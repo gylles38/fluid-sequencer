@@ -4,37 +4,36 @@ This project is a minimalist audio/MIDI sequencer in Python.
 
 ## Installation (Linux)
 
-1.  **Créez un environnement virtuel**
-
+1.  **Clonez le projet** (si ce n'est pas déjà fait)
     ```bash
-    python3 -m venv venv
+    git clone <repository_url>
+    cd <repository_directory>
     ```
 
-2.  **Activez l'environnement virtuel**
-
+2.  **Créez et activez un environnement virtuel**
     ```bash
+    python3 -m venv venv
     source venv/bin/activate
     ```
 
-3.  **Installez les dépendances**
-
+3.  **Installez le projet**
+    Pour une utilisation normale, installez le projet avec `pip` :
     ```bash
-    pip install -r requirements.txt
+    pip install .
     ```
+    Pour le développement (ce qui vous permet de modifier le code et de voir les changements immédiatement), utilisez le mode "éditable" :
+    ```bash
+    pip install -e .
+    ```
+    Cette commande installera également les dépendances listées dans `setup.py` (comme `midiutil`).
 
 ## How to use
 
-Here is an example of how to create a simple song and export it to a MIDI file.
-Save this code as `create_simple_song.py` and run it with `python create_simple_song.py`.
+Une fois le projet installé, vous pouvez importer le module `sequencer` dans n'importe quel script Python. Voici un exemple de comment créer une chanson simple et l'exporter dans un fichier MIDI.
+
+Sauvegardez ce code dans un fichier (par exemple, `create_song.py`) et exécutez-le avec `python create_song.py`.
 
 ```python
-import sys
-import os
-
-# Add the 'src' directory to the Python path to find the 'sequencer' module.
-# This is not needed if the package is installed, but is useful for development.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
-
 from sequencer.models import Song, Track, Event, Note
 from sequencer.midi_export import export_to_midi
 

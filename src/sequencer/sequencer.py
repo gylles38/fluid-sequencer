@@ -6,37 +6,37 @@ from .midi_import import import_song
 from .midi_export import export_to_midi
 
 class Sequencer:
-    """
-    The main class for the interactive sequencer.
-    It manages the song, tracks, and provides an API for high-level operations.
-    """
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
         self.playback_state = "stopped"
         self.playback_thread = None
-        self.outport = None
+        self.open_ports = {}  # Changed from self.outport to a dict
         self._stop_event = threading.Event()
         self._run_event = threading.Event()
         self._run_event.set()
 
     def _all_notes_off(self):
-        if self.outport and not self.outport.closed:
-            for channel in range(16):
-                self.outport.send(mido.Message('control_change', channel=channel, control=123, value=0))
-            print("Sent all notes off.")
+        for port in self.open_ports.values():
+            if port and not port.closed:
+                for channel in range(16):
+                    port.send(mido.Message('control_change', channel=channel, control=123, value=0))
+        print("Sent all notes off to all open ports.")
 
     def set_tempo(self, tempo: int):
+        # ... (no change)
         if tempo <= 0:
             raise ValueError("Tempo must be positive.")
         self.song.tempo = tempo
         print(f"Tempo set to {self.song.tempo} BPM.")
 
     def add_track(self, name: str, instrument: int = 0):
+        # ... (no change)
         track = Track(name=name, instrument=instrument)
         self.song.add_track(track)
         print(f"Track '{name}' added.")
 
     def delete_track(self, track_index: int):
+        # ... (no change)
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return False
@@ -45,8 +45,24 @@ class Sequencer:
         print(f"Track '{track_name}' deleted.")
         return True
 
+    def assign_port(self, track_index: int, port_index: int):
+        # ... (no change)
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+        try:
+            output_ports = mido.get_output_names()
+            if not output_ports or not 0 <= port_index < len(output_ports):
+                print("Error: Invalid port index.")
+                return
+            port_name = output_ports[port_index]
+            self.song.tracks[track_index].output_port_name = port_name
+            print(f"Assigned port '{port_name}' to track '{self.song.tracks[track_index].name}'.")
+        except Exception as e:
+            print(f"An error occurred while assigning port: {e}")
+
     def load_song(self, filepath: str):
-        """Loads a MIDI file as the new current song."""
+        # ... (no change)
         try:
             self.song = import_song(filepath)
             print(f"Successfully loaded song from '{filepath}'.")
@@ -54,6 +70,7 @@ class Sequencer:
             print(f"Error loading MIDI file: {e}")
 
     def save_song(self, filepath: str):
+        # ... (no change)
         try:
             export_to_midi(self.song, filepath)
             print(f"Song successfully saved to '{filepath}'.")
@@ -61,16 +78,18 @@ class Sequencer:
             print(f"Error saving MIDI file: {e}")
 
     def list_tracks(self) -> str:
+        # ... (no change)
         if not self.song.tracks:
             return "No tracks in the song."
         lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM"]
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):
-            lines.append(f"[{i}] {track.name} (Instrument: {track.instrument}, {len(track.events)} events)")
+            port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
+            lines.append(f"[{i}] {track.name} (Instrument: {track.instrument}, {len(track.events)} events){port_info}")
         return "\n".join(lines)
 
     def record_track(self, track_index: int):
-        # ... (record_track implementation remains the same)
+        # ... (no change)
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
@@ -118,54 +137,71 @@ class Sequencer:
                 print("\nRecording stopped.")
 
     def _play_thread(self):
+        """The actual playback logic that runs in a separate thread."""
         try:
-            temp_mid = mido.MidiFile(type=1, ticks_per_beat=480)
-            tempo_track = mido.MidiTrack()
-            temp_mid.tracks.append(tempo_track)
-            tempo_track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(self.song.tempo)))
-            for i, track in enumerate(self.song.tracks):
-                midi_track = mido.MidiTrack()
-                temp_mid.tracks.append(midi_track)
-                channel = i % 16
-                midi_track.append(mido.Message('program_change', channel=channel, program=track.instrument, time=0))
-                all_midi_events = []
+            # 1. Build a master list of all MIDI messages from all tracks
+            master_event_list = []
+            ticks_per_beat = 480
+
+            for track_idx, track in enumerate(self.song.tracks):
+                if not track.output_port_name:
+                    continue # Skip tracks without an assigned port
+
+                # Add program change at the beginning of the track
+                program_change_msg = mido.Message('program_change', channel=track_idx % 16, program=track.instrument, time=0)
+                master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': program_change_msg})
+
                 for event in track.events:
                     for note in event.notes:
-                        start_tick = int(event.start_time * 480)
-                        end_tick = start_tick + int(note.duration * 480)
-                        all_midi_events.append({'tick': start_tick, 'type': 'note_on', 'pitch': note.pitch, 'velocity': note.velocity})
-                        all_midi_events.append({'tick': end_tick, 'type': 'note_off', 'pitch': note.pitch, 'velocity': note.velocity})
-                all_midi_events.sort(key=lambda e: e['tick'])
-                last_tick = 0
-                for event in all_midi_events:
-                    delta_ticks = event['tick'] - last_tick
-                    midi_track.append(mido.Message(event['type'], channel=channel, note=event['pitch'], velocity=event['velocity'], time=delta_ticks))
-                    last_tick = event['tick']
-            print(f"Playing on '{self.outport.name}'...")
-            for msg in temp_mid:
+                        start_tick = int(event.start_time * ticks_per_beat)
+                        end_tick = start_tick + int(note.duration * ticks_per_beat)
+
+                        note_on_msg = mido.Message('note_on', channel=track_idx % 16, note=note.pitch, velocity=note.velocity)
+                        note_off_msg = mido.Message('note_off', channel=track_idx % 16, note=note.pitch, velocity=note.velocity)
+
+                        master_event_list.append({'tick': start_tick, 'track_idx': track_idx, 'message': note_on_msg})
+                        master_event_list.append({'tick': end_tick, 'track_idx': track_idx, 'message': note_off_msg})
+
+            master_event_list.sort(key=lambda e: e['tick'])
+
+            # 2. Convert absolute ticks to delta times in seconds
+            last_tick = 0
+            seconds_per_tick = mido.tempo2bpm(self.song.tempo) / ticks_per_beat
+
+            # 3. Play the master list
+            print(f"Playing on {len(self.open_ports)} port(s)...")
+            for event in master_event_list:
                 self._run_event.wait()
-                if self._stop_event.is_set():
-                    break
-                if msg.time > 0:
-                    wait_time = msg.time
+                if self._stop_event.is_set(): break
+
+                delta_ticks = event['tick'] - last_tick
+                if delta_ticks > 0:
+                    wait_time = delta_ticks * seconds_per_tick
+                    # Interruptible sleep
                     while wait_time > 0:
                         self._run_event.wait()
-                        if self._stop_event.is_set():
-                            break
+                        if self._stop_event.is_set(): break
                         sleep_chunk = min(wait_time, 0.01)
                         time.sleep(sleep_chunk)
                         wait_time -= sleep_chunk
-                if self._stop_event.is_set():
-                    break
-                if not msg.is_meta:
-                    self.outport.send(msg)
+
+                if self._stop_event.is_set(): break
+
+                # Route the message to the correct port
+                track = self.song.tracks[event['track_idx']]
+                port = self.open_ports.get(track.output_port_name)
+                if port:
+                    port.send(event['message'])
+
+                last_tick = event['tick']
+
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:
-            if self.outport and not self.outport.closed:
-                self._all_notes_off()
-                self.outport.close()
-            self.outport = None
+            self._all_notes_off()
+            for port in self.open_ports.values():
+                port.close()
+            self.open_ports = {}
             self.playback_state = "stopped"
             print("Playback finished.")
 
@@ -176,23 +212,24 @@ class Sequencer:
         if self.playback_state == "paused":
             self.pause()
             return
-        if not self.song.tracks:
-            print("The song is empty. Add or load a track first.")
+
+        ports_to_open = {track.output_port_name for track in self.song.tracks if track.output_port_name}
+        if not ports_to_open:
+            print("No tracks have an assigned output port. Use 'assign' command first.")
             return
+
         try:
-            output_ports = mido.get_output_names()
-            if not output_ports:
-                print("Error: No MIDI output ports found.")
-                return
-            print("Available MIDI output ports:")
-            for i, port in enumerate(output_ports):
-                print(f"[{i}] {port}")
-            port_index = int(input("Choose a port to play on: "))
-            port_name = output_ports[port_index]
-            self.outport = mido.open_output(port_name)
-        except (ValueError, IndexError, mido.PortNotOpenError) as e:
-            print(f"Error opening port: {e}")
+            for port_name in ports_to_open:
+                self.open_ports[port_name] = mido.open_output(port_name)
+                print(f"Opened port: {port_name}")
+        except Exception as e:
+            print(f"Error opening ports: {e}")
+            # Close any ports that were successfully opened
+            for port in self.open_ports.values():
+                port.close()
+            self.open_ports = {}
             return
+
         self._stop_event.clear()
         self._run_event.set()
         self.playback_state = "playing"
@@ -217,8 +254,7 @@ class Sequencer:
         if self.playback_state == "stopped":
             print("Already stopped.")
             return
-        if self.outport:
-            self._all_notes_off()
+        self._all_notes_off()
         self._stop_event.set()
         if self.playback_state == "paused":
             self._run_event.set()

@@ -1,3 +1,4 @@
+import mido
 from sequencer.sequencer import Sequencer
 
 def print_help():
@@ -8,11 +9,13 @@ Sequencer CLI Commands:
   add <name> [instr]      - Adds a new track. `instr` is an optional MIDI program number (0-127).
   load <filepath>         - Loads a song from a MIDI file, replacing the current session.
   list                    - Shows all tracks in the current song.
+  ports                   - Lists available MIDI output ports.
+  assign <track> <port>   - Assigns a track to a MIDI output port (use indexes from `list` and `ports`).
   record <track_index>    - Records MIDI input into the specified track.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   save <filepath>         - Saves the entire song to a MIDI file.
-  play                    - Plays the current song.
+  play                    - Plays the song using the assigned ports for each track.
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
   quit                    - Exits the sequencer.
@@ -60,6 +63,15 @@ def main():
                     print("Usage: load <filepath>")
             elif command == "list":
                 print(seq.list_tracks())
+            elif command == "ports":
+                print("Available MIDI output ports:")
+                for i, port in enumerate(mido.get_output_names()):
+                    print(f"[{i}] {port}")
+            elif command == "assign":
+                if len(args) == 2:
+                    seq.assign_port(track_index=int(args[0]), port_index=int(args[1]))
+                else:
+                    print("Usage: assign <track_index> <port_index>")
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))
@@ -90,7 +102,10 @@ def main():
                 else:
                     print("Usage: save <filepath>")
             elif command == "play":
-                seq.play()
+                if len(args) == 0:
+                    seq.play()
+                else:
+                    print("Usage: play (takes no arguments)")
             elif command == "pause":
                 seq.pause()
             elif command == "stop":

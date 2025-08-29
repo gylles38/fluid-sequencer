@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 @dataclass
 class Note:
@@ -32,6 +32,7 @@ class Track:
     name: str
     events: List[Event] = field(default_factory=list)
     instrument: int = 0  # MIDI program number (0-127)
+    output_port_name: Optional[str] = None
 
     def add_event(self, event: Event):
         """Adds an event to the track and keeps the event list sorted by start time."""

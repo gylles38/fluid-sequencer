@@ -67,7 +67,6 @@ class Sequencer:
         return "\n".join(lines)
 
     def record_track(self, track_index: int):
-        # ... (record_track implementation remains the same)
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
@@ -118,7 +117,6 @@ class Sequencer:
         """The actual playback logic that runs in a separate thread."""
         try:
             temp_mid = mido.MidiFile(type=1, ticks_per_beat=480)
-            # ... (MIDI file generation logic remains the same)
             tempo_track = mido.MidiTrack()
             temp_mid.tracks.append(tempo_track)
             tempo_track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(self.song.tempo)))
@@ -146,21 +144,33 @@ class Sequencer:
                 self._run_event.wait()
                 if self._stop_event.is_set():
                     break
+
                 if msg.time > 0:
-                    time.sleep(msg.time)
+                    wait_time = msg.time
+                    while wait_time > 0:
+                        self._run_event.wait()
+                        if self._stop_event.is_set():
+                            break
+                        sleep_chunk = min(wait_time, 0.01)
+                        time.sleep(sleep_chunk)
+                        wait_time -= sleep_chunk
+
+                if self._stop_event.is_set():
+                    break
+
                 if not msg.is_meta:
                     self.outport.send(msg)
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:
-            self._all_notes_off()
-            self.outport.close()
+            if self.outport and not self.outport.closed:
+                self._all_notes_off()
+                self.outport.close()
             self.outport = None
             self.playback_state = "stopped"
             print("Playback finished.")
 
     def play(self):
-        """Starts playback of the song in a new thread."""
         if self.playback_state == "playing":
             print("Already playing.")
             return
@@ -191,7 +201,6 @@ class Sequencer:
         self.playback_thread.start()
 
     def pause(self):
-        """Pauses or resumes playback."""
         if self.playback_state == "stopped":
             print("Nothing to pause.")
             return
@@ -206,14 +215,15 @@ class Sequencer:
             print("Resuming playback...")
 
     def stop(self):
-        """Stops playback."""
         if self.playback_state == "stopped":
             print("Already stopped.")
             return
-        self._all_notes_off()
+        if self.outport:
+            self._all_notes_off()
         self._stop_event.set()
         if self.playback_state == "paused":
             self._run_event.set()
-        self.playback_thread.join()
+        if self.playback_thread:
+            self.playback_thread.join()
         self.playback_state = "stopped"
         print("Playback stopped.")

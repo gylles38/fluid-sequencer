@@ -11,6 +11,9 @@ Sequencer CLI Commands:
   record <track_index>    - Records MIDI input into the specified track.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   save <filepath>         - Saves the entire song to a MIDI file.
+  play                    - Plays the current song.
+  pause                   - Pauses or resumes playback.
+  stop                    - Stops playback.
   quit                    - Exits the sequencer.
 """
     print(help_text)
@@ -64,6 +67,12 @@ def main():
                     seq.save_song(filepath=args[0])
                 else:
                     print("Usage: save <filepath>")
+            elif command == "play":
+                seq.play()
+            elif command == "pause":
+                seq.pause()
+            elif command == "stop":
+                seq.stop()
             else:
                 print(f"Unknown command: '{command}'. Type 'help' for a list of commands.")
 

@@ -41,6 +41,9 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `record <index_piste>`   | Démarre l'enregistrement sur une piste. Utilisez `list` pour trouver l'`<index_piste>`. |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
 | `save <fichier>`         | Sauvegarde la chanson entière dans un nouveau fichier MIDI.                 |
+| `play`                   | Joue la chanson actuelle depuis le début.                                   |
+| `pause`                  | Met en pause ou reprend la lecture.                                         |
+| `stop`                   | Arrête la lecture et réinitialise la position.                              |
 | `quit`                   | Quitte le séquenceur.                                                       |
 
 ---

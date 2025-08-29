@@ -1,5 +1,6 @@
 import time
 import mido
+import threading
 from .models import Song, Track, Event, Note
 from .midi_import import import_midi_to_track
 from .midi_export import export_to_midi
@@ -11,6 +12,10 @@ class Sequencer:
     """
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
+        self.playback_state = "stopped"  # "stopped", "playing", "paused"
+        self.playback_thread = None
+        self._stop_event = threading.Event()
+        self._pause_event = threading.Event()
 
     def set_tempo(self, tempo: int):
         """Sets the tempo of the song."""
@@ -117,3 +122,117 @@ class Sequencer:
 
             except KeyboardInterrupt:
                 print("\nRecording stopped.")
+
+    def _play_thread(self, port_name: str):
+        """The actual playback logic that runs in a separate thread."""
+        try:
+            # Re-use the export logic to create an in-memory MIDI file
+            temp_mid = mido.MidiFile(type=1, ticks_per_beat=480)
+            tempo_track = mido.MidiTrack()
+            temp_mid.tracks.append(tempo_track)
+            tempo_track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(self.song.tempo)))
+
+            for i, track in enumerate(self.song.tracks):
+                midi_track = mido.MidiTrack()
+                temp_mid.tracks.append(midi_track)
+                channel = i % 16
+                midi_track.append(mido.Message('program_change', channel=channel, program=track.instrument, time=0))
+
+                all_midi_events = []
+                for event in track.events:
+                    for note in event.notes:
+                        start_tick = int(event.start_time * 480)
+                        end_tick = start_tick + int(note.duration * 480)
+                        all_midi_events.append({'tick': start_tick, 'type': 'note_on', 'pitch': note.pitch, 'velocity': note.velocity})
+                        all_midi_events.append({'tick': end_tick, 'type': 'note_off', 'pitch': note.pitch, 'velocity': note.velocity})
+
+                all_midi_events.sort(key=lambda e: e['tick'])
+
+                last_tick = 0
+                for event in all_midi_events:
+                    delta_ticks = event['tick'] - last_tick
+                    midi_track.append(mido.Message(event['type'], channel=channel, note=event['pitch'], velocity=event['velocity'], time=delta_ticks))
+                    last_tick = event['tick']
+
+            with mido.open_output(port_name) as outport:
+                print(f"Playing on '{port_name}'...")
+                for msg in temp_mid.play():
+                    if self._stop_event.is_set():
+                        break
+                    if self._pause_event.is_set():
+                        # When paused, block until the event is cleared
+                        self._pause_event.wait()
+
+                    outport.send(msg)
+
+        except Exception as e:
+            print(f"\nError during playback: {e}")
+        finally:
+            self.playback_state = "stopped"
+            print("Playback finished.")
+
+    def play(self):
+        """Starts playback of the song in a new thread."""
+        if self.playback_state == "playing":
+            print("Already playing.")
+            return
+
+        if self.playback_state == "paused":
+            self.pause() # Unpause
+            return
+
+        if not self.song.tracks:
+            print("The song is empty. Add or load a track first.")
+            return
+
+        try:
+            output_ports = mido.get_output_names()
+            if not output_ports:
+                print("Error: No MIDI output ports found.")
+                return
+
+            print("Available MIDI output ports:")
+            for i, port in enumerate(output_ports):
+                print(f"[{i}] {port}")
+
+            port_index = int(input("Choose a port to play on: "))
+            port_name = output_ports[port_index]
+        except (ValueError, IndexError):
+            print("Error: Invalid selection.")
+            return
+
+        self._stop_event.clear()
+        self._pause_event.clear()
+        self.playback_state = "playing"
+        self.playback_thread = threading.Thread(target=self._play_thread, args=(port_name,))
+        self.playback_thread.start()
+
+    def pause(self):
+        """Pauses or resumes playback."""
+        if self.playback_state == "stopped":
+            print("Nothing to pause.")
+            return
+
+        if self.playback_state == "paused":
+            self._pause_event.clear() # Release the thread from its wait() state
+            self.playback_state = "playing"
+            print("Resuming playback...")
+        elif self.playback_state == "playing":
+            self._pause_event.set()
+            self.playback_state = "paused"
+            print("Playback paused.")
+
+    def stop(self):
+        """Stops playback."""
+        if self.playback_state == "stopped":
+            print("Already stopped.")
+            return
+
+        self._stop_event.set()
+        if self.playback_state == "paused":
+            # If paused, the thread is blocked. We need to un-pause it so it can check the stop event.
+            self._pause_event.clear()
+
+        self.playback_thread.join() # Wait for the thread to finish
+        self.playback_state = "stopped"
+        print("Playback stopped.")

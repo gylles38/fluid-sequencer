@@ -15,7 +15,8 @@ class Sequencer:
         self.playback_state = "stopped"  # "stopped", "playing", "paused"
         self.playback_thread = None
         self._stop_event = threading.Event()
-        self._pause_event = threading.Event()
+        self._run_event = threading.Event()
+        self._run_event.set() # Set to true by default, playback is not paused
 
     def set_tempo(self, tempo: int):
         """Sets the tempo of the song."""
@@ -63,81 +64,61 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-
         try:
             input_ports = mido.get_input_names()
             if not input_ports:
                 print("Error: No MIDI input ports found.")
                 return
-
             print("Available MIDI input ports:")
             for i, port in enumerate(input_ports):
                 print(f"[{i}] {port}")
-
             port_index = int(input("Choose a port to record from: "))
             port_name = input_ports[port_index]
-
         except (ValueError, IndexError):
             print("Error: Invalid selection.")
             return
-
         target_track = self.song.tracks[track_index]
-        open_notes = {} # key: pitch, value: (start_time_sec, velocity)
-
-        # Determine the starting beat for the new recording
-        # For simplicity, we append after the last event in the track.
+        open_notes = {}
         start_beat = 0
         if target_track.events:
             last_event = target_track.events[-1]
             start_beat = last_event.start_time + last_event.notes[0].duration
-
         input("Press Enter to start recording...")
-
         with mido.open_input(port_name) as inport:
             print(f"Recording on '{port_name}'. Press Ctrl+C to stop.")
             recording_start_time_sec = time.time()
-
             try:
                 for msg in inport:
                     now = time.time()
                     if msg.type == 'note_on' and msg.velocity > 0:
                         if msg.note not in open_notes:
                             open_notes[msg.note] = (now, msg.velocity)
-
                     elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                         if msg.note in open_notes:
                             start_time_sec, velocity = open_notes.pop(msg.note)
                             duration_sec = now - start_time_sec
-
-                            # Convert time to beats
                             beats_per_second = self.song.tempo / 60
                             start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
                             duration_beats = duration_sec * beats_per_second
-
                             note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                             event = Event(notes=[note], start_time=start_time_beats)
                             target_track.add_event(event)
-
                             print(f"Recorded note: {note.pitch}, duration: {duration_beats:.2f} beats")
-
             except KeyboardInterrupt:
                 print("\nRecording stopped.")
 
     def _play_thread(self, port_name: str):
         """The actual playback logic that runs in a separate thread."""
         try:
-            # Re-use the export logic to create an in-memory MIDI file
             temp_mid = mido.MidiFile(type=1, ticks_per_beat=480)
             tempo_track = mido.MidiTrack()
             temp_mid.tracks.append(tempo_track)
             tempo_track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(self.song.tempo)))
-
             for i, track in enumerate(self.song.tracks):
                 midi_track = mido.MidiTrack()
                 temp_mid.tracks.append(midi_track)
                 channel = i % 16
                 midi_track.append(mido.Message('program_change', channel=channel, program=track.instrument, time=0))
-
                 all_midi_events = []
                 for event in track.events:
                     for note in event.notes:
@@ -145,39 +126,22 @@ class Sequencer:
                         end_tick = start_tick + int(note.duration * 480)
                         all_midi_events.append({'tick': start_tick, 'type': 'note_on', 'pitch': note.pitch, 'velocity': note.velocity})
                         all_midi_events.append({'tick': end_tick, 'type': 'note_off', 'pitch': note.pitch, 'velocity': note.velocity})
-
                 all_midi_events.sort(key=lambda e: e['tick'])
-
                 last_tick = 0
                 for event in all_midi_events:
                     delta_ticks = event['tick'] - last_tick
                     midi_track.append(mido.Message(event['type'], channel=channel, note=event['pitch'], velocity=event['velocity'], time=delta_ticks))
                     last_tick = event['tick']
-
             with mido.open_output(port_name) as outport:
                 print(f"Playing on '{port_name}'...")
                 for msg in temp_mid:
-                    # Before processing the message, handle any waiting time.
-                    if msg.time > 0:
-                        wait_time = msg.time
-                        while wait_time > 0:
-                            if self._stop_event.is_set():
-                                break
-                            if self._pause_event.is_set():
-                                self._pause_event.wait() # Block until cleared
-
-                            # Sleep in small, interruptible chunks
-                            sleep_chunk = min(wait_time, 0.01)
-                            time.sleep(sleep_chunk)
-                            wait_time -= sleep_chunk
-
+                    self._run_event.wait() # Blocks here if event is cleared (paused)
                     if self._stop_event.is_set():
-                        break # Exit the main message loop
-
-                    # After waiting, send the message.
+                        break
+                    if msg.time > 0:
+                        time.sleep(msg.time)
                     if not msg.is_meta:
                         outport.send(msg)
-
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:
@@ -189,33 +153,27 @@ class Sequencer:
         if self.playback_state == "playing":
             print("Already playing.")
             return
-
         if self.playback_state == "paused":
-            self.pause() # Unpause
+            self.pause()
             return
-
         if not self.song.tracks:
             print("The song is empty. Add or load a track first.")
             return
-
         try:
             output_ports = mido.get_output_names()
             if not output_ports:
                 print("Error: No MIDI output ports found.")
                 return
-
             print("Available MIDI output ports:")
             for i, port in enumerate(output_ports):
                 print(f"[{i}] {port}")
-
             port_index = int(input("Choose a port to play on: "))
             port_name = output_ports[port_index]
         except (ValueError, IndexError):
             print("Error: Invalid selection.")
             return
-
         self._stop_event.clear()
-        self._pause_event.clear()
+        self._run_event.set()
         self.playback_state = "playing"
         self.playback_thread = threading.Thread(target=self._play_thread, args=(port_name,))
         self.playback_thread.start()
@@ -225,27 +183,23 @@ class Sequencer:
         if self.playback_state == "stopped":
             print("Nothing to pause.")
             return
-
-        if self.playback_state == "paused":
-            self._pause_event.clear() # Release the thread from its wait() state
-            self.playback_state = "playing"
-            print("Resuming playback...")
-        elif self.playback_state == "playing":
-            self._pause_event.set()
+        if self.playback_state == "playing":
+            self._run_event.clear()
             self.playback_state = "paused"
             print("Playback paused.")
+        elif self.playback_state == "paused":
+            self._run_event.set()
+            self.playback_state = "playing"
+            print("Resuming playback...")
 
     def stop(self):
         """Stops playback."""
         if self.playback_state == "stopped":
             print("Already stopped.")
             return
-
         self._stop_event.set()
         if self.playback_state == "paused":
-            # If paused, the thread is blocked. We need to un-pause it so it can check the stop event.
-            self._pause_event.clear()
-
-        self.playback_thread.join() # Wait for the thread to finish
+            self._run_event.set()
+        self.playback_thread.join()
         self.playback_state = "stopped"
         print("Playback stopped.")

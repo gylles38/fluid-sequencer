@@ -39,6 +39,17 @@ class Sequencer:
         self.song.add_track(track)
         print(f"Track '{name}' added.")
 
+    def delete_track(self, track_index: int):
+        """Deletes a track from the song by its index."""
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return False
+
+        track_name = self.song.tracks[track_index].name
+        self.song.tracks.pop(track_index)
+        print(f"Track '{track_name}' deleted.")
+        return True
+
     def load_track_from_file(self, filepath: str):
         """Loads a MIDI file as a new track in the song."""
         try:

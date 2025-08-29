@@ -39,6 +39,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `load <fichier>`         | Charge un fichier MIDI (`.mid`) et l'ajoute comme une nouvelle piste.         |
 | `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
 | `record <index_piste>`   | Démarre l'enregistrement sur une piste. Utilisez `list` pour trouver l'`<index_piste>`. |
+| `delete <index_piste>`   | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
 | `save <fichier>`         | Sauvegarde la chanson entière dans un nouveau fichier MIDI.                 |
 | `play`                   | Joue la chanson actuelle depuis le début.                                   |

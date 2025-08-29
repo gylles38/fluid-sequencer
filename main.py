@@ -60,6 +60,20 @@ def main():
                     seq.record_track(track_index=int(args[0]))
                 else:
                     print("Usage: record <track_index>")
+            elif command == "delete":
+                if len(args) == 1:
+                    track_index = int(args[0])
+                    if 0 <= track_index < len(seq.song.tracks):
+                        track_name = seq.song.tracks[track_index].name
+                        confirm = input(f"Are you sure you want to delete track '{track_name}'? [y/N] ").lower()
+                        if confirm == 'y':
+                            seq.delete_track(track_index)
+                        else:
+                            print("Deletion cancelled.")
+                    else:
+                        print("Error: Invalid track index.")
+                else:
+                    print("Usage: delete <track_index>")
             elif command == "tempo":
                 if len(args) == 1:
                     seq.set_tempo(tempo=int(args[0]))

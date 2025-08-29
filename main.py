@@ -6,7 +6,7 @@ def print_help():
 Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [instr]      - Adds a new track. `instr` is an optional MIDI program number (0-127).
-  load <filepath>         - Loads a MIDI file into a new track.
+  load <filepath>         - Loads a song from a MIDI file, replacing the current session.
   list                    - Shows all tracks in the current song.
   record <track_index>    - Records MIDI input into the specified track.
   delete <track_index>    - Deletes a track after confirmation.
@@ -51,7 +51,11 @@ def main():
                     print("Usage: add <name> [instrument_id]")
             elif command == "load":
                 if len(args) == 1:
-                    seq.load_track_from_file(filepath=args[0])
+                    confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
+                    if confirm == 'y':
+                        seq.load_song(filepath=args[0])
+                    else:
+                        print("Load cancelled.")
                 else:
                     print("Usage: load <filepath>")
             elif command == "list":

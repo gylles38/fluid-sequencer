@@ -1,39 +1,50 @@
 import mido
-from .models import Track, Event, Note
+from .models import Song, Track, Event, Note
 from collections import defaultdict
 
-def import_midi_to_track(filepath: str) -> Track:
+def import_song(filepath: str) -> Song:
     """
-    Imports a MIDI file and converts its first track with note events into a Track object.
+    Imports an entire MIDI file and converts it into a Song object.
 
     :param filepath: Path to the MIDI file.
-    :return: A Track object containing the imported musical data.
+    :return: A Song object containing all tracks and tempo from the file.
     """
     mid = mido.MidiFile(filepath)
     ticks_per_beat = mid.ticks_per_beat
 
-    imported_track = None
+    tempo = 120 # Default tempo
 
-    for i, midi_track in enumerate(mid.tracks):
-        track_name = f"Track {i}"
+    # First, find the tempo from the first track, if it exists
+    if mid.tracks:
+        for msg in mid.tracks[0]:
+            if msg.is_meta and msg.type == 'set_tempo':
+                tempo = mido.tempo2bpm(msg.tempo)
+                break
+
+    song = Song(name=filepath.split('/')[-1], tempo=int(tempo))
+
+    for midi_track in mid.tracks:
+        # Don't create a track if it only contains metadata
+        if not any(msg.type in ('note_on', 'note_off') for msg in midi_track):
+            continue
+
+        track_name = "Untitled Track"
+        instrument = 0
         note_events = []
 
-        # --- State for parsing ---
         absolute_time_ticks = 0
-        open_notes = defaultdict(list) # key: pitch, value: list of (start_tick, velocity)
+        open_notes = defaultdict(list)
 
         for msg in midi_track:
             absolute_time_ticks += msg.time
 
             if msg.is_meta and msg.type == 'track_name':
                 track_name = msg.name
-
+            elif msg.type == 'program_change':
+                instrument = msg.program
             elif msg.type == 'note_on' and msg.velocity > 0:
-                # Store the start of a note
                 open_notes[msg.note].append((absolute_time_ticks, msg.velocity))
-
             elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                # A note has ended, find its corresponding start event
                 if open_notes[msg.note]:
                     start_tick, velocity = open_notes[msg.note].pop(0)
                     duration_ticks = absolute_time_ticks - start_tick
@@ -42,24 +53,13 @@ def import_midi_to_track(filepath: str) -> Track:
                     duration_beats = duration_ticks / ticks_per_beat
 
                     if duration_beats > 0:
-                        note = Note(
-                            pitch=msg.note,
-                            velocity=velocity,
-                            duration=duration_beats
-                        )
-                        # For simplicity, each note becomes a new Event.
-                        # A more complex importer might group simultaneous notes into a single Event.
+                        note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                         note_events.append(Event(notes=[note], start_time=start_time_beats))
 
-        # If we found any notes in this track, use it and stop.
         if note_events:
-            imported_track = Track(name=track_name)
-            # Sort events by start time before adding, as they are created out of order
+            new_track = Track(name=track_name, instrument=instrument)
             note_events.sort(key=lambda e: e.start_time)
-            imported_track.events = note_events
-            break # Stop after the first track with notes
+            new_track.events = note_events
+            song.add_track(new_track)
 
-    if imported_track is None:
-        raise ValueError(f"No tracks with note events found in '{filepath}'")
-
-    return imported_track
+    return song

@@ -2,7 +2,7 @@ import time
 import mido
 import threading
 from .models import Song, Track, Event, Note
-from .midi_import import import_midi_to_track
+from .midi_import import import_song
 from .midi_export import export_to_midi
 
 class Sequencer:
@@ -12,7 +12,7 @@ class Sequencer:
     """
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
-        self.playback_state = "stopped"  # "stopped", "playing", "paused"
+        self.playback_state = "stopped"
         self.playback_thread = None
         self.outport = None
         self._stop_event = threading.Event()
@@ -20,47 +20,40 @@ class Sequencer:
         self._run_event.set()
 
     def _all_notes_off(self):
-        """Sends an 'all notes off' message to all channels on the current output port."""
         if self.outport and not self.outport.closed:
             for channel in range(16):
                 self.outport.send(mido.Message('control_change', channel=channel, control=123, value=0))
             print("Sent all notes off.")
 
     def set_tempo(self, tempo: int):
-        """Sets the tempo of the song."""
         if tempo <= 0:
             raise ValueError("Tempo must be positive.")
         self.song.tempo = tempo
         print(f"Tempo set to {self.song.tempo} BPM.")
 
     def add_track(self, name: str, instrument: int = 0):
-        """Adds a new, empty track to the song."""
         track = Track(name=name, instrument=instrument)
         self.song.add_track(track)
         print(f"Track '{name}' added.")
 
     def delete_track(self, track_index: int):
-        """Deletes a track from the song by its index."""
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return False
-
         track_name = self.song.tracks[track_index].name
         self.song.tracks.pop(track_index)
         print(f"Track '{track_name}' deleted.")
         return True
 
-    def load_track_from_file(self, filepath: str):
-        """Loads a MIDI file as a new track in the song."""
+    def load_song(self, filepath: str):
+        """Loads a MIDI file as the new current song."""
         try:
-            new_track = import_midi_to_track(filepath)
-            self.song.add_track(new_track)
-            print(f"Loaded track '{new_track.name}' from '{filepath}'.")
+            self.song = import_song(filepath)
+            print(f"Successfully loaded song from '{filepath}'.")
         except Exception as e:
             print(f"Error loading MIDI file: {e}")
 
     def save_song(self, filepath: str):
-        """Saves the entire song to a MIDI file."""
         try:
             export_to_midi(self.song, filepath)
             print(f"Song successfully saved to '{filepath}'.")
@@ -68,7 +61,6 @@ class Sequencer:
             print(f"Error saving MIDI file: {e}")
 
     def list_tracks(self) -> str:
-        """Returns a string listing all tracks in the song."""
         if not self.song.tracks:
             return "No tracks in the song."
         lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM"]
@@ -78,6 +70,7 @@ class Sequencer:
         return "\n".join(lines)
 
     def record_track(self, track_index: int):
+        # ... (record_track implementation remains the same)
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
@@ -125,7 +118,6 @@ class Sequencer:
                 print("\nRecording stopped.")
 
     def _play_thread(self):
-        """The actual playback logic that runs in a separate thread."""
         try:
             temp_mid = mido.MidiFile(type=1, ticks_per_beat=480)
             tempo_track = mido.MidiTrack()
@@ -149,13 +141,11 @@ class Sequencer:
                     delta_ticks = event['tick'] - last_tick
                     midi_track.append(mido.Message(event['type'], channel=channel, note=event['pitch'], velocity=event['velocity'], time=delta_ticks))
                     last_tick = event['tick']
-
             print(f"Playing on '{self.outport.name}'...")
             for msg in temp_mid:
                 self._run_event.wait()
                 if self._stop_event.is_set():
                     break
-
                 if msg.time > 0:
                     wait_time = msg.time
                     while wait_time > 0:
@@ -165,10 +155,8 @@ class Sequencer:
                         sleep_chunk = min(wait_time, 0.01)
                         time.sleep(sleep_chunk)
                         wait_time -= sleep_chunk
-
                 if self._stop_event.is_set():
                     break
-
                 if not msg.is_meta:
                     self.outport.send(msg)
         except Exception as e:

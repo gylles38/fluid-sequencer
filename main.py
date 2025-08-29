@@ -35,6 +35,9 @@ def main():
             args = parts[1:]
 
             if command == "quit":
+                if seq.playback_state != "stopped":
+                    print("Stopping playback before exiting...")
+                    seq.stop()
                 break
             elif command == "help":
                 print_help()

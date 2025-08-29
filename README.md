@@ -38,7 +38,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `add <nom> [instr]`      | Ajoute une nouvelle piste vide. `instr` est un numéro d'instrument MIDI optionnel (0-127). |
 | `load <fichier>`         | Charge un fichier MIDI (`.mid`) et l'ajoute comme une nouvelle piste.         |
 | `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
-| `record <index_piste>`   | Démarre l'enregistrement sur la piste spécifiée.                            |
+| `record <index_piste>`   | Démarre l'enregistrement sur une piste. Utilisez `list` pour trouver l'`<index_piste>`. |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
 | `save <fichier>`         | Sauvegarde la chanson entière dans un nouveau fichier MIDI.                 |
 | `quit`                   | Quitte le séquenceur.                                                       |

@@ -1,0 +1,8 @@
+LICENSE
+README.md
+setup.py
+src/sequencer.egg-info/PKG-INFO
+src/sequencer.egg-info/SOURCES.txt
+src/sequencer.egg-info/dependency_links.txt
+src/sequencer.egg-info/requires.txt
+src/sequencer.egg-info/top_level.txt

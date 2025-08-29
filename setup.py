@@ -6,7 +6,7 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
-        "midiutil==1.2.1",
+        "mido[ports-rtmidi]>=1.2.10",
     ],
     author="Jules",
     author_email="jules@example.com",

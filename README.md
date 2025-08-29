@@ -1,66 +1,57 @@
-# Sequencer minimaliste audio/midi en python
+# Séquenceur MIDI Interactif en Python
 
-This project is a minimalist audio/MIDI sequencer in Python.
+Ce projet est un séquenceur MIDI interactif en ligne de commande, écrit en Python. Il vous permet d'ajouter des pistes, de charger des fichiers MIDI, d'enregistrer depuis un périphérique MIDI en temps réel et de sauvegarder votre travail.
 
 ## Installation (Linux)
 
-1.  **Clonez le projet** (si ce n'est pas déjà fait)
+1.  **Clonez le projet** (si ce n'est pas déjà fait) et naviguez dans le répertoire :
     ```bash
     git clone <repository_url>
     cd <repository_directory>
     ```
 
-2.  **Créez et activez un environnement virtuel**
+2.  **Créez et activez un environnement virtuel** :
     ```bash
     python3 -m venv venv
     source venv/bin/activate
     ```
 
-3.  **Installez le projet**
-    Pour une utilisation normale, installez le projet avec `pip` :
-    ```bash
-    pip install .
-    ```
-    Pour le développement (ce qui vous permet de modifier le code et de voir les changements immédiatement), utilisez le mode "éditable" :
+3.  **Installez le projet** :
+    Cette commande installe le projet et ses dépendances (comme `mido`).
     ```bash
     pip install -e .
     ```
-    Cette commande installera également les dépendances listées dans `setup.py` (comme `midiutil`).
 
-## How to use
+## Utilisation
 
-Une fois le projet installé, vous pouvez importer le module `sequencer` dans n'importe quel script Python. Voici un exemple de comment créer une chanson simple et l'exporter dans un fichier MIDI.
+Une fois le projet installé, lancez l'interface en ligne de commande avec :
+```bash
+python3 main.py
+```
+Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la liste des commandes.
 
-Sauvegardez ce code dans un fichier (par exemple, `create_song.py`) et exécutez-le avec `python create_song.py`.
+### Commandes disponibles
+
+| Commande                 | Description                                                                 |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `help`                   | Affiche le message d'aide.                                                  |
+| `add <nom> [instr]`      | Ajoute une nouvelle piste vide. `instr` est un numéro d'instrument MIDI optionnel (0-127). |
+| `load <fichier>`         | Charge un fichier MIDI (`.mid`) et l'ajoute comme une nouvelle piste.         |
+| `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
+| `record <index_piste>`   | Démarre l'enregistrement sur la piste spécifiée.                            |
+| `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
+| `save <fichier>`         | Sauvegarde la chanson entière dans un nouveau fichier MIDI.                 |
+| `quit`                   | Quitte le séquenceur.                                                       |
+
+---
+
+### Utilisation programmatique (API)
+
+Il est également possible d'utiliser les modules du séquenceur directement dans votre propre code Python.
 
 ```python
 from sequencer.models import Song, Track, Event, Note
 from sequencer.midi_export import export_to_midi
 
-def main():
-    """Creates a simple song and exports it to a MIDI file."""
-    # 1. Create a song
-    song = Song(name="Simple Song", tempo=120)
-
-    # 2. Create a track
-    piano_track = Track(name="Piano Melody", instrument=0) # 0 is Acoustic Grand Piano
-
-    # 3. Add notes to the track (a C-major scale)
-    c_major_scale = [60, 62, 64, 65, 67, 69, 71, 72] # MIDI note numbers for C4 to C5
-    for i, pitch in enumerate(c_major_scale):
-        note = Note(pitch=pitch, velocity=100, duration=0.5)
-        event = Event(notes=[note], start_time=i * 0.5)
-        piano_track.add_event(event)
-
-    # 4. Add the track to the song
-    song.add_track(piano_track)
-
-    # 5. Export the song to a MIDI file
-    output_filename = "simple_song.mid"
-    export_to_midi(song, output_filename)
-
-    print(f"Song '{song.name}' has been successfully exported to '{output_filename}'")
-
-if __name__ == "__main__":
-    main()
+# ... votre code pour créer des objets Song, Track, etc. ...
 ```

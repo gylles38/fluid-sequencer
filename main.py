@@ -9,6 +9,7 @@ Sequencer CLI Commands:
   load <filepath>         - Loads a MIDI file into a new track.
   list                    - Shows all tracks in the current song.
   record <track_index>    - Records MIDI input into the specified track.
+  delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   save <filepath>         - Saves the entire song to a MIDI file.
   play                    - Plays the current song.

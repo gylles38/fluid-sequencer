@@ -156,14 +156,27 @@ class Sequencer:
 
             with mido.open_output(port_name) as outport:
                 print(f"Playing on '{port_name}'...")
-                for msg in temp_mid.play():
-                    if self._stop_event.is_set():
-                        break
-                    if self._pause_event.is_set():
-                        # When paused, block until the event is cleared
-                        self._pause_event.wait()
+                for msg in temp_mid:
+                    # Before processing the message, handle any waiting time.
+                    if msg.time > 0:
+                        wait_time = msg.time
+                        while wait_time > 0:
+                            if self._stop_event.is_set():
+                                break
+                            if self._pause_event.is_set():
+                                self._pause_event.wait() # Block until cleared
 
-                    outport.send(msg)
+                            # Sleep in small, interruptible chunks
+                            sleep_chunk = min(wait_time, 0.01)
+                            time.sleep(sleep_chunk)
+                            wait_time -= sleep_chunk
+
+                    if self._stop_event.is_set():
+                        break # Exit the main message loop
+
+                    # After waiting, send the message.
+                    if not msg.is_meta:
+                        outport.send(msg)
 
         except Exception as e:
             print(f"\nError during playback: {e}")

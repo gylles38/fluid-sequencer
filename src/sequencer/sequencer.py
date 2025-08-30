@@ -10,7 +10,7 @@ class Sequencer:
         self.song = Song(name="New Song", tempo=tempo)
         self.playback_state = "stopped"
         self.playback_thread = None
-        self.open_ports = {}  # Changed from self.outport to a dict
+        self.open_ports = {}
         self.virtual_ports = []
         self.temporary_ports = []
         self._stop_event = threading.Event()
@@ -25,20 +25,17 @@ class Sequencer:
         print("Sent all notes off to all open ports.")
 
     def set_tempo(self, tempo: int):
-        # ... (no change)
         if tempo <= 0:
             raise ValueError("Tempo must be positive.")
         self.song.tempo = tempo
         print(f"Tempo set to {self.song.tempo} BPM.")
 
     def add_track(self, name: str, instrument: int = 0):
-        # ... (no change)
         track = Track(name=name, instrument=instrument)
         self.song.add_track(track)
         print(f"Track '{name}' added.")
 
     def delete_track(self, track_index: int):
-        # ... (no change)
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return False
@@ -47,24 +44,14 @@ class Sequencer:
         print(f"Track '{track_name}' deleted.")
         return True
 
-    def assign_port(self, track_index: int, port_index: int):
-        # ... (no change)
+    def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-        try:
-            output_ports = mido.get_output_names()
-            if not output_ports or not 0 <= port_index < len(output_ports):
-                print("Error: Invalid port index.")
-                return
-            port_name = output_ports[port_index]
-            self.song.tracks[track_index].output_port_name = port_name
-            print(f"Assigned port '{port_name}' to track '{self.song.tracks[track_index].name}'.")
-        except Exception as e:
-            print(f"An error occurred while assigning port: {e}")
+        self.song.tracks[track_index].output_port_name = port_name
+        print(f"Assigned port '{port_name}' to track '{self.song.tracks[track_index].name}'.")
 
     def load_song(self, filepath: str):
-        # ... (no change)
         try:
             self.song = import_song(filepath)
             print(f"Successfully loaded song from '{filepath}'.")
@@ -72,7 +59,6 @@ class Sequencer:
             print(f"Error loading MIDI file: {e}")
 
     def save_song(self, filepath: str):
-        # ... (no change)
         try:
             export_to_midi(self.song, filepath)
             print(f"Song successfully saved to '{filepath}'.")
@@ -80,7 +66,6 @@ class Sequencer:
             print(f"Error saving MIDI file: {e}")
 
     def list_tracks(self) -> str:
-        # ... (no change)
         if not self.song.tracks:
             return "No tracks in the song."
         lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM"]
@@ -91,7 +76,6 @@ class Sequencer:
         return "\n".join(lines)
 
     def list_ports(self) -> str:
-        """Returns a formatted string of available MIDI input and output ports."""
         lines = []
         try:
             lines.append("Available MIDI Input Ports:")
@@ -104,8 +88,10 @@ class Sequencer:
 
             lines.append("\nAvailable MIDI Output Ports:")
             output_ports = mido.get_output_names()
-            if output_ports:
-                for i, port in enumerate(output_ports):
+            virtual_port_names = [vp.name for vp in self.virtual_ports]
+            all_outputs = output_ports + virtual_port_names
+            if all_outputs:
+                for i, port in enumerate(all_outputs):
                     lines.append(f"  [{i}] {port}")
             else:
                 lines.append("  (None found)")
@@ -115,7 +101,6 @@ class Sequencer:
             return f"Error getting MIDI ports: {e}"
 
     def create_virtual_port(self, name: str):
-        """Creates a virtual MIDI output port."""
         try:
             port = mido.open_output(name, virtual=True)
             self.virtual_ports.append(port)
@@ -124,7 +109,6 @@ class Sequencer:
             print(f"Error creating virtual port: {e}")
 
     def close_virtual_ports(self):
-        """Closes all open virtual MIDI ports."""
         for port in self.virtual_ports:
             if not port.closed:
                 port.close()
@@ -137,7 +121,6 @@ class Sequencer:
 
         inport_name, outport_name = None, None
         try:
-            # Select Input Port
             input_ports = mido.get_input_names()
             if not input_ports:
                 print("Error: No MIDI input ports found.")
@@ -148,19 +131,20 @@ class Sequencer:
             inport_idx = int(input("Choose a port to record from: "))
             inport_name = input_ports[inport_idx]
 
-            # Select Output Port for MIDI Thru
             thru_choice = input("Enable MIDI Thru to an output port? [y/N] ").lower()
             if thru_choice == 'y':
-                output_ports = mido.get_output_names()
-                if not output_ports:
+                hardware_ports = mido.get_output_names()
+                virtual_port_names = [vp.name for vp in self.virtual_ports]
+                all_outputs = hardware_ports + virtual_port_names
+                if not all_outputs:
                     print("No MIDI output ports found for Thru.")
                 else:
                     print("Available MIDI output ports:")
-                    for i, port in enumerate(output_ports):
+                    for i, port in enumerate(all_outputs):
                         print(f"  [{i}] {port}")
                     outport_idx = int(input("Choose a port for MIDI Thru (or -1 to disable): "))
-                    if 0 <= outport_idx < len(output_ports):
-                        outport_name = output_ports[outport_idx]
+                    if 0 <= outport_idx < len(all_outputs):
+                        outport_name = all_outputs[outport_idx]
 
         except (ValueError, IndexError):
             print("Error: Invalid selection.")
@@ -194,11 +178,9 @@ class Sequencer:
                         if msg.note in open_notes:
                             start_time_sec, velocity = open_notes.pop(msg.note)
                             duration_sec = now - start_time_sec
-
                             beats_per_second = self.song.tempo / 60
                             start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
                             duration_beats = duration_sec * beats_per_second
-
                             note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                             event = Event(notes=[note], start_time=start_time_beats)
                             target_track.add_event(event)
@@ -213,68 +195,45 @@ class Sequencer:
                 print(f"Closed Thru port '{outport_name}'.")
 
     def _play_thread(self):
-        """The actual playback logic that runs in a separate thread."""
         try:
-            # 1. Build a master list of all MIDI messages from all tracks
             master_event_list = []
             ticks_per_beat = 480
 
             for track_idx, track in enumerate(self.song.tracks):
                 if not track.output_port_name:
-                    continue # Skip tracks without an assigned port
-
-                # Add program change at the beginning of the track
+                    continue
                 program_change_msg = mido.Message('program_change', channel=track_idx % 16, program=track.instrument, time=0)
                 master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': program_change_msg})
-
                 for event in track.events:
                     for note in event.notes:
                         start_tick = int(event.start_time * ticks_per_beat)
                         end_tick = start_tick + int(note.duration * ticks_per_beat)
-
                         note_on_msg = mido.Message('note_on', channel=track_idx % 16, note=note.pitch, velocity=note.velocity)
                         note_off_msg = mido.Message('note_off', channel=track_idx % 16, note=note.pitch, velocity=note.velocity)
-
                         master_event_list.append({'tick': start_tick, 'track_idx': track_idx, 'message': note_on_msg})
                         master_event_list.append({'tick': end_tick, 'track_idx': track_idx, 'message': note_off_msg})
 
             master_event_list.sort(key=lambda e: e['tick'])
-
-            # 2. Play the master list
             print(f"Playing on {len(self.open_ports)} port(s)...")
             last_tick = 0
-            mido_tempo = mido.bpm2tempo(self.song.tempo) # Microseconds per beat
+            mido_tempo = mido.bpm2tempo(self.song.tempo)
 
             for event in master_event_list:
                 self._run_event.wait()
                 if self._stop_event.is_set(): break
-
                 delta_ticks = event['tick'] - last_tick
                 if delta_ticks > 0:
                     wait_time = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
-                    # Interruptible sleep
-                    while wait_time > 0:
-                        self._run_event.wait()
-                        if self._stop_event.is_set(): break
-                        sleep_chunk = min(wait_time, 0.01)
-                        time.sleep(sleep_chunk)
-                        wait_time -= sleep_chunk
-
-                if self._stop_event.is_set(): break
-
-                # Route the message to the correct port
+                    time.sleep(wait_time)
                 track = self.song.tracks[event['track_idx']]
                 port = self.open_ports.get(track.output_port_name)
                 if port:
                     port.send(event['message'])
-
                 last_tick = event['tick']
-
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:
             self._all_notes_off()
-            # Close only the temporary ports that were opened for this playback
             for port in self.temporary_ports:
                 if not port.closed:
                     port.close()
@@ -288,37 +247,25 @@ class Sequencer:
             print("Already playing.")
             return
         if self.playback_state == "paused":
-            self.pause()  # Resume playback
+            self.pause()
             return
 
         self.open_ports.clear()
         self.temporary_ports = []
-
         required_ports = {t.output_port_name for t in self.song.tracks if t.output_port_name}
-        print(f"\n[DEBUG] Required ports for playback: {required_ports}")
         if not required_ports:
             print("No tracks have an assigned output port. Use 'assign' command first.")
             return
 
-        print(f"[DEBUG] Managed virtual ports: {[vp.name for vp in self.virtual_ports]}")
-
         for name in required_ports:
-            print(f"\n[DEBUG] Checking port: '{name}'")
-            # Check if the required port name corresponds to one of our virtual ports
             found_virtual = False
             for vp in self.virtual_ports:
-                print(f"[DEBUG]   Comparing with virtual port '{vp.name}'")
-                is_substring = vp.name in name
-                print(f"[DEBUG]   Is '{vp.name}' a substring of '{name}'? {is_substring}")
-                if is_substring:
+                if vp.name in name:
                     self.open_ports[name] = vp
-                    print(f"[SUCCESS] Using existing virtual port: {name}")
+                    print(f"Using existing virtual port: {name}")
                     found_virtual = True
                     break
-
             if not found_virtual:
-                print(f"[DEBUG] Port '{name}' not found in managed virtual ports. Opening as temporary hardware port.")
-                # This is a hardware port, open it temporarily for this playback
                 try:
                     temp_port = mido.open_output(name)
                     self.open_ports[name] = temp_port
@@ -326,7 +273,6 @@ class Sequencer:
                     print(f"Opened temporary hardware port: {name}")
                 except Exception as e:
                     print(f"Error opening hardware port '{name}': {e}")
-                    # Clean up any other temporary ports that were successfully opened
                     for p in self.temporary_ports:
                         p.close()
                     self.temporary_ports = []

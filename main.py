@@ -11,7 +11,7 @@ Sequencer CLI Commands:
   list                    - Shows all tracks in the current song.
   ports                   - Lists available MIDI input and output ports.
   vport <name>            - Creates a virtual MIDI output port for use with other apps.
-  assign <track> <port>   - Assigns a track to a MIDI output port for playback.
+  assign <track_index>    - Assigns a track to an output port from a list of choices.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -72,10 +72,36 @@ def main():
             elif command == "ports":
                 print(seq.list_ports())
             elif command == "assign":
-                if len(args) == 2:
-                    seq.assign_port(track_index=int(args[0]), port_index=int(args[1]))
+                if len(args) == 1:
+                    try:
+                        track_index = int(args[0])
+                        if not 0 <= track_index < len(seq.song.tracks):
+                            print("Error: Invalid track index.")
+                            continue
+
+                        hardware_ports = mido.get_output_names()
+                        virtual_port_names = [vp.name for vp in seq.virtual_ports]
+                        all_outputs = hardware_ports + virtual_port_names
+
+                        if not all_outputs:
+                            print("No output ports available.")
+                            continue
+
+                        print("Available output ports:")
+                        for i, name in enumerate(all_outputs):
+                            print(f"  [{i}] {name}")
+
+                        port_index = int(input("Choose a port to assign: "))
+                        if 0 <= port_index < len(all_outputs):
+                            port_name = all_outputs[port_index]
+                            seq.assign_port(track_index, port_name)
+                        else:
+                            print("Error: Invalid port index.")
+
+                    except (ValueError, IndexError):
+                        print("Error: Invalid input.")
                 else:
-                    print("Usage: assign <track_index> <port_index>")
+                    print("Usage: assign <track_index>")
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))

@@ -87,7 +87,7 @@ class Sequencer:
 
         track = self.song.tracks[track_index]
         track.instrument = program
-        print(f"Set program for track '{track.name}' to {program}.")
+        print(f"Set program for track '{track.name}' to {program + 1}.")
 
     def load_song(self, filepath: str):
         try:

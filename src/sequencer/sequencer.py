@@ -12,6 +12,7 @@ class Sequencer:
         self.playback_thread = None
         self.open_ports = {}  # Changed from self.outport to a dict
         self.virtual_ports = []
+        self.temporary_ports = []
         self._stop_event = threading.Event()
         self._run_event = threading.Event()
         self._run_event.set()
@@ -273,9 +274,12 @@ class Sequencer:
             print(f"\nError during playback: {e}")
         finally:
             self._all_notes_off()
-            for port in self.open_ports.values():
-                port.close()
-            self.open_ports = {}
+            # Close only the temporary ports that were opened for this playback
+            for port in self.temporary_ports:
+                if not port.closed:
+                    port.close()
+            self.temporary_ports = []
+            self.open_ports.clear()
             self.playback_state = "stopped"
             print("Playback finished.")
 
@@ -284,25 +288,39 @@ class Sequencer:
             print("Already playing.")
             return
         if self.playback_state == "paused":
-            self.pause()
+            self.pause()  # Resume playback
             return
 
-        ports_to_open = {track.output_port_name for track in self.song.tracks if track.output_port_name}
-        if not ports_to_open:
+        self.open_ports.clear()
+        self.temporary_ports = []
+
+        required_ports = {t.output_port_name for t in self.song.tracks if t.output_port_name}
+        if not required_ports:
             print("No tracks have an assigned output port. Use 'assign' command first.")
             return
 
-        try:
-            for port_name in ports_to_open:
-                self.open_ports[port_name] = mido.open_output(port_name)
-                print(f"Opened port: {port_name}")
-        except Exception as e:
-            print(f"Error opening ports: {e}")
-            # Close any ports that were successfully opened
-            for port in self.open_ports.values():
-                port.close()
-            self.open_ports = {}
-            return
+        virtual_port_map = {p.name: p for p in self.virtual_ports}
+
+        for name in required_ports:
+            port = virtual_port_map.get(name)
+            if port:
+                self.open_ports[name] = port
+                print(f"Using existing virtual port: {name}")
+            else:
+                try:
+                    # This is a hardware port, open it temporarily for this playback
+                    temp_port = mido.open_output(name)
+                    self.open_ports[name] = temp_port
+                    self.temporary_ports.append(temp_port)
+                    print(f"Opened temporary hardware port: {name}")
+                except Exception as e:
+                    print(f"Error opening hardware port '{name}': {e}")
+                    # Clean up any other temporary ports that were successfully opened
+                    for p in self.temporary_ports:
+                        p.close()
+                    self.temporary_ports = []
+                    self.open_ports.clear()
+                    return
 
         self._stop_event.clear()
         self._run_event.set()

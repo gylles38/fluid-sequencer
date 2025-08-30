@@ -64,6 +64,18 @@ class Sequencer:
         track.bank_lsb = lsb
         print(f"Set bank for track '{track.name}' to MSB={msb}, LSB={lsb}.")
 
+    def set_channel(self, track_index: int, channel: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+        if not 1 <= channel <= 16:
+            print("Error: MIDI channel must be between 1 and 16.")
+            return
+
+        track = self.song.tracks[track_index]
+        track.channel = channel - 1 # Convert to 0-indexed for mido
+        print(f"Set MIDI channel for track '{track.name}' to {channel}.")
+
     def load_song(self, filepath: str):
         try:
             self.song = import_song(filepath)
@@ -86,9 +98,14 @@ class Sequencer:
         for i, track in enumerate(self.song.tracks):
             bank_info = ""
             if track.bank_msb is not None:
-                bank_info = f" (Bank: {track.bank_msb}:{track.bank_lsb or 0})"
+                bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
+
+            # Display channel as 1-indexed
+            ch_info = f"Ch: {track.channel + 1}"
+            prog_info = f"Prog: {track.instrument}"
+
             port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
-            lines.append(f"[{i}] {track.name} (Prog: {track.instrument}{bank_info}, {len(track.events)} events){port_info}")
+            lines.append(f"[{i}] {track.name} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
         return "\n".join(lines)
 
     def list_ports(self) -> str:
@@ -220,21 +237,20 @@ class Sequencer:
                     continue
 
                 # Add bank select and program change messages at the beginning of the track
-                channel = track_idx % 16
                 if track.bank_msb is not None:
-                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=channel, control=0, value=track.bank_msb, time=0)})
+                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb, time=0)})
                 if track.bank_lsb is not None:
-                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=channel, control=32, value=track.bank_lsb, time=0)})
+                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb, time=0)})
 
-                program_change_msg = mido.Message('program_change', channel=channel, program=track.instrument, time=0)
+                program_change_msg = mido.Message('program_change', channel=track.channel, program=track.instrument, time=0)
                 master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': program_change_msg})
 
                 for event in track.events:
                     for note in event.notes:
                         start_tick = int(event.start_time * ticks_per_beat)
                         end_tick = start_tick + int(note.duration * ticks_per_beat)
-                        note_on_msg = mido.Message('note_on', channel=track_idx % 16, note=note.pitch, velocity=note.velocity)
-                        note_off_msg = mido.Message('note_off', channel=track_idx % 16, note=note.pitch, velocity=note.velocity)
+                        note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)
+                        note_off_msg = mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=note.velocity)
                         master_event_list.append({'tick': start_tick, 'track_idx': track_idx, 'message': note_on_msg})
                         master_event_list.append({'tick': end_tick, 'track_idx': track_idx, 'message': note_off_msg})
 

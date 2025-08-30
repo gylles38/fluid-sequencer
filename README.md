@@ -42,6 +42,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `vport <nom>`            | Crée un port de sortie MIDI virtuel pour l'utiliser avec d'autres applications. |
 | `assign <piste>`         | Assigne une piste à un port de sortie à partir d'une liste de choix.        |
 | `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32).                  |
+| `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
@@ -55,38 +56,32 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 
 ## Exemples d'utilisation
 
-### How-To : Enregistrer deux pistes avec des banques et des ports différents
+### How-To : Enregistrer deux pistes avec des canaux et banques différents
 
-Voici un exemple de workflow pour enregistrer deux pistes, chacune avec un instrument et une banque de sons spécifiques.
+Voici un exemple de workflow pour enregistrer deux pistes, chacune avec un canal, un instrument et une banque de sons spécifiques.
 
 1.  **Ajouter et configurer la Piste 1 :**
-    *   Ajoutez une piste pour un piano (programme 1) : `add piano 1`
-    *   Définissez la banque de sons. Par exemple, pour la banque 1, programme 1 : `setbank 0 1 1` (piste 0, MSB 1, LSB 1)
+    *   Ajoutez une piste pour un piano (programme 1). Par défaut, elle sera sur le canal 1.
+        `> add piano 1`
+    *   Définissez la banque de sons. Par exemple, pour la banque 1, programme 1 :
+        `> setbank 0 1 1` (piste 0, MSB 1, LSB 1)
 
 2.  **Ajouter et configurer la Piste 2 :**
-    *   Ajoutez une piste pour des cordes (programme 92) : `add cordes 92`
-    *   Définissez la banque de sons. Par exemple, pour la banque 2, programme 92 : `setbank 1 2 92` (piste 1, MSB 2, LSB 92)
+    *   Ajoutez une piste pour des cordes (programme 92). Par défaut, elle sera sur le canal 2.
+        `> add cordes 92`
+    *   Définissez la banque de sons. Par exemple, pour la banque 2, programme 92 :
+        `> setbank 1 2 92` (piste 1, MSB 2, LSB 92)
 
-3.  **Lister les pistes** pour vérifier la configuration : `list`
+3.  **(Optionnel) Changer le canal d'une piste :** Si votre instrument externe pour les cordes écoute sur le canal 10, par exemple :
+    `> setch 1 10` (change le canal de la piste 1 pour le canal 10)
+
+4.  **Lister les pistes** pour vérifier la configuration : `list`
     ```
-    [0] piano (Prog: 1 (Bank: 1:1), 0 events)
-    [1] cordes (Prog: 92 (Bank: 2:92), 0 events)
+    [0] piano (Ch: 1, Prog: 1, Bank: 1:1, 0 events)
+    [1] cordes (Ch: 10, Prog: 92, Bank: 2:92, 0 events)
     ```
 
-4.  **Enregistrer la Piste 1 :**
-    *   Lancez l'enregistrement : `record 0`
-    *   Le programme vous demandera de choisir un port d'entrée MIDI. Choisissez le port correspondant à votre premier clavier/périphérique.
-
-5.  **Enregistrer la Piste 2 :**
-    *   Lancez l'enregistrement : `record 1`
-    *   Choisissez le port d'entrée MIDI correspondant à votre second clavier/périphérique.
-
-6.  **Assigner les pistes pour la lecture :**
-    *   Pour jouer ces pistes, assignez-les à un port de sortie (matériel ou virtuel).
-    *   `assign 0` -> Choisissez un port de sortie.
-    *   `assign 1` -> Choisissez le même port ou un autre.
-
-7.  **Jouer le tout :** `play`
+5.  **Enregistrer et jouer les pistes** comme d'habitude. Le séquenceur utilisera les canaux et les banques que vous avez spécifiés.
 
 ---
 
@@ -97,8 +92,8 @@ Pour connecter ce séquenceur avec un hôte de plugins comme Carla, vous pouvez 
 ### Cas 1 : Jouer une piste du séquenceur avec un instrument dans Carla
 
 1.  **Lancez le séquenceur** et **créez un port virtuel** : `> vport carla-in`
-2.  **Lancez Carla.** Dans l'onglet "Patchbay", vous devriez voir `carla-in` comme une source MIDI (il faut peut-être utiliser `a2jmidid` et bien configurer Carla, voir les messages précédents).
-3.  **Chargez un instrument** dans Carla.
+2.  **Lancez Carla.** Dans l'onglet "Patchbay", vous devriez voir `carla-in` comme une source MIDI (il faut peut-être utiliser `a2jmidid` et bien configurer Carla).
+3.  **Chargez un instrument** dans Carla. Assurez-vous que son canal d'entrée MIDI correspond à celui de la piste dans le séquenceur.
 4.  **Connectez le port :** Dans Carla, reliez la sortie `carla-in` à l'entrée MIDI de votre instrument.
 5.  **Dans le séquenceur, assignez votre piste** à ce nouveau port : `assign 0` -> choisissez `carla-in` dans la liste.
 6.  **Jouez !** `play`

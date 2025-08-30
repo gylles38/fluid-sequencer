@@ -110,6 +110,11 @@ def main():
                     seq.set_bank(track_index=int(args[0]), msb=int(args[1]), lsb=int(args[2]))
                 else:
                     print("Usage: setbank <track_index> <msb> [lsb]")
+            elif command == "setch":
+                if len(args) == 2:
+                    seq.set_channel(track_index=int(args[0]), channel=int(args[1]))
+                else:
+                    print("Usage: setch <track_index> <channel>")
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))

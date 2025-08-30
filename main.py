@@ -13,6 +13,7 @@ Sequencer CLI Commands:
   vport <name>            - Creates a virtual MIDI output port for use with other apps.
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
+  setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.

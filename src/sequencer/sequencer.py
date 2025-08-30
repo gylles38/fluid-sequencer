@@ -269,6 +269,7 @@ class Sequencer:
                 track = self.song.tracks[event['track_idx']]
                 port = self.open_ports.get(track.output_port_name)
                 if port:
+                    print(f"[DEBUG] Sending to port '{port.name}': {event['message']}")
                     port.send(event['message'])
                 last_tick = event['tick']
         except Exception as e:

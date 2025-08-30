@@ -289,6 +289,26 @@ class Sequencer:
                 port.close()
         print("Virtual ports closed.")
 
+    def delete_virtual_port(self, name: str):
+        port_to_delete = None
+        for vp in self.virtual_ports:
+            if vp.name == name:
+                port_to_delete = vp
+                break
+
+        if port_to_delete:
+            # Un-assign any tracks that were using this port
+            for track in self.song.tracks:
+                if track.output_port_name == port_to_delete.name:
+                    track.output_port_name = None
+                    print(f"Un-assigned port from track '{track.name}'.")
+
+            port_to_delete.close()
+            self.virtual_ports.remove(port_to_delete)
+            print(f"Virtual port '{name}' deleted.")
+        else:
+            print(f"Error: Virtual port '{name}' not found.")
+
     def record_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")

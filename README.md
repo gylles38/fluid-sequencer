@@ -40,7 +40,8 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `loadproject <basename>` | Charge un projet complet (`.mid` et `.proj.json`).                          |
 | `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
 | `ports`                  | Liste les ports d'entrée et de sortie MIDI disponibles.                     |
-| `vport <nom>`            | Crée un port de sortie MIDI virtuel pour l'utiliser avec d'autres applications. |
+| `vport <nom>`            | Crée un port de sortie MIDI virtuel.                                        |
+| `delvport`               | Supprime un port de sortie MIDI virtuel existant.                           |
 | `assign <piste>`         | Assigne une piste à un port de sortie à partir d'une liste de choix.        |
 | `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32, 0-127).          |
 | `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |

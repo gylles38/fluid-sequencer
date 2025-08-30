@@ -11,7 +11,8 @@ Sequencer CLI Commands:
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
   list                    - Shows all tracks in the current song.
   ports                   - Lists available MIDI input and output ports.
-  vport <name>            - Creates a virtual MIDI output port for use with other apps.
+  vport <name>            - Creates a virtual MIDI output port.
+  delvport                - Deletes an existing virtual port.
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
@@ -91,6 +92,24 @@ def main():
                     seq.create_virtual_port(name=args[0])
                 else:
                     print("Usage: vport <port_name>")
+            elif command == "delvport":
+                if not seq.virtual_ports:
+                    print("No virtual ports to delete.")
+                    continue
+
+                print("Available virtual ports:")
+                for i, vp in enumerate(seq.virtual_ports):
+                    print(f"  [{i}] {vp.name}")
+
+                try:
+                    idx = int(input("Choose a virtual port to delete: "))
+                    if 0 <= idx < len(seq.virtual_ports):
+                        seq.delete_virtual_port(seq.virtual_ports[idx].name)
+                    else:
+                        print("Error: Invalid index.")
+                except (ValueError, IndexError):
+                    print("Error: Invalid input.")
+
             elif command == "ports":
                 print(seq.list_ports())
             elif command == "assign":

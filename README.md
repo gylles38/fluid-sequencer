@@ -35,16 +35,16 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | Commande                 | Description                                                                 |
 | ------------------------ | --------------------------------------------------------------------------- |
 | `help`                   | Affiche le message d'aide.                                                  |
-| `add <nom> [prog]`       | Ajoute une nouvelle piste vide. `prog` est le numéro de programme MIDI (0-127). |
+| `add <nom> [prog]`       | Ajoute une nouvelle piste. `prog` est le numéro de programme (1-128).        |
 | `load <fichier>`         | Charge uniquement un fichier MIDI.                                          |
 | `loadproject <basename>` | Charge un projet complet (`.mid` et `.proj.json`).                          |
 | `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
 | `ports`                  | Liste les ports d'entrée et de sortie MIDI disponibles.                     |
 | `vport <nom>`            | Crée un port de sortie MIDI virtuel pour l'utiliser avec d'autres applications. |
 | `assign <piste>`         | Assigne une piste à un port de sortie à partir d'une liste de choix.        |
-| `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32).                  |
+| `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32, 0-127).          |
 | `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
-| `setprog <piste> <prog>` | Définit le programme MIDI (0-127) pour une piste.                           |
+| `setprog <piste> <prog>` | Définit le programme MIDI (1-128) pour une piste.                           |
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
@@ -80,7 +80,7 @@ Pour éviter de reconfigurer vos ports virtuels et vos assignations de pistes à
 Voici un exemple de workflow complet.
 
 1.  **Ajouter une piste :**
-    *   `> add piano` (ajoute une piste nommée "piano" avec le programme 0 par défaut)
+    *   `> add piano` (ajoute une piste nommée "piano" avec le programme 1 par défaut)
 
 2.  **Configurer l'instrument :**
     *   Changer le programme pour un piano électrique (ex: 5) : `> setprog 0 5`

@@ -6,7 +6,7 @@ def print_help():
     help_text = """
 Sequencer CLI Commands:
   help                    - Shows this help message.
-  add <name> [instr]      - Adds a new track. `instr` is an optional MIDI program number (0-127).
+  add <name> [prog]       - Adds a new track. `prog` is an optional program number (1-128).
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
   list                    - Shows all tracks in the current song.
@@ -15,7 +15,7 @@ Sequencer CLI Commands:
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
-  setprog <track> <prog>  - Sets the MIDI program (0-127) for a track.
+  setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -55,9 +55,13 @@ def main():
                 if len(args) == 1:
                     seq.add_track(name=args[0])
                 elif len(args) == 2:
-                    seq.add_track(name=args[0], instrument=int(args[1]))
+                    prog = int(args[1])
+                    if not 1 <= prog <= 128:
+                        print("Error: Program number must be between 1 and 128.")
+                        continue
+                    seq.add_track(name=args[0], instrument=prog - 1)
                 else:
-                    print("Usage: add <name> [instrument_id]")
+                    print("Usage: add <name> [program_number]")
             elif command == "load":
                 if len(args) == 1:
                     confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
@@ -130,7 +134,11 @@ def main():
                     print("Usage: setch <track_index> <channel>")
             elif command == "setprog":
                 if len(args) == 2:
-                    seq.set_program(track_index=int(args[0]), program=int(args[1]))
+                    prog = int(args[1])
+                    if not 1 <= prog <= 128:
+                        print("Error: Program number must be between 1 and 128.")
+                        continue
+                    seq.set_program(track_index=int(args[0]), program=prog - 1)
                 else:
                     print("Usage: setprog <track_index> <program>")
             elif command == "record":

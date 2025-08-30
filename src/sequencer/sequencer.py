@@ -180,9 +180,9 @@ class Sequencer:
             if track.bank_msb is not None:
                 bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
 
-            # Display channel as 1-indexed
+            # Display channel and program as 1-indexed
             ch_info = f"Ch: {track.channel + 1}"
-            prog_info = f"Prog: {track.instrument}"
+            prog_info = f"Prog: {track.instrument + 1}"
 
             port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
             lines.append(f"[{i}] {track.name} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")

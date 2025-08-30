@@ -21,6 +21,7 @@ Sequencer CLI Commands:
   tempo <bpm>             - Sets the song tempo in beats per minute.
   save <filepath>         - Saves only the song to a MIDI file.
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
+  prime                   - Sends current program/bank state to all assigned ports.
   play                    - Plays the song using the assigned ports for each track.
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
@@ -175,6 +176,8 @@ def main():
                     seq.save_project(basename=args[0])
                 else:
                     print("Usage: saveproject <basename>")
+            elif command == "prime":
+                seq.prime_all_tracks()
             elif command == "play":
                 if len(args) == 0:
                     seq.play()

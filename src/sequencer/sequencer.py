@@ -89,6 +89,45 @@ class Sequencer:
         track.instrument = program
         print(f"Set program for track '{track.name}' to {program + 1}.")
 
+    def prime_all_tracks(self):
+        """Sends the current program/bank state for all assigned tracks."""
+        print("Priming all assigned tracks...")
+        for track in self.song.tracks:
+            if not track.output_port_name:
+                continue
+
+            port = None
+            is_temp_port = False
+            port_name = track.output_port_name
+            try:
+                # Find the port object (virtual or hardware)
+                found_virtual = False
+                for vp in self.virtual_ports:
+                    if vp.name in port_name:
+                        port = vp
+                        found_virtual = True
+                        break
+
+                if not found_virtual:
+                    port = mido.open_output(port_name)
+                    is_temp_port = True
+
+                if port:
+                    print(f"  - Sending state for track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}")
+                    # Send bank select
+                    if track.bank_msb is not None:
+                        port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                    if track.bank_lsb is not None:
+                        port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                    # Send program change
+                    port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+            except Exception as e:
+                print(f"  - Could not send state to port '{port_name}': {e}")
+            finally:
+                if is_temp_port and port:
+                    port.close()
+        print("Priming complete.")
+
     def load_song(self, filepath: str):
         try:
             self.song = import_song(filepath)

@@ -45,6 +45,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32, 0-127).          |
 | `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
 | `setprog <piste> <prog>` | Définit le programme MIDI (1-128) pour une piste.                           |
+| `prime`                  | Envoie l'état (banque/programme) de toutes les pistes aux ports assignés.   |
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
@@ -98,16 +99,20 @@ Voici un exemple de workflow complet.
     *   Dans la baie de patch de Carla, connecter la sortie `mon-synth` à l'entrée du synthétiseur.
     *   Assigner la piste au port virtuel : `> assign 0` -> choisir `mon-synth` dans la liste.
 
-5.  **Enregistrer la piste en s'écoutant en direct :**
+5.  **Envoyer la configuration au synthétiseur :**
+    *   La commande `assign` n'envoie pas automatiquement l'état. Utilisez la commande `prime` pour mettre à jour votre synthétiseur.
+    *   `> prime`
+
+6.  **Enregistrer la piste en s'écoutant en direct :**
     *   Lancer l'enregistrement : `> record 0`
     *   Choisir votre clavier physique comme port d'entrée.
     *   Activer le "MIDI Thru" (`y`) et choisir `mon-synth` comme port de sortie.
     *   Jouez ! Vous entendrez le son du synthé de Carla pendant l'enregistrement.
 
-6.  **Sauvegarder le projet :**
+7.  **Sauvegarder le projet :**
     *   `> saveproject mon_morceau`
 
-7.  Plus tard, vous pourrez tout recharger avec `loadproject mon_morceau`.
+8.  Plus tard, vous pourrez tout recharger avec `loadproject mon_morceau`.
 
 
 ---

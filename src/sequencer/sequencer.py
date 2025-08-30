@@ -77,6 +77,18 @@ class Sequencer:
         track.channel = channel - 1 # Convert to 0-indexed for mido
         print(f"Set MIDI channel for track '{track.name}' to {channel}.")
 
+    def set_program(self, track_index: int, program: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+        if not 0 <= program <= 127:
+            print("Error: Program number must be between 0 and 127.")
+            return
+
+        track = self.song.tracks[track_index]
+        track.instrument = program
+        print(f"Set program for track '{track.name}' to {program}.")
+
     def load_song(self, filepath: str):
         try:
             self.song = import_song(filepath)

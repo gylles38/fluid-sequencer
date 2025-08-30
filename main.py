@@ -15,6 +15,7 @@ Sequencer CLI Commands:
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
+  setprog <track> <prog>  - Sets the MIDI program (0-127) for a track.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -127,6 +128,11 @@ def main():
                     seq.set_channel(track_index=int(args[0]), channel=int(args[1]))
                 else:
                     print("Usage: setch <track_index> <channel>")
+            elif command == "setprog":
+                if len(args) == 2:
+                    seq.set_program(track_index=int(args[0]), program=int(args[1]))
+                else:
+                    print("Usage: setprog <track_index> <program>")
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))

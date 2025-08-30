@@ -44,6 +44,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `assign <piste>`         | Assigne une piste à un port de sortie à partir d'une liste de choix.        |
 | `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32).                  |
 | `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
+| `setprog <piste> <prog>` | Définit le programme MIDI (0-127) pour une piste.                           |
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
@@ -74,32 +75,40 @@ Pour éviter de reconfigurer vos ports virtuels et vos assignations de pistes à
 
 ## Exemples d'utilisation
 
-### How-To : Enregistrer deux pistes avec des canaux et banques différents
+### How-To : Configurer et enregistrer une piste
 
-Voici un exemple de workflow pour enregistrer deux pistes, chacune avec un canal, un instrument et une banque de sons spécifiques.
+Voici un exemple de workflow complet.
 
-1.  **Ajouter et configurer la Piste 1 :**
-    *   Ajoutez une piste pour un piano (programme 1). Par défaut, elle sera sur le canal 1.
-        `> add piano 1`
-    *   Définissez la banque de sons. Par exemple, pour la banque 1, programme 1 :
-        `> setbank 0 1 1` (piste 0, MSB 1, LSB 1)
+1.  **Ajouter une piste :**
+    *   `> add piano` (ajoute une piste nommée "piano" avec le programme 0 par défaut)
 
-2.  **Ajouter et configurer la Piste 2 :**
-    *   Ajoutez une piste pour des cordes (programme 92). Par défaut, elle sera sur le canal 2.
-        `> add cordes 92`
-    *   Définissez la banque de sons. Par exemple, pour la banque 2, programme 92 :
-        `> setbank 1 2 92` (piste 1, MSB 2, LSB 92)
+2.  **Configurer l'instrument :**
+    *   Changer le programme pour un piano électrique (ex: 5) : `> setprog 0 5`
+    *   Changer le canal MIDI pour le canal 10 : `> setch 0 10`
+    *   Définir la banque de sons (ex: MSB=1, LSB=1) : `> setbank 0 1 1`
 
-3.  **(Optionnel) Changer le canal d'une piste :** Si votre instrument externe pour les cordes écoute sur le canal 10, par exemple :
-    `> setch 1 10` (change le canal de la piste 1 pour le canal 10)
-
-4.  **Lister les pistes** pour vérifier la configuration : `list`
+3.  **Lister les pistes** pour vérifier la configuration : `list`
     ```
-    [0] piano (Ch: 1, Prog: 1, Bank: 1:1, 0 events)
-    [1] cordes (Ch: 10, Prog: 92, Bank: 2:92, 0 events)
+    [0] piano (Ch: 10, Prog: 5, Bank: 1:1, 0 events)
     ```
 
-5.  **Enregistrer et jouer les pistes** comme d'habitude. Le séquenceur utilisera les canaux et les banques que vous avez spécifiés.
+4.  **Connecter à un synthétiseur (via Carla) :**
+    *   Créer un port virtuel : `> vport mon-synth`
+    *   Lancer Carla, y charger un synthétiseur, et le configurer pour qu'il écoute sur le **canal 10**.
+    *   Dans la baie de patch de Carla, connecter la sortie `mon-synth` à l'entrée du synthétiseur.
+    *   Assigner la piste au port virtuel : `> assign 0` -> choisir `mon-synth` dans la liste.
+
+5.  **Enregistrer la piste en s'écoutant en direct :**
+    *   Lancer l'enregistrement : `> record 0`
+    *   Choisir votre clavier physique comme port d'entrée.
+    *   Activer le "MIDI Thru" (`y`) et choisir `mon-synth` comme port de sortie.
+    *   Jouez ! Vous entendrez le son du synthé de Carla pendant l'enregistrement.
+
+6.  **Sauvegarder le projet :**
+    *   `> saveproject mon_morceau`
+
+7.  Plus tard, vous pourrez tout recharger avec `loadproject mon_morceau`.
+
 
 ---
 

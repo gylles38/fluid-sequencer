@@ -36,6 +36,8 @@ class Track:
     bank_msb: Optional[int] = None  # Bank Select MSB (CC#0)
     bank_lsb: Optional[int] = None  # Bank Select LSB (CC#32)
     output_port_name: Optional[str] = None
+    is_muted: bool = False
+    is_solo: bool = False
 
     def add_event(self, event: Event):
         """Adds an event to the track and keeps the event list sorted by start time."""

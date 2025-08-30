@@ -89,6 +89,24 @@ class Sequencer:
         track.instrument = program
         print(f"Set program for track '{track.name}' to {program + 1}.")
 
+    def toggle_mute(self, track_index: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+        track = self.song.tracks[track_index]
+        track.is_muted = not track.is_muted
+        status = "Muted" if track.is_muted else "Unmuted"
+        print(f"Track '{track.name}' is now {status}.")
+
+    def toggle_solo(self, track_index: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+        track = self.song.tracks[track_index]
+        track.is_solo = not track.is_solo
+        status = "Solo" if track.is_solo else "Un-soloed"
+        print(f"Track '{track.name}' is now {status}.")
+
     def prime_all_tracks(self):
         """Sends the current program/bank state for all assigned tracks."""
         print("Priming all assigned tracks...")
@@ -215,16 +233,21 @@ class Sequencer:
         lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM"]
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):
+            status_info = ""
+            if track.is_muted:
+                status_info += " [M]"
+            if track.is_solo:
+                status_info += " [S]"
+
             bank_info = ""
             if track.bank_msb is not None:
                 bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
 
-            # Display channel and program as 1-indexed
             ch_info = f"Ch: {track.channel + 1}"
             prog_info = f"Prog: {track.instrument + 1}"
 
             port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
-            lines.append(f"[{i}] {track.name} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
+            lines.append(f"[{i}] {track.name}{status_info} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
         return "\n".join(lines)
 
     def list_ports(self) -> str:
@@ -351,10 +374,21 @@ class Sequencer:
             master_event_list = []
             ticks_per_beat = 480
 
-            for track_idx, track in enumerate(self.song.tracks):
+            # Determine which tracks to play based on mute/solo status
+            solo_tracks = [t for t in self.song.tracks if t.is_solo]
+            if solo_tracks:
+                tracks_to_play = solo_tracks
+            else:
+                tracks_to_play = [t for t in self.song.tracks if not t.is_muted]
+
+            # Create a map of track name to index for easy lookup
+            track_name_to_idx = {t.name: i for i, t in enumerate(self.song.tracks)}
+
+            for track in tracks_to_play:
                 if not track.output_port_name:
                     continue
 
+                track_idx = track_name_to_idx[track.name]
                 # Add bank select and program change messages at the beginning of the track
                 if track.bank_msb is not None:
                     master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb, time=0)})

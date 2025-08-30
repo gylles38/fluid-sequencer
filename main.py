@@ -16,6 +16,8 @@ Sequencer CLI Commands:
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
+  mute <track_index>      - Toggles mute for a track.
+  solo <track_index>      - Toggles solo for a track.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -143,6 +145,16 @@ def main():
                     seq.set_program(track_index=int(args[0]), program=prog - 1)
                 else:
                     print("Usage: setprog <track_index> <program>")
+            elif command == "mute":
+                if len(args) == 1:
+                    seq.toggle_mute(track_index=int(args[0]))
+                else:
+                    print("Usage: mute <track_index>")
+            elif command == "solo":
+                if len(args) == 1:
+                    seq.toggle_solo(track_index=int(args[0]))
+                else:
+                    print("Usage: solo <track_index>")
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))

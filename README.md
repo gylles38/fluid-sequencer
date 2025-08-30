@@ -46,6 +46,8 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
 | `setprog <piste> <prog>` | Définit le programme MIDI (1-128) pour une piste.                           |
 | `prime`                  | Envoie l'état (banque/programme) de toutes les pistes aux ports assignés.   |
+| `mute <piste>`           | Met une piste en sourdine ou réactive son son.                              |
+| `solo <piste>`           | Isole une piste pour l'écoute ou la désactive.                              |
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |

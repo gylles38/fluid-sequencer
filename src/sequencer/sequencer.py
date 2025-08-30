@@ -471,3 +471,9 @@ class Sequencer:
             self.playback_thread.join()
         self.playback_state = "stopped"
         print("Playback stopped.")
+
+    def restart(self):
+        """Restarts playback from the beginning."""
+        if self.playback_state != "stopped":
+            self.stop()
+        self.play()

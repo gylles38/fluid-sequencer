@@ -25,6 +25,7 @@ Sequencer CLI Commands:
   play                    - Plays the song using the assigned ports for each track.
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
+  restart                 - Stops and restarts playback from the beginning.
   quit                    - Exits the sequencer.
 """
     print(help_text)
@@ -187,6 +188,8 @@ def main():
                 seq.pause()
             elif command == "stop":
                 seq.stop()
+            elif command == "restart":
+                seq.restart()
             else:
                 print(f"Unknown command: '{command}'. Type 'help' for a list of commands.")
 

@@ -54,6 +54,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `play`                   | Joue la chanson actuelle depuis le début.                                   |
 | `pause`                  | Met en pause ou reprend la lecture.                                         |
 | `stop`                   | Arrête la lecture et réinitialise la position.                              |
+| `restart`                | Arrête et redémarre la lecture depuis le début.                             |
 | `quit`                   | Quitte le séquenceur.                                                       |
 
 ---

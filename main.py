@@ -22,6 +22,7 @@ Sequencer CLI Commands:
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
+  timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
@@ -198,6 +199,11 @@ def main():
                     seq.set_tempo(tempo=int(args[0]))
                 else:
                     print("Usage: tempo <bpm>")
+            elif command == "timesig":
+                if len(args) == 2:
+                    seq.set_time_signature(numerator=int(args[0]), denominator=int(args[1]))
+                else:
+                    print("Usage: timesig <numerator> <denominator>")
             elif command == "save":
                 if len(args) == 1:
                     seq.save_song(filepath=args[0])

@@ -31,6 +31,15 @@ class Sequencer:
         self.song.tempo = tempo
         print(f"Tempo set to {self.song.tempo} BPM.")
 
+    def set_time_signature(self, numerator: int, denominator: int):
+        # Basic validation
+        if not (numerator > 0 and denominator > 0 and (denominator & (denominator - 1) == 0)):
+            print("Error: Invalid time signature. Denominator must be a power of 2.")
+            return
+        self.song.time_signature_numerator = numerator
+        self.song.time_signature_denominator = denominator
+        print(f"Time signature set to {numerator}/{denominator}.")
+
     def add_track(self, name: str, instrument: int = 0):
         track = Track(name=name, instrument=instrument)
         self.song.add_track(track)
@@ -230,7 +239,7 @@ class Sequencer:
     def list_tracks(self) -> str:
         if not self.song.tracks:
             return "No tracks in the song."
-        lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM"]
+        lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM | Time Signature: {self.song.time_signature_numerator}/{self.song.time_signature_denominator}"]
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):
             status_info = ""

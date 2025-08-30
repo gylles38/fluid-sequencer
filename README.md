@@ -52,6 +52,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
+| `timesig <num> <den>`    | Définit la signature rythmique du morceau (ex: 4 4).                        |
 | `save <fichier>`         | Sauvegarde uniquement la chanson dans un fichier MIDI.                      |
 | `saveproject <basename>` | Sauvegarde le projet complet (MIDI et configuration).                       |
 | `play`                   | Joue la chanson actuelle depuis le début.                                   |
@@ -87,13 +88,16 @@ Voici un exemple de workflow complet.
 1.  **Ajouter une piste :**
     *   `> add piano` (ajoute une piste nommée "piano" avec le programme 1 par défaut)
 
-2.  **Configurer l'instrument :**
+2.  **Configurer l'instrument et la chanson :**
     *   Changer le programme pour un piano électrique (ex: 5) : `> setprog 0 5`
     *   Changer le canal MIDI pour le canal 10 : `> setch 0 10`
     *   Définir la banque de sons (ex: MSB=1, LSB=1) : `> setbank 0 1 1`
+    *   Définir la signature rythmique : `> timesig 3 4`
 
 3.  **Lister les pistes** pour vérifier la configuration : `list`
     ```
+    Song: New Song | Tempo: 120 BPM | Time Signature: 3/4
+    ====================
     [0] piano (Ch: 10, Prog: 5, Bank: 1:1, 0 events)
     ```
 

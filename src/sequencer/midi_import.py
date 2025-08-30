@@ -13,15 +13,25 @@ def import_song(filepath: str) -> Song:
     ticks_per_beat = mid.ticks_per_beat
 
     tempo = 120 # Default tempo
+    time_sig_num = 4
+    time_sig_den = 4
 
-    # First, find the tempo from the first track, if it exists
+    # First, find tempo and time signature from the first track
     if mid.tracks:
         for msg in mid.tracks[0]:
-            if msg.is_meta and msg.type == 'set_tempo':
-                tempo = mido.tempo2bpm(msg.tempo)
-                break
+            if msg.is_meta:
+                if msg.type == 'set_tempo':
+                    tempo = mido.tempo2bpm(msg.tempo)
+                elif msg.type == 'time_signature':
+                    time_sig_num = msg.numerator
+                    time_sig_den = msg.denominator
 
-    song = Song(name=filepath.split('/')[-1], tempo=int(tempo))
+    song = Song(
+        name=filepath.split('/')[-1],
+        tempo=int(tempo),
+        time_signature_numerator=time_sig_num,
+        time_signature_denominator=time_sig_den
+    )
 
     for midi_track in mid.tracks:
         # Don't create a track if it only contains metadata

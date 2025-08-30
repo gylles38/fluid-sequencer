@@ -49,6 +49,8 @@ class Song:
     """Represents a song, containing multiple tracks and global settings."""
     name: str
     tempo: int = 120  # Beats per minute (BPM)
+    time_signature_numerator: int = 4
+    time_signature_denominator: int = 4
     tracks: List[Track] = field(default_factory=list)
 
     def add_track(self, track: Track):

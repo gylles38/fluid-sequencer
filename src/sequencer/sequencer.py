@@ -164,19 +164,18 @@ class Sequencer:
 
             master_event_list.sort(key=lambda e: e['tick'])
 
-            # 2. Convert absolute ticks to delta times in seconds
-            last_tick = 0
-            seconds_per_tick = mido.tempo2bpm(self.song.tempo) / ticks_per_beat
-
-            # 3. Play the master list
+            # 2. Play the master list
             print(f"Playing on {len(self.open_ports)} port(s)...")
+            last_tick = 0
+            mido_tempo = mido.bpm2tempo(self.song.tempo) # Microseconds per beat
+
             for event in master_event_list:
                 self._run_event.wait()
                 if self._stop_event.is_set(): break
 
                 delta_ticks = event['tick'] - last_tick
                 if delta_ticks > 0:
-                    wait_time = delta_ticks * seconds_per_tick
+                    wait_time = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
                     # Interruptible sleep
                     while wait_time > 0:
                         self._run_event.wait()

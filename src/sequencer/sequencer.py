@@ -11,6 +11,7 @@ class Sequencer:
         self.playback_state = "stopped"
         self.playback_thread = None
         self.open_ports = {}  # Changed from self.outport to a dict
+        self.virtual_ports = []
         self._stop_event = threading.Event()
         self._run_event = threading.Event()
         self._run_event.set()
@@ -88,36 +89,102 @@ class Sequencer:
             lines.append(f"[{i}] {track.name} (Instrument: {track.instrument}, {len(track.events)} events){port_info}")
         return "\n".join(lines)
 
+    def list_ports(self) -> str:
+        """Returns a formatted string of available MIDI input and output ports."""
+        lines = []
+        try:
+            lines.append("Available MIDI Input Ports:")
+            input_ports = mido.get_input_names()
+            if input_ports:
+                for i, port in enumerate(input_ports):
+                    lines.append(f"  [{i}] {port}")
+            else:
+                lines.append("  (None found)")
+
+            lines.append("\nAvailable MIDI Output Ports:")
+            output_ports = mido.get_output_names()
+            if output_ports:
+                for i, port in enumerate(output_ports):
+                    lines.append(f"  [{i}] {port}")
+            else:
+                lines.append("  (None found)")
+
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error getting MIDI ports: {e}"
+
+    def create_virtual_port(self, name: str):
+        """Creates a virtual MIDI output port."""
+        try:
+            port = mido.open_output(name, virtual=True)
+            self.virtual_ports.append(port)
+            print(f"Created virtual MIDI port: '{name}'")
+        except Exception as e:
+            print(f"Error creating virtual port: {e}")
+
+    def close_virtual_ports(self):
+        """Closes all open virtual MIDI ports."""
+        for port in self.virtual_ports:
+            if not port.closed:
+                port.close()
+        print("Virtual ports closed.")
+
     def record_track(self, track_index: int):
-        # ... (no change)
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
+
+        inport_name, outport_name = None, None
         try:
+            # Select Input Port
             input_ports = mido.get_input_names()
             if not input_ports:
                 print("Error: No MIDI input ports found.")
                 return
             print("Available MIDI input ports:")
             for i, port in enumerate(input_ports):
-                print(f"[{i}] {port}")
-            port_index = int(input("Choose a port to record from: "))
-            port_name = input_ports[port_index]
+                print(f"  [{i}] {port}")
+            inport_idx = int(input("Choose a port to record from: "))
+            inport_name = input_ports[inport_idx]
+
+            # Select Output Port for MIDI Thru
+            thru_choice = input("Enable MIDI Thru to an output port? [y/N] ").lower()
+            if thru_choice == 'y':
+                output_ports = mido.get_output_names()
+                if not output_ports:
+                    print("No MIDI output ports found for Thru.")
+                else:
+                    print("Available MIDI output ports:")
+                    for i, port in enumerate(output_ports):
+                        print(f"  [{i}] {port}")
+                    outport_idx = int(input("Choose a port for MIDI Thru (or -1 to disable): "))
+                    if 0 <= outport_idx < len(output_ports):
+                        outport_name = output_ports[outport_idx]
+
         except (ValueError, IndexError):
             print("Error: Invalid selection.")
             return
+
         target_track = self.song.tracks[track_index]
         open_notes = {}
-        start_beat = 0
-        if target_track.events:
-            last_event = target_track.events[-1]
-            start_beat = last_event.start_time + last_event.notes[0].duration
-        input("Press Enter to start recording...")
-        with mido.open_input(port_name) as inport:
-            print(f"Recording on '{port_name}'. Press Ctrl+C to stop.")
-            recording_start_time_sec = time.time()
-            try:
+        start_beat = max((evt.start_time + evt.notes[0].duration for evt in target_track.events), default=0)
+
+        outport = None
+        try:
+            with mido.open_input(inport_name) as inport:
+                if outport_name:
+                    outport = mido.open_output(outport_name)
+                    print(f"Recording on '{inport_name}' with MIDI Thru to '{outport_name}'. Press Ctrl+C to stop.")
+                else:
+                    print(f"Recording on '{inport_name}'. Press Ctrl+C to stop.")
+
+                input("Press Enter to start recording...")
+                recording_start_time_sec = time.time()
+
                 for msg in inport:
+                    if outport:
+                        outport.send(msg)
+
                     now = time.time()
                     if msg.type == 'note_on' and msg.velocity > 0:
                         if msg.note not in open_notes:
@@ -126,15 +193,23 @@ class Sequencer:
                         if msg.note in open_notes:
                             start_time_sec, velocity = open_notes.pop(msg.note)
                             duration_sec = now - start_time_sec
+
                             beats_per_second = self.song.tempo / 60
                             start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
                             duration_beats = duration_sec * beats_per_second
+
                             note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                             event = Event(notes=[note], start_time=start_time_beats)
                             target_track.add_event(event)
                             print(f"Recorded note: {note.pitch}, duration: {duration_beats:.2f} beats")
-            except KeyboardInterrupt:
-                print("\nRecording stopped.")
+        except KeyboardInterrupt:
+            print("\nRecording stopped.")
+        except Exception as e:
+            print(f"An error occurred during recording: {e}")
+        finally:
+            if outport:
+                outport.close()
+                print(f"Closed Thru port '{outport_name}'.")
 
     def _play_thread(self):
         """The actual playback logic that runs in a separate thread."""

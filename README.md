@@ -36,7 +36,8 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | ------------------------ | --------------------------------------------------------------------------- |
 | `help`                   | Affiche le message d'aide.                                                  |
 | `add <nom> [prog]`       | Ajoute une nouvelle piste vide. `prog` est le numéro de programme MIDI (0-127). |
-| `load <fichier>`         | Charge un fichier MIDI (`.mid`) et l'ajoute comme une nouvelle piste.         |
+| `load <fichier>`         | Charge uniquement un fichier MIDI.                                          |
+| `loadproject <basename>` | Charge un projet complet (`.mid` et `.proj.json`).                          |
 | `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
 | `ports`                  | Liste les ports d'entrée et de sortie MIDI disponibles.                     |
 | `vport <nom>`            | Crée un port de sortie MIDI virtuel pour l'utiliser avec d'autres applications. |
@@ -46,11 +47,28 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
-| `save <fichier>`         | Sauvegarde la chanson entière dans un nouveau fichier MIDI.                 |
+| `save <fichier>`         | Sauvegarde uniquement la chanson dans un fichier MIDI.                      |
+| `saveproject <basename>` | Sauvegarde le projet complet (MIDI et configuration).                       |
 | `play`                   | Joue la chanson actuelle depuis le début.                                   |
 | `pause`                  | Met en pause ou reprend la lecture.                                         |
 | `stop`                   | Arrête la lecture et réinitialise la position.                              |
 | `quit`                   | Quitte le séquenceur.                                                       |
+
+---
+
+## Sauvegarde et Chargement de Projets
+
+Pour éviter de reconfigurer vos ports virtuels et vos assignations de pistes à chaque session, vous pouvez utiliser les commandes de projet.
+
+-   **`saveproject <nom>`** : Cette commande sauvegarde deux fichiers :
+    1.  `<nom>.mid` : Le fichier MIDI standard contenant toutes vos notes.
+    2.  `<nom>.proj.json` : Un fichier de configuration qui mémorise les ports virtuels que vous avez créés et quelles pistes leur sont assignées.
+
+-   **`loadproject <nom>`** : Cette commande charge un projet complet. Elle va :
+    1.  Lire le fichier `<nom>.proj.json`.
+    2.  Charger le fichier MIDI associé.
+    3.  Recréer automatiquement les ports virtuels.
+    4.  Réassigner les pistes aux bons ports.
 
 ---
 
@@ -82,30 +100,6 @@ Voici un exemple de workflow pour enregistrer deux pistes, chacune avec un canal
     ```
 
 5.  **Enregistrer et jouer les pistes** comme d'habitude. Le séquenceur utilisera les canaux et les banques que vous avez spécifiés.
-
----
-
-## Utilisation avec Carla
-
-Pour connecter ce séquenceur avec un hôte de plugins comme Carla, vous pouvez utiliser la commande `vport` pour créer un "câble MIDI virtuel".
-
-### Cas 1 : Jouer une piste du séquenceur avec un instrument dans Carla
-
-1.  **Lancez le séquenceur** et **créez un port virtuel** : `> vport carla-in`
-2.  **Lancez Carla.** Dans l'onglet "Patchbay", vous devriez voir `carla-in` comme une source MIDI (il faut peut-être utiliser `a2jmidid` et bien configurer Carla).
-3.  **Chargez un instrument** dans Carla. Assurez-vous que son canal d'entrée MIDI correspond à celui de la piste dans le séquenceur.
-4.  **Connectez le port :** Dans Carla, reliez la sortie `carla-in` à l'entrée MIDI de votre instrument.
-5.  **Dans le séquenceur, assignez votre piste** à ce nouveau port : `assign 0` -> choisissez `carla-in` dans la liste.
-6.  **Jouez !** `play`
-
-### Cas 2 : S'entendre en direct pendant l'enregistrement (MIDI Thru)
-
-1.  Suivez les étapes 1 à 4 ci-dessus pour connecter le port `carla-in` à un instrument.
-2.  Dans le séquenceur, lancez l'enregistrement : `record 0`
-3.  Choisissez votre clavier physique comme **port d'entrée**.
-4.  À la question "Enable MIDI Thru...", répondez `y`.
-5.  Choisissez le port `carla-in` comme **port de sortie**.
-6.  Vous pouvez maintenant jouer sur votre clavier et vous entendrez le son de l'instrument de Carla en temps réel pendant que le séquenceur enregistre.
 
 ---
 

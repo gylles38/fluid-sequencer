@@ -7,7 +7,8 @@ def print_help():
 Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [instr]      - Adds a new track. `instr` is an optional MIDI program number (0-127).
-  load <filepath>         - Loads a song from a MIDI file, replacing the current session.
+  load <filepath>         - Loads a song from a MIDI file.
+  loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
   list                    - Shows all tracks in the current song.
   ports                   - Lists available MIDI input and output ports.
   vport <name>            - Creates a virtual MIDI output port for use with other apps.
@@ -17,7 +18,8 @@ Sequencer CLI Commands:
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
-  save <filepath>         - Saves the entire song to a MIDI file.
+  save <filepath>         - Saves only the song to a MIDI file.
+  saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   play                    - Plays the song using the assigned ports for each track.
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
@@ -64,6 +66,15 @@ def main():
                         print("Load cancelled.")
                 else:
                     print("Usage: load <filepath>")
+            elif command == "loadproject":
+                if len(args) == 1:
+                    confirm = input("Loading a new project will discard the current session. Are you sure? [y/N] ").lower()
+                    if confirm == 'y':
+                        seq.load_project(basename=args[0])
+                    else:
+                        print("Load cancelled.")
+                else:
+                    print("Usage: loadproject <basename>")
             elif command == "list":
                 print(seq.list_tracks())
             elif command == "vport":
@@ -145,6 +156,11 @@ def main():
                     seq.save_song(filepath=args[0])
                 else:
                     print("Usage: save <filepath>")
+            elif command == "saveproject":
+                if len(args) == 1:
+                    seq.save_project(basename=args[0])
+                else:
+                    print("Usage: saveproject <basename>")
             elif command == "play":
                 if len(args) == 0:
                     seq.play()

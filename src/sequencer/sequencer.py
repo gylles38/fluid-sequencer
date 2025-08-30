@@ -1,6 +1,7 @@
 import time
 import mido
 import threading
+import json
 from .models import Song, Track, Event, Note
 from .midi_import import import_song
 from .midi_export import export_to_midi
@@ -89,6 +90,73 @@ class Sequencer:
             print(f"Song successfully saved to '{filepath}'.")
         except Exception as e:
             print(f"Error saving MIDI file: {e}")
+
+    def save_project(self, basename: str):
+        midi_filepath = f"{basename}.mid"
+        project_filepath = f"{basename}.proj.json"
+
+        # 1. Save the MIDI data
+        self.save_song(midi_filepath)
+
+        # 2. Prepare and save the project configuration
+        try:
+            project_data = {
+                "midi_file": midi_filepath,
+                "virtual_ports": [vp.name for vp in self.virtual_ports],
+                "track_assignments": [
+                    {
+                        "track_name": t.name,
+                        "port_name": t.output_port_name
+                    }
+                    for t in self.song.tracks if t.output_port_name
+                ]
+            }
+            with open(project_filepath, 'w') as f:
+                json.dump(project_data, f, indent=4)
+
+            print(f"Project configuration saved to '{project_filepath}'")
+
+        except Exception as e:
+            print(f"Error saving project file: {e}")
+
+    def load_project(self, basename: str):
+        project_filepath = f"{basename}.proj.json"
+        try:
+            with open(project_filepath, 'r') as f:
+                project_data = json.load(f)
+
+            # 1. Load the MIDI song data
+            midi_file = project_data.get("midi_file")
+            if not midi_file:
+                print("Error: Project file is missing 'midi_file' key.")
+                return
+            self.load_song(midi_file)
+
+            # 2. Recreate virtual ports
+            self.close_virtual_ports() # Close any existing vports first
+            self.virtual_ports = []
+            for vp_name in project_data.get("virtual_ports", []):
+                self.create_virtual_port(vp_name)
+
+            # 3. Restore track assignments
+            assignments = project_data.get("track_assignments", [])
+            for assignment in assignments:
+                track_name = assignment.get("track_name")
+                port_name = assignment.get("port_name")
+                if track_name and port_name:
+                    # Find the track index by name
+                    track_indices = [i for i, t in enumerate(self.song.tracks) if t.name == track_name]
+                    if track_indices:
+                        self.assign_port(track_indices[0], port_name)
+                    else:
+                        print(f"Warning: Could not find track '{track_name}' to assign port.")
+
+            print(f"Successfully loaded project from '{project_filepath}'")
+
+        except FileNotFoundError:
+            print(f"Error: Project file not found at '{project_filepath}'")
+        except Exception as e:
+            print(f"Error loading project file: {e}")
 
     def list_tracks(self) -> str:
         if not self.song.tracks:

@@ -295,21 +295,29 @@ class Sequencer:
         self.temporary_ports = []
 
         required_ports = {t.output_port_name for t in self.song.tracks if t.output_port_name}
+        print(f"\n[DEBUG] Required ports for playback: {required_ports}")
         if not required_ports:
             print("No tracks have an assigned output port. Use 'assign' command first.")
             return
 
+        print(f"[DEBUG] Managed virtual ports: {[vp.name for vp in self.virtual_ports]}")
+
         for name in required_ports:
+            print(f"\n[DEBUG] Checking port: '{name}'")
             # Check if the required port name corresponds to one of our virtual ports
             found_virtual = False
             for vp in self.virtual_ports:
-                if vp.name in name: # Substring check
+                print(f"[DEBUG]   Comparing with virtual port '{vp.name}'")
+                is_substring = vp.name in name
+                print(f"[DEBUG]   Is '{vp.name}' a substring of '{name}'? {is_substring}")
+                if is_substring:
                     self.open_ports[name] = vp
-                    print(f"Using existing virtual port: {name}")
+                    print(f"[SUCCESS] Using existing virtual port: {name}")
                     found_virtual = True
                     break
 
             if not found_virtual:
+                print(f"[DEBUG] Port '{name}' not found in managed virtual ports. Opening as temporary hardware port.")
                 # This is a hardware port, open it temporarily for this playback
                 try:
                     temp_port = mido.open_output(name)

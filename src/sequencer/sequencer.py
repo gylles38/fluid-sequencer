@@ -299,16 +299,19 @@ class Sequencer:
             print("No tracks have an assigned output port. Use 'assign' command first.")
             return
 
-        virtual_port_map = {p.name: p for p in self.virtual_ports}
-
         for name in required_ports:
-            port = virtual_port_map.get(name)
-            if port:
-                self.open_ports[name] = port
-                print(f"Using existing virtual port: {name}")
-            else:
+            # Check if the required port name corresponds to one of our virtual ports
+            found_virtual = False
+            for vp in self.virtual_ports:
+                if vp.name in name: # Substring check
+                    self.open_ports[name] = vp
+                    print(f"Using existing virtual port: {name}")
+                    found_virtual = True
+                    break
+
+            if not found_virtual:
+                # This is a hardware port, open it temporarily for this playback
                 try:
-                    # This is a hardware port, open it temporarily for this playback
                     temp_port = mido.open_output(name)
                     self.open_ports[name] = temp_port
                     self.temporary_ports.append(temp_port)

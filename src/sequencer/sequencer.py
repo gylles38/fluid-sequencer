@@ -51,6 +51,19 @@ class Sequencer:
         self.song.tracks[track_index].output_port_name = port_name
         print(f"Assigned port '{port_name}' to track '{self.song.tracks[track_index].name}'.")
 
+    def set_bank(self, track_index: int, msb: int, lsb: int = 0):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+        if not 0 <= msb <= 127 and 0 <= lsb <= 127:
+            print("Error: Bank values (MSB, LSB) must be between 0 and 127.")
+            return
+
+        track = self.song.tracks[track_index]
+        track.bank_msb = msb
+        track.bank_lsb = lsb
+        print(f"Set bank for track '{track.name}' to MSB={msb}, LSB={lsb}.")
+
     def load_song(self, filepath: str):
         try:
             self.song = import_song(filepath)
@@ -71,8 +84,11 @@ class Sequencer:
         lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM"]
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):
+            bank_info = ""
+            if track.bank_msb is not None:
+                bank_info = f" (Bank: {track.bank_msb}:{track.bank_lsb or 0})"
             port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
-            lines.append(f"[{i}] {track.name} (Instrument: {track.instrument}, {len(track.events)} events){port_info}")
+            lines.append(f"[{i}] {track.name} (Prog: {track.instrument}{bank_info}, {len(track.events)} events){port_info}")
         return "\n".join(lines)
 
     def list_ports(self) -> str:
@@ -202,8 +218,17 @@ class Sequencer:
             for track_idx, track in enumerate(self.song.tracks):
                 if not track.output_port_name:
                     continue
-                program_change_msg = mido.Message('program_change', channel=track_idx % 16, program=track.instrument, time=0)
+
+                # Add bank select and program change messages at the beginning of the track
+                channel = track_idx % 16
+                if track.bank_msb is not None:
+                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=channel, control=0, value=track.bank_msb, time=0)})
+                if track.bank_lsb is not None:
+                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=channel, control=32, value=track.bank_lsb, time=0)})
+
+                program_change_msg = mido.Message('program_change', channel=channel, program=track.instrument, time=0)
                 master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': program_change_msg})
+
                 for event in track.events:
                     for note in event.notes:
                         start_tick = int(event.start_time * ticks_per_beat)

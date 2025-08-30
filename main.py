@@ -12,6 +12,7 @@ Sequencer CLI Commands:
   ports                   - Lists available MIDI input and output ports.
   vport <name>            - Creates a virtual MIDI output port for use with other apps.
   assign <track_index>    - Assigns a track to an output port from a list of choices.
+  setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -102,6 +103,13 @@ def main():
                         print("Error: Invalid input.")
                 else:
                     print("Usage: assign <track_index>")
+            elif command == "setbank":
+                if len(args) == 2:
+                    seq.set_bank(track_index=int(args[0]), msb=int(args[1]))
+                elif len(args) == 3:
+                    seq.set_bank(track_index=int(args[0]), msb=int(args[1]), lsb=int(args[2]))
+                else:
+                    print("Usage: setbank <track_index> <msb> [lsb]")
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))

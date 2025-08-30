@@ -32,6 +32,8 @@ class Track:
     name: str
     events: List[Event] = field(default_factory=list)
     instrument: int = 0  # MIDI program number (0-127)
+    bank_msb: Optional[int] = None  # Bank Select MSB (CC#0)
+    bank_lsb: Optional[int] = None  # Bank Select LSB (CC#32)
     output_port_name: Optional[str] = None
 
     def add_event(self, event: Event):

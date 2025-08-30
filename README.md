@@ -49,6 +49,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `prime`                  | Envoie l'état (banque/programme) de toutes les pistes aux ports assignés.   |
 | `mute <piste>`           | Met une piste en sourdine ou réactive son son.                              |
 | `solo <piste>`           | Isole une piste pour l'écoute ou la désactive.                              |
+| `rename <piste> <nom>`   | Renomme une piste.                                                          |
 | `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
@@ -89,6 +90,7 @@ Voici un exemple de workflow complet.
     *   `> add piano` (ajoute une piste nommée "piano" avec le programme 1 par défaut)
 
 2.  **Configurer l'instrument et la chanson :**
+    *   Renommer la piste si nécessaire : `> rename 0 "Grand Piano"`
     *   Changer le programme pour un piano électrique (ex: 5) : `> setprog 0 5`
     *   Changer le canal MIDI pour le canal 10 : `> setch 0 10`
     *   Définir la banque de sons (ex: MSB=1, LSB=1) : `> setbank 0 1 1`
@@ -98,7 +100,7 @@ Voici un exemple de workflow complet.
     ```
     Song: New Song | Tempo: 120 BPM | Time Signature: 3/4
     ====================
-    [0] piano (Ch: 10, Prog: 5, Bank: 1:1, 0 events)
+    [0] Grand Piano (Ch: 10, Prog: 5, Bank: 1:1, 0 events)
     ```
 
 4.  **Connecter à un synthétiseur (via Carla) :**

@@ -19,6 +19,7 @@ Sequencer CLI Commands:
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
+  rename <index> <new_name> - Renames a track.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -194,6 +195,11 @@ def main():
                         print("Error: Invalid track index.")
                 else:
                     print("Usage: delete <track_index>")
+            elif command == "rename":
+                if len(args) == 2:
+                    seq.rename_track(track_index=int(args[0]), new_name=args[1])
+                else:
+                    print("Usage: rename <track_index> <new_name>")
             elif command == "tempo":
                 if len(args) == 1:
                     seq.set_tempo(tempo=int(args[0]))

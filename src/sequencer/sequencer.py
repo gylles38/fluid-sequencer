@@ -54,6 +54,15 @@ class Sequencer:
         print(f"Track '{track_name}' deleted.")
         return True
 
+    def rename_track(self, track_index: int, new_name: str):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        old_name = self.song.tracks[track_index].name
+        self.song.tracks[track_index].name = new_name
+        print(f"Track '{old_name}' renamed to '{new_name}'.")
+
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")

@@ -2,6 +2,7 @@ import time
 import mido
 import threading
 import json
+from copy import deepcopy
 from typing import Optional
 from .models import Song, Track, Event, Note
 from .midi_import import import_song
@@ -137,22 +138,31 @@ class Sequencer:
 
     def move_track_section(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
+            print("Error: Invalid source track index.")
             return
 
-        track = self.song.tracks[track_index]
+        source_track = self.song.tracks[track_index]
 
         try:
-            start_measure = int(input("Move from start measure: ").strip())
+            start_measure = int(input(f"Move from start measure on track '{source_track.name}': ").strip())
             num_measures = int(input("Number of measures to move: ").strip())
-            destination_measure = int(input("Move to destination measure: ").strip())
+
+            dest_track_idx_str = input(f"Move to destination track index (default: {track_index}, '{source_track.name}'): ").strip()
+            dest_track_idx = track_index if dest_track_idx_str == "" else int(dest_track_idx_str)
+
+            if not 0 <= dest_track_idx < len(self.song.tracks):
+                print("Error: Invalid destination track index.")
+                return
+
+            dest_track = self.song.tracks[dest_track_idx]
+            destination_measure = int(input(f"Move to destination measure on track '{dest_track.name}': ").strip())
 
             if start_measure < 1 or num_measures < 1 or destination_measure < 1:
                 print("Error: Measure numbers and count must be 1 or greater.")
                 return
 
-            if destination_measure >= start_measure and destination_measure < start_measure + num_measures:
-                print("Error: Destination cannot be inside the source range.")
+            if track_index == dest_track_idx and destination_measure >= start_measure and destination_measure < start_measure + num_measures:
+                print("Error: Destination cannot be inside the source range when moving within the same track.")
                 return
 
         except ValueError:
@@ -161,11 +171,146 @@ class Sequencer:
 
         # Confirmation
         confirm_message = (
-            f"On track '{track.name}', move {num_measures} measure(s) "
-            f"from measure {start_measure} to measure {destination_measure}. Are you sure? [y/N] "
+            f"Move {num_measures} measure(s) from track '{source_track.name}' (measure {start_measure}) "
+            f"to track '{dest_track.name}' (measure {destination_measure}). Are you sure? [y/N] "
         )
         if input(confirm_message).lower() != 'y':
             print("Move cancelled.")
+            return
+
+        # --- Calculations ---
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+        source_start_beat = (start_measure - 1) * beats_per_measure
+        source_end_beat = source_start_beat + (num_measures * beats_per_measure)
+        destination_start_beat = (destination_measure - 1) * beats_per_measure
+        destination_end_beat = destination_start_beat + (num_measures * beats_per_measure)
+        offset_beats = destination_start_beat - source_start_beat
+
+        # --- Check for notes at destination ---
+        events_at_destination = [
+            event for event in dest_track.events if destination_start_beat <= event.start_time < destination_end_beat
+        ]
+        if source_track == dest_track:
+            events_at_destination = [e for e in events_at_destination if not (source_start_beat <= e.start_time < source_end_beat)]
+
+        overwrite_mode = "add"
+        if events_at_destination:
+            print("There are existing notes at the destination.")
+            while True:
+                choice = input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                if choice in ['r', 'replace', 'a', 'add']:
+                    overwrite_mode = choice[0]
+                    break
+                else:
+                    print("Invalid choice. Please enter 'r' or 'a'.")
+
+        # --- Partition and process events ---
+        events_to_move = []
+        remaining_source_events = []
+        for event in source_track.events:
+            if source_start_beat <= event.start_time < source_end_beat:
+                events_to_move.append(event)
+            else:
+                remaining_source_events.append(event)
+
+        deleted_event_count = 0
+        if overwrite_mode == 'r':
+            # This list will hold the events that are NOT in the destination range
+            final_dest_events = []
+            # When moving within the same track, we must not remove the events that are being moved.
+            # So, we iterate over the original list of events of the destination track.
+            for event in dest_track.events:
+                # If the event is not in the destination range, we keep it.
+                if not (destination_start_beat <= event.start_time < destination_end_beat):
+                    final_dest_events.append(event)
+                else:
+                    # If the event IS in the destination range, we must check if it's also in the source range
+                    # (only relevant if source_track == dest_track)
+                    if source_track == dest_track and source_start_beat <= event.start_time < source_end_beat:
+                        # This event is being moved, so we keep it for now.
+                        # It will be processed and moved later.
+                        final_dest_events.append(event)
+                    else:
+                        # This event is in the destination and is NOT being moved, so it gets deleted.
+                        deleted_event_count += 1
+            dest_track.events = final_dest_events
+
+
+        # Update source track events list only if the move is to a different track
+        if source_track != dest_track:
+            source_track.events = remaining_source_events
+
+        # Move the selected events
+        moved_event_count = 0
+        for event in events_to_move:
+            event.start_time += offset_beats
+            if event.start_time < 0:
+                print(f"Warning: Moving event would result in a negative start time ({event.start_time:.2f} beats). Skipping and keeping original.")
+                source_track.add_event(event) # Add it back to source if it's an invalid move
+                continue
+
+            # If moving to a different track, add the event object to the new track
+            if source_track != dest_track:
+                dest_track.add_event(event)
+
+            moved_event_count += 1
+
+        # Sort the events for both tracks to ensure correct playback order
+        source_track.events.sort(key=lambda e: e.start_time)
+        dest_track.events.sort(key=lambda e: e.start_time)
+
+        # --- Report results ---
+        report = []
+        if moved_event_count > 0:
+            report.append(f"Moved {moved_event_count} event(s) from '{source_track.name}' to '{dest_track.name}'")
+        if deleted_event_count > 0:
+            report.append(f"deleted {deleted_event_count} event(s) at destination")
+
+        if not report:
+            print("No notes were found in the source range to move.")
+        else:
+            print(f"Operation complete: {', '.join(report)}.")
+
+    def copy_track_section(self):
+        if not self.song.tracks:
+            print("No tracks to copy from.")
+            return
+
+        try:
+            source_track_idx = int(input("Copy from track index: ").strip())
+            if not 0 <= source_track_idx < len(self.song.tracks):
+                print("Error: Invalid source track index.")
+                return
+
+            source_track = self.song.tracks[source_track_idx]
+
+            start_measure = int(input(f"Copy from start measure on track '{source_track.name}': ").strip())
+            num_measures = int(input("Number of measures to copy: ").strip())
+
+            dest_track_idx = int(input("Copy to destination track index: ").strip())
+            if not 0 <= dest_track_idx < len(self.song.tracks):
+                print("Error: Invalid destination track index.")
+                return
+
+            dest_track = self.song.tracks[dest_track_idx]
+
+            destination_measure = int(input(f"Copy to destination measure on track '{dest_track.name}': ").strip())
+
+            if start_measure < 1 or num_measures < 1 or destination_measure < 1:
+                print("Error: Measure numbers and count must be 1 or greater.")
+                return
+
+        except ValueError:
+            print("Error: Invalid number.")
+            return
+
+        # Confirmation
+        confirm_message = (
+            f"Copy {num_measures} measure(s) from track '{source_track.name}' (measure {start_measure}) "
+            f"to track '{dest_track.name}' (measure {destination_measure}). Are you sure? [y/N] "
+        )
+        if input(confirm_message).lower() != 'y':
+            print("Copy cancelled.")
             return
 
         # --- Calculations ---
@@ -181,9 +326,8 @@ class Sequencer:
 
         # --- Check for notes at destination ---
         events_at_destination = [
-            event for event in track.events
-            if (destination_start_beat <= event.start_time < destination_end_beat)
-            and not (source_start_beat <= event.start_time < source_end_beat)
+            event for event in dest_track.events
+            if destination_start_beat <= event.start_time < destination_end_beat
         ]
 
         overwrite_mode = "add"
@@ -201,45 +345,47 @@ class Sequencer:
                     print("Invalid choice. Please enter 'r' or 'a'.")
 
         # --- Partition and process events ---
-        final_events = []
-        moved_event_count = 0
+        copied_event_count = 0
         deleted_event_count = 0
 
-        for event in track.events:
-            # Case 1: Event is in the source range -> Move it
-            if source_start_beat <= event.start_time < source_end_beat:
-                new_start_time = event.start_time + offset_beats
-                if new_start_time < 0:
-                    print(f"Warning: Moving event would result in a negative start time ({new_start_time:.2f} beats). Keeping original.")
-                    final_events.append(event) # Keep it in its original position
-                else:
-                    event.start_time = new_start_time
-                    final_events.append(event)
-                    moved_event_count += 1
+        # Find events to copy
+        source_events_to_copy = [
+            event for event in source_track.events
+            if source_start_beat <= event.start_time < source_end_beat
+        ]
 
-            # Case 2: Event is at the destination and we are replacing -> Delete it
-            elif overwrite_mode == "replace" and destination_start_beat <= event.start_time < destination_end_beat:
-                deleted_event_count += 1
-                pass # Don't add it to final_events
+        # If replacing, remove existing events at destination
+        if overwrite_mode == "replace":
+            initial_dest_event_count = len(dest_track.events)
+            dest_track.events = [
+                event for event in dest_track.events
+                if not (destination_start_beat <= event.start_time < destination_end_beat)
+            ]
+            deleted_event_count = initial_dest_event_count - len(dest_track.events)
 
-            # Case 3: Event is not affected -> Keep it
-            else:
-                final_events.append(event)
+        # Create copies of the source events and add them
+        for event in source_events_to_copy:
+            new_event = deepcopy(event)
+            new_event.start_time += offset_beats
+            if new_event.start_time < 0:
+                print(f"Warning: Copying event would result in a negative start time ({new_event.start_time:.2f} beats). Skipping event.")
+                continue
+            dest_track.add_event(new_event)
+            copied_event_count += 1
 
-        track.events = final_events
-        track.events.sort(key=lambda e: e.start_time)
+        dest_track.events.sort(key=lambda e: e.start_time)
 
         # --- Report results ---
         report = []
-        if moved_event_count > 0:
-            report.append(f"Moved {moved_event_count} event(s)")
+        if copied_event_count > 0:
+            report.append(f"Copied {copied_event_count} event(s)")
         if deleted_event_count > 0:
             report.append(f"deleted {deleted_event_count} event(s) at destination")
 
         if not report:
-            print("No notes were found in the source range to move.")
+            print("No notes were found in the source range to copy.")
         else:
-            print(f"Operation complete: {', '.join(report)} on track '{track.name}'.")
+            print(f"Operation complete: {', '.join(report)}.")
 
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):

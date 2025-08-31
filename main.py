@@ -22,7 +22,8 @@ Sequencer CLI Commands:
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
-  move <track_index>      - Moves a section of a track to a new measure.
+  copy                    - Copies a section of a track to another (or the same) track.
+  move <track_index>      - Moves a section of a track, potentially to a new destination track.
   record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
   delete <track_index>    - Deletes a track after confirmation.
   erase <track_index>     - Erases all or a range of notes from a track.
@@ -260,6 +261,8 @@ def main():
                         print("Error: Invalid track index.")
                 else:
                     print("Usage: move <track_index>")
+            elif command == "copy":
+                seq.copy_track_section()
             elif command == "tempo":
                 if len(args) == 1:
                     seq.set_tempo(tempo=int(args[0]))

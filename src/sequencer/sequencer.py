@@ -116,14 +116,14 @@ class Sequencer:
         # Ranged erase
         try:
             start_pos_str = input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
-            start_beat = self._parse_position_to_beats(start_pos_str, default="1:1")
+            start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if start_beat is None: return
 
             end_pos_str = input(f"Erase up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
             if end_pos_str == "":
                 end_beat = float('inf')
             else:
-                end_beat = self._parse_position_to_beats(end_pos_str)
+                end_beat = self.parse_position_to_beats(end_pos_str)
                 if end_beat is None: return
 
             if end_beat <= start_beat:

@@ -18,6 +18,10 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
 
+        # Recording metronome
+        self._stop_recording_metronome_event = threading.Event()
+        self.metronome_thread = None
+
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
         self.metronome_pitch_downbeat = 76  # High Wood Block
@@ -419,19 +423,23 @@ class Sequencer:
 
         outport = None
         try:
+            self.start_recording_metronome()
             with mido.open_input(inport_name) as inport:
                 if outport_name:
                     outport = mido.open_output(outport_name)
-                    print(f"Recording on '{inport_name}' with MIDI Thru to '{outport_name}'. Press Ctrl+C to stop.")
+                    print(f"Listening on '{inport_name}' with MIDI Thru to '{outport_name}'. Waiting for first note...")
                 else:
-                    print(f"Recording on '{inport_name}'. Press Ctrl+C to stop.")
+                    print(f"Listening on '{inport_name}'. Waiting for first note...")
 
-                input("Press Enter to start recording...")
-                recording_start_time_sec = time.time()
-
+                recording_start_time_sec = None
                 for msg in inport:
                     if outport:
                         outport.send(msg)
+
+                    # Start recording on the first valid message
+                    if recording_start_time_sec is None:
+                        recording_start_time_sec = time.time()
+                        print("Recording started. Press Ctrl+C to stop.")
 
                     now = time.time()
                     if msg.type == 'note_on' and msg.velocity > 0:
@@ -453,9 +461,70 @@ class Sequencer:
         except Exception as e:
             print(f"An error occurred during recording: {e}")
         finally:
+            self.stop_recording_metronome()
             if outport:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
+
+    def _recording_metronome_thread(self):
+        """A dedicated thread to play metronome clicks during recording."""
+        try:
+            port = mido.open_output(self.song.metronome_port_name)
+            ticks_per_beat = 480
+            beat_counter = 0
+            start_time_sec = time.time()
+            playback_cursor_sec = 0.0
+
+            while not self._stop_recording_metronome_event.is_set():
+                # Calculate time to next beat
+                mido_tempo = mido.bpm2tempo(self.song.tempo)
+                delta_sec = mido.tick2second(ticks_per_beat, ticks_per_beat, mido_tempo)
+
+                # The first beat should happen immediately, others after a delay
+                if beat_counter > 0:
+                    playback_cursor_sec += delta_sec
+
+                # Drift correction
+                target_real_time_sec = start_time_sec + playback_cursor_sec
+                sleep_duration = target_real_time_sec - time.time()
+                if sleep_duration > 0:
+                    time.sleep(sleep_duration)
+
+                if self._stop_recording_metronome_event.is_set():
+                    break
+
+                # Send the click
+                is_downbeat = (beat_counter % self.song.time_signature_numerator) == 0
+                pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
+
+                port.send(mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100))
+                # Send a note-off almost immediately after to create a click sound
+                port.send(mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0))
+
+                beat_counter += 1
+
+        except Exception as e:
+            print(f"Error in metronome thread: {e}")
+        finally:
+            if 'port' in locals() and port and not port.closed:
+                # Turn off any lingering notes on the metronome channel
+                port.send(mido.Message('control_change', channel=self.metronome_channel, control=123, value=0))
+                port.close()
+
+    def start_recording_metronome(self):
+        if not self.song.metronome_enabled or not self.song.metronome_port_name:
+            return
+
+        self._stop_recording_metronome_event.clear()
+        self.metronome_thread = threading.Thread(target=self._recording_metronome_thread)
+        self.metronome_thread.start()
+        print("Metronome started for recording.")
+
+    def stop_recording_metronome(self):
+        if self.metronome_thread and self.metronome_thread.is_alive():
+            self._stop_recording_metronome_event.set()
+            self.metronome_thread.join()
+            print("Metronome stopped.")
 
     def _play_thread(self):
         try:

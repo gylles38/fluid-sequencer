@@ -489,7 +489,7 @@ class Sequencer:
                     now = time.time()
 
                     if recording_start_time_sec is None:
-                        recording_start_time_sec = time.time()
+                        recording_start_time_sec = now
                         print("Recording started. Press Ctrl+C or play for the specified duration to stop.")
 
                     if max_duration_beats is not None:

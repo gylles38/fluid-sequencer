@@ -626,7 +626,6 @@ class Sequencer:
         try:
             if self.song.metronome_enabled:
                 self.metronome_only_mode = True
-                # Call play with a default start_measure to prevent interactive prompts
                 self.play(start_measure=1)
 
             with mido.open_input(inport_name) as inport:
@@ -644,35 +643,45 @@ class Sequencer:
                     max_duration_beats = num_measures_to_record * beats_per_measure
                     print(f"Recording for {num_measures_to_record} measure(s) ({max_duration_beats:.2f} beats).")
 
-                for msg in inport:
-                    if outport: outport.send(msg)
-                    now = time.time()
+                is_recording = True
+                while is_recording:
+                    # Process all pending messages non-blockingly
+                    for msg in inport.iter_pending():
+                        if outport: outport.send(msg)
+                        now = time.time()
 
-                    if recording_start_time_sec is None:
-                        recording_start_time_sec = now
-                        print("Recording started. Press Ctrl+C or play for the specified duration to stop.")
+                        if recording_start_time_sec is None:
+                            recording_start_time_sec = now
+                            print("\nRecording started... Press Ctrl+C to stop.")
 
-                    if max_duration_beats is not None:
-                        elapsed_beats = (now - recording_start_time_sec) * beats_per_second
-                        if elapsed_beats >= max_duration_beats:
+                        if msg.type == 'note_on' and msg.velocity > 0:
+                            if msg.note not in open_notes:
+                                open_notes[msg.note] = (now, msg.velocity)
+                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                            if msg.note in open_notes:
+                                start_time_sec, velocity = open_notes.pop(msg.note)
+                                duration_sec = now - start_time_sec
+                                start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
+                                duration_beats = duration_sec * beats_per_second
+                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
+                                event = Event(notes=[note], start_time=start_time_beats)
+                                target_track.add_event(event)
+
+                    # Live display and timing logic
+                    if recording_start_time_sec:
+                        elapsed_beats = (time.time() - recording_start_time_sec) * beats_per_second
+
+                        current_beat_float = start_beat + elapsed_beats
+                        current_measure = int(current_beat_float / beats_per_measure) + 1
+                        current_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+                        print(f"\rRecording: Measure {current_measure}, Beat {current_beat_in_measure} ", end="")
+
+                        if max_duration_beats is not None and elapsed_beats >= max_duration_beats:
                             print(f"\nFinished recording {num_measures_to_record} measure(s).")
-                            break
+                            is_recording = False
 
-                    if msg.type == 'note_on' and msg.velocity > 0:
-                        if msg.note not in open_notes:
-                            open_notes[msg.note] = (now, msg.velocity)
-                    elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                        if msg.note in open_notes:
-                            start_time_sec, velocity = open_notes.pop(msg.note)
-                            duration_sec = now - start_time_sec
+                    time.sleep(0.01) # 10ms sleep to prevent high CPU usage
 
-                            start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
-                            duration_beats = duration_sec * beats_per_second
-
-                            note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                            event = Event(notes=[note], start_time=start_time_beats)
-                            target_track.add_event(event)
-                            print(f"Recorded note: {note.pitch}, start: {start_time_beats:.2f}, duration: {duration_beats:.2f} beats")
         except KeyboardInterrupt:
             print("\nRecording stopped.")
         except Exception as e:
@@ -820,54 +829,71 @@ class Sequencer:
                 else:
                     print(f"Playing on {len(self.open_ports)} port(s)...")
 
-                last_tick = 0
                 start_time_sec = time.time()
-                playback_cursor_sec = 0.0
+                next_event_index = 0
 
-                for event_details in ranged_event_list:
-                    self._run_event.wait()
+                # This inner loop is time-driven
+                while not self._stop_event.is_set():
+                    self._run_event.wait() # For pause/resume
                     if self._stop_event.is_set(): break
 
-                    delta_ticks = event_details['tick'] - last_tick
-                    if delta_ticks > 0:
-                        mido_tempo = mido.bpm2tempo(self.song.tempo)
-                        delta_sec = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
-                        playback_cursor_sec += delta_sec
+                    # --- Calculate current position in ticks ---
+                    elapsed_sec = time.time() - start_time_sec
+                    mido_tempo = mido.bpm2tempo(self.song.tempo)
+                    current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
 
-                    target_real_time_sec = start_time_sec + playback_cursor_sec
-                    sleep_duration = target_real_time_sec - time.time()
-                    if sleep_duration > 0:
-                        time.sleep(sleep_duration)
+                    # --- Display current measure and beat ---
+                    current_beat_float = current_ticks / ticks_per_beat
+                    current_measure = int(current_beat_float / beats_per_measure)
+                    current_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
 
-                    if self._stop_event.is_set(): break
+                    # Adjust for the original start measure for display
+                    display_measure = current_measure + start_measure
 
-                    port_name = event_details['port_name']
-                    port = self.open_ports.get(port_name)
-                    if not port: continue
+                    print(f"\rPlaying: Measure {display_measure}, Beat {current_beat_in_measure} ", end="")
 
-                    if event_details['track_idx'] != -1:
-                        track = self.song.tracks[event_details['track_idx']]
-                        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                        should_play_event = False
-                        if is_any_track_soloed:
-                            if track.is_solo: should_play_event = True
-                        elif not track.is_muted:
-                            should_play_event = True
-                        if should_play_event:
-                            port.send(event_details['message'])
-                    else: # Metronome events
-                        # Only play metronome if it falls within the original, non-normalized tick range
-                        original_tick = event_details['tick'] + start_tick
-                        if self.song.metronome_enabled and start_tick <= original_tick < end_tick:
-                            port.send(event_details['message'])
+                    # --- Check for and send due events ---
+                    while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
+                        event_details = ranged_event_list[next_event_index]
+                        port_name = event_details['port_name']
+                        port = self.open_ports.get(port_name)
 
-                    last_tick = event_details['tick']
+                        if port:
+                            if event_details['track_idx'] != -1: # Note events
+                                track = self.song.tracks[event_details['track_idx']]
+                                is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                                should_play_event = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
+                                if should_play_event:
+                                    port.send(event_details['message'])
+                            else: # Metronome events
+                                original_tick = event_details['tick'] + start_tick
+                                if self.song.metronome_enabled and start_tick <= original_tick < end_tick:
+                                    port.send(event_details['message'])
 
+                        next_event_index += 1
+
+                    # --- Check for end of playback/loop section ---
+                    if next_event_index >= len(ranged_event_list):
+                        if not loop:
+                            # Add a small delay to allow last notes to be heard before finishing
+                            time.sleep(1.0)
+                            break # Exit the inner time-driven loop
+
+                        # If looping, check if we've played the last note's duration
+                        last_event_tick = ranged_event_list[-1]['tick'] if ranged_event_list else 0
+                        loop_duration_sec = mido.tick2second(last_event_tick, ticks_per_beat, mido_tempo)
+
+                        if elapsed_sec > loop_duration_sec + 0.5: # 0.5s tail
+                            break
+
+                    time.sleep(0.02) # 20ms sleep interval
+
+                print() # Final newline after loop finishes
                 if not loop or self._stop_event.is_set():
                     break
 
                 self._all_notes_off()
-                time.sleep(0.1)
+                time.sleep(0.1) # Small pause before looping
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:

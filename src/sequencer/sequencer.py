@@ -150,14 +150,9 @@ class Sequencer:
             return
 
         target_track = self.song.tracks[track_index]
-
-        # Determine the new solo state. If we are turning solo ON for this track.
         is_being_soloed = not target_track.is_solo
-
-        # Update the target track
         target_track.is_solo = is_being_soloed
 
-        # If we just soloed this track, un-solo all other tracks.
         if is_being_soloed:
             for i, other_track in enumerate(self.song.tracks):
                 if i == track_index:
@@ -180,7 +175,6 @@ class Sequencer:
             is_temp_port = False
             port_name = track.output_port_name
             try:
-                # Find the port object (virtual or hardware)
                 found_virtual = False
                 for vp in self.virtual_ports:
                     if vp.name in port_name:
@@ -194,12 +188,10 @@ class Sequencer:
 
                 if port:
                     print(f"  - Sending state for track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}")
-                    # Send bank select
                     if track.bank_msb is not None:
                         port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
                     if track.bank_lsb is not None:
                         port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                    # Send program change
                     port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
             except Exception as e:
                 print(f"  - Could not send state to port '{port_name}': {e}")
@@ -225,11 +217,7 @@ class Sequencer:
     def save_project(self, basename: str):
         midi_filepath = f"{basename}.mid"
         project_filepath = f"{basename}.proj.json"
-
-        # 1. Save the MIDI data
         self.save_song(midi_filepath)
-
-        # 2. Prepare and save the project configuration
         try:
             project_data = {
                 "midi_file": midi_filepath,
@@ -248,9 +236,7 @@ class Sequencer:
             }
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4)
-
             print(f"Project configuration saved to '{project_filepath}'")
-
         except Exception as e:
             print(f"Error saving project file: {e}")
 
@@ -260,39 +246,32 @@ class Sequencer:
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f)
 
-            # 1. Load the MIDI song data
             midi_file = project_data.get("midi_file")
             if not midi_file:
                 print("Error: Project file is missing 'midi_file' key.")
                 return
             self.load_song(midi_file)
 
-            # 2. Recreate virtual ports
-            self.close_virtual_ports() # Close any existing vports first
+            self.close_virtual_ports()
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
 
-            # 3. Restore track assignments
             assignments = project_data.get("track_assignments", [])
             for assignment in assignments:
                 track_name = assignment.get("track_name")
                 port_name = assignment.get("port_name")
                 if track_name and port_name:
-                    # Find the track index by name
                     track_indices = [i for i, t in enumerate(self.song.tracks) if t.name == track_name]
                     if track_indices:
                         self.assign_port(track_indices[0], port_name)
                     else:
                         print(f"Warning: Could not find track '{track_name}' to assign port.")
 
-            # 4. Restore metronome settings
             metronome_settings = project_data.get("metronome_settings", {})
             self.song.metronome_enabled = metronome_settings.get("enabled", False)
             self.song.metronome_port_name = metronome_settings.get("port_name")
-
             print(f"Successfully loaded project from '{project_filepath}'")
-
         except FileNotFoundError:
             print(f"Error: Project file not found at '{project_filepath}'")
         except Exception as e:
@@ -303,7 +282,6 @@ class Sequencer:
             return "No tracks in the song."
         lines = [f"Song: {self.song.name} | Tempo: {self.song.tempo} BPM | Time Signature: {self.song.time_signature_numerator}/{self.song.time_signature_denominator}"]
 
-        # Metronome status
         metro_status = "OFF"
         if self.song.metronome_enabled:
             port_info = f" -> Port: {self.song.metronome_port_name}" if self.song.metronome_port_name else " (No port assigned)"
@@ -313,18 +291,12 @@ class Sequencer:
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):
             status_info = ""
-            if track.is_muted:
-                status_info += " [M]"
-            if track.is_solo:
-                status_info += " [S]"
-
+            if track.is_muted: status_info += " [M]"
+            if track.is_solo: status_info += " [S]"
             bank_info = ""
-            if track.bank_msb is not None:
-                bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
-
+            if track.bank_msb is not None: bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
             ch_info = f"Ch: {track.channel + 1}"
             prog_info = f"Prog: {track.instrument + 1}"
-
             port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
             lines.append(f"[{i}] {track.name}{status_info} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
         return "\n".join(lines)
@@ -335,8 +307,7 @@ class Sequencer:
             lines.append("Available MIDI Input Ports:")
             input_ports = mido.get_input_names()
             if input_ports:
-                for i, port in enumerate(input_ports):
-                    lines.append(f"  [{i}] {port}")
+                for i, port in enumerate(input_ports): lines.append(f"  [{i}] {port}")
             else:
                 lines.append("  (None found)")
 
@@ -345,11 +316,9 @@ class Sequencer:
             virtual_port_names = [vp.name for vp in self.virtual_ports]
             all_outputs = output_ports + virtual_port_names
             if all_outputs:
-                for i, port in enumerate(all_outputs):
-                    lines.append(f"  [{i}] {port}")
+                for i, port in enumerate(all_outputs): lines.append(f"  [{i}] {port}")
             else:
                 lines.append("  (None found)")
-
             return "\n".join(lines)
         except Exception as e:
             return f"Error getting MIDI ports: {e}"
@@ -376,12 +345,10 @@ class Sequencer:
                 break
 
         if port_to_delete:
-            # Un-assign any tracks that were using this port
             for track in self.song.tracks:
                 if track.output_port_name == port_to_delete.name:
                     track.output_port_name = None
                     print(f"Un-assigned port from track '{track.name}'.")
-
             port_to_delete.close()
             self.virtual_ports.remove(port_to_delete)
             print(f"Virtual port '{name}' deleted.")
@@ -400,8 +367,7 @@ class Sequencer:
                 print("Error: No MIDI input ports found.")
                 return
             print("Available MIDI input ports:")
-            for i, port in enumerate(input_ports):
-                print(f"  [{i}] {port}")
+            for i, port in enumerate(input_ports): print(f"  [{i}] {port}")
             inport_idx = int(input("Choose a port to record from: "))
             inport_name = input_ports[inport_idx]
 
@@ -414,12 +380,10 @@ class Sequencer:
                     print("No MIDI output ports found for Thru.")
                 else:
                     print("Available MIDI output ports:")
-                    for i, port in enumerate(all_outputs):
-                        print(f"  [{i}] {port}")
+                    for i, port in enumerate(all_outputs): print(f"  [{i}] {port}")
                     outport_idx = int(input("Choose a port for MIDI Thru (or -1 to disable): "))
                     if 0 <= outport_idx < len(all_outputs):
                         outport_name = all_outputs[outport_idx]
-
         except (ValueError, IndexError):
             print("Error: Invalid selection.")
             return
@@ -427,10 +391,8 @@ class Sequencer:
         target_track = self.song.tracks[track_index]
         open_notes = {}
         start_beat = max((evt.start_time + evt.notes[0].duration for evt in target_track.events), default=0)
-
         outport = None
         try:
-            # Use the main playback engine in metronome-only mode for the count-in
             if self.song.metronome_enabled:
                 self.metronome_only_mode = True
                 self.play()
@@ -444,8 +406,7 @@ class Sequencer:
 
                 recording_start_time_sec = None
                 for msg in inport:
-                    if outport:
-                        outport.send(msg)
+                    if outport: outport.send(msg)
 
                     if recording_start_time_sec is None:
                         recording_start_time_sec = time.time()
@@ -471,7 +432,6 @@ class Sequencer:
         except Exception as e:
             print(f"An error occurred during recording: {e}")
         finally:
-            # Stop the metronome and reset the mode
             if self.metronome_only_mode:
                 self.stop()
                 self.metronome_only_mode = False
@@ -481,10 +441,14 @@ class Sequencer:
                 print(f"Closed Thru port '{outport_name}'.")
 
     def _play_thread(self):
+        # Metronome-only mode for recording count-in
         if self.metronome_only_mode:
-            # Metronome-only mode for recording count-in
+            port = self.open_ports.get(self.song.metronome_port_name)
+            if not port:
+                print(f"Error: Metronome port '{self.song.metronome_port_name}' not open.")
+                return
+
             try:
-                port = mido.open_output(self.song.metronome_port_name)
                 ticks_per_beat = 480
                 beat_counter = 0
                 start_time_sec = time.time()
@@ -519,69 +483,55 @@ class Sequencer:
             except Exception as e:
                 print(f"Error in metronome thread: {e}")
             finally:
-                if 'port' in locals() and port and not port.closed:
-                    port.send(mido.Message('control_change', channel=self.metronome_channel, control=123, value=0))
-                    port.close()
-                self.playback_state = "stopped"
+                # The main stop() method handles port cleanup and state change
                 print("Metronome stopped.")
             return
 
+        # Full playback mode
         try:
             master_event_list = []
-            ticks_per_beat = 480  # Standard MIDI ticks per beat
+            ticks_per_beat = 480
 
-            # 1. Build the event list from all tracks
-            if not self.metronome_only_mode:
-                for track_idx, track in enumerate(self.song.tracks):
-                    if not track.output_port_name:
-                        continue
-
-                    # Add bank select and program change messages
+            # 1. Build track events
+            for track_idx, track in enumerate(self.song.tracks):
+                if not track.output_port_name:
+                    continue
+                # Add bank select and program change messages
                 if track.bank_msb is not None:
                     master_event_list.append({'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb)})
                 if track.bank_lsb is not None:
                     master_event_list.append({'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb)})
                 program_change_msg = mido.Message('program_change', channel=track.channel, program=track.instrument)
                 master_event_list.append({'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': program_change_msg})
-
                 # Add note events
                 for event in track.events:
                     for note in event.notes:
                         start_tick = int(event.start_time * ticks_per_beat)
                         end_tick = start_tick + int(note.duration * ticks_per_beat)
                         note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)
-                        note_off_msg = mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0) # Velocity 0 is crucial
+                        note_off_msg = mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)
                         master_event_list.append({'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_on_msg})
                         master_event_list.append({'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_off_msg})
 
-            # 2. Generate metronome events if enabled
+            # 2. Build metronome events
             if self.song.metronome_enabled and self.song.metronome_port_name:
-                # If in metronome-only mode, we need a duration, otherwise calculate from the song.
-                if self.metronome_only_mode:
-                    num_beats = 4 * 60 # Default to a long duration (e.g., 4 minutes at 60bpm) that will be stopped manually
-                else:
-                    last_event_tick = 0
-                    if master_event_list:
-                        last_event_tick = max(e['tick'] for e in master_event_list)
-                    num_beats = (last_event_tick // ticks_per_beat) + 1
-
+                last_event_tick = 0
+                if master_event_list:
+                    last_event_tick = max(e['tick'] for e in master_event_list)
+                num_beats = (last_event_tick // ticks_per_beat) + 1
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
                     is_downbeat = (beat % self.song.time_signature_numerator) == 0
                     pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
-
                     note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
                     note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
-
                     master_event_list.append({'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_on})
                     master_event_list.append({'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
 
-            # 3. Sort the final event list and play
+            # 3. Sort and play
             master_event_list.sort(key=lambda e: e['tick'])
             print(f"Playing on {len(self.open_ports)} port(s)...")
             last_tick = 0
-
-            # Absolute timing for drift correction
             start_time_sec = time.time()
             playback_cursor_sec = 0.0
 
@@ -589,32 +539,22 @@ class Sequencer:
                 self._run_event.wait()
                 if self._stop_event.is_set(): break
 
-                # Calculate time to next event using the current tempo
                 delta_ticks = event_details['tick'] - last_tick
                 if delta_ticks > 0:
                     mido_tempo = mido.bpm2tempo(self.song.tempo)
                     delta_sec = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
                     playback_cursor_sec += delta_sec
 
-                # Correct for processing drift
                 target_real_time_sec = start_time_sec + playback_cursor_sec
                 sleep_duration = target_real_time_sec - time.time()
-
                 if sleep_duration > 0:
                     time.sleep(sleep_duration)
 
                 port_name = event_details['port_name']
                 port = self.open_ports.get(port_name)
+                if not port: continue
 
-                if not port:
-                    continue
-
-                # If it's a track event, check mute/solo status
                 if event_details['track_idx'] != -1:
-                    # Don't play track events in metronome-only mode
-                    if self.metronome_only_mode:
-                        continue
-
                     track = self.song.tracks[event_details['track_idx']]
                     is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                     should_play_event = False
@@ -622,10 +562,9 @@ class Sequencer:
                         if track.is_solo: should_play_event = True
                     elif not track.is_muted:
                         should_play_event = True
-
                     if should_play_event:
                         port.send(event_details['message'])
-                else:  # It's a metronome event
+                else:
                     if self.song.metronome_enabled:
                         port.send(event_details['message'])
 
@@ -653,13 +592,15 @@ class Sequencer:
         self.open_ports.clear()
         self.temporary_ports = []
 
-        # Gather all required ports (from tracks and metronome)
         required_ports = {t.output_port_name for t in self.song.tracks if t.output_port_name}
         if self.song.metronome_enabled and self.song.metronome_port_name:
             required_ports.add(self.song.metronome_port_name)
 
         if not required_ports:
-            print("No tracks or metronome have an assigned output port. Use 'assign' or 'assignmetro'.")
+            if self.metronome_only_mode:
+                print("No metronome port assigned. Use 'assignmetro'.")
+            else:
+                print("No tracks have an assigned output port. Use 'assign' command first.")
             return
 
         for name in required_ports:
@@ -711,6 +652,7 @@ class Sequencer:
         self._all_notes_off()
         self._stop_event.set()
         if self.playback_state == "paused":
+            self.playback_state = "playing" # Set to playing to allow thread to exit wait
             self._run_event.set()
         if self.playback_thread:
             self.playback_thread.join()

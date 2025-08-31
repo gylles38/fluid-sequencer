@@ -499,16 +499,22 @@ class Sequencer:
 
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
-                    is_downbeat = (beat % self.song.time_signature_numerator) == 0
-                    pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
 
-                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
-                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
+                    # Pitch will be determined in real-time in the playback loop.
+                    # We use a placeholder pitch for now.
+                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=0, velocity=100)
+                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=0, velocity=0)
 
-                    # Add metronome note on at the beat
-                    master_event_list.append({'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_on})
-                    # Add note off shortly after (e.g., 1/16th of a beat later)
-                    master_event_list.append({'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
+                    # Add metronome note on at the beat, including the beat number
+                    master_event_list.append({
+                        'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name,
+                        'message': note_on, 'beat_number': beat, 'is_note_off': False
+                    })
+                    # Add note off shortly after
+                    master_event_list.append({
+                        'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name,
+                        'message': note_off, 'beat_number': beat, 'is_note_off': True
+                    })
 
             # 3. Sort the final event list and play
             master_event_list.sort(key=lambda e: e['tick'])
@@ -555,9 +561,15 @@ class Sequencer:
 
                     if should_play_event:
                         port.send(event_details['message'])
-                else:  # It's a metronome event, play it only if the metronome is currently enabled
+                else:  # It's a metronome event
                     if self.song.metronome_enabled:
-                        port.send(event_details['message'])
+                        beat_number = event_details['beat_number']
+                        is_downbeat = (beat_number % self.song.time_signature_numerator) == 0
+                        pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
+
+                        # Create a copy of the message to avoid modifying the list
+                        msg = event_details['message'].copy(note=pitch)
+                        port.send(msg)
 
                 last_tick = event_details['tick']
         except Exception as e:

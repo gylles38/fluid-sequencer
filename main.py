@@ -22,15 +22,17 @@ Sequencer CLI Commands:
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
-  record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
+  move <track_index>      - Moves a section of a track to a new measure.
+  record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
   delete <track_index>    - Deletes a track after confirmation.
-  erase <track_index>     - Erases all notes from a track.
+  erase <track_index>     - Erases all or a range of notes from a track.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
-  play                    - Plays the song using the assigned ports for each track.
+  play [start] [end]      - Plays the song, optionally from a start to an end measure.
+  loop [start] [end]      - Loops a section of the song, optionally from a start to an end measure.
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
   restart                 - Stops and restarts playback from the beginning.
@@ -211,8 +213,15 @@ def main():
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))
+                elif len(args) == 2:
+                    try:
+                        track_index = int(args[0])
+                        start_measure = int(args[1])
+                        seq.record_track(track_index=track_index, start_measure=start_measure)
+                    except ValueError:
+                        print("Error: Invalid track index or measure number.")
                 else:
-                    print("Usage: record <track_index>")
+                    print("Usage: record <track_index> [start_measure]")
             elif command == "delete":
                 if len(args) == 1:
                     track_index = int(args[0])
@@ -229,15 +238,11 @@ def main():
                     print("Usage: delete <track_index>")
             elif command == "erase":
                 if len(args) == 1:
-                    track_index = int(args[0])
-                    if 0 <= track_index < len(seq.song.tracks):
-                        track_name = seq.song.tracks[track_index].name
-                        confirm = input(f"Are you sure you want to erase all notes from track '{track_name}'? [y/N] ").lower()
-                        if confirm == 'y':
-                            seq.erase_track(track_index)
-                        else:
-                            print("Erase cancelled.")
-                    else:
+                    try:
+                        track_index = int(args[0])
+                        # The sequencer method will now handle all prompting
+                        seq.erase_track(track_index=track_index)
+                    except ValueError:
                         print("Error: Invalid track index.")
                 else:
                     print("Usage: erase <track_index>")
@@ -246,6 +251,15 @@ def main():
                     seq.rename_track(track_index=int(args[0]), new_name=args[1])
                 else:
                     print("Usage: rename <track_index> <new_name>")
+            elif command == "move":
+                if len(args) == 1:
+                    try:
+                        track_index = int(args[0])
+                        seq.move_track_section(track_index)
+                    except ValueError:
+                        print("Error: Invalid track index.")
+                else:
+                    print("Usage: move <track_index>")
             elif command == "tempo":
                 if len(args) == 1:
                     seq.set_tempo(tempo=int(args[0]))
@@ -268,11 +282,19 @@ def main():
                     print("Usage: saveproject <basename>")
             elif command == "prime":
                 seq.prime_all_tracks()
-            elif command == "play":
-                if len(args) == 0:
-                    seq.play()
-                else:
-                    print("Usage: play (takes no arguments)")
+            elif command == "play" or command == "loop":
+                try:
+                    if len(args) > 2:
+                        print(f"Usage: {command} [start_measure] [end_measure]")
+                        continue
+
+                    start_measure = int(args[0]) if len(args) >= 1 else None
+                    end_measure = int(args[1]) if len(args) == 2 else None
+
+                    is_looping = command == "loop"
+                    seq.play(start_measure=start_measure, end_measure=end_measure, loop=is_looping)
+                except ValueError:
+                    print("Error: Invalid measure number.")
             elif command == "pause":
                 seq.pause()
             elif command == "stop":

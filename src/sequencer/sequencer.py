@@ -2,6 +2,7 @@ import time
 import mido
 import threading
 import json
+from typing import Optional
 from .models import Song, Track, Event, Note
 from .midi_import import import_song
 from .midi_export import export_to_midi
@@ -19,6 +20,8 @@ class Sequencer:
         self._run_event.set()
 
         self.metronome_only_mode = False
+        self.total_paused_time = 0.0
+        self.pause_start_time = 0.0
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -67,8 +70,61 @@ class Sequencer:
             return
 
         track = self.song.tracks[track_index]
-        track.events.clear()
-        print(f"Erased all events from track '{track.name}'.")
+        start_measure = None
+        end_measure = None
+
+        try:
+            s_measure_input = input("Erase from measure (default: all track): ").strip()
+            if s_measure_input == "":
+                start_measure = None # This signals a full erase
+            else:
+                start_measure = int(s_measure_input)
+                # Only ask for end measure if a start measure was given
+                e_measure_input = input(f"Erase up to measure (optional, press Enter for end of track): ").strip()
+                if e_measure_input != "":
+                    end_measure = int(e_measure_input)
+        except ValueError:
+            print("Error: Invalid measure number.")
+            return
+
+        # --- Confirmation ---
+        confirm_message = ""
+        if start_measure is None:
+            confirm_message = f"Are you sure you want to erase ALL notes from track '{track.name}'? [y/N] "
+        else:
+            end_str = f" to measure {end_measure}" if end_measure else " to the end of the track"
+            confirm_message = f"Are you sure you want to erase notes from measure {start_measure}{end_str} on track '{track.name}'? [y/N] "
+
+        if input(confirm_message).lower() != 'y':
+            print("Erase cancelled.")
+            return
+
+        # --- Execution ---
+        if start_measure is None:
+            track.events.clear()
+            print(f"Erased all events from track '{track.name}'.")
+            return
+
+        # Ranged erase logic
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+
+        start_beat = (start_measure - 1) * beats_per_measure
+
+        end_beat = float('inf')
+        if end_measure is not None:
+            if end_measure < start_measure:
+                print("Error: End measure cannot be before the start measure.")
+                return
+            end_beat = end_measure * beats_per_measure
+
+        initial_event_count = len(track.events)
+        track.events = [
+            event for event in track.events
+            if not (start_beat <= event.start_time < end_beat)
+        ]
+        removed_count = initial_event_count - len(track.events)
+
+        print(f"Erased {removed_count} event(s) from track '{track.name}'.")
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):
@@ -78,6 +134,112 @@ class Sequencer:
         old_name = self.song.tracks[track_index].name
         self.song.tracks[track_index].name = new_name
         print(f"Track '{old_name}' renamed to '{new_name}'.")
+
+    def move_track_section(self, track_index: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+
+        try:
+            start_measure = int(input("Move from start measure: ").strip())
+            num_measures = int(input("Number of measures to move: ").strip())
+            destination_measure = int(input("Move to destination measure: ").strip())
+
+            if start_measure < 1 or num_measures < 1 or destination_measure < 1:
+                print("Error: Measure numbers and count must be 1 or greater.")
+                return
+
+            if destination_measure >= start_measure and destination_measure < start_measure + num_measures:
+                print("Error: Destination cannot be inside the source range.")
+                return
+
+        except ValueError:
+            print("Error: Invalid number.")
+            return
+
+        # Confirmation
+        confirm_message = (
+            f"On track '{track.name}', move {num_measures} measure(s) "
+            f"from measure {start_measure} to measure {destination_measure}. Are you sure? [y/N] "
+        )
+        if input(confirm_message).lower() != 'y':
+            print("Move cancelled.")
+            return
+
+        # --- Calculations ---
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+
+        source_start_beat = (start_measure - 1) * beats_per_measure
+        source_end_beat = source_start_beat + (num_measures * beats_per_measure)
+
+        destination_start_beat = (destination_measure - 1) * beats_per_measure
+        destination_end_beat = destination_start_beat + (num_measures * beats_per_measure)
+
+        offset_beats = destination_start_beat - source_start_beat
+
+        # --- Check for notes at destination ---
+        events_at_destination = [
+            event for event in track.events
+            if (destination_start_beat <= event.start_time < destination_end_beat)
+            and not (source_start_beat <= event.start_time < source_end_beat)
+        ]
+
+        overwrite_mode = "add"
+        if events_at_destination:
+            print("There are existing notes at the destination.")
+            while True:
+                choice = input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                if choice in ['r', 'replace']:
+                    overwrite_mode = "replace"
+                    break
+                elif choice in ['a', 'add']:
+                    overwrite_mode = "add"
+                    break
+                else:
+                    print("Invalid choice. Please enter 'r' or 'a'.")
+
+        # --- Partition and process events ---
+        final_events = []
+        moved_event_count = 0
+        deleted_event_count = 0
+
+        for event in track.events:
+            # Case 1: Event is in the source range -> Move it
+            if source_start_beat <= event.start_time < source_end_beat:
+                new_start_time = event.start_time + offset_beats
+                if new_start_time < 0:
+                    print(f"Warning: Moving event would result in a negative start time ({new_start_time:.2f} beats). Keeping original.")
+                    final_events.append(event) # Keep it in its original position
+                else:
+                    event.start_time = new_start_time
+                    final_events.append(event)
+                    moved_event_count += 1
+
+            # Case 2: Event is at the destination and we are replacing -> Delete it
+            elif overwrite_mode == "replace" and destination_start_beat <= event.start_time < destination_end_beat:
+                deleted_event_count += 1
+                pass # Don't add it to final_events
+
+            # Case 3: Event is not affected -> Keep it
+            else:
+                final_events.append(event)
+
+        track.events = final_events
+        track.events.sort(key=lambda e: e.start_time)
+
+        # --- Report results ---
+        report = []
+        if moved_event_count > 0:
+            report.append(f"Moved {moved_event_count} event(s)")
+        if deleted_event_count > 0:
+            report.append(f"deleted {deleted_event_count} event(s) at destination")
+
+        if not report:
+            print("No notes were found in the source range to move.")
+        else:
+            print(f"Operation complete: {', '.join(report)} on track '{track.name}'.")
 
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):
@@ -355,10 +517,83 @@ class Sequencer:
         else:
             print(f"Error: Virtual port '{name}' not found.")
 
-    def record_track(self, track_index: int):
+    def record_track(self, track_index: int, start_measure: Optional[int] = None):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
+
+        if start_measure is None:
+            try:
+                measure_input = input("Start recording at measure (default: 1): ").strip()
+                if measure_input == "":
+                    start_measure = 1
+                else:
+                    start_measure = int(measure_input)
+            except ValueError:
+                print("Error: Invalid measure number.")
+                return
+
+        if start_measure < 1:
+            print("Error: Start measure must be 1 or greater.")
+            return
+
+        target_track = self.song.tracks[track_index]
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+        start_beat = (start_measure - 1) * beats_per_measure
+
+        # Check for existing notes from the start_beat onwards
+        existing_notes_in_range = [
+            event for event in target_track.events
+            if event.start_time >= start_beat
+        ]
+
+        overwrite_mode = "add"
+        num_measures_to_record = None
+
+        if existing_notes_in_range:
+            print("There are existing notes from this measure onwards.")
+            while True:
+                choice = input("Do you want to (r)eplace the existing notes or (a)dd to them? [r/a] ").lower()
+                if choice in ['r', 'replace']:
+                    overwrite_mode = "replace"
+                    break
+                elif choice in ['a', 'add']:
+                    overwrite_mode = "add"
+                    break
+                else:
+                    print("Invalid choice. Please enter 'r' or 'a'.")
+
+        # Ask for number of measures to record
+        while True:
+            try:
+                measures_input = input("How many measures to record? (Press Enter for unlimited) ").strip()
+                if measures_input == "":
+                    num_measures_to_record = None
+                    break
+                else:
+                    num_measures_to_record = int(measures_input)
+                    if num_measures_to_record <= 0:
+                        print("Error: Number of measures must be positive.")
+                        continue
+                    break
+            except ValueError:
+                print("Error: Invalid number.")
+
+        # Handle overwrite logic
+        if overwrite_mode == "replace":
+            end_beat = float('inf')
+            if num_measures_to_record is not None:
+                end_beat = start_beat + (num_measures_to_record * beats_per_measure)
+
+            # Remove events within the specified range
+            initial_event_count = len(target_track.events)
+            target_track.events = [
+                event for event in target_track.events
+                if not (start_beat <= event.start_time < end_beat)
+            ]
+            removed_count = initial_event_count - len(target_track.events)
+            if removed_count > 0:
+                print(f"Removed {removed_count} event(s) from the recording range.")
 
         inport_name, outport_name = None, None
         try:
@@ -388,14 +623,12 @@ class Sequencer:
             print("Error: Invalid selection.")
             return
 
-        target_track = self.song.tracks[track_index]
         open_notes = {}
-        start_beat = max((evt.start_time + evt.notes[0].duration for evt in target_track.events), default=0)
         outport = None
         try:
             if self.song.metronome_enabled:
                 self.metronome_only_mode = True
-                self.play()
+                self.play(start_measure=1)
 
             with mido.open_input(inport_name) as inport:
                 if outport_name:
@@ -405,28 +638,52 @@ class Sequencer:
                     print(f"Listening on '{inport_name}'. Waiting for first note...")
 
                 recording_start_time_sec = None
-                for msg in inport:
-                    if outport: outport.send(msg)
+                beats_per_second = self.song.tempo / 60
 
-                    if recording_start_time_sec is None:
-                        recording_start_time_sec = time.time()
-                        print("Recording started. Press Ctrl+C to stop.")
+                max_duration_beats = None
+                if num_measures_to_record is not None:
+                    max_duration_beats = num_measures_to_record * beats_per_measure
+                    print(f"Recording for {num_measures_to_record} measure(s) ({max_duration_beats:.2f} beats).")
 
-                    now = time.time()
-                    if msg.type == 'note_on' and msg.velocity > 0:
-                        if msg.note not in open_notes:
-                            open_notes[msg.note] = (now, msg.velocity)
-                    elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                        if msg.note in open_notes:
-                            start_time_sec, velocity = open_notes.pop(msg.note)
-                            duration_sec = now - start_time_sec
-                            beats_per_second = self.song.tempo / 60
-                            start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
-                            duration_beats = duration_sec * beats_per_second
-                            note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                            event = Event(notes=[note], start_time=start_time_beats)
-                            target_track.add_event(event)
-                            print(f"Recorded note: {note.pitch}, duration: {duration_beats:.2f} beats")
+                is_recording = True
+                while is_recording:
+                    # Process all pending messages non-blockingly
+                    for msg in inport.iter_pending():
+                        if outport: outport.send(msg)
+                        now = time.time()
+
+                        if recording_start_time_sec is None:
+                            recording_start_time_sec = now
+                            print("\nRecording started... Press Ctrl+C to stop.")
+
+                        if msg.type == 'note_on' and msg.velocity > 0:
+                            if msg.note not in open_notes:
+                                open_notes[msg.note] = (now, msg.velocity)
+                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                            if msg.note in open_notes:
+                                start_time_sec, velocity = open_notes.pop(msg.note)
+                                duration_sec = now - start_time_sec
+                                start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
+                                duration_beats = duration_sec * beats_per_second
+                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
+                                event = Event(notes=[note], start_time=start_time_beats)
+                                target_track.add_event(event)
+
+                    # Live display and timing logic
+                    if recording_start_time_sec:
+                        elapsed_beats = (time.time() - recording_start_time_sec) * beats_per_second
+
+                        current_beat_float = start_beat + elapsed_beats
+                        current_measure = int(current_beat_float / beats_per_measure) + 1
+                        current_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+                        print(f"\rRecording: Measure {current_measure}, Beat {current_beat_in_measure} ", end="")
+
+                        if max_duration_beats is not None and elapsed_beats >= max_duration_beats:
+                            print(f"\nFinished recording {num_measures_to_record} measure(s).")
+                            is_recording = False
+
+                    time.sleep(0.01) # 10ms sleep to prevent high CPU usage
+
         except KeyboardInterrupt:
             print("\nRecording stopped.")
         except Exception as e:
@@ -440,7 +697,7 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_thread(self):
+    def _play_thread(self, start_measure: int = 1, end_measure: Optional[int] = None, loop: bool = False):
         # Metronome-only mode for recording count-in
         if self.metronome_only_mode:
             port = self.open_ports.get(self.song.metronome_port_name)
@@ -528,47 +785,117 @@ class Sequencer:
                     master_event_list.append({'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_on})
                     master_event_list.append({'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
 
-            # 3. Sort and play
-            master_event_list.sort(key=lambda e: e['tick'])
-            print(f"Playing on {len(self.open_ports)} port(s)...")
-            last_tick = 0
-            start_time_sec = time.time()
-            playback_cursor_sec = 0.0
+            # 3. Filter and normalize events for ranged playback
+            beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+            start_beat = (start_measure - 1) * beats_per_measure
+            start_tick = int(start_beat * ticks_per_beat)
 
-            for event_details in master_event_list:
-                self._run_event.wait()
-                if self._stop_event.is_set(): break
+            end_tick = float('inf')
+            if end_measure is not None:
+                # The end beat is the start of the measure *after* the end_measure
+                end_beat = end_measure * beats_per_measure
+                end_tick = int(end_beat * ticks_per_beat)
 
-                delta_ticks = event_details['tick'] - last_tick
-                if delta_ticks > 0:
-                    mido_tempo = mido.bpm2tempo(self.song.tempo)
-                    delta_sec = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
-                    playback_cursor_sec += delta_sec
+            # Filter events that are within the playback range
+            ranged_event_list = [
+                event for event in master_event_list
+                if start_tick <= event['tick'] < end_tick
+            ]
 
-                target_real_time_sec = start_time_sec + playback_cursor_sec
-                sleep_duration = target_real_time_sec - time.time()
-                if sleep_duration > 0:
-                    time.sleep(sleep_duration)
+            # Normalize ticks so playback starts immediately
+            if start_tick > 0 and ranged_event_list:
+                # Create a shallow copy of the event dictionaries
+                ranged_event_list = [e.copy() for e in ranged_event_list]
+                for event in ranged_event_list:
+                    event['tick'] -= start_tick
 
-                port_name = event_details['port_name']
-                port = self.open_ports.get(port_name)
-                if not port: continue
+            if not ranged_event_list:
+                print("No notes to play in the selected range.")
+                return
 
-                if event_details['track_idx'] != -1:
-                    track = self.song.tracks[event_details['track_idx']]
-                    is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                    should_play_event = False
-                    if is_any_track_soloed:
-                        if track.is_solo: should_play_event = True
-                    elif not track.is_muted:
-                        should_play_event = True
-                    if should_play_event:
-                        port.send(event_details['message'])
+            # 4. Sort and play
+            ranged_event_list.sort(key=lambda e: e['tick'])
+
+            if loop:
+                print("Looping playback... Press 'stop' to exit.")
+
+            # The main loop for playback, which can be repeated for the "loop" feature
+            while not self._stop_event.is_set():
+                if loop:
+                    loop_message = f"Looping measures {start_measure}"
+                    if end_measure:
+                        loop_message += f" to {end_measure}."
+                    else:
+                        loop_message += " to end."
+                    print(loop_message)
                 else:
-                    if self.song.metronome_enabled:
-                        port.send(event_details['message'])
+                    print(f"Playing on {len(self.open_ports)} port(s)...")
 
-                last_tick = event_details['tick']
+                start_time_sec = time.time()
+                next_event_index = 0
+
+                # This inner loop is time-driven
+                while not self._stop_event.is_set():
+                    self._run_event.wait() # For pause/resume
+                    if self._stop_event.is_set(): break
+
+                    # --- Calculate current position in ticks ---
+                    elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
+                    mido_tempo = mido.bpm2tempo(self.song.tempo)
+                    current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
+
+                    # --- Display current measure and beat ---
+                    current_beat_float = current_ticks / ticks_per_beat
+                    current_measure = int(current_beat_float / beats_per_measure)
+                    current_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+
+                    # Adjust for the original start measure for display
+                    display_measure = current_measure + start_measure
+
+                    print(f"\rPlaying: Measure {display_measure}, Beat {current_beat_in_measure} ", end="")
+
+                    # --- Check for and send due events ---
+                    while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
+                        event_details = ranged_event_list[next_event_index]
+                        port_name = event_details['port_name']
+                        port = self.open_ports.get(port_name)
+
+                        if port:
+                            if event_details['track_idx'] != -1: # Note events
+                                track = self.song.tracks[event_details['track_idx']]
+                                is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                                should_play_event = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
+                                if should_play_event:
+                                    port.send(event_details['message'])
+                            else: # Metronome events
+                                original_tick = event_details['tick'] + start_tick
+                                if self.song.metronome_enabled and start_tick <= original_tick < end_tick:
+                                    port.send(event_details['message'])
+
+                        next_event_index += 1
+
+                    # --- Check for end of playback/loop section ---
+                    if next_event_index >= len(ranged_event_list):
+                        if not loop:
+                            # Add a small delay to allow last notes to be heard before finishing
+                            time.sleep(1.0)
+                            break # Exit the inner time-driven loop
+
+                        # If looping, check if we've played the last note's duration
+                        last_event_tick = ranged_event_list[-1]['tick'] if ranged_event_list else 0
+                        loop_duration_sec = mido.tick2second(last_event_tick, ticks_per_beat, mido_tempo)
+
+                        if elapsed_sec > loop_duration_sec + 0.5: # 0.5s tail
+                            break
+
+                    time.sleep(0.02) # 20ms sleep interval
+
+                print() # Final newline after loop finishes
+                if not loop or self._stop_event.is_set():
+                    break
+
+                self._all_notes_off()
+                time.sleep(0.1) # Small pause before looping
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:
@@ -581,7 +908,7 @@ class Sequencer:
             self.playback_state = "stopped"
             print("Playback finished.")
 
-    def play(self):
+    def play(self, start_measure: Optional[int] = None, end_measure: Optional[int] = None, loop: bool = False):
         if self.playback_state == "playing":
             print("Already playing.")
             return
@@ -589,6 +916,37 @@ class Sequencer:
             self.pause()
             return
 
+        # Only prompt for measures if not in metronome-only mode (for recording)
+        if not self.metronome_only_mode:
+            try:
+                if start_measure is None:
+                    measure_input = input("Start at measure (default: 1): ").strip()
+                    start_measure = 1 if measure_input == "" else int(measure_input)
+
+                if end_measure is None:
+                    measure_input = input("End at measure (optional, press Enter for end of song): ").strip()
+                    if measure_input != "":
+                        end_measure = int(measure_input)
+                    else:
+                        end_measure = None # Explicitly set to None if user presses Enter
+
+            except ValueError:
+                print("Error: Invalid measure number.")
+                return
+
+        # If we are in metronome only mode and no start measure was passed, default to 1
+        # This is a safeguard, as record_track should now always pass start_measure=1
+        if self.metronome_only_mode and start_measure is None:
+            start_measure = 1
+
+        if start_measure < 1:
+            print("Error: Start measure must be 1 or greater.")
+            return
+        if end_measure is not None and end_measure < start_measure:
+            print("Error: End measure cannot be before the start measure.")
+            return
+
+        self.total_paused_time = 0.0 # Reset pause timer for new playback
         self.open_ports.clear()
         self.temporary_ports = []
 
@@ -628,7 +986,10 @@ class Sequencer:
         self._stop_event.clear()
         self._run_event.set()
         self.playback_state = "playing"
-        self.playback_thread = threading.Thread(target=self._play_thread)
+        self.playback_thread = threading.Thread(
+            target=self._play_thread,
+            kwargs={'start_measure': start_measure, 'end_measure': end_measure, 'loop': loop}
+        )
         self.playback_thread.start()
 
     def pause(self):
@@ -638,9 +999,12 @@ class Sequencer:
         if self.playback_state == "playing":
             self._all_notes_off()
             self._run_event.clear()
+            self.pause_start_time = time.time()
             self.playback_state = "paused"
             print("Playback paused.")
         elif self.playback_state == "paused":
+            paused_duration = time.time() - self.pause_start_time
+            self.total_paused_time += paused_duration
             self._run_event.set()
             self.playback_state = "playing"
             print("Resuming playback...")

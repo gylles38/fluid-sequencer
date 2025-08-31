@@ -782,21 +782,28 @@ class Sequencer:
             self.pause()
             return
 
-        try:
-            if start_measure is None:
-                measure_input = input("Start at measure (default: 1): ").strip()
-                start_measure = 1 if measure_input == "" else int(measure_input)
+        # Only prompt for measures if not in metronome-only mode (for recording)
+        if not self.metronome_only_mode:
+            try:
+                if start_measure is None:
+                    measure_input = input("Start at measure (default: 1): ").strip()
+                    start_measure = 1 if measure_input == "" else int(measure_input)
 
-            if end_measure is None:
-                measure_input = input("End at measure (optional, press Enter for end of song): ").strip()
-                if measure_input != "":
-                    end_measure = int(measure_input)
-                else:
-                    end_measure = None # Explicitly set to None if user presses Enter
+                if end_measure is None:
+                    measure_input = input("End at measure (optional, press Enter for end of song): ").strip()
+                    if measure_input != "":
+                        end_measure = int(measure_input)
+                    else:
+                        end_measure = None # Explicitly set to None if user presses Enter
 
-        except ValueError:
-            print("Error: Invalid measure number.")
-            return
+            except ValueError:
+                print("Error: Invalid measure number.")
+                return
+
+        # If we are in metronome only mode and no start measure was passed, default to 1
+        # This is a safeguard, as record_track should now always pass start_measure=1
+        if self.metronome_only_mode and start_measure is None:
+            start_measure = 1
 
         if start_measure < 1:
             print("Error: Start measure must be 1 or greater.")

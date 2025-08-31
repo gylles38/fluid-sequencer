@@ -24,7 +24,7 @@ Sequencer CLI Commands:
   rename <index> <new_name> - Renames a track.
   record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
   delete <track_index>    - Deletes a track after confirmation.
-  erase <track_index>     - Erases all notes from a track.
+  erase <track_index> [start] [end] - Erases notes from a track, optionally within a measure range.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.
@@ -236,19 +236,23 @@ def main():
                 else:
                     print("Usage: delete <track_index>")
             elif command == "erase":
-                if len(args) == 1:
+                try:
+                    if not 1 <= len(args) <= 3:
+                        print("Usage: erase <track_index> [start_measure] [end_measure]")
+                        continue
+
                     track_index = int(args[0])
-                    if 0 <= track_index < len(seq.song.tracks):
-                        track_name = seq.song.tracks[track_index].name
-                        confirm = input(f"Are you sure you want to erase all notes from track '{track_name}'? [y/N] ").lower()
-                        if confirm == 'y':
-                            seq.erase_track(track_index)
-                        else:
-                            print("Erase cancelled.")
-                    else:
-                        print("Error: Invalid track index.")
-                else:
-                    print("Usage: erase <track_index>")
+                    start_measure = int(args[1]) if len(args) >= 2 else None
+                    end_measure = int(args[2]) if len(args) == 3 else None
+
+                    # Let the sequencer handle confirmation and logic
+                    seq.erase_track(
+                        track_index=track_index,
+                        start_measure=start_measure,
+                        end_measure=end_measure
+                    )
+                except ValueError:
+                    print("Error: Invalid number for track index or measure.")
             elif command == "rename":
                 if len(args) == 2:
                     seq.rename_track(track_index=int(args[0]), new_name=args[1])

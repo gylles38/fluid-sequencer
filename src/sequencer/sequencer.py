@@ -62,14 +62,69 @@ class Sequencer:
         print(f"Track '{track_name}' deleted.")
         return True
 
-    def erase_track(self, track_index: int):
+    def erase_track(self, track_index: int, start_measure: Optional[int] = None, end_measure: Optional[int] = None):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
 
         track = self.song.tracks[track_index]
-        track.events.clear()
-        print(f"Erased all events from track '{track.name}'.")
+
+        # If no measure args are passed, start interactive prompting
+        if start_measure is None and end_measure is None:
+            try:
+                s_measure_input = input("Erase from measure (default: all track): ").strip()
+                if s_measure_input == "":
+                    start_measure = None # This signals a full erase
+                else:
+                    start_measure = int(s_measure_input)
+                    # Only ask for end measure if a start measure was given
+                    e_measure_input = input(f"Erase up to measure (optional, press Enter for end of track): ").strip()
+                    if e_measure_input != "":
+                        end_measure = int(e_measure_input)
+            except ValueError:
+                print("Error: Invalid measure number.")
+                return
+
+        # --- Confirmation ---
+        confirm_message = ""
+        # Case 1: Erase entire track
+        if start_measure is None:
+            confirm_message = f"Are you sure you want to erase ALL notes from track '{track.name}'? [y/N] "
+        # Case 2: Erase from a measure to the end
+        else:
+            end_str = f" to measure {end_measure}" if end_measure else " to the end of the track"
+            confirm_message = f"Are you sure you want to erase notes from measure {start_measure}{end_str} on track '{track.name}'? [y/N] "
+
+        if input(confirm_message).lower() != 'y':
+            print("Erase cancelled.")
+            return
+
+        # --- Execution ---
+        if start_measure is None:
+            track.events.clear()
+            print(f"Erased all events from track '{track.name}'.")
+            return
+
+        # Ranged erase logic
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+
+        start_beat = (start_measure - 1) * beats_per_measure
+
+        end_beat = float('inf')
+        if end_measure is not None:
+            if end_measure < start_measure:
+                print("Error: End measure cannot be before the start measure.")
+                return
+            end_beat = end_measure * beats_per_measure
+
+        initial_event_count = len(track.events)
+        track.events = [
+            event for event in track.events
+            if not (start_beat <= event.start_time < end_beat)
+        ]
+        removed_count = initial_event_count - len(track.events)
+
+        print(f"Erased {removed_count} event(s) from track '{track.name}'.")
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):

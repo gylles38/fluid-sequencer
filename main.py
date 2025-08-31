@@ -24,7 +24,7 @@ Sequencer CLI Commands:
   rename <index> <new_name> - Renames a track.
   record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
   delete <track_index>    - Deletes a track after confirmation.
-  erase <track_index> [start] [end] - Erases notes from a track, optionally within a measure range.
+  erase <track_index>     - Erases all or a range of notes from a track.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.
@@ -236,23 +236,15 @@ def main():
                 else:
                     print("Usage: delete <track_index>")
             elif command == "erase":
-                try:
-                    if not 1 <= len(args) <= 3:
-                        print("Usage: erase <track_index> [start_measure] [end_measure]")
-                        continue
-
-                    track_index = int(args[0])
-                    start_measure = int(args[1]) if len(args) >= 2 else None
-                    end_measure = int(args[2]) if len(args) == 3 else None
-
-                    # Let the sequencer handle confirmation and logic
-                    seq.erase_track(
-                        track_index=track_index,
-                        start_measure=start_measure,
-                        end_measure=end_measure
-                    )
-                except ValueError:
-                    print("Error: Invalid number for track index or measure.")
+                if len(args) == 1:
+                    try:
+                        track_index = int(args[0])
+                        # The sequencer method will now handle all prompting
+                        seq.erase_track(track_index=track_index)
+                    except ValueError:
+                        print("Error: Invalid track index.")
+                else:
+                    print("Usage: erase <track_index>")
             elif command == "rename":
                 if len(args) == 2:
                     seq.rename_track(track_index=int(args[0]), new_name=args[1])

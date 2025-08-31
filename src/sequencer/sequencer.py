@@ -520,7 +520,8 @@ class Sequencer:
         try:
             if self.song.metronome_enabled:
                 self.metronome_only_mode = True
-                self.play()
+                # Call play with a default start_measure to prevent interactive prompts
+                self.play(start_measure=1)
 
             with mido.open_input(inport_name) as inport:
                 if outport_name:

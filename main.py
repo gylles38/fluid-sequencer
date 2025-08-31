@@ -22,12 +22,12 @@ Sequencer CLI Commands:
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
-  copy                    - Copies a section of a track to another (or the same) track.
-  move <track_index>      - Moves a section of a track, potentially to a new destination track.
-  transpose               - Transposes a section of a track by a number of semitones.
+  copy                    - Copies a section of a track using 'measure:beat' positions.
+  move <track_index>      - Moves a section of a track using 'measure:beat' positions.
+  transpose               - Transposes a section of a track using 'measure:beat' positions.
   record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
   delete <track_index>    - Deletes a track after confirmation.
-  erase <track_index>     - Erases all or a range of notes from a track.
+  erase <track_index>     - Erases notes from a track using 'measure:beat' positions.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.

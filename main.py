@@ -14,6 +14,7 @@ Sequencer CLI Commands:
   vport <name>            - Creates a virtual MIDI output port.
   delvport                - Deletes an existing virtual port.
   assign <track_index>    - Assigns a track to an output port from a list of choices.
+  assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
@@ -23,6 +24,7 @@ Sequencer CLI Commands:
   rename <index> <new_name> - Renames a track.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
+  erase <track_index>     - Erases all notes from a track.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.
@@ -32,6 +34,7 @@ Sequencer CLI Commands:
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
   restart                 - Stops and restarts playback from the beginning.
+  metronome <on|off>      - Enables or disables the metronome.
   quit                    - Exits the sequencer.
 """
     print(help_text)
@@ -146,6 +149,29 @@ def main():
                         print("Error: Invalid input.")
                 else:
                     print("Usage: assign <track_index>")
+            elif command == "assignmetro":
+                hardware_ports = mido.get_output_names()
+                virtual_port_names = [vp.name for vp in seq.virtual_ports]
+                all_outputs = hardware_ports + virtual_port_names
+
+                if not all_outputs:
+                    print("No output ports available.")
+                    continue
+
+                print("Available output ports:")
+                for i, name in enumerate(all_outputs):
+                    print(f"  [{i}] {name}")
+
+                try:
+                    port_index = int(input("Choose a port to assign for the metronome: "))
+                    if 0 <= port_index < len(all_outputs):
+                        port_name = all_outputs[port_index]
+                        seq.song.metronome_port_name = port_name
+                        print(f"Metronome assigned to port '{port_name}'.")
+                    else:
+                        print("Error: Invalid port index.")
+                except (ValueError, IndexError):
+                    print("Error: Invalid input.")
             elif command == "unassign":
                 if len(args) == 1:
                     seq.unassign_port(track_index=int(args[0]))
@@ -201,6 +227,20 @@ def main():
                         print("Error: Invalid track index.")
                 else:
                     print("Usage: delete <track_index>")
+            elif command == "erase":
+                if len(args) == 1:
+                    track_index = int(args[0])
+                    if 0 <= track_index < len(seq.song.tracks):
+                        track_name = seq.song.tracks[track_index].name
+                        confirm = input(f"Are you sure you want to erase all notes from track '{track_name}'? [y/N] ").lower()
+                        if confirm == 'y':
+                            seq.erase_track(track_index)
+                        else:
+                            print("Erase cancelled.")
+                    else:
+                        print("Error: Invalid track index.")
+                else:
+                    print("Usage: erase <track_index>")
             elif command == "rename":
                 if len(args) == 2:
                     seq.rename_track(track_index=int(args[0]), new_name=args[1])
@@ -239,6 +279,14 @@ def main():
                 seq.stop()
             elif command == "restart":
                 seq.restart()
+            elif command == "metronome":
+                if len(args) == 1 and args[0].lower() in ["on", "off"]:
+                    is_enabled = args[0].lower() == "on"
+                    seq.song.metronome_enabled = is_enabled
+                    status = "enabled" if is_enabled else "disabled"
+                    print(f"Metronome is now {status}.")
+                else:
+                    print("Usage: metronome <on|off>")
             else:
                 print(f"Unknown command: '{command}'. Type 'help' for a list of commands.")
 

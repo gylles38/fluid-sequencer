@@ -22,7 +22,7 @@ Sequencer CLI Commands:
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
-  record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
+  record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
   delete <track_index>    - Deletes a track after confirmation.
   erase <track_index>     - Erases all notes from a track.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -211,8 +211,15 @@ def main():
             elif command == "record":
                 if len(args) == 1:
                     seq.record_track(track_index=int(args[0]))
+                elif len(args) == 2:
+                    try:
+                        track_index = int(args[0])
+                        start_measure = int(args[1])
+                        seq.record_track(track_index=track_index, start_measure=start_measure)
+                    except ValueError:
+                        print("Error: Invalid track index or measure number.")
                 else:
-                    print("Usage: record <track_index>")
+                    print("Usage: record <track_index> [start_measure]")
             elif command == "delete":
                 if len(args) == 1:
                     track_index = int(args[0])

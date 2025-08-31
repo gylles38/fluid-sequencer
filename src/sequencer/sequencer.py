@@ -2,6 +2,7 @@ import time
 import mido
 import threading
 import json
+from typing import Optional
 from .models import Song, Track, Event, Note
 from .midi_import import import_song
 from .midi_export import export_to_midi
@@ -355,10 +356,83 @@ class Sequencer:
         else:
             print(f"Error: Virtual port '{name}' not found.")
 
-    def record_track(self, track_index: int):
+    def record_track(self, track_index: int, start_measure: Optional[int] = None):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
+
+        if start_measure is None:
+            try:
+                measure_input = input("Start recording at measure (default: 1): ").strip()
+                if measure_input == "":
+                    start_measure = 1
+                else:
+                    start_measure = int(measure_input)
+            except ValueError:
+                print("Error: Invalid measure number.")
+                return
+
+        if start_measure < 1:
+            print("Error: Start measure must be 1 or greater.")
+            return
+
+        target_track = self.song.tracks[track_index]
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+        start_beat = (start_measure - 1) * beats_per_measure
+
+        # Check for existing notes from the start_beat onwards
+        existing_notes_in_range = [
+            event for event in target_track.events
+            if event.start_time >= start_beat
+        ]
+
+        overwrite_mode = "add"
+        num_measures_to_record = None
+
+        if existing_notes_in_range:
+            print("There are existing notes from this measure onwards.")
+            while True:
+                choice = input("Do you want to (r)eplace the existing notes or (a)dd to them? [r/a] ").lower()
+                if choice in ['r', 'replace']:
+                    overwrite_mode = "replace"
+                    break
+                elif choice in ['a', 'add']:
+                    overwrite_mode = "add"
+                    break
+                else:
+                    print("Invalid choice. Please enter 'r' or 'a'.")
+
+        # Ask for number of measures to record
+        while True:
+            try:
+                measures_input = input("How many measures to record? (Press Enter for unlimited) ").strip()
+                if measures_input == "":
+                    num_measures_to_record = None
+                    break
+                else:
+                    num_measures_to_record = int(measures_input)
+                    if num_measures_to_record <= 0:
+                        print("Error: Number of measures must be positive.")
+                        continue
+                    break
+            except ValueError:
+                print("Error: Invalid number.")
+
+        # Handle overwrite logic
+        if overwrite_mode == "replace":
+            end_beat = float('inf')
+            if num_measures_to_record is not None:
+                end_beat = start_beat + (num_measures_to_record * beats_per_measure)
+
+            # Remove events within the specified range
+            initial_event_count = len(target_track.events)
+            target_track.events = [
+                event for event in target_track.events
+                if not (start_beat <= event.start_time < end_beat)
+            ]
+            removed_count = initial_event_count - len(target_track.events)
+            if removed_count > 0:
+                print(f"Removed {removed_count} event(s) from the recording range.")
 
         inport_name, outport_name = None, None
         try:
@@ -388,9 +462,7 @@ class Sequencer:
             print("Error: Invalid selection.")
             return
 
-        target_track = self.song.tracks[track_index]
         open_notes = {}
-        start_beat = max((evt.start_time + evt.notes[0].duration for evt in target_track.events), default=0)
         outport = None
         try:
             if self.song.metronome_enabled:
@@ -405,14 +477,27 @@ class Sequencer:
                     print(f"Listening on '{inport_name}'. Waiting for first note...")
 
                 recording_start_time_sec = None
+                beats_per_second = self.song.tempo / 60
+
+                max_duration_beats = None
+                if num_measures_to_record is not None:
+                    max_duration_beats = num_measures_to_record * beats_per_measure
+                    print(f"Recording for {num_measures_to_record} measure(s) ({max_duration_beats:.2f} beats).")
+
                 for msg in inport:
                     if outport: outport.send(msg)
+                    now = time.time()
 
                     if recording_start_time_sec is None:
                         recording_start_time_sec = time.time()
-                        print("Recording started. Press Ctrl+C to stop.")
+                        print("Recording started. Press Ctrl+C or play for the specified duration to stop.")
 
-                    now = time.time()
+                    if max_duration_beats is not None:
+                        elapsed_beats = (now - recording_start_time_sec) * beats_per_second
+                        if elapsed_beats >= max_duration_beats:
+                            print(f"\nFinished recording {num_measures_to_record} measure(s).")
+                            break
+
                     if msg.type == 'note_on' and msg.velocity > 0:
                         if msg.note not in open_notes:
                             open_notes[msg.note] = (now, msg.velocity)
@@ -420,13 +505,14 @@ class Sequencer:
                         if msg.note in open_notes:
                             start_time_sec, velocity = open_notes.pop(msg.note)
                             duration_sec = now - start_time_sec
-                            beats_per_second = self.song.tempo / 60
+
                             start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
                             duration_beats = duration_sec * beats_per_second
+
                             note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                             event = Event(notes=[note], start_time=start_time_beats)
                             target_track.add_event(event)
-                            print(f"Recorded note: {note.pitch}, duration: {duration_beats:.2f} beats")
+                            print(f"Recorded note: {note.pitch}, start: {start_time_beats:.2f}, duration: {duration_beats:.2f} beats")
         except KeyboardInterrupt:
             print("\nRecording stopped.")
         except Exception as e:

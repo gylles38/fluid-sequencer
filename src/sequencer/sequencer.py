@@ -481,6 +481,51 @@ class Sequencer:
                 print(f"Closed Thru port '{outport_name}'.")
 
     def _play_thread(self):
+        if self.metronome_only_mode:
+            # Metronome-only mode for recording count-in
+            try:
+                port = mido.open_output(self.song.metronome_port_name)
+                ticks_per_beat = 480
+                beat_counter = 0
+                start_time_sec = time.time()
+                playback_cursor_sec = 0.0
+
+                while not self._stop_event.is_set():
+                    mido_tempo = mido.bpm2tempo(self.song.tempo)
+                    delta_sec = mido.tick2second(ticks_per_beat, ticks_per_beat, mido_tempo)
+
+                    if beat_counter > 0:
+                        playback_cursor_sec += delta_sec
+
+                    target_real_time_sec = start_time_sec + playback_cursor_sec
+                    sleep_duration = target_real_time_sec - time.time()
+                    if sleep_duration > 0:
+                        time.sleep(sleep_duration)
+
+                    if self._stop_event.is_set():
+                        break
+
+                    is_downbeat = (beat_counter % self.song.time_signature_numerator) == 0
+                    pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
+
+                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
+                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
+
+                    port.send(note_on)
+                    time.sleep(0.05)
+                    port.send(note_off)
+
+                    beat_counter += 1
+            except Exception as e:
+                print(f"Error in metronome thread: {e}")
+            finally:
+                if 'port' in locals() and port and not port.closed:
+                    port.send(mido.Message('control_change', channel=self.metronome_channel, control=123, value=0))
+                    port.close()
+                self.playback_state = "stopped"
+                print("Metronome stopped.")
+            return
+
         try:
             master_event_list = []
             ticks_per_beat = 480  # Standard MIDI ticks per beat

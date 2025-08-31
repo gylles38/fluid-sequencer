@@ -23,8 +23,8 @@ def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
         mid.tracks.append(midi_track)
 
         midi_track.append(mido.MetaMessage('track_name', name=track.name))
-        # Use channel `i` for track `i`. Channels are 0-15.
-        channel = i % 16
+        # Use the channel stored in the track model.
+        channel = track.channel
         midi_track.append(mido.Message('program_change', channel=channel, program=track.instrument, time=0))
 
         # --- Convert absolute time events to delta time MIDI messages ---

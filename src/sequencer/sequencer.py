@@ -543,8 +543,9 @@ class Sequencer:
 
                     if should_play_event:
                         port.send(event_details['message'])
-                else: # It's a metronome event, play it directly
-                    port.send(event_details['message'])
+                else:  # It's a metronome event, play it only if the metronome is currently enabled
+                    if self.song.metronome_enabled:
+                        port.send(event_details['message'])
 
                 last_tick = event_details['tick']
         except Exception as e:

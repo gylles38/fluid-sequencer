@@ -14,6 +14,7 @@ Sequencer CLI Commands:
   vport <name>            - Creates a virtual MIDI output port.
   delvport                - Deletes an existing virtual port.
   assign <track_index>    - Assigns a track to an output port from a list of choices.
+  unassign <track_index>  - Un-assigns a track from its output port.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
@@ -145,6 +146,11 @@ def main():
                         print("Error: Invalid input.")
                 else:
                     print("Usage: assign <track_index>")
+            elif command == "unassign":
+                if len(args) == 1:
+                    seq.unassign_port(track_index=int(args[0]))
+                else:
+                    print("Usage: unassign <track_index>")
             elif command == "setbank":
                 if len(args) == 2:
                     seq.set_bank(track_index=int(args[0]), msb=int(args[1]))

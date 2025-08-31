@@ -70,6 +70,18 @@ class Sequencer:
         self.song.tracks[track_index].output_port_name = port_name
         print(f"Assigned port '{port_name}' to track '{self.song.tracks[track_index].name}'.")
 
+    def unassign_port(self, track_index: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        if track.output_port_name:
+            print(f"Un-assigned port from track '{track.name}'.")
+            track.output_port_name = None
+        else:
+            print(f"Track '{track.name}' has no port assigned.")
+
     def set_bank(self, track_index: int, msb: int, lsb: int = 0):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")

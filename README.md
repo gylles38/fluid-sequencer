@@ -43,6 +43,7 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `vport <nom>`            | Crée un port de sortie MIDI virtuel.                                        |
 | `delvport`               | Supprime un port de sortie MIDI virtuel existant.                           |
 | `assign <piste>`         | Assigne une piste à un port de sortie à partir d'une liste de choix.        |
+| `unassign <piste>`       | Désassigne une piste de son port de sortie.                                 |
 | `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32, 0-127).          |
 | `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
 | `setprog <piste> <prog>` | Définit le programme MIDI (1-128) pour une piste.                           |

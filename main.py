@@ -24,6 +24,7 @@ Sequencer CLI Commands:
   rename <index> <new_name> - Renames a track.
   copy                    - Copies a section of a track to another (or the same) track.
   move <track_index>      - Moves a section of a track, potentially to a new destination track.
+  transpose               - Transposes a section of a track by a number of semitones.
   record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
   delete <track_index>    - Deletes a track after confirmation.
   erase <track_index>     - Erases all or a range of notes from a track.
@@ -263,6 +264,8 @@ def main():
                     print("Usage: move <track_index>")
             elif command == "copy":
                 seq.copy_track_section()
+            elif command == "transpose":
+                seq.transpose_track_section()
             elif command == "tempo":
                 if len(args) == 1:
                     seq.set_tempo(tempo=int(args[0]))

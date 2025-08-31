@@ -387,6 +387,85 @@ class Sequencer:
         else:
             print(f"Operation complete: {', '.join(report)}.")
 
+    def transpose_track_section(self):
+        if not self.song.tracks:
+            print("No tracks to transpose.")
+            return
+
+        try:
+            track_idx = int(input("Transpose track index: ").strip())
+            if not 0 <= track_idx < len(self.song.tracks):
+                print("Error: Invalid track index.")
+                return
+
+            track = self.song.tracks[track_idx]
+
+            start_measure_str = input(f"Transpose from start measure on track '{track.name}' (default: 1): ").strip()
+            start_measure = 1 if start_measure_str == "" else int(start_measure_str)
+
+            end_measure_str = input(f"Transpose to end measure on track '{track.name}' (default: end of track): ").strip()
+            end_measure = None if end_measure_str == "" else int(end_measure_str)
+
+            transpose_value = int(input("Transpose by how many semitones (e.g., 12 for an octave up, -12 for an octave down): ").strip())
+            if not -127 <= transpose_value <= 127:
+                print("Error: Transposition value must be between -127 and 127.")
+                return
+
+        except ValueError:
+            print("Error: Invalid number.")
+            return
+
+        # --- Calculations ---
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+        start_beat = (start_measure - 1) * beats_per_measure
+
+        end_beat = float('inf')
+        if end_measure is not None:
+            if end_measure < start_measure:
+                print("Error: End measure cannot be before the start measure.")
+                return
+            end_beat = end_measure * beats_per_measure
+
+        # --- Find events to transpose ---
+        events_to_transpose = [
+            event for event in track.events
+            if start_beat <= event.start_time < end_beat
+        ]
+
+        if not events_to_transpose:
+            print("No notes found in the specified range to transpose.")
+            return
+
+        # --- Confirmation ---
+        confirm_message = (
+            f"Transpose {len(events_to_transpose)} event(s) on track '{track.name}' by {transpose_value} semitones. "
+            f"Are you sure? [y/N] "
+        )
+        if input(confirm_message).lower() != 'y':
+            print("Transpose cancelled.")
+            return
+
+        # --- Transpose notes ---
+        transposed_note_count = 0
+        clamped_note_count = 0
+        for event in events_to_transpose:
+            for note in event.notes:
+                original_pitch = note.pitch
+                new_pitch = original_pitch + transpose_value
+
+                if not 0 <= new_pitch <= 127:
+                    clamped_pitch = max(0, min(127, new_pitch))
+                    print(f"Warning: Transposing note {original_pitch} by {transpose_value} results in an out-of-range pitch ({new_pitch}). Clamping to {clamped_pitch}.")
+                    note.pitch = clamped_pitch
+                    clamped_note_count += 1
+                else:
+                    note.pitch = new_pitch
+                transposed_note_count += 1
+
+        print(f"Transposed {transposed_note_count} note(s) on track '{track.name}'.")
+        if clamped_note_count > 0:
+            print(f"{clamped_note_count} note(s) were clamped to the valid MIDI pitch range (0-127).")
+
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")

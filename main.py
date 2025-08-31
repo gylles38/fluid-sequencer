@@ -24,6 +24,7 @@ Sequencer CLI Commands:
   rename <index> <new_name> - Renames a track.
   record <track_index>    - Records MIDI to a track, with optional live MIDI thru.
   delete <track_index>    - Deletes a track after confirmation.
+  erase <track_index>     - Erases all notes from a track.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.
@@ -226,6 +227,20 @@ def main():
                         print("Error: Invalid track index.")
                 else:
                     print("Usage: delete <track_index>")
+            elif command == "erase":
+                if len(args) == 1:
+                    track_index = int(args[0])
+                    if 0 <= track_index < len(seq.song.tracks):
+                        track_name = seq.song.tracks[track_index].name
+                        confirm = input(f"Are you sure you want to erase all notes from track '{track_name}'? [y/N] ").lower()
+                        if confirm == 'y':
+                            seq.erase_track(track_index)
+                        else:
+                            print("Erase cancelled.")
+                    else:
+                        print("Error: Invalid track index.")
+                else:
+                    print("Usage: erase <track_index>")
             elif command == "rename":
                 if len(args) == 2:
                     seq.rename_track(track_index=int(args[0]), new_name=args[1])

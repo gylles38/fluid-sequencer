@@ -63,6 +63,15 @@ class Sequencer:
         print(f"Track '{track_name}' deleted.")
         return True
 
+    def erase_track(self, track_index: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        track.events.clear()
+        print(f"Erased all events from track '{track.name}'.")
+
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")

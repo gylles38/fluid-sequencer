@@ -720,12 +720,28 @@ class Sequencer:
             self.playback_state = "stopped"
             print("Playback finished.")
 
-    def play(self, start_measure: int = 1, end_measure: Optional[int] = None, loop: bool = False):
+    def play(self, start_measure: Optional[int] = None, end_measure: Optional[int] = None, loop: bool = False):
         if self.playback_state == "playing":
             print("Already playing.")
             return
         if self.playback_state == "paused":
             self.pause()
+            return
+
+        try:
+            if start_measure is None:
+                measure_input = input("Start at measure (default: 1): ").strip()
+                start_measure = 1 if measure_input == "" else int(measure_input)
+
+            if end_measure is None:
+                measure_input = input("End at measure (optional, press Enter for end of song): ").strip()
+                if measure_input != "":
+                    end_measure = int(measure_input)
+                else:
+                    end_measure = None # Explicitly set to None if user presses Enter
+
+        except ValueError:
+            print("Error: Invalid measure number.")
             return
 
         if start_measure < 1:

@@ -277,17 +277,13 @@ def main():
             elif command == "prime":
                 seq.prime_all_tracks()
             elif command == "play" or command == "loop":
-                start_measure = 1
-                end_measure = None
                 try:
                     if len(args) > 2:
                         print(f"Usage: {command} [start_measure] [end_measure]")
                         continue
 
-                    if len(args) >= 1:
-                        start_measure = int(args[0])
-                    if len(args) == 2:
-                        end_measure = int(args[1])
+                    start_measure = int(args[0]) if len(args) >= 1 else None
+                    end_measure = int(args[1]) if len(args) == 2 else None
 
                     is_looping = command == "loop"
                     seq.play(start_measure=start_measure, end_measure=end_measure, loop=is_looping)

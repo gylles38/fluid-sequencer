@@ -18,9 +18,7 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
 
-        # Recording metronome
-        self._stop_recording_metronome_event = threading.Event()
-        self.metronome_thread = None
+        self.metronome_only_mode = False
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -432,7 +430,11 @@ class Sequencer:
 
         outport = None
         try:
-            self.start_recording_metronome()
+            # Use the main playback engine in metronome-only mode for the count-in
+            if self.song.metronome_enabled:
+                self.metronome_only_mode = True
+                self.play()
+
             with mido.open_input(inport_name) as inport:
                 if outport_name:
                     outport = mido.open_output(outport_name)
@@ -445,7 +447,6 @@ class Sequencer:
                     if outport:
                         outport.send(msg)
 
-                    # Start recording on the first valid message
                     if recording_start_time_sec is None:
                         recording_start_time_sec = time.time()
                         print("Recording started. Press Ctrl+C to stop.")
@@ -470,70 +471,14 @@ class Sequencer:
         except Exception as e:
             print(f"An error occurred during recording: {e}")
         finally:
-            self.stop_recording_metronome()
+            # Stop the metronome and reset the mode
+            if self.metronome_only_mode:
+                self.stop()
+                self.metronome_only_mode = False
+
             if outport:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
-
-    def _recording_metronome_thread(self):
-        """A dedicated thread to play metronome clicks during recording."""
-        try:
-            port = mido.open_output(self.song.metronome_port_name)
-            ticks_per_beat = 480
-            beat_counter = 0
-            start_time_sec = time.time()
-            playback_cursor_sec = 0.0
-
-            while not self._stop_recording_metronome_event.is_set():
-                # Calculate time to next beat
-                mido_tempo = mido.bpm2tempo(self.song.tempo)
-                delta_sec = mido.tick2second(ticks_per_beat, ticks_per_beat, mido_tempo)
-
-                # The first beat should happen immediately, others after a delay
-                if beat_counter > 0:
-                    playback_cursor_sec += delta_sec
-
-                # Drift correction
-                target_real_time_sec = start_time_sec + playback_cursor_sec
-                sleep_duration = target_real_time_sec - time.time()
-                if sleep_duration > 0:
-                    time.sleep(sleep_duration)
-
-                if self._stop_recording_metronome_event.is_set():
-                    break
-
-                # Send the click
-                is_downbeat = (beat_counter % self.song.time_signature_numerator) == 0
-                pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
-
-                port.send(mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100))
-                # Send a note-off almost immediately after to create a click sound
-                port.send(mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0))
-
-                beat_counter += 1
-
-        except Exception as e:
-            print(f"Error in metronome thread: {e}")
-        finally:
-            if 'port' in locals() and port and not port.closed:
-                # Turn off any lingering notes on the metronome channel
-                port.send(mido.Message('control_change', channel=self.metronome_channel, control=123, value=0))
-                port.close()
-
-    def start_recording_metronome(self):
-        if not self.song.metronome_enabled or not self.song.metronome_port_name:
-            return
-
-        self._stop_recording_metronome_event.clear()
-        self.metronome_thread = threading.Thread(target=self._recording_metronome_thread)
-        self.metronome_thread.start()
-        print("Metronome started for recording.")
-
-    def stop_recording_metronome(self):
-        if self.metronome_thread and self.metronome_thread.is_alive():
-            self._stop_recording_metronome_event.set()
-            self.metronome_thread.join()
-            print("Metronome stopped.")
 
     def _play_thread(self):
         try:
@@ -541,11 +486,12 @@ class Sequencer:
             ticks_per_beat = 480  # Standard MIDI ticks per beat
 
             # 1. Build the event list from all tracks
-            for track_idx, track in enumerate(self.song.tracks):
-                if not track.output_port_name:
-                    continue
+            if not self.metronome_only_mode:
+                for track_idx, track in enumerate(self.song.tracks):
+                    if not track.output_port_name:
+                        continue
 
-                # Add bank select and program change messages
+                    # Add bank select and program change messages
                 if track.bank_msb is not None:
                     master_event_list.append({'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb)})
                 if track.bank_lsb is not None:
@@ -559,40 +505,31 @@ class Sequencer:
                         start_tick = int(event.start_time * ticks_per_beat)
                         end_tick = start_tick + int(note.duration * ticks_per_beat)
                         note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)
-                        note_off_msg = mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)
+                        note_off_msg = mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0) # Velocity 0 is crucial
                         master_event_list.append({'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_on_msg})
                         master_event_list.append({'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_off_msg})
 
             # 2. Generate metronome events if enabled
             if self.song.metronome_enabled and self.song.metronome_port_name:
-                last_event_tick = 0
-                if master_event_list:
-                    last_event_tick = max(e['tick'] for e in master_event_list)
-
-                # Determine the total length in beats
-                num_beats = (last_event_tick // ticks_per_beat) + 1
-                # If the song is empty, provide a default length (e.g., 4 bars)
-                if num_beats <= 1:
-                    num_beats = self.song.time_signature_numerator * 4
+                # If in metronome-only mode, we need a duration, otherwise calculate from the song.
+                if self.metronome_only_mode:
+                    num_beats = 4 * 60 # Default to a long duration (e.g., 4 minutes at 60bpm) that will be stopped manually
+                else:
+                    last_event_tick = 0
+                    if master_event_list:
+                        last_event_tick = max(e['tick'] for e in master_event_list)
+                    num_beats = (last_event_tick // ticks_per_beat) + 1
 
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
+                    is_downbeat = (beat % self.song.time_signature_numerator) == 0
+                    pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
 
-                    # Pitch will be determined in real-time in the playback loop.
-                    # We use a placeholder pitch for now.
-                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=0, velocity=100)
-                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=0, velocity=0)
+                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
+                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
 
-                    # Add metronome note on at the beat, including the beat number
-                    master_event_list.append({
-                        'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name,
-                        'message': note_on, 'beat_number': beat, 'is_note_off': False
-                    })
-                    # Add note off shortly after
-                    master_event_list.append({
-                        'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name,
-                        'message': note_off, 'beat_number': beat, 'is_note_off': True
-                    })
+                    master_event_list.append({'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_on})
+                    master_event_list.append({'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
 
             # 3. Sort the final event list and play
             master_event_list.sort(key=lambda e: e['tick'])
@@ -629,6 +566,10 @@ class Sequencer:
 
                 # If it's a track event, check mute/solo status
                 if event_details['track_idx'] != -1:
+                    # Don't play track events in metronome-only mode
+                    if self.metronome_only_mode:
+                        continue
+
                     track = self.song.tracks[event_details['track_idx']]
                     is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                     should_play_event = False
@@ -641,13 +582,7 @@ class Sequencer:
                         port.send(event_details['message'])
                 else:  # It's a metronome event
                     if self.song.metronome_enabled:
-                        beat_number = event_details['beat_number']
-                        is_downbeat = (beat_number % self.song.time_signature_numerator) == 0
-                        pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
-
-                        # Create a copy of the message to avoid modifying the list
-                        msg = event_details['message'].copy(note=pitch)
-                        port.send(msg)
+                        port.send(event_details['message'])
 
                 last_tick = event_details['tick']
         except Exception as e:

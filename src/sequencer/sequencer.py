@@ -515,16 +515,27 @@ class Sequencer:
             print(f"Playing on {len(self.open_ports)} port(s)...")
             last_tick = 0
 
+            # Absolute timing for drift correction
+            start_time_sec = time.time()
+            playback_cursor_sec = 0.0
+
             for event_details in master_event_list:
                 self._run_event.wait()
                 if self._stop_event.is_set(): break
 
+                # Calculate time to next event using the current tempo
                 delta_ticks = event_details['tick'] - last_tick
                 if delta_ticks > 0:
-                    # Recalculate tempo in real-time to allow for live changes
                     mido_tempo = mido.bpm2tempo(self.song.tempo)
-                    wait_time = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
-                    time.sleep(wait_time)
+                    delta_sec = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
+                    playback_cursor_sec += delta_sec
+
+                # Correct for processing drift
+                target_real_time_sec = start_time_sec + playback_cursor_sec
+                sleep_duration = target_real_time_sec - time.time()
+
+                if sleep_duration > 0:
+                    time.sleep(sleep_duration)
 
                 port_name = event_details['port_name']
                 port = self.open_ports.get(port_name)

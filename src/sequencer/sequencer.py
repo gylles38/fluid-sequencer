@@ -67,6 +67,18 @@ class Sequencer:
             print("Error: Invalid format. Please enter numbers in 'measure:beat' format.")
             return None
 
+    def _format_beats_to_position(self, beats: float) -> str:
+        """Converts an absolute beat count into a 'measure:beat' string."""
+        if beats is None:
+            return ""
+        beats_per_measure = self.song.time_signature_numerator
+        if beats_per_measure == 0:
+            return "1:1"  # Avoid division by zero, return a sensible default
+
+        measure = int(beats / beats_per_measure) + 1
+        beat = int(beats % beats_per_measure) + 1
+        return f"{measure}:{beat}"
+
     def set_tempo(self, tempo: int):
         if tempo <= 0:
             raise ValueError("Tempo must be positive.")
@@ -1061,11 +1073,9 @@ class Sequencer:
             # The main loop for playback, which can be repeated for the "loop" feature
             while not self._stop_event.is_set():
                 if loop:
-                    loop_message = f"Looping measures {start_measure}"
-                    if end_measure:
-                        loop_message += f" to {end_measure}."
-                    else:
-                        loop_message += " to end."
+                    start_pos_str = self._format_beats_to_position(start_beat)
+                    end_pos_str = self._format_beats_to_position(end_beat) if end_beat is not None else "end"
+                    loop_message = f"Looping from {start_pos_str} to {end_pos_str}."
                     print(loop_message)
                 else:
                     print(f"Playing on {len(self.open_ports)} port(s)...")

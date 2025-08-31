@@ -132,10 +132,26 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-        track = self.song.tracks[track_index]
-        track.is_solo = not track.is_solo
-        status = "Solo" if track.is_solo else "Un-soloed"
-        print(f"Track '{track.name}' is now {status}.")
+
+        target_track = self.song.tracks[track_index]
+
+        # Determine the new solo state. If we are turning solo ON for this track.
+        is_being_soloed = not target_track.is_solo
+
+        # Update the target track
+        target_track.is_solo = is_being_soloed
+
+        # If we just soloed this track, un-solo all other tracks.
+        if is_being_soloed:
+            for i, other_track in enumerate(self.song.tracks):
+                if i == track_index:
+                    continue
+                if other_track.is_solo:
+                    other_track.is_solo = False
+                    print(f"Track '{other_track.name}' is now Un-soloed.")
+
+        status = "Solo" if target_track.is_solo else "Un-soloed"
+        print(f"Track '{target_track.name}' is now {status}.")
 
     def prime_all_tracks(self):
         """Sends the current program/bank state for all assigned tracks."""
@@ -424,21 +440,12 @@ class Sequencer:
             master_event_list = []
             ticks_per_beat = 480
 
-            # Determine which tracks to play based on mute/solo status
-            solo_tracks = [t for t in self.song.tracks if t.is_solo]
-            if solo_tracks:
-                tracks_to_play = solo_tracks
-            else:
-                tracks_to_play = [t for t in self.song.tracks if not t.is_muted]
-
-            # Create a map of track name to index for easy lookup
-            track_name_to_idx = {t.name: i for i, t in enumerate(self.song.tracks)}
-
-            for track in tracks_to_play:
+            # Build the master event list from ALL tracks.
+            # Mute/solo logic will be handled in the playback loop.
+            for track_idx, track in enumerate(self.song.tracks):
                 if not track.output_port_name:
                     continue
 
-                track_idx = track_name_to_idx[track.name]
                 # Add bank select and program change messages at the beginning of the track
                 if track.bank_msb is not None:
                     master_event_list.append({'tick': 0, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb, time=0)})
@@ -462,18 +469,35 @@ class Sequencer:
             last_tick = 0
             mido_tempo = mido.bpm2tempo(self.song.tempo)
 
-            for event in master_event_list:
+            for event_details in master_event_list:
                 self._run_event.wait()
                 if self._stop_event.is_set(): break
-                delta_ticks = event['tick'] - last_tick
+
+                delta_ticks = event_details['tick'] - last_tick
                 if delta_ticks > 0:
                     wait_time = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
                     time.sleep(wait_time)
-                track = self.song.tracks[event['track_idx']]
-                port = self.open_ports.get(track.output_port_name)
-                if port:
-                    port.send(event['message'])
-                last_tick = event['tick']
+
+                track_idx = event_details['track_idx']
+                track = self.song.tracks[track_idx]
+
+                # Real-time mute/solo check
+                is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+
+                should_play_event = False
+                if is_any_track_soloed:
+                    if track.is_solo:
+                        should_play_event = True
+                else: # No tracks are soloed, so check for mutes
+                    if not track.is_muted:
+                        should_play_event = True
+
+                if should_play_event:
+                    port = self.open_ports.get(track.output_port_name)
+                    if port:
+                        port.send(event_details['message'])
+
+                last_tick = event_details['tick']
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:

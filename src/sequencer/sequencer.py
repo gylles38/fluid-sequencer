@@ -133,6 +133,76 @@ class Sequencer:
         self.song.tracks[track_index].name = new_name
         print(f"Track '{old_name}' renamed to '{new_name}'.")
 
+    def move_track_section(self, track_index: int):
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+
+        try:
+            start_measure = int(input("Move from start measure: ").strip())
+            num_measures = int(input("Number of measures to move: ").strip())
+            destination_measure = int(input("Move to destination measure: ").strip())
+
+            if start_measure < 1 or num_measures < 1 or destination_measure < 1:
+                print("Error: Measure numbers and count must be 1 or greater.")
+                return
+
+            if destination_measure >= start_measure and destination_measure < start_measure + num_measures:
+                print("Error: Destination cannot be inside the source range.")
+                return
+
+        except ValueError:
+            print("Error: Invalid number.")
+            return
+
+        # Confirmation
+        confirm_message = (
+            f"On track '{track.name}', move {num_measures} measure(s) "
+            f"from measure {start_measure} to measure {destination_measure}. Are you sure? [y/N] "
+        )
+        if input(confirm_message).lower() != 'y':
+            print("Move cancelled.")
+            return
+
+        # --- Core move logic ---
+        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+
+        source_start_beat = (start_measure - 1) * beats_per_measure
+        source_end_beat = source_start_beat + (num_measures * beats_per_measure)
+
+        offset_beats = (destination_measure - start_measure) * beats_per_measure
+
+        events_to_move = []
+        other_events = []
+
+        for event in track.events:
+            if source_start_beat <= event.start_time < source_end_beat:
+                events_to_move.append(event)
+            else:
+                other_events.append(event)
+
+        if not events_to_move:
+            print("No notes found in the specified source range to move.")
+            return
+
+        moved_count = 0
+        for event in events_to_move:
+            new_start_time = event.start_time + offset_beats
+            if new_start_time < 0:
+                print(f"Warning: Moving event would result in a negative start time ({new_start_time:.2f} beats). Skipping this event.")
+                other_events.append(event) # Put it back without moving it
+            else:
+                event.start_time = new_start_time
+                moved_count += 1
+
+        # Recombine and sort
+        track.events = other_events + events_to_move
+        track.events.sort(key=lambda e: e.start_time)
+
+        print(f"Moved {moved_count} event(s) on track '{track.name}'.")
+
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")

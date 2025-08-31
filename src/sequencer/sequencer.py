@@ -526,7 +526,7 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_thread(self):
+    def _play_thread(self, start_measure: int = 1, end_measure: Optional[int] = None, loop: bool = False):
         # Metronome-only mode for recording count-in
         if self.metronome_only_mode:
             port = self.open_ports.get(self.song.metronome_port_name)
@@ -614,47 +614,100 @@ class Sequencer:
                     master_event_list.append({'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_on})
                     master_event_list.append({'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
 
-            # 3. Sort and play
-            master_event_list.sort(key=lambda e: e['tick'])
-            print(f"Playing on {len(self.open_ports)} port(s)...")
-            last_tick = 0
-            start_time_sec = time.time()
-            playback_cursor_sec = 0.0
+            # 3. Filter and normalize events for ranged playback
+            beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
+            start_beat = (start_measure - 1) * beats_per_measure
+            start_tick = int(start_beat * ticks_per_beat)
 
-            for event_details in master_event_list:
-                self._run_event.wait()
-                if self._stop_event.is_set(): break
+            end_tick = float('inf')
+            if end_measure is not None:
+                # The end beat is the start of the measure *after* the end_measure
+                end_beat = end_measure * beats_per_measure
+                end_tick = int(end_beat * ticks_per_beat)
 
-                delta_ticks = event_details['tick'] - last_tick
-                if delta_ticks > 0:
-                    mido_tempo = mido.bpm2tempo(self.song.tempo)
-                    delta_sec = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
-                    playback_cursor_sec += delta_sec
+            # Filter events that are within the playback range
+            ranged_event_list = [
+                event for event in master_event_list
+                if start_tick <= event['tick'] < end_tick
+            ]
 
-                target_real_time_sec = start_time_sec + playback_cursor_sec
-                sleep_duration = target_real_time_sec - time.time()
-                if sleep_duration > 0:
-                    time.sleep(sleep_duration)
+            # Normalize ticks so playback starts immediately
+            if start_tick > 0 and ranged_event_list:
+                # Create a shallow copy of the event dictionaries
+                ranged_event_list = [e.copy() for e in ranged_event_list]
+                for event in ranged_event_list:
+                    event['tick'] -= start_tick
 
-                port_name = event_details['port_name']
-                port = self.open_ports.get(port_name)
-                if not port: continue
+            if not ranged_event_list:
+                print("No notes to play in the selected range.")
+                return
 
-                if event_details['track_idx'] != -1:
-                    track = self.song.tracks[event_details['track_idx']]
-                    is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                    should_play_event = False
-                    if is_any_track_soloed:
-                        if track.is_solo: should_play_event = True
-                    elif not track.is_muted:
-                        should_play_event = True
-                    if should_play_event:
-                        port.send(event_details['message'])
+            # 4. Sort and play
+            ranged_event_list.sort(key=lambda e: e['tick'])
+
+            if loop:
+                print("Looping playback... Press 'stop' to exit.")
+
+            # The main loop for playback, which can be repeated for the "loop" feature
+            while not self._stop_event.is_set():
+                if loop:
+                    loop_message = f"Looping measures {start_measure}"
+                    if end_measure:
+                        loop_message += f" to {end_measure}."
+                    else:
+                        loop_message += " to end."
+                    print(loop_message)
                 else:
-                    if self.song.metronome_enabled:
-                        port.send(event_details['message'])
+                    print(f"Playing on {len(self.open_ports)} port(s)...")
 
-                last_tick = event_details['tick']
+                last_tick = 0
+                start_time_sec = time.time()
+                playback_cursor_sec = 0.0
+
+                for event_details in ranged_event_list:
+                    self._run_event.wait()
+                    if self._stop_event.is_set(): break
+
+                    delta_ticks = event_details['tick'] - last_tick
+                    if delta_ticks > 0:
+                        mido_tempo = mido.bpm2tempo(self.song.tempo)
+                        delta_sec = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
+                        playback_cursor_sec += delta_sec
+
+                    target_real_time_sec = start_time_sec + playback_cursor_sec
+                    sleep_duration = target_real_time_sec - time.time()
+                    if sleep_duration > 0:
+                        time.sleep(sleep_duration)
+
+                    if self._stop_event.is_set(): break
+
+                    port_name = event_details['port_name']
+                    port = self.open_ports.get(port_name)
+                    if not port: continue
+
+                    if event_details['track_idx'] != -1:
+                        track = self.song.tracks[event_details['track_idx']]
+                        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                        should_play_event = False
+                        if is_any_track_soloed:
+                            if track.is_solo: should_play_event = True
+                        elif not track.is_muted:
+                            should_play_event = True
+                        if should_play_event:
+                            port.send(event_details['message'])
+                    else: # Metronome events
+                        # Only play metronome if it falls within the original, non-normalized tick range
+                        original_tick = event_details['tick'] + start_tick
+                        if self.song.metronome_enabled and start_tick <= original_tick < end_tick:
+                            port.send(event_details['message'])
+
+                    last_tick = event_details['tick']
+
+                if not loop or self._stop_event.is_set():
+                    break
+
+                self._all_notes_off()
+                time.sleep(0.1)
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:
@@ -667,12 +720,19 @@ class Sequencer:
             self.playback_state = "stopped"
             print("Playback finished.")
 
-    def play(self):
+    def play(self, start_measure: int = 1, end_measure: Optional[int] = None, loop: bool = False):
         if self.playback_state == "playing":
             print("Already playing.")
             return
         if self.playback_state == "paused":
             self.pause()
+            return
+
+        if start_measure < 1:
+            print("Error: Start measure must be 1 or greater.")
+            return
+        if end_measure is not None and end_measure < start_measure:
+            print("Error: End measure cannot be before the start measure.")
             return
 
         self.open_ports.clear()
@@ -714,7 +774,10 @@ class Sequencer:
         self._stop_event.clear()
         self._run_event.set()
         self.playback_state = "playing"
-        self.playback_thread = threading.Thread(target=self._play_thread)
+        self.playback_thread = threading.Thread(
+            target=self._play_thread,
+            kwargs={'start_measure': start_measure, 'end_measure': end_measure, 'loop': loop}
+        )
         self.playback_thread.start()
 
     def pause(self):

@@ -30,7 +30,8 @@ Sequencer CLI Commands:
   save <filepath>         - Saves only the song to a MIDI file.
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
-  play                    - Plays the song using the assigned ports for each track.
+  play [start] [end]      - Plays the song, optionally from a start to an end measure.
+  loop [start] [end]      - Loops a section of the song, optionally from a start to an end measure.
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
   restart                 - Stops and restarts playback from the beginning.
@@ -275,11 +276,23 @@ def main():
                     print("Usage: saveproject <basename>")
             elif command == "prime":
                 seq.prime_all_tracks()
-            elif command == "play":
-                if len(args) == 0:
-                    seq.play()
-                else:
-                    print("Usage: play (takes no arguments)")
+            elif command == "play" or command == "loop":
+                start_measure = 1
+                end_measure = None
+                try:
+                    if len(args) > 2:
+                        print(f"Usage: {command} [start_measure] [end_measure]")
+                        continue
+
+                    if len(args) >= 1:
+                        start_measure = int(args[0])
+                    if len(args) == 2:
+                        end_measure = int(args[1])
+
+                    is_looping = command == "loop"
+                    seq.play(start_measure=start_measure, end_measure=end_measure, loop=is_looping)
+                except ValueError:
+                    print("Error: Invalid measure number.")
             elif command == "pause":
                 seq.pause()
             elif command == "stop":

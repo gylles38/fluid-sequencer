@@ -52,6 +52,8 @@ class Song:
     time_signature_numerator: int = 4
     time_signature_denominator: int = 4
     tracks: List[Track] = field(default_factory=list)
+    metronome_enabled: bool = False
+    metronome_port_name: Optional[str] = None
 
     def add_track(self, track: Track):
         """Adds a track to the song, assigning a default channel."""

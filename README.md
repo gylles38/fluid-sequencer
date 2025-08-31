@@ -35,17 +35,96 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | Commande                 | Description                                                                 |
 | ------------------------ | --------------------------------------------------------------------------- |
 | `help`                   | Affiche le message d'aide.                                                  |
-| `add <nom> [instr]`      | Ajoute une nouvelle piste vide. `instr` est un numéro d'instrument MIDI optionnel (0-127). |
-| `load <fichier>`         | Charge un fichier MIDI (`.mid`) et l'ajoute comme une nouvelle piste.         |
+| `add <nom> [prog]`       | Ajoute une nouvelle piste. `prog` est le numéro de programme (1-128).        |
+| `load <fichier>`         | Charge uniquement un fichier MIDI.                                          |
+| `loadproject <basename>` | Charge un projet complet (`.mid` et `.proj.json`).                          |
 | `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
-| `record <index_piste>`   | Démarre l'enregistrement sur une piste. Utilisez `list` pour trouver l'`<index_piste>`. |
-| `delete <index_piste>`   | Supprime une piste après confirmation.                                      |
+| `ports`                  | Liste les ports d'entrée et de sortie MIDI disponibles.                     |
+| `vport <nom>`            | Crée un port de sortie MIDI virtuel.                                        |
+| `delvport`               | Supprime un port de sortie MIDI virtuel existant.                           |
+| `assign <piste>`         | Assigne une piste à un port de sortie à partir d'une liste de choix.        |
+| `unassign <piste>`       | Désassigne une piste de son port de sortie.                                 |
+| `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32, 0-127).          |
+| `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
+| `setprog <piste> <prog>` | Définit le programme MIDI (1-128) pour une piste.                           |
+| `prime`                  | Envoie l'état (banque/programme) de toutes les pistes aux ports assignés.   |
+| `mute <piste>`           | Met une piste en sourdine ou réactive son son.                              |
+| `solo <piste>`           | Isole une piste pour l'écoute ou la désactive.                              |
+| `rename <piste> <nom>`   | Renomme une piste.                                                          |
+| `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
+| `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
-| `save <fichier>`         | Sauvegarde la chanson entière dans un nouveau fichier MIDI.                 |
+| `timesig <num> <den>`    | Définit la signature rythmique du morceau (ex: 4 4).                        |
+| `save <fichier>`         | Sauvegarde uniquement la chanson dans un fichier MIDI.                      |
+| `saveproject <basename>` | Sauvegarde le projet complet (MIDI et configuration).                       |
 | `play`                   | Joue la chanson actuelle depuis le début.                                   |
 | `pause`                  | Met en pause ou reprend la lecture.                                         |
 | `stop`                   | Arrête la lecture et réinitialise la position.                              |
+| `restart`                | Arrête et redémarre la lecture depuis le début.                             |
 | `quit`                   | Quitte le séquenceur.                                                       |
+
+---
+
+## Sauvegarde et Chargement de Projets
+
+Pour éviter de reconfigurer vos ports virtuels et vos assignations de pistes à chaque session, vous pouvez utiliser les commandes de projet.
+
+-   **`saveproject <nom>`** : Cette commande sauvegarde deux fichiers :
+    1.  `<nom>.mid` : Le fichier MIDI standard contenant toutes vos notes.
+    2.  `<nom>.proj.json` : Un fichier de configuration qui mémorise les ports virtuels que vous avez créés et quelles pistes leur sont assignées.
+
+-   **`loadproject <nom>`** : Cette commande charge un projet complet. Elle va :
+    1.  Lire le fichier `<nom>.proj.json`.
+    2.  Charger le fichier MIDI associé.
+    3.  Recréer automatiquement les ports virtuels.
+    4.  Réassigner les pistes aux bons ports.
+
+---
+
+## Exemples d'utilisation
+
+### How-To : Configurer et enregistrer une piste
+
+Voici un exemple de workflow complet.
+
+1.  **Ajouter une piste :**
+    *   `> add piano` (ajoute une piste nommée "piano" avec le programme 1 par défaut)
+
+2.  **Configurer l'instrument et la chanson :**
+    *   Renommer la piste si nécessaire : `> rename 0 "Grand Piano"`
+    *   Changer le programme pour un piano électrique (ex: 5) : `> setprog 0 5`
+    *   Changer le canal MIDI pour le canal 10 : `> setch 0 10`
+    *   Définir la banque de sons (ex: MSB=1, LSB=1) : `> setbank 0 1 1`
+    *   Définir la signature rythmique : `> timesig 3 4`
+
+3.  **Lister les pistes** pour vérifier la configuration : `list`
+    ```
+    Song: New Song | Tempo: 120 BPM | Time Signature: 3/4
+    ====================
+    [0] Grand Piano (Ch: 10, Prog: 5, Bank: 1:1, 0 events)
+    ```
+
+4.  **Connecter à un synthétiseur (via Carla) :**
+    *   Créer un port virtuel : `> vport mon-synth`
+    *   Lancer Carla, y charger un synthétiseur, et le configurer pour qu'il écoute sur le **canal 10**.
+    *   Dans la baie de patch de Carla, connecter la sortie `mon-synth` à l'entrée du synthétiseur.
+    *   Assigner la piste au port virtuel : `> assign 0` -> choisir `mon-synth` dans la liste.
+
+5.  **Envoyer la configuration au synthétiseur :**
+    *   La commande `assign` n'envoie pas automatiquement l'état. Utilisez la commande `prime` pour mettre à jour votre synthétiseur.
+    *   `> prime`
+
+6.  **Enregistrer la piste en s'écoutant en direct :**
+    *   Lancer l'enregistrement : `> record 0`
+    *   Choisir votre clavier physique comme port d'entrée.
+    *   Activer le "MIDI Thru" (`y`) et choisir `mon-synth` comme port de sortie.
+    *   Jouez ! Vous entendrez le son du synthé de Carla pendant l'enregistrement.
+
+7.  **Sauvegarder le projet :**
+    *   `> saveproject mon_morceau`
+
+8.  Plus tard, vous pourrez tout recharger avec `loadproject mon_morceau`.
+
 
 ---
 

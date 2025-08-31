@@ -30,9 +30,14 @@ class Event:
 class Track:
     """Represents a track, which is a sequence of musical events."""
     name: str
+    channel: int = 0  # MIDI channel (0-15)
     events: List[Event] = field(default_factory=list)
     instrument: int = 0  # MIDI program number (0-127)
+    bank_msb: Optional[int] = None  # Bank Select MSB (CC#0)
+    bank_lsb: Optional[int] = None  # Bank Select LSB (CC#32)
     output_port_name: Optional[str] = None
+    is_muted: bool = False
+    is_solo: bool = False
 
     def add_event(self, event: Event):
         """Adds an event to the track and keeps the event list sorted by start time."""
@@ -44,8 +49,15 @@ class Song:
     """Represents a song, containing multiple tracks and global settings."""
     name: str
     tempo: int = 120  # Beats per minute (BPM)
+    time_signature_numerator: int = 4
+    time_signature_denominator: int = 4
     tracks: List[Track] = field(default_factory=list)
 
     def add_track(self, track: Track):
-        """Adds a track to the song."""
+        """Adds a track to the song, assigning a default channel."""
+        # Assign channel based on current number of tracks (0-indexed)
+        if len(self.tracks) < 16:
+            track.channel = len(self.tracks)
+        else:
+            track.channel = 15 # Default to last channel if more than 16 tracks
         self.tracks.append(track)

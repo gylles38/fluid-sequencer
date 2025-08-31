@@ -14,7 +14,8 @@ def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
     # Create a tempo track (required for type 1 files)
     tempo_track = mido.MidiTrack()
     mid.tracks.append(tempo_track)
-    # mido tempo is in microseconds per beat
+    # Add time signature and tempo meta messages
+    tempo_track.append(mido.MetaMessage('time_signature', numerator=song.time_signature_numerator, denominator=song.time_signature_denominator))
     tempo_track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(song.tempo)))
 
     for i, track in enumerate(song.tracks):

@@ -20,6 +20,8 @@ class Sequencer:
         self._run_event.set()
 
         self.metronome_only_mode = False
+        self.total_paused_time = 0.0
+        self.pause_start_time = 0.0
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -838,7 +840,7 @@ class Sequencer:
                     if self._stop_event.is_set(): break
 
                     # --- Calculate current position in ticks ---
-                    elapsed_sec = time.time() - start_time_sec
+                    elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
                     mido_tempo = mido.bpm2tempo(self.song.tempo)
                     current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
 
@@ -944,6 +946,7 @@ class Sequencer:
             print("Error: End measure cannot be before the start measure.")
             return
 
+        self.total_paused_time = 0.0 # Reset pause timer for new playback
         self.open_ports.clear()
         self.temporary_ports = []
 
@@ -996,9 +999,12 @@ class Sequencer:
         if self.playback_state == "playing":
             self._all_notes_off()
             self._run_event.clear()
+            self.pause_start_time = time.time()
             self.playback_state = "paused"
             print("Playback paused.")
         elif self.playback_state == "paused":
+            paused_duration = time.time() - self.pause_start_time
+            self.total_paused_time += paused_duration
             self._run_event.set()
             self.playback_state = "playing"
             print("Resuming playback...")

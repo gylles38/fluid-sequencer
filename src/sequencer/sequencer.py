@@ -166,42 +166,78 @@ class Sequencer:
             print("Move cancelled.")
             return
 
-        # --- Core move logic ---
+        # --- Calculations ---
         beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
 
         source_start_beat = (start_measure - 1) * beats_per_measure
         source_end_beat = source_start_beat + (num_measures * beats_per_measure)
 
-        offset_beats = (destination_measure - start_measure) * beats_per_measure
+        destination_start_beat = (destination_measure - 1) * beats_per_measure
+        destination_end_beat = destination_start_beat + (num_measures * beats_per_measure)
 
-        events_to_move = []
-        other_events = []
+        offset_beats = destination_start_beat - source_start_beat
+
+        # --- Check for notes at destination ---
+        events_at_destination = [
+            event for event in track.events
+            if (destination_start_beat <= event.start_time < destination_end_beat)
+            and not (source_start_beat <= event.start_time < source_end_beat)
+        ]
+
+        overwrite_mode = "add"
+        if events_at_destination:
+            print("There are existing notes at the destination.")
+            while True:
+                choice = input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                if choice in ['r', 'replace']:
+                    overwrite_mode = "replace"
+                    break
+                elif choice in ['a', 'add']:
+                    overwrite_mode = "add"
+                    break
+                else:
+                    print("Invalid choice. Please enter 'r' or 'a'.")
+
+        # --- Partition and process events ---
+        final_events = []
+        moved_event_count = 0
+        deleted_event_count = 0
 
         for event in track.events:
+            # Case 1: Event is in the source range -> Move it
             if source_start_beat <= event.start_time < source_end_beat:
-                events_to_move.append(event)
+                new_start_time = event.start_time + offset_beats
+                if new_start_time < 0:
+                    print(f"Warning: Moving event would result in a negative start time ({new_start_time:.2f} beats). Keeping original.")
+                    final_events.append(event) # Keep it in its original position
+                else:
+                    event.start_time = new_start_time
+                    final_events.append(event)
+                    moved_event_count += 1
+
+            # Case 2: Event is at the destination and we are replacing -> Delete it
+            elif overwrite_mode == "replace" and destination_start_beat <= event.start_time < destination_end_beat:
+                deleted_event_count += 1
+                pass # Don't add it to final_events
+
+            # Case 3: Event is not affected -> Keep it
             else:
-                other_events.append(event)
+                final_events.append(event)
 
-        if not events_to_move:
-            print("No notes found in the specified source range to move.")
-            return
-
-        moved_count = 0
-        for event in events_to_move:
-            new_start_time = event.start_time + offset_beats
-            if new_start_time < 0:
-                print(f"Warning: Moving event would result in a negative start time ({new_start_time:.2f} beats). Skipping this event.")
-                other_events.append(event) # Put it back without moving it
-            else:
-                event.start_time = new_start_time
-                moved_count += 1
-
-        # Recombine and sort
-        track.events = other_events + events_to_move
+        track.events = final_events
         track.events.sort(key=lambda e: e.start_time)
 
-        print(f"Moved {moved_count} event(s) on track '{track.name}'.")
+        # --- Report results ---
+        report = []
+        if moved_event_count > 0:
+            report.append(f"Moved {moved_event_count} event(s)")
+        if deleted_event_count > 0:
+            report.append(f"deleted {deleted_event_count} event(s) at destination")
+
+        if not report:
+            print("No notes were found in the source range to move.")
+        else:
+            print(f"Operation complete: {', '.join(report)} on track '{track.name}'.")
 
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):

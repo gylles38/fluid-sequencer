@@ -161,10 +161,6 @@ class Sequencer:
                 print("Error: Measure numbers and count must be 1 or greater.")
                 return
 
-            if track_index == dest_track_idx and destination_measure >= start_measure and destination_measure < start_measure + num_measures:
-                print("Error: Destination cannot be inside the source range when moving within the same track.")
-                return
-
         except ValueError:
             print("Error: Invalid number.")
             return

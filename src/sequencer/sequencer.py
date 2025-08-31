@@ -514,7 +514,6 @@ class Sequencer:
             master_event_list.sort(key=lambda e: e['tick'])
             print(f"Playing on {len(self.open_ports)} port(s)...")
             last_tick = 0
-            mido_tempo = mido.bpm2tempo(self.song.tempo)
 
             for event_details in master_event_list:
                 self._run_event.wait()
@@ -522,6 +521,8 @@ class Sequencer:
 
                 delta_ticks = event_details['tick'] - last_tick
                 if delta_ticks > 0:
+                    # Recalculate tempo in real-time to allow for live changes
+                    mido_tempo = mido.bpm2tempo(self.song.tempo)
                     wait_time = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
                     time.sleep(wait_time)
 

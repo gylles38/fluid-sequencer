@@ -7,6 +7,8 @@ setup(
     package_dir={"": "src"},
     install_requires=[
         "mido[ports-rtmidi]>=1.2.10",
+        "pydub>=0.25.1",
+        "simpleaudio>=1.0.4",
     ],
     author="Jules",
     author_email="jules@example.com",

@@ -1215,9 +1215,8 @@ class Sequencer:
 
                         elif event_details['type'] == 'audio':
                             if should_play_event:
-                                # Non-blocking audio playback
-                                audio_thread = threading.Thread(target=self._play_audio_file, args=(event_details['filepath'],))
-                                audio_thread.start()
+                                # _play_audio_file is already non-blocking as it uses _play_with_simpleaudio
+                                self._play_audio_file(event_details['filepath'])
 
                         elif event_details['type'] == 'metronome':
                              original_tick = event_details['tick'] + start_tick

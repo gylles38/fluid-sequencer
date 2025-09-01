@@ -51,13 +51,18 @@ Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la
 | `mute <piste>`           | Met une piste en sourdine ou réactive son son.                              |
 | `solo <piste>`           | Isole une piste pour l'écoute ou la désactive.                              |
 | `rename <piste> <nom>`   | Renomme une piste.                                                          |
-| `record <piste>`         | Enregistre le MIDI sur une piste, avec une option de "MIDI thru" en direct.  |
+| `copy`                   | Copie une section d'une piste en utilisant des positions `mesure:temps`.    |
+| `move <piste>`           | Déplace une section d'une piste en utilisant des positions `mesure:temps`.    |
+| `erase <piste>`          | Efface des notes d'une piste en utilisant des positions `mesure:temps`.       |
+| `transpose`              | Transpose une section d'une piste en utilisant des positions `mesure:temps`.  |
+| `record <piste>`         | Enregistre le MIDI sur une piste, avec une précision `mesure:temps`.          |
 | `delete <piste>`         | Supprime une piste après confirmation.                                      |
 | `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
 | `timesig <num> <den>`    | Définit la signature rythmique du morceau (ex: 4 4).                        |
 | `save <fichier>`         | Sauvegarde uniquement la chanson dans un fichier MIDI.                      |
 | `saveproject <basename>` | Sauvegarde le projet complet (MIDI et configuration).                       |
-| `play`                   | Joue la chanson actuelle depuis le début.                                   |
+| `play [début] [fin]`     | Joue la chanson. Les positions de début/fin sont au format `mesure:temps`.   |
+| `loop [début] [fin]`     | Joue une section en boucle. Les positions sont au format `mesure:temps`.      |
 | `pause`                  | Met en pause ou reprend la lecture.                                         |
 | `stop`                   | Arrête la lecture et réinitialise la position.                              |
 | `restart`                | Arrête et redémarre la lecture depuis le début.                             |
@@ -125,6 +130,40 @@ Voici un exemple de workflow complet.
 
 8.  Plus tard, vous pourrez tout recharger avec `loadproject mon_morceau`.
 
+
+---
+
+### How-To : Éditer une piste
+
+Une fois que vous avez enregistré des notes, vous pouvez les manipuler avec précision.
+
+1.  **Copier une section :**
+    *   Copier les deux premières mesures de la piste 0 pour les coller à partir de la mesure 5.
+    *   `> copy`
+    *   Suivez les invites :
+        *   `Copy from track index: 0`
+        *   `Copy from position on track '...' (measure:beat) [default: 1:1]: 1:1`
+        *   `Copy up to position on track '...' (measure:beat): 3:1`
+        *   `Copy to destination track index (default: 0): 0`
+        *   `Copy to destination position on track '...' (measure:beat) [default: 1:1]: 5:1`
+
+2.  **Déplacer une section :**
+    *   Déplacer la mesure 5 de la piste 0 pour la mettre à la mesure 10.
+    *   `> move 0`
+    *   Suivez les invites :
+        *   `Move from position...: 5:1`
+        *   `Move up to position...: 6:1`
+        *   `Move to destination track...: 0`
+        *   `Move to destination position...: 10:1`
+
+3.  **Transposer une section :**
+    *   Transposer toute la piste 0 d'une octave vers le haut (12 demi-tons).
+    *   `> transpose`
+    *   Suivez les invites :
+        *   `Transpose track index: 0`
+        *   `Transpose from position...: 1:1`
+        *   `Transpose up to position...:` (laisser vide pour aller jusqu'à la fin)
+        *   `Transpose by how many semitones...: 12`
 
 ---
 

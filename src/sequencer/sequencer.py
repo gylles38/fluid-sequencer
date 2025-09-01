@@ -1023,15 +1023,24 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
+    def _play_with_ffplay(self, seg):
+        import subprocess
+        command = ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-loglevel", "error", "-i", "-"]
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        process.stdin.write(seg.raw_data)
+        process.stdin.close()
+        process.wait()
+
     def _play_audio_file_blocking(self, filepath: str):
-        """
-        Plays an audio file using pydub's blocking play function.
-        This is intended to be run in a separate thread.
-        """
-        from pydub.playback import play
+        """Plays an audio file using a robust ffplay subprocess."""
         try:
             audio_segment = AudioSegment.from_file(filepath)
-            play(audio_segment)
+            self._play_with_ffplay(audio_segment)
         except Exception as e:
             print(f"\n[ERROR] in audio playback thread: {e}")
 
@@ -1233,9 +1242,18 @@ class Sequencer:
 
                     # --- Check for end of playback/loop section ---
                     if next_event_index >= len(ranged_event_list):
-                        # Before ending, wait for all audio threads to complete
-                        for t in self.audio_threads:
-                            t.join()
+                        # Wait for all audio threads to complete, but don't block forever.
+                        all_finished = False
+                        while not all_finished:
+                            if self._stop_event.is_set():
+                                break
+                            all_finished = True
+                            for t in self.audio_threads:
+                                if t.is_alive():
+                                    all_finished = False
+                                    break
+                            if not all_finished:
+                                time.sleep(0.1)
 
                         if not loop:
                             break # Exit the inner time-driven loop

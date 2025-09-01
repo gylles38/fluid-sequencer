@@ -30,12 +30,13 @@ class Event:
 class BaseTrack:
     """Base class for tracks. Cannot be instantiated directly."""
     name: str
-    is_muted: bool = False
-    is_solo: bool = False
+    # is_muted and is_solo moved to child classes to solve non-default argument error
 
 @dataclass
 class MidiTrack(BaseTrack):
     """Represents a MIDI track, which is a sequence of musical events."""
+    is_muted: bool = False
+    is_solo: bool = False
     channel: int = 0  # MIDI channel (0-15)
     events: List[Event] = field(default_factory=list)
     instrument: int = 0  # MIDI program number (0-127)
@@ -52,6 +53,8 @@ class MidiTrack(BaseTrack):
 class AudioTrack(BaseTrack):
     """Represents an audio track, which is a single audio file."""
     filepath: str
+    is_muted: bool = False
+    is_solo: bool = False
     start_time: float = 0.0 # Start time in beats from the beginning of the track
     # Volume/pan controls could be added here in the future
     # volume: float = 1.0 # (0.0 to 1.0)

@@ -1,5 +1,5 @@
 import mido
-from .models import Song, Track, Event, Note
+from .models import Song, MidiTrack, Event, Note
 from collections import defaultdict
 
 def import_song(filepath: str) -> Song:
@@ -67,7 +67,7 @@ def import_song(filepath: str) -> Song:
                         note_events.append(Event(notes=[note], start_time=start_time_beats))
 
         if note_events:
-            new_track = Track(name=track_name, instrument=instrument)
+            new_track = MidiTrack(name=track_name, instrument=instrument)
             note_events.sort(key=lambda e: e.start_time)
             new_track.events = note_events
             song.add_track(new_track)

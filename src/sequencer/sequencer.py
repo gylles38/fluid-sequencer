@@ -1028,11 +1028,12 @@ class Sequencer:
         import subprocess
         import shlex
 
-        # Format the command with the audio segment's parameters
-        command_str = self.audio_player_command.format(
-            ar=seg.frame_rate,
-            ac=seg.channels
-        )
+        # Replace placeholders manually to avoid KeyError if they don't exist
+        command_str = self.audio_player_command.replace('{ar}', str(seg.frame_rate))
+        command_str = command_str.replace('{ac}', str(seg.channels))
+
+        print(f"\n[DEBUG] Executing audio command: {command_str}")
+
         command = shlex.split(command_str)
 
         process = subprocess.Popen(

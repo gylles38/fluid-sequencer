@@ -6,7 +6,7 @@ from dataclasses import asdict, is_dataclass
 import json
 import mido
 from pydub import AudioSegment
-from pydub.playback import _play_with_simpleaudio
+import subprocess
 import threading
 import time
 from typing import List, Optional
@@ -59,6 +59,8 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
         self.audio_threads: List[threading.Thread] = []
+        self.active_audio_processes: List[subprocess.Popen] = []
+        self.process_lock = threading.Lock()
         self.audio_player_command: str = "ffplay -nodisp -autoexit -hide_banner"
 
         self.metronome_only_mode = False
@@ -1030,11 +1032,11 @@ class Sequencer:
         calling a configurable external player command.
         """
         import tempfile
-        import subprocess
         import shlex
         import os
 
         tmp_path = None
+        process = None
         try:
             audio_segment = AudioSegment.from_file(filepath)
             if len(audio_segment) == 0:
@@ -1050,13 +1052,17 @@ class Sequencer:
             command = shlex.split(self.audio_player_command)
             command.append(tmp_path)
 
-            # Run the command
-            result = subprocess.run(command, capture_output=True, text=True)
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            with self.process_lock:
+                self.active_audio_processes.append(process)
 
-            if result.returncode != 0:
-                print(f"\n[ERROR] Audio player exited with code {result.returncode}")
-                print(f"[ERROR] stdout: {result.stdout}")
-                print(f"[ERROR] stderr: {result.stderr}")
+            # This will wait for the process to finish
+            _, stderr_data = process.communicate()
+
+            if process.returncode != 0:
+                print(f"\n[ERROR] Audio player exited with code {process.returncode}")
+                if stderr_data:
+                    print(f"[ERROR] stderr: {stderr_data.decode('utf-8', errors='ignore')}")
 
         except Exception as e:
             print(f"\n[ERROR] in audio playback thread for file '{filepath}': {e}")
@@ -1064,6 +1070,13 @@ class Sequencer:
             # Clean up the temporary file
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
+            # Clean up the process from the list
+            if process:
+                with self.process_lock:
+                    try:
+                        self.active_audio_processes.remove(process)
+                    except ValueError:
+                        pass # Already removed by stop()
 
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         # Metronome-only mode for recording count-in
@@ -1262,20 +1275,7 @@ class Sequencer:
                         next_event_index += 1
 
                     # --- Check for end of playback/loop section ---
-                    if next_event_index >= len(ranged_event_list):
-                        # Wait for all audio threads to complete, but don't block forever.
-                        all_finished = False
-                        while not all_finished:
-                            if self._stop_event.is_set():
-                                break
-                            all_finished = True
-                            for t in self.audio_threads:
-                                if t.is_alive():
-                                    all_finished = False
-                                    break
-                            if not all_finished:
-                                time.sleep(0.1)
-
+                    if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads):
                         if not loop:
                             break # Exit the inner time-driven loop
 
@@ -1395,9 +1395,14 @@ class Sequencer:
             print("Already stopped.")
             return
 
-        # Audio threads will stop on their own when ffplay finishes.
-        # The main way to stop them is to stop the whole program.
-        # For now, we just stop the MIDI and the playback thread.
+        with self.process_lock:
+            for process in self.active_audio_processes:
+                try:
+                    process.kill()
+                except Exception as e:
+                    print(f"Error killing audio process: {e}")
+            self.active_audio_processes.clear()
+
         self._all_notes_off()
         self._stop_event.set()
         if self.playback_state == "paused":

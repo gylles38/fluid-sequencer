@@ -1,9 +1,10 @@
 import mido
-from .models import Song
+from .models import Song, MidiTrack, AudioTrack
 
 def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
     """
     Exports a Song object to a MIDI file using mido.
+    Audio tracks will be ignored.
 
     :param song: The Song object to export.
     :param filename: The path to the output MIDI file.
@@ -19,6 +20,14 @@ def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
     tempo_track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(song.tempo)))
 
     for i, track in enumerate(song.tracks):
+        if isinstance(track, AudioTrack):
+            print(f"Warning: Skipping audio track '{track.name}' during MIDI export.")
+            continue
+
+        if not isinstance(track, MidiTrack):
+            print(f"Warning: Skipping unknown track type for track '{track.name}' during MIDI export.")
+            continue
+
         midi_track = mido.MidiTrack()
         mid.tracks.append(midi_track)
 

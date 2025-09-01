@@ -6,7 +6,8 @@ def print_help():
     help_text = """
 Sequencer CLI Commands:
   help                    - Shows this help message.
-  add <name> [prog]       - Adds a new track. `prog` is an optional program number (1-128).
+  add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
+  addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
   list                    - Shows all tracks in the current song.
@@ -68,15 +69,20 @@ def main():
                 print_help()
             elif command == "add":
                 if len(args) == 1:
-                    seq.add_track(name=args[0])
+                    seq.add_track(name=args[0], track_type='midi')
                 elif len(args) == 2:
                     prog = int(args[1])
                     if not 1 <= prog <= 128:
                         print("Error: Program number must be between 1 and 128.")
                         continue
-                    seq.add_track(name=args[0], instrument=prog - 1)
+                    seq.add_track(name=args[0], track_type='midi', instrument=prog - 1)
                 else:
                     print("Usage: add <name> [program_number]")
+            elif command == "addaudio":
+                if len(args) == 2:
+                    seq.add_track(name=args[0], track_type='audio', filepath=args[1])
+                else:
+                    print("Usage: addaudio <name> <filepath>")
             elif command == "load":
                 if len(args) == 1:
                     confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()

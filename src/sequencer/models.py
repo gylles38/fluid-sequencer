@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Union
 
 @dataclass
 class Note:
@@ -27,22 +27,39 @@ class Event:
             raise ValueError("Start time cannot be negative.")
 
 @dataclass
-class Track:
-    """Represents a track, which is a sequence of musical events."""
+class BaseTrack:
+    """Base class for tracks. Cannot be instantiated directly."""
     name: str
+    is_muted: bool = False
+    is_solo: bool = False
+
+@dataclass
+class MidiTrack(BaseTrack):
+    """Represents a MIDI track, which is a sequence of musical events."""
     channel: int = 0  # MIDI channel (0-15)
     events: List[Event] = field(default_factory=list)
     instrument: int = 0  # MIDI program number (0-127)
     bank_msb: Optional[int] = None  # Bank Select MSB (CC#0)
     bank_lsb: Optional[int] = None  # Bank Select LSB (CC#32)
     output_port_name: Optional[str] = None
-    is_muted: bool = False
-    is_solo: bool = False
 
     def add_event(self, event: Event):
-        """Adds an event to the track and keeps the event list sorted by start time."""
+        """Adds a MIDI event to the track and keeps the event list sorted by start time."""
         self.events.append(event)
         self.events.sort(key=lambda e: e.start_time)
+
+@dataclass
+class AudioTrack(BaseTrack):
+    """Represents an audio track, which is a single audio file."""
+    filepath: str
+    start_time: float = 0.0 # Start time in beats from the beginning of the track
+    # Volume/pan controls could be added here in the future
+    # volume: float = 1.0 # (0.0 to 1.0)
+    # pan: float = 0.0 # (-1.0 for left, 0.0 for center, 1.0 for right)
+
+
+# Using Union to allow the list to contain both MidiTrack and AudioTrack objects
+AnyTrack = Union[MidiTrack, AudioTrack]
 
 @dataclass
 class Song:
@@ -51,15 +68,17 @@ class Song:
     tempo: int = 120  # Beats per minute (BPM)
     time_signature_numerator: int = 4
     time_signature_denominator: int = 4
-    tracks: List[Track] = field(default_factory=list)
+    tracks: List[AnyTrack] = field(default_factory=list)
     metronome_enabled: bool = False
     metronome_port_name: Optional[str] = None
 
-    def add_track(self, track: Track):
-        """Adds a track to the song, assigning a default channel."""
-        # Assign channel based on current number of tracks (0-indexed)
-        if len(self.tracks) < 16:
-            track.channel = len(self.tracks)
-        else:
-            track.channel = 15 # Default to last channel if more than 16 tracks
+    def add_track(self, track: AnyTrack):
+        """Adds a track to the song, assigning a default channel if it's a MIDI track."""
+        if isinstance(track, MidiTrack):
+            # Assign channel based on the number of existing MIDI tracks
+            midi_track_count = sum(1 for t in self.tracks if isinstance(t, MidiTrack))
+            if midi_track_count < 16:
+                track.channel = midi_track_count
+            else:
+                track.channel = 15 # Default to last channel if more than 16 tracks
         self.tracks.append(track)

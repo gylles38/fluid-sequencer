@@ -1,12 +1,52 @@
-import time
-import mido
-import threading
-import json
-from copy import deepcopy
-from typing import Optional
-from .models import Song, Track, Event, Note
-from .midi_import import import_song
+import simpleaudio
 from .midi_export import export_to_midi
+from .midi_import import import_song
+from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
+from copy import deepcopy
+from dataclasses import asdict, is_dataclass
+import json
+import mido
+from pydub import AudioSegment
+from pydub.playback import _play_with_simpleaudio
+import threading
+import time
+from typing import List, Optional
+
+
+class CustomSongEncoder(json.JSONEncoder):
+    def default(self, o):
+        if is_dataclass(o):
+            d = asdict(o)
+            # Add a type identifier for our custom classes
+            if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note)):
+                d['__type__'] = o.__class__.__name__
+            return d
+        return super().default(o)
+
+def song_decoder(d):
+    if '__type__' in d:
+        type_name = d.pop('__type__')
+        # This is a simplified check. For a real app, you might want a more robust
+        # way to map type names to classes, e.g., a dictionary.
+        if type_name == 'Song':
+            # The 'tracks' field needs to be recursively decoded first
+            tracks_data = d.get('tracks', [])
+            d['tracks'] = [song_decoder(t) for t in tracks_data]
+            return Song(**d)
+        elif type_name == 'MidiTrack':
+            events_data = d.get('events', [])
+            d['events'] = [song_decoder(e) for e in events_data]
+            return MidiTrack(**d)
+        elif type_name == 'AudioTrack':
+            return AudioTrack(**d)
+        elif type_name == 'Event':
+            notes_data = d.get('notes', [])
+            d['notes'] = [song_decoder(n) for n in notes_data]
+            return Event(**d)
+        elif type_name == 'Note':
+            return Note(**d)
+    return d
+
 
 class Sequencer:
     def __init__(self, tempo: int = 120):
@@ -19,6 +59,7 @@ class Sequencer:
         self._stop_event = threading.Event()
         self._run_event = threading.Event()
         self._run_event.set()
+        self.active_audio_playbacks: List[simpleaudio.PlayObject] = []
 
         self.metronome_only_mode = False
         self.total_paused_time = 0.0
@@ -94,10 +135,31 @@ class Sequencer:
         self.song.time_signature_denominator = denominator
         print(f"Time signature set to {numerator}/{denominator}.")
 
-    def add_track(self, name: str, instrument: int = 0):
-        track = Track(name=name, instrument=instrument)
+    def add_track(self, name: str, track_type: str = 'midi', instrument: int = 0, filepath: Optional[str] = None):
+        """Adds a new track to the song."""
+        if track_type == 'midi':
+            track = MidiTrack(name=name, instrument=instrument)
+            print(f"MIDI track '{name}' added.")
+        elif track_type == 'audio':
+            if not filepath:
+                print("Error: Filepath is required for audio tracks.")
+                return
+            try:
+                # Pre-load the audio file to check for errors early
+                AudioSegment.from_file(filepath)
+            except FileNotFoundError:
+                print(f"Error: Audio file not found at '{filepath}'")
+                return
+            except Exception as e:
+                print(f"Error opening audio file: {e}")
+                return
+            track = AudioTrack(name=name, filepath=filepath)
+            print(f"Audio track '{name}' added with file '{filepath}'.")
+        else:
+            print(f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'.")
+            return
+
         self.song.add_track(track)
-        print(f"Track '{name}' added.")
 
     def delete_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -112,8 +174,10 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-
         track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: Erasing events is only supported for MIDI tracks.")
+            return
 
         # Ask whether to erase all or a range
         erase_all_choice = input(f"Erase ALL events from track '{track.name}'? [y/N]: ").lower()
@@ -177,17 +241,19 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid source track index.")
             return
-
         source_track = self.song.tracks[track_index]
+        if not isinstance(source_track, MidiTrack):
+            print("Error: Moving events is only supported for MIDI tracks.")
+            return
 
         try:
             # Get source range
             start_pos_str = input(f"Move from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
-            source_start_beat = self._parse_position_to_beats(start_pos_str, default="1:1")
+            source_start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if source_start_beat is None: return
 
             end_pos_str = input(f"Move up to position on track '{source_track.name}' (measure:beat): ").strip()
-            source_end_beat = self._parse_position_to_beats(end_pos_str)
+            source_end_beat = self.parse_position_to_beats(end_pos_str)
             if source_end_beat is None: return
 
             if source_end_beat <= source_start_beat:
@@ -203,9 +269,12 @@ class Sequencer:
                 return
 
             dest_track = self.song.tracks[dest_track_idx]
+            if not isinstance(dest_track, MidiTrack):
+                print("Error: Destination track must be a MIDI track.")
+                return
 
             dest_pos_str = input(f"Move to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
-            destination_start_beat = self._parse_position_to_beats(dest_pos_str, default="1:1")
+            destination_start_beat = self.parse_position_to_beats(dest_pos_str, default="1:1")
             if destination_start_beat is None: return
 
         except ValueError:
@@ -323,14 +392,17 @@ class Sequencer:
                 print("Error: Invalid source track index.")
                 return
             source_track = self.song.tracks[source_track_idx]
+            if not isinstance(source_track, MidiTrack):
+                print("Error: Copying events is only supported for MIDI tracks.")
+                return
 
             # Get source range
             start_pos_str = input(f"Copy from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
-            source_start_beat = self._parse_position_to_beats(start_pos_str, default="1:1")
+            source_start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if source_start_beat is None: return
 
             end_pos_str = input(f"Copy up to position on track '{source_track.name}' (measure:beat): ").strip()
-            source_end_beat = self._parse_position_to_beats(end_pos_str)
+            source_end_beat = self.parse_position_to_beats(end_pos_str)
             if source_end_beat is None: return
 
             if source_end_beat <= source_start_beat:
@@ -343,9 +415,12 @@ class Sequencer:
                 print("Error: Invalid destination track index.")
                 return
             dest_track = self.song.tracks[dest_track_idx]
+            if not isinstance(dest_track, MidiTrack):
+                print("Error: Destination track must be a MIDI track.")
+                return
 
             dest_pos_str = input(f"Copy to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
-            destination_start_beat = self._parse_position_to_beats(dest_pos_str, default="1:1")
+            destination_start_beat = self.parse_position_to_beats(dest_pos_str, default="1:1")
             if destination_start_beat is None: return
 
         except ValueError:
@@ -440,16 +515,19 @@ class Sequencer:
                 print("Error: Invalid track index.")
                 return
             track = self.song.tracks[track_idx]
+            if not isinstance(track, MidiTrack):
+                print("Error: Transposing is only supported for MIDI tracks.")
+                return
 
             start_pos_str = input(f"Transpose from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
-            start_beat = self._parse_position_to_beats(start_pos_str, default="1:1")
+            start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if start_beat is None: return
 
             end_pos_str = input(f"Transpose up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
             if end_pos_str == "":
                 end_beat = float('inf')
             else:
-                end_beat = self._parse_position_to_beats(end_pos_str)
+                end_beat = self.parse_position_to_beats(end_pos_str)
                 if end_beat is None: return
 
             if end_beat <= start_beat:
@@ -509,15 +587,22 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-        self.song.tracks[track_index].output_port_name = port_name
-        print(f"Assigned port '{port_name}' to track '{self.song.tracks[track_index].name}'.")
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: Port assignment is currently only supported for MIDI tracks.")
+            return
+        track.output_port_name = port_name
+        print(f"Assigned port '{port_name}' to track '{track.name}'.")
 
     def unassign_port(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-
         track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: Port un-assignment is currently only supported for MIDI tracks.")
+            return
+
         if track.output_port_name:
             print(f"Un-assigned port from track '{track.name}'.")
             track.output_port_name = None
@@ -528,11 +613,14 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: Bank select is only available for MIDI tracks.")
+            return
         if not 0 <= msb <= 127 and 0 <= lsb <= 127:
             print("Error: Bank values (MSB, LSB) must be between 0 and 127.")
             return
 
-        track = self.song.tracks[track_index]
         track.bank_msb = msb
         track.bank_lsb = lsb
         print(f"Set bank for track '{track.name}' to MSB={msb}, LSB={lsb}.")
@@ -541,11 +629,14 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: MIDI channel can only be set for MIDI tracks.")
+            return
         if not 1 <= channel <= 16:
             print("Error: MIDI channel must be between 1 and 16.")
             return
 
-        track = self.song.tracks[track_index]
         track.channel = channel - 1 # Convert to 0-indexed for mido
         print(f"Set MIDI channel for track '{track.name}' to {channel}.")
 
@@ -553,11 +644,14 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: Program change is only available for MIDI tracks.")
+            return
         if not 0 <= program <= 127:
             print("Error: Program number must be between 0 and 127.")
             return
 
-        track = self.song.tracks[track_index]
         track.instrument = program
         print(f"Set program for track '{track.name}' to {program + 1}.")
 
@@ -591,10 +685,10 @@ class Sequencer:
         print(f"Track '{target_track.name}' is now {status}.")
 
     def prime_all_tracks(self):
-        """Sends the current program/bank state for all assigned tracks."""
-        print("Priming all assigned tracks...")
+        """Sends the current program/bank state for all assigned MIDI tracks."""
+        print("Priming all assigned MIDI tracks...")
         for track in self.song.tracks:
-            if not track.output_port_name:
+            if not isinstance(track, MidiTrack) or not track.output_port_name:
                 continue
 
             port = None
@@ -641,28 +735,15 @@ class Sequencer:
             print(f"Error saving MIDI file: {e}")
 
     def save_project(self, basename: str):
-        midi_filepath = f"{basename}.mid"
         project_filepath = f"{basename}.proj.json"
-        self.save_song(midi_filepath)
         try:
             project_data = {
-                "midi_file": midi_filepath,
+                "song": self.song,
                 "virtual_ports": [vp.name for vp in self.virtual_ports],
-                "track_assignments": [
-                    {
-                        "track_name": t.name,
-                        "port_name": t.output_port_name
-                    }
-                    for t in self.song.tracks if t.output_port_name
-                ],
-                "metronome_settings": {
-                    "enabled": self.song.metronome_enabled,
-                    "port_name": self.song.metronome_port_name
-                }
             }
             with open(project_filepath, 'w') as f:
-                json.dump(project_data, f, indent=4)
-            print(f"Project configuration saved to '{project_filepath}'")
+                json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
+            print(f"Project saved to '{project_filepath}'")
         except Exception as e:
             print(f"Error saving project file: {e}")
 
@@ -670,33 +751,16 @@ class Sequencer:
         project_filepath = f"{basename}.proj.json"
         try:
             with open(project_filepath, 'r') as f:
-                project_data = json.load(f)
+                project_data = json.load(f, object_hook=song_decoder)
 
-            midi_file = project_data.get("midi_file")
-            if not midi_file:
-                print("Error: Project file is missing 'midi_file' key.")
-                return
-            self.load_song(midi_file)
+            self.song = project_data.get("song", Song(name="New Song"))
 
+            # Restore virtual ports
             self.close_virtual_ports()
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
 
-            assignments = project_data.get("track_assignments", [])
-            for assignment in assignments:
-                track_name = assignment.get("track_name")
-                port_name = assignment.get("port_name")
-                if track_name and port_name:
-                    track_indices = [i for i, t in enumerate(self.song.tracks) if t.name == track_name]
-                    if track_indices:
-                        self.assign_port(track_indices[0], port_name)
-                    else:
-                        print(f"Warning: Could not find track '{track_name}' to assign port.")
-
-            metronome_settings = project_data.get("metronome_settings", {})
-            self.song.metronome_enabled = metronome_settings.get("enabled", False)
-            self.song.metronome_port_name = metronome_settings.get("port_name")
             print(f"Successfully loaded project from '{project_filepath}'")
         except FileNotFoundError:
             print(f"Error: Project file not found at '{project_filepath}'")
@@ -719,12 +783,19 @@ class Sequencer:
             status_info = ""
             if track.is_muted: status_info += " [M]"
             if track.is_solo: status_info += " [S]"
-            bank_info = ""
-            if track.bank_msb is not None: bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
-            ch_info = f"Ch: {track.channel + 1}"
-            prog_info = f"Prog: {track.instrument + 1}"
-            port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
-            lines.append(f"[{i}] {track.name}{status_info} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
+
+            if isinstance(track, MidiTrack):
+                bank_info = ""
+                if track.bank_msb is not None: bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
+                ch_info = f"Ch: {track.channel + 1}"
+                prog_info = f"Prog: {track.instrument + 1}"
+                port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
+                lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
+            elif isinstance(track, AudioTrack):
+                start_pos_str = self._format_beats_to_position(track.start_time)
+                lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str})")
+            else:
+                lines.append(f"[{i}] {track.name} (Unknown Type){status_info}")
         return "\n".join(lines)
 
     def list_ports(self) -> str:
@@ -772,7 +843,7 @@ class Sequencer:
 
         if port_to_delete:
             for track in self.song.tracks:
-                if track.output_port_name == port_to_delete.name:
+                if isinstance(track, MidiTrack) and track.output_port_name == port_to_delete.name:
                     track.output_port_name = None
                     print(f"Un-assigned port from track '{track.name}'.")
             port_to_delete.close()
@@ -785,8 +856,10 @@ class Sequencer:
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-
         target_track = self.song.tracks[track_index]
+        if not isinstance(target_track, MidiTrack):
+            print("Error: Recording is only supported for MIDI tracks.")
+            return
 
         try:
             start_pos_str = input(f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: ").strip()
@@ -951,6 +1024,15 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
+    def _play_audio_file(self, filepath: str):
+        """Plays an audio file in a new thread."""
+        try:
+            audio_segment = AudioSegment.from_file(filepath)
+            play_obj = _play_with_simpleaudio(audio_segment)
+            self.active_audio_playbacks.append(play_obj)
+        except Exception as e:
+            print(f"\nError playing audio file '{filepath}': {e}")
+
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         # Metronome-only mode for recording count-in
         if self.metronome_only_mode:
@@ -1005,30 +1087,41 @@ class Sequencer:
 
             # 1. Build track events
             for track_idx, track in enumerate(self.song.tracks):
-                if not track.output_port_name:
-                    continue
-                # Add bank select and program change messages
-                if track.bank_msb is not None:
-                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb)})
-                if track.bank_lsb is not None:
-                    master_event_list.append({'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb)})
-                program_change_msg = mido.Message('program_change', channel=track.channel, program=track.instrument)
-                master_event_list.append({'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': program_change_msg})
-                # Add note events
-                for event in track.events:
-                    for note in event.notes:
-                        start_tick = int(event.start_time * ticks_per_beat)
-                        end_tick = start_tick + int(note.duration * ticks_per_beat)
-                        note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)
-                        note_off_msg = mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)
-                        master_event_list.append({'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_on_msg})
-                        master_event_list.append({'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_off_msg})
+                if isinstance(track, MidiTrack):
+                    if not track.output_port_name:
+                        continue
+                    # Add bank select and program change messages
+                    if track.bank_msb is not None:
+                        master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb)})
+                    if track.bank_lsb is not None:
+                        master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb)})
+                    program_change_msg = mido.Message('program_change', channel=track.channel, program=track.instrument)
+                    master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': program_change_msg})
+                    # Add note events
+                    for event in track.events:
+                        for note in event.notes:
+                            start_tick = int(event.start_time * ticks_per_beat)
+                            end_tick = start_tick + int(note.duration * ticks_per_beat)
+                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)
+                            note_off_msg = mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)
+                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_on_msg})
+                            master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_off_msg})
+                elif isinstance(track, AudioTrack):
+                    start_tick = int(track.start_time * ticks_per_beat)
+                    audio_event = {
+                        'type': 'audio',
+                        'tick': start_tick,
+                        'track_idx': track_idx,
+                        'filepath': track.filepath,
+                    }
+                    master_event_list.append(audio_event)
+
 
             # 2. Build metronome events
             if self.song.metronome_enabled and self.song.metronome_port_name:
                 last_event_tick = 0
                 if master_event_list:
-                    last_event_tick = max(e['tick'] for e in master_event_list)
+                    last_event_tick = max((e['tick'] for e in master_event_list), default=0)
                 num_beats = (last_event_tick // ticks_per_beat) + 1
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
@@ -1036,8 +1129,8 @@ class Sequencer:
                     pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
                     note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
                     note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
-                    master_event_list.append({'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_on})
-                    master_event_list.append({'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
+                    master_event_list.append({'type': 'metronome', 'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_on})
+                    master_event_list.append({'type': 'metronome', 'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
 
             # 3. Filter and normalize events for ranged playback
             ticks_per_beat = 480
@@ -1078,7 +1171,9 @@ class Sequencer:
                     loop_message = f"Looping from {start_pos_str} to {end_pos_str}."
                     print(loop_message)
                 else:
-                    print(f"Playing on {len(self.open_ports)} port(s)...")
+                    # Count midi ports only
+                    midi_ports_count = len({e['port_name'] for e in ranged_event_list if e['type'] == 'midi'})
+                    print(f"Playing on {midi_ports_count} port(s)...")
 
                 start_time_sec = time.time()
                 next_event_index = 0
@@ -1104,20 +1199,33 @@ class Sequencer:
                     # --- Check for and send due events ---
                     while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
                         event_details = ranged_event_list[next_event_index]
-                        port_name = event_details['port_name']
-                        port = self.open_ports.get(port_name)
+                        track = self.song.tracks[event_details['track_idx']] if event_details['track_idx'] != -1 else None
 
-                        if port:
-                            if event_details['track_idx'] != -1: # Note events
-                                track = self.song.tracks[event_details['track_idx']]
-                                is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                                should_play_event = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
-                                if should_play_event:
+                        # Check mute/solo conditions
+                        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                        should_play_event = (track and track.is_solo) or \
+                                            (not is_any_track_soloed and not (track and track.is_muted))
+
+                        if event_details['type'] == 'midi':
+                            if should_play_event:
+                                port_name = event_details['port_name']
+                                port = self.open_ports.get(port_name)
+                                if port:
                                     port.send(event_details['message'])
-                            else: # Metronome events
-                                original_tick = event_details['tick'] + start_tick
-                                if self.song.metronome_enabled and start_tick <= original_tick < end_tick:
-                                    port.send(event_details['message'])
+
+                        elif event_details['type'] == 'audio':
+                            if should_play_event:
+                                # Non-blocking audio playback
+                                audio_thread = threading.Thread(target=self._play_audio_file, args=(event_details['filepath'],))
+                                audio_thread.start()
+
+                        elif event_details['type'] == 'metronome':
+                             original_tick = event_details['tick'] + start_tick
+                             if self.song.metronome_enabled and start_tick <= original_tick < end_tick:
+                                 port_name = event_details['port_name']
+                                 port = self.open_ports.get(port_name)
+                                 if port:
+                                     port.send(event_details['message'])
 
                         next_event_index += 1
 
@@ -1174,16 +1282,20 @@ class Sequencer:
         self.total_paused_time = 0.0 # Reset pause timer for new playback
         self.open_ports.clear()
         self.temporary_ports = []
+        self.active_audio_playbacks = []
 
-        required_ports = {t.output_port_name for t in self.song.tracks if t.output_port_name}
+        # Find all unique MIDI port names required for the session
+        required_ports = {track.output_port_name for track in self.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
         if self.song.metronome_enabled and self.song.metronome_port_name:
             required_ports.add(self.song.metronome_port_name)
 
-        if not required_ports:
+        # Check if there's anything to play
+        has_audio_tracks = any(isinstance(track, AudioTrack) for track in self.song.tracks)
+        if not required_ports and not has_audio_tracks:
             if self.metronome_only_mode:
                 print("No metronome port assigned. Use 'assignmetro'.")
             else:
-                print("No tracks have an assigned output port. Use 'assign' command first.")
+                print("No tracks have an assigned output port and there are no audio tracks.")
             return
 
         for name in required_ports:
@@ -1223,10 +1335,15 @@ class Sequencer:
             return
         if self.playback_state == "playing":
             self._all_notes_off()
+            # Stop all active audio playbacks. True pause/resume is complex.
+            for play_obj in self.active_audio_playbacks:
+                if play_obj.is_playing():
+                    play_obj.stop()
+            self.active_audio_playbacks = [] # Clear the list
             self._run_event.clear()
             self.pause_start_time = time.time()
             self.playback_state = "paused"
-            print("Playback paused.")
+            print("Playback paused. Note: Audio tracks were stopped, not paused.")
         elif self.playback_state == "paused":
             paused_duration = time.time() - self.pause_start_time
             self.total_paused_time += paused_duration
@@ -1238,6 +1355,12 @@ class Sequencer:
         if self.playback_state == "stopped":
             print("Already stopped.")
             return
+
+        for play_obj in self.active_audio_playbacks:
+            if play_obj.is_playing():
+                play_obj.stop()
+        self.active_audio_playbacks = []
+
         self._all_notes_off()
         self._stop_event.set()
         if self.playback_state == "paused":

@@ -59,7 +59,7 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
         self.audio_threads: List[threading.Thread] = []
-        self.audio_driver: str = 'default' # 'default' or 'jack'
+        self.audio_player_command: str = "ffplay -nodisp -autoexit -hide_banner -loglevel error -f s16le -ar {ar} -ac {ac} -i -"
 
         self.metronome_only_mode = False
         self.total_paused_time = 0.0
@@ -1024,36 +1024,39 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_with_ffplay(self, seg):
+    def _play_with_external_player(self, seg):
         import subprocess
-        command = [
-            "ffplay",
-            "-nodisp", "-autoexit", "-hide_banner",
-            # Explicitly tell ffplay the format of the raw PCM data
-            "-f", "s16le",
-            "-ar", str(seg.frame_rate),
-            "-ac", str(seg.channels),
-            "-i", "-"
-        ]
-        if self.audio_driver == 'jack':
-            command.extend(["-ao", "jack"])
+        import shlex
+
+        # Format the command with the audio segment's parameters
+        command_str = self.audio_player_command.format(
+            ar=seg.frame_rate,
+            ac=seg.channels
+        )
+        command = shlex.split(command_str)
 
         process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.PIPE
         )
-        process.communicate(input=seg.raw_data)
+
+        _, stderr_data = process.communicate(input=seg.raw_data)
+
+        if process.returncode != 0:
+            print(f"\n[ERROR] Audio player exited with code {process.returncode}")
+            if stderr_data:
+                print(f"[ERROR] Audio player stderr:\n{stderr_data.decode('utf-8', errors='ignore')}")
 
     def _play_audio_file_blocking(self, filepath: str):
-        """Plays an audio file using a robust ffplay subprocess."""
+        """Plays an audio file using a robust external player subprocess."""
         try:
             audio_segment = AudioSegment.from_file(filepath)
             if len(audio_segment) == 0:
                 print(f"\n[ERROR] Audio file at '{filepath}' could not be loaded or is empty.")
                 return
-            self._play_with_ffplay(audio_segment)
+            self._play_with_external_player(audio_segment)
         except Exception as e:
             print(f"\n[ERROR] in audio playback thread for file '{filepath}': {e}")
 

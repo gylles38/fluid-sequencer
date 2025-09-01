@@ -1043,7 +1043,14 @@ class Sequencer:
     def _play_audio_file_blocking(self, filepath: str):
         """Plays an audio file using a robust ffplay subprocess."""
         try:
+            print(f"\n[DEBUG] Loading audio file: {filepath}")
             audio_segment = AudioSegment.from_file(filepath)
+            print(f"\n[DEBUG] Audio file loaded. Duration: {len(audio_segment)} ms")
+
+            if len(audio_segment) == 0:
+                print("\n[ERROR] Loaded audio segment is empty. Cannot play.")
+                return
+
             self._play_with_ffplay(audio_segment)
         except Exception as e:
             print(f"\n[ERROR] in audio playback thread: {e}")

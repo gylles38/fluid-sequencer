@@ -1025,35 +1025,33 @@ class Sequencer:
 
     def _play_with_ffplay(self, seg):
         import subprocess
-        command = ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-loglevel", "warning", "-i", "-"]
+        command = [
+            "ffplay",
+            "-nodisp", "-autoexit", "-hide_banner",
+            # Explicitly tell ffplay the format of the raw PCM data
+            "-f", "s16le",
+            "-ar", str(seg.frame_rate),
+            "-ac", str(seg.channels),
+            "-i", "-"
+        ]
         process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE
+            stderr=subprocess.DEVNULL
         )
-
-        _, stderr_data = process.communicate(input=seg.raw_data)
-
-        if process.returncode != 0:
-            print(f"\n[ERROR] ffplay exited with code {process.returncode}")
-            if stderr_data:
-                print(f"[ERROR] ffplay stderr:\n{stderr_data.decode('utf-8', errors='ignore')}")
+        process.communicate(input=seg.raw_data)
 
     def _play_audio_file_blocking(self, filepath: str):
         """Plays an audio file using a robust ffplay subprocess."""
         try:
-            print(f"\n[DEBUG] Loading audio file: {filepath}")
             audio_segment = AudioSegment.from_file(filepath)
-            print(f"\n[DEBUG] Audio file loaded. Duration: {len(audio_segment)} ms")
-
             if len(audio_segment) == 0:
-                print("\n[ERROR] Loaded audio segment is empty. Cannot play.")
+                print(f"\n[ERROR] Audio file at '{filepath}' could not be loaded or is empty.")
                 return
-
             self._play_with_ffplay(audio_segment)
         except Exception as e:
-            print(f"\n[ERROR] in audio playback thread: {e}")
+            print(f"\n[ERROR] in audio playback thread for file '{filepath}': {e}")
 
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         # Metronome-only mode for recording count-in

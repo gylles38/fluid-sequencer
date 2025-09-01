@@ -1025,17 +1025,20 @@ class Sequencer:
 
     def _play_with_ffplay(self, seg):
         import subprocess
-        command = ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-loglevel", "error", "-i", "-"]
+        command = ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-loglevel", "warning", "-i", "-"]
         process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.PIPE
         )
-        # Use communicate to send data and wait for process to finish.
-        # This is safer than writing to stdin and waiting manually,
-        # as it handles potential SIGPIPE errors gracefully.
-        process.communicate(input=seg.raw_data)
+
+        _, stderr_data = process.communicate(input=seg.raw_data)
+
+        if process.returncode != 0:
+            print(f"\n[ERROR] ffplay exited with code {process.returncode}")
+            if stderr_data:
+                print(f"[ERROR] ffplay stderr:\n{stderr_data.decode('utf-8', errors='ignore')}")
 
     def _play_audio_file_blocking(self, filepath: str):
         """Plays an audio file using a robust ffplay subprocess."""

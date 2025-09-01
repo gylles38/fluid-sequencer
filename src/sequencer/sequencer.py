@@ -1,4 +1,3 @@
-import simpleaudio
 from .midi_export import export_to_midi
 from .midi_import import import_song
 from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
@@ -59,8 +58,7 @@ class Sequencer:
         self._stop_event = threading.Event()
         self._run_event = threading.Event()
         self._run_event.set()
-        self.active_audio_playbacks: List[simpleaudio.PlayObject] = []
-        self.audio_lock = threading.Lock()
+        self.audio_threads: List[threading.Thread] = []
 
         self.metronome_only_mode = False
         self.total_paused_time = 0.0
@@ -1025,15 +1023,17 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_audio_file(self, filepath: str):
-        """Plays an audio file and adds its playback object to the active list."""
+    def _play_audio_file_blocking(self, filepath: str):
+        """
+        Plays an audio file using pydub's blocking play function.
+        This is intended to be run in a separate thread.
+        """
+        from pydub.playback import play
         try:
             audio_segment = AudioSegment.from_file(filepath)
-            play_obj = _play_with_simpleaudio(audio_segment)
-            with self.audio_lock:
-                self.active_audio_playbacks.append(play_obj)
+            play(audio_segment)
         except Exception as e:
-            print(f"\nError playing audio file '{filepath}': {e}")
+            print(f"\n[ERROR] in audio playback thread: {e}")
 
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         # Metronome-only mode for recording count-in
@@ -1217,9 +1217,9 @@ class Sequencer:
 
                         elif event_details['type'] == 'audio':
                             if should_play_event:
-                                # Play audio in a separate thread to prevent potential deadlocks with simpleaudio
-                                audio_thread = threading.Thread(target=self._play_audio_file, args=(event_details['filepath'],))
+                                audio_thread = threading.Thread(target=self._play_audio_file_blocking, args=(event_details['filepath'],))
                                 audio_thread.start()
+                                self.audio_threads.append(audio_thread)
 
                         elif event_details['type'] == 'metronome':
                              original_tick = event_details['tick'] + start_tick
@@ -1233,22 +1233,11 @@ class Sequencer:
 
                     # --- Check for end of playback/loop section ---
                     if next_event_index >= len(ranged_event_list):
-                        # Before ending, check if any audio is still playing
-                        while True:
-                            with self.audio_lock:
-                                still_playing = any(p.is_playing() for p in self.active_audio_playbacks)
-
-                            if not still_playing:
-                                break
-
-                            if self._stop_event.is_set():
-                                break
-
-                            time.sleep(0.1)
+                        # Before ending, wait for all audio threads to complete
+                        for t in self.audio_threads:
+                            t.join()
 
                         if not loop:
-                            # Add a small delay to allow last notes to be heard before finishing
-                            time.sleep(0.5)
                             break # Exit the inner time-driven loop
 
                         # If looping, check if we've played the last note's duration
@@ -1297,7 +1286,7 @@ class Sequencer:
         self.total_paused_time = 0.0 # Reset pause timer for new playback
         self.open_ports.clear()
         self.temporary_ports = []
-        self.active_audio_playbacks = []
+        self.audio_threads = []
 
         # Find all unique MIDI port names required for the session
         required_ports = {track.output_port_name for track in self.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
@@ -1350,15 +1339,11 @@ class Sequencer:
             return
         if self.playback_state == "playing":
             self._all_notes_off()
-            # Stop all active audio playbacks. True pause/resume is complex.
-            for play_obj in self.active_audio_playbacks:
-                if play_obj.is_playing():
-                    play_obj.stop()
-            self.active_audio_playbacks = [] # Clear the list
+            # Pausing ffplay is not supported in this simple implementation
             self._run_event.clear()
             self.pause_start_time = time.time()
             self.playback_state = "paused"
-            print("Playback paused. Note: Audio tracks were stopped, not paused.")
+            print("Playback paused. Audio tracks will continue playing in the background.")
         elif self.playback_state == "paused":
             paused_duration = time.time() - self.pause_start_time
             self.total_paused_time += paused_duration
@@ -1371,11 +1356,9 @@ class Sequencer:
             print("Already stopped.")
             return
 
-        for play_obj in self.active_audio_playbacks:
-            if play_obj.is_playing():
-                play_obj.stop()
-        self.active_audio_playbacks = []
-
+        # Audio threads will stop on their own when ffplay finishes.
+        # The main way to stop them is to stop the whole program.
+        # For now, we just stop the MIDI and the playback thread.
         self._all_notes_off()
         self._stop_event.set()
         if self.playback_state == "paused":

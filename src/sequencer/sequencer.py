@@ -1032,9 +1032,10 @@ class Sequencer:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        process.stdin.write(seg.raw_data)
-        process.stdin.close()
-        process.wait()
+        # Use communicate to send data and wait for process to finish.
+        # This is safer than writing to stdin and waiting manually,
+        # as it handles potential SIGPIPE errors gracefully.
+        process.communicate(input=seg.raw_data)
 
     def _play_audio_file_blocking(self, filepath: str):
         """Plays an audio file using a robust ffplay subprocess."""

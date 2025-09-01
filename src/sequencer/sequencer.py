@@ -2,6 +2,7 @@ import time
 import mido
 import threading
 import json
+from copy import deepcopy
 from typing import Optional
 from .models import Song, Track, Event, Note
 from .midi_import import import_song
@@ -34,6 +35,49 @@ class Sequencer:
                 for channel in range(16):
                     port.send(mido.Message('control_change', channel=channel, control=123, value=0))
         print("Sent all notes off to all open ports.")
+
+    def parse_position_to_beats(self, position_str: str, default: str = "1:1") -> Optional[float]:
+        """Parses a 'measure:beat' string into a float representing the absolute beat count."""
+        if not position_str:
+            position_str = default
+
+        try:
+            parts = position_str.split(':')
+            if len(parts) > 2:
+                print("Error: Invalid format. Please use 'measure:beat' or 'measure'.")
+                return None
+
+            measure = int(parts[0])
+            beat = int(parts[1]) if len(parts) == 2 else 1
+
+            beats_per_measure = self.song.time_signature_numerator
+
+            if not 1 <= beat <= beats_per_measure:
+                print(f"Error: Beat number {beat} is out of range for the current time signature ({beats_per_measure}/...). It must be between 1 and {beats_per_measure}.")
+                return None
+
+            if measure < 1:
+                print("Error: Measure number must be 1 or greater.")
+                return None
+
+            # Return total beats from the start (0-indexed)
+            return (measure - 1) * beats_per_measure + (beat - 1)
+
+        except (ValueError, IndexError):
+            print("Error: Invalid format. Please enter numbers in 'measure:beat' format.")
+            return None
+
+    def _format_beats_to_position(self, beats: float) -> str:
+        """Converts an absolute beat count into a 'measure:beat' string."""
+        if beats is None:
+            return ""
+        beats_per_measure = self.song.time_signature_numerator
+        if beats_per_measure == 0:
+            return "1:1"  # Avoid division by zero, return a sensible default
+
+        measure = int(beats / beats_per_measure) + 1
+        beat = int(beats % beats_per_measure) + 1
+        return f"{measure}:{beat}"
 
     def set_tempo(self, tempo: int):
         if tempo <= 0:
@@ -70,52 +114,46 @@ class Sequencer:
             return
 
         track = self.song.tracks[track_index]
-        start_measure = None
-        end_measure = None
 
-        try:
-            s_measure_input = input("Erase from measure (default: all track): ").strip()
-            if s_measure_input == "":
-                start_measure = None # This signals a full erase
+        # Ask whether to erase all or a range
+        erase_all_choice = input(f"Erase ALL events from track '{track.name}'? [y/N]: ").lower()
+        if erase_all_choice == 'y':
+            if input("This cannot be undone. Are you sure? [y/N]: ").lower() == 'y':
+                track.events.clear()
+                print(f"Erased all events from track '{track.name}'.")
             else:
-                start_measure = int(s_measure_input)
-                # Only ask for end measure if a start measure was given
-                e_measure_input = input(f"Erase up to measure (optional, press Enter for end of track): ").strip()
-                if e_measure_input != "":
-                    end_measure = int(e_measure_input)
+                print("Erase cancelled.")
+            return
+
+        # Ranged erase
+        try:
+            start_pos_str = input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
+            if start_beat is None: return
+
+            end_pos_str = input(f"Erase up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
+            if end_pos_str == "":
+                end_beat = float('inf')
+            else:
+                end_beat = self.parse_position_to_beats(end_pos_str)
+                if end_beat is None: return
+
+            if end_beat <= start_beat:
+                print("Error: End position must be after the start position.")
+                return
+
         except ValueError:
-            print("Error: Invalid measure number.")
+            print("Error: Invalid number format.")
             return
 
         # --- Confirmation ---
-        confirm_message = ""
-        if start_measure is None:
-            confirm_message = f"Are you sure you want to erase ALL notes from track '{track.name}'? [y/N] "
-        else:
-            end_str = f" to measure {end_measure}" if end_measure else " to the end of the track"
-            confirm_message = f"Are you sure you want to erase notes from measure {start_measure}{end_str} on track '{track.name}'? [y/N] "
-
+        end_str = f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
+        confirm_message = f"Erase events from {start_pos_str} {end_str} on track '{track.name}'? [y/N] "
         if input(confirm_message).lower() != 'y':
             print("Erase cancelled.")
             return
 
         # --- Execution ---
-        if start_measure is None:
-            track.events.clear()
-            print(f"Erased all events from track '{track.name}'.")
-            return
-
-        # Ranged erase logic
-        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
-
-        start_beat = (start_measure - 1) * beats_per_measure
-
-        end_beat = float('inf')
-        if end_measure is not None:
-            if end_measure < start_measure:
-                print("Error: End measure cannot be before the start measure.")
-                return
-            end_beat = end_measure * beats_per_measure
 
         initial_event_count = len(track.events)
         track.events = [
@@ -137,53 +175,201 @@ class Sequencer:
 
     def move_track_section(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
+            print("Error: Invalid source track index.")
             return
 
-        track = self.song.tracks[track_index]
+        source_track = self.song.tracks[track_index]
 
         try:
-            start_measure = int(input("Move from start measure: ").strip())
-            num_measures = int(input("Number of measures to move: ").strip())
-            destination_measure = int(input("Move to destination measure: ").strip())
+            # Get source range
+            start_pos_str = input(f"Move from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            source_start_beat = self._parse_position_to_beats(start_pos_str, default="1:1")
+            if source_start_beat is None: return
 
-            if start_measure < 1 or num_measures < 1 or destination_measure < 1:
-                print("Error: Measure numbers and count must be 1 or greater.")
+            end_pos_str = input(f"Move up to position on track '{source_track.name}' (measure:beat): ").strip()
+            source_end_beat = self._parse_position_to_beats(end_pos_str)
+            if source_end_beat is None: return
+
+            if source_end_beat <= source_start_beat:
+                print("Error: End position must be after the start position.")
                 return
 
-            if destination_measure >= start_measure and destination_measure < start_measure + num_measures:
-                print("Error: Destination cannot be inside the source range.")
+            # Get destination
+            dest_track_idx_str = input(f"Move to destination track index (default: {track_index}, '{source_track.name}'): ").strip()
+            dest_track_idx = track_index if dest_track_idx_str == "" else int(dest_track_idx_str)
+
+            if not 0 <= dest_track_idx < len(self.song.tracks):
+                print("Error: Invalid destination track index.")
                 return
+
+            dest_track = self.song.tracks[dest_track_idx]
+
+            dest_pos_str = input(f"Move to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            destination_start_beat = self._parse_position_to_beats(dest_pos_str, default="1:1")
+            if destination_start_beat is None: return
 
         except ValueError:
-            print("Error: Invalid number.")
+            print("Error: Invalid number in track index.")
             return
+
+        # --- Calculations ---
+        range_duration_beats = source_end_beat - source_start_beat
+        destination_end_beat = destination_start_beat + range_duration_beats
+        offset_beats = destination_start_beat - source_start_beat
 
         # Confirmation
         confirm_message = (
-            f"On track '{track.name}', move {num_measures} measure(s) "
-            f"from measure {start_measure} to measure {destination_measure}. Are you sure? [y/N] "
+            f"Move events from {start_pos_str} to {end_pos_str} on track '{source_track.name}' "
+            f"to start at {dest_pos_str} on track '{dest_track.name}'. Are you sure? [y/N] "
         )
         if input(confirm_message).lower() != 'y':
             print("Move cancelled.")
             return
 
+        # --- Check for notes at destination ---
+        events_at_destination = [
+            event for event in dest_track.events if destination_start_beat <= event.start_time < destination_end_beat
+        ]
+        if source_track == dest_track:
+            events_at_destination = [e for e in events_at_destination if not (source_start_beat <= e.start_time < source_end_beat)]
+
+        overwrite_mode = "add"
+        if events_at_destination:
+            print("There are existing notes at the destination.")
+            while True:
+                choice = input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                if choice in ['r', 'replace', 'a', 'add']:
+                    overwrite_mode = choice[0]
+                    break
+                else:
+                    print("Invalid choice. Please enter 'r' or 'a'.")
+
+        # --- Partition and process events ---
+        events_to_move = []
+        remaining_source_events = []
+        for event in source_track.events:
+            if source_start_beat <= event.start_time < source_end_beat:
+                events_to_move.append(event)
+            else:
+                remaining_source_events.append(event)
+
+        deleted_event_count = 0
+        if overwrite_mode == 'r':
+            # This list will hold the events that are NOT in the destination range
+            final_dest_events = []
+            # When moving within the same track, we must not remove the events that are being moved.
+            # So, we iterate over the original list of events of the destination track.
+            for event in dest_track.events:
+                # If the event is not in the destination range, we keep it.
+                if not (destination_start_beat <= event.start_time < destination_end_beat):
+                    final_dest_events.append(event)
+                else:
+                    # If the event IS in the destination range, we must check if it's also in the source range
+                    # (only relevant if source_track == dest_track)
+                    if source_track == dest_track and source_start_beat <= event.start_time < source_end_beat:
+                        # This event is being moved, so we keep it for now.
+                        # It will be processed and moved later.
+                        final_dest_events.append(event)
+                    else:
+                        # This event is in the destination and is NOT being moved, so it gets deleted.
+                        deleted_event_count += 1
+            dest_track.events = final_dest_events
+
+
+        # Update source track events list only if the move is to a different track
+        if source_track != dest_track:
+            source_track.events = remaining_source_events
+
+        # Move the selected events
+        moved_event_count = 0
+        for event in events_to_move:
+            event.start_time += offset_beats
+            if event.start_time < 0:
+                print(f"Warning: Moving event would result in a negative start time ({event.start_time:.2f} beats). Skipping and keeping original.")
+                source_track.add_event(event) # Add it back to source if it's an invalid move
+                continue
+
+            # If moving to a different track, add the event object to the new track
+            if source_track != dest_track:
+                dest_track.add_event(event)
+
+            moved_event_count += 1
+
+        # Sort the events for both tracks to ensure correct playback order
+        source_track.events.sort(key=lambda e: e.start_time)
+        dest_track.events.sort(key=lambda e: e.start_time)
+
+        # --- Report results ---
+        report = []
+        if moved_event_count > 0:
+            report.append(f"Moved {moved_event_count} event(s) from '{source_track.name}' to '{dest_track.name}'")
+        if deleted_event_count > 0:
+            report.append(f"deleted {deleted_event_count} event(s) at destination")
+
+        if not report:
+            print("No notes were found in the source range to move.")
+        else:
+            print(f"Operation complete: {', '.join(report)}.")
+
+    def copy_track_section(self):
+        if not self.song.tracks:
+            print("No tracks to copy from.")
+            return
+
+        try:
+            # Get source track
+            source_track_idx = int(input("Copy from track index: ").strip())
+            if not 0 <= source_track_idx < len(self.song.tracks):
+                print("Error: Invalid source track index.")
+                return
+            source_track = self.song.tracks[source_track_idx]
+
+            # Get source range
+            start_pos_str = input(f"Copy from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            source_start_beat = self._parse_position_to_beats(start_pos_str, default="1:1")
+            if source_start_beat is None: return
+
+            end_pos_str = input(f"Copy up to position on track '{source_track.name}' (measure:beat): ").strip()
+            source_end_beat = self._parse_position_to_beats(end_pos_str)
+            if source_end_beat is None: return
+
+            if source_end_beat <= source_start_beat:
+                print("Error: End position must be after the start position.")
+                return
+
+            # Get destination
+            dest_track_idx = int(input(f"Copy to destination track index (default: {source_track_idx}): ").strip() or str(source_track_idx))
+            if not 0 <= dest_track_idx < len(self.song.tracks):
+                print("Error: Invalid destination track index.")
+                return
+            dest_track = self.song.tracks[dest_track_idx]
+
+            dest_pos_str = input(f"Copy to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            destination_start_beat = self._parse_position_to_beats(dest_pos_str, default="1:1")
+            if destination_start_beat is None: return
+
+        except ValueError:
+            print("Error: Invalid number.")
+            return
+
         # --- Calculations ---
-        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
-
-        source_start_beat = (start_measure - 1) * beats_per_measure
-        source_end_beat = source_start_beat + (num_measures * beats_per_measure)
-
-        destination_start_beat = (destination_measure - 1) * beats_per_measure
-        destination_end_beat = destination_start_beat + (num_measures * beats_per_measure)
-
+        range_duration_beats = source_end_beat - source_start_beat
+        destination_end_beat = destination_start_beat + range_duration_beats
         offset_beats = destination_start_beat - source_start_beat
+
+        # Confirmation
+        confirm_message = (
+            f"Copy events from {start_pos_str} to {end_pos_str} on track '{source_track.name}' "
+            f"to start at {dest_pos_str} on track '{dest_track.name}'. Are you sure? [y/N] "
+        )
+        if input(confirm_message).lower() != 'y':
+            print("Copy cancelled.")
+            return
 
         # --- Check for notes at destination ---
         events_at_destination = [
-            event for event in track.events
-            if (destination_start_beat <= event.start_time < destination_end_beat)
-            and not (source_start_beat <= event.start_time < source_end_beat)
+            event for event in dest_track.events
+            if destination_start_beat <= event.start_time < destination_end_beat
         ]
 
         overwrite_mode = "add"
@@ -201,45 +387,123 @@ class Sequencer:
                     print("Invalid choice. Please enter 'r' or 'a'.")
 
         # --- Partition and process events ---
-        final_events = []
-        moved_event_count = 0
+        copied_event_count = 0
         deleted_event_count = 0
 
-        for event in track.events:
-            # Case 1: Event is in the source range -> Move it
-            if source_start_beat <= event.start_time < source_end_beat:
-                new_start_time = event.start_time + offset_beats
-                if new_start_time < 0:
-                    print(f"Warning: Moving event would result in a negative start time ({new_start_time:.2f} beats). Keeping original.")
-                    final_events.append(event) # Keep it in its original position
-                else:
-                    event.start_time = new_start_time
-                    final_events.append(event)
-                    moved_event_count += 1
+        # Find events to copy
+        source_events_to_copy = [
+            event for event in source_track.events
+            if source_start_beat <= event.start_time < source_end_beat
+        ]
 
-            # Case 2: Event is at the destination and we are replacing -> Delete it
-            elif overwrite_mode == "replace" and destination_start_beat <= event.start_time < destination_end_beat:
-                deleted_event_count += 1
-                pass # Don't add it to final_events
+        # If replacing, remove existing events at destination
+        if overwrite_mode == "replace":
+            initial_dest_event_count = len(dest_track.events)
+            dest_track.events = [
+                event for event in dest_track.events
+                if not (destination_start_beat <= event.start_time < destination_end_beat)
+            ]
+            deleted_event_count = initial_dest_event_count - len(dest_track.events)
 
-            # Case 3: Event is not affected -> Keep it
-            else:
-                final_events.append(event)
+        # Create copies of the source events and add them
+        for event in source_events_to_copy:
+            new_event = deepcopy(event)
+            new_event.start_time += offset_beats
+            if new_event.start_time < 0:
+                print(f"Warning: Copying event would result in a negative start time ({new_event.start_time:.2f} beats). Skipping event.")
+                continue
+            dest_track.add_event(new_event)
+            copied_event_count += 1
 
-        track.events = final_events
-        track.events.sort(key=lambda e: e.start_time)
+        dest_track.events.sort(key=lambda e: e.start_time)
 
         # --- Report results ---
         report = []
-        if moved_event_count > 0:
-            report.append(f"Moved {moved_event_count} event(s)")
+        if copied_event_count > 0:
+            report.append(f"Copied {copied_event_count} event(s)")
         if deleted_event_count > 0:
             report.append(f"deleted {deleted_event_count} event(s) at destination")
 
         if not report:
-            print("No notes were found in the source range to move.")
+            print("No notes were found in the source range to copy.")
         else:
-            print(f"Operation complete: {', '.join(report)} on track '{track.name}'.")
+            print(f"Operation complete: {', '.join(report)}.")
+
+    def transpose_track_section(self):
+        if not self.song.tracks:
+            print("No tracks to transpose.")
+            return
+
+        try:
+            track_idx = int(input("Transpose track index: ").strip())
+            if not 0 <= track_idx < len(self.song.tracks):
+                print("Error: Invalid track index.")
+                return
+            track = self.song.tracks[track_idx]
+
+            start_pos_str = input(f"Transpose from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_beat = self._parse_position_to_beats(start_pos_str, default="1:1")
+            if start_beat is None: return
+
+            end_pos_str = input(f"Transpose up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
+            if end_pos_str == "":
+                end_beat = float('inf')
+            else:
+                end_beat = self._parse_position_to_beats(end_pos_str)
+                if end_beat is None: return
+
+            if end_beat <= start_beat:
+                print("Error: End position must be after the start position.")
+                return
+
+            transpose_value = int(input("Transpose by how many semitones (e.g., 12 for up, -12 for down): ").strip())
+            if not -127 <= transpose_value <= 127:
+                print("Error: Transposition value must be between -127 and 127.")
+                return
+
+        except ValueError:
+            print("Error: Invalid number.")
+            return
+
+        # --- Find events to transpose ---
+        events_to_transpose = [
+            event for event in track.events
+            if start_beat <= event.start_time < end_beat
+        ]
+
+        if not events_to_transpose:
+            print("No notes found in the specified range to transpose.")
+            return
+
+        # --- Confirmation ---
+        confirm_message = (
+            f"Transpose {len(events_to_transpose)} event(s) on track '{track.name}' by {transpose_value} semitones. "
+            f"Are you sure? [y/N] "
+        )
+        if input(confirm_message).lower() != 'y':
+            print("Transpose cancelled.")
+            return
+
+        # --- Transpose notes ---
+        transposed_note_count = 0
+        clamped_note_count = 0
+        for event in events_to_transpose:
+            for note in event.notes:
+                original_pitch = note.pitch
+                new_pitch = original_pitch + transpose_value
+
+                if not 0 <= new_pitch <= 127:
+                    clamped_pitch = max(0, min(127, new_pitch))
+                    print(f"Warning: Transposing note {original_pitch} by {transpose_value} results in an out-of-range pitch ({new_pitch}). Clamping to {clamped_pitch}.")
+                    note.pitch = clamped_pitch
+                    clamped_note_count += 1
+                else:
+                    note.pitch = new_pitch
+                transposed_note_count += 1
+
+        print(f"Transposed {transposed_note_count} note(s) on track '{track.name}'.")
+        if clamped_note_count > 0:
+            print(f"{clamped_note_count} note(s) were clamped to the valid MIDI pitch range (0-127).")
 
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):
@@ -517,29 +781,40 @@ class Sequencer:
         else:
             print(f"Error: Virtual port '{name}' not found.")
 
-    def record_track(self, track_index: int, start_measure: Optional[int] = None):
+    def record_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
 
-        if start_measure is None:
-            try:
-                measure_input = input("Start recording at measure (default: 1): ").strip()
-                if measure_input == "":
-                    start_measure = 1
-                else:
-                    start_measure = int(measure_input)
-            except ValueError:
-                print("Error: Invalid measure number.")
-                return
-
-        if start_measure < 1:
-            print("Error: Start measure must be 1 or greater.")
-            return
-
         target_track = self.song.tracks[track_index]
-        beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
-        start_beat = (start_measure - 1) * beats_per_measure
+
+        try:
+            start_pos_str = input(f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
+            if start_beat is None: return
+
+            # Ask for number of measures to record
+            measures_input = input("Record for how long (measures:beats)? (Press Enter for unlimited) ").strip()
+            num_beats_to_record = None
+            if measures_input:
+                parts = measures_input.split(':')
+                if len(parts) > 2:
+                    print("Error: Invalid format. Please use 'measures:beats' or 'measures'.")
+                    return
+
+                num_measures = int(parts[0])
+                num_beats = int(parts[1]) if len(parts) == 2 else 0
+                beats_per_measure = self.song.time_signature_numerator
+
+                if num_measures < 0 or num_beats < 0 or (num_measures == 0 and num_beats == 0):
+                    print("Error: Recording duration must be positive.")
+                    return
+
+                num_beats_to_record = (num_measures * beats_per_measure) + num_beats
+
+        except (ValueError, IndexError):
+            print("Error: Invalid number format.")
+            return
 
         # Check for existing notes from the start_beat onwards
         existing_notes_in_range = [
@@ -548,42 +823,21 @@ class Sequencer:
         ]
 
         overwrite_mode = "add"
-        num_measures_to_record = None
-
         if existing_notes_in_range:
-            print("There are existing notes from this measure onwards.")
+            print("There are existing notes from this position onwards.")
             while True:
                 choice = input("Do you want to (r)eplace the existing notes or (a)dd to them? [r/a] ").lower()
-                if choice in ['r', 'replace']:
-                    overwrite_mode = "replace"
-                    break
-                elif choice in ['a', 'add']:
-                    overwrite_mode = "add"
+                if choice in ['r', 'replace', 'a', 'add']:
+                    overwrite_mode = choice[0]
                     break
                 else:
                     print("Invalid choice. Please enter 'r' or 'a'.")
 
-        # Ask for number of measures to record
-        while True:
-            try:
-                measures_input = input("How many measures to record? (Press Enter for unlimited) ").strip()
-                if measures_input == "":
-                    num_measures_to_record = None
-                    break
-                else:
-                    num_measures_to_record = int(measures_input)
-                    if num_measures_to_record <= 0:
-                        print("Error: Number of measures must be positive.")
-                        continue
-                    break
-            except ValueError:
-                print("Error: Invalid number.")
-
         # Handle overwrite logic
         if overwrite_mode == "replace":
             end_beat = float('inf')
-            if num_measures_to_record is not None:
-                end_beat = start_beat + (num_measures_to_record * beats_per_measure)
+            if num_beats_to_record is not None:
+                end_beat = start_beat + num_beats_to_record
 
             # Remove events within the specified range
             initial_event_count = len(target_track.events)
@@ -628,7 +882,7 @@ class Sequencer:
         try:
             if self.song.metronome_enabled:
                 self.metronome_only_mode = True
-                self.play(start_measure=1)
+                self.play(start_beat=0.0)
 
             with mido.open_input(inport_name) as inport:
                 if outport_name:
@@ -640,10 +894,9 @@ class Sequencer:
                 recording_start_time_sec = None
                 beats_per_second = self.song.tempo / 60
 
-                max_duration_beats = None
-                if num_measures_to_record is not None:
-                    max_duration_beats = num_measures_to_record * beats_per_measure
-                    print(f"Recording for {num_measures_to_record} measure(s) ({max_duration_beats:.2f} beats).")
+                max_duration_beats = num_beats_to_record
+                if max_duration_beats is not None:
+                    print(f"Recording for {max_duration_beats:.2f} beats.")
 
                 is_recording = True
                 while is_recording:
@@ -674,12 +927,13 @@ class Sequencer:
                         elapsed_beats = (time.time() - recording_start_time_sec) * beats_per_second
 
                         current_beat_float = start_beat + elapsed_beats
+                        beats_per_measure = self.song.time_signature_numerator
                         current_measure = int(current_beat_float / beats_per_measure) + 1
                         current_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
                         print(f"\rRecording: Measure {current_measure}, Beat {current_beat_in_measure} ", end="")
 
                         if max_duration_beats is not None and elapsed_beats >= max_duration_beats:
-                            print(f"\nFinished recording {num_measures_to_record} measure(s).")
+                            print(f"\nFinished recording for {max_duration_beats:.2f} beats.")
                             is_recording = False
 
                     time.sleep(0.01) # 10ms sleep to prevent high CPU usage
@@ -697,7 +951,7 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_thread(self, start_measure: int = 1, end_measure: Optional[int] = None, loop: bool = False):
+    def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         # Metronome-only mode for recording count-in
         if self.metronome_only_mode:
             port = self.open_ports.get(self.song.metronome_port_name)
@@ -786,14 +1040,11 @@ class Sequencer:
                     master_event_list.append({'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': note_off})
 
             # 3. Filter and normalize events for ranged playback
-            beats_per_measure = self.song.time_signature_numerator * (4 / self.song.time_signature_denominator)
-            start_beat = (start_measure - 1) * beats_per_measure
+            ticks_per_beat = 480
             start_tick = int(start_beat * ticks_per_beat)
 
             end_tick = float('inf')
-            if end_measure is not None:
-                # The end beat is the start of the measure *after* the end_measure
-                end_beat = end_measure * beats_per_measure
+            if end_beat is not None:
                 end_tick = int(end_beat * ticks_per_beat)
 
             # Filter events that are within the playback range
@@ -822,11 +1073,9 @@ class Sequencer:
             # The main loop for playback, which can be repeated for the "loop" feature
             while not self._stop_event.is_set():
                 if loop:
-                    loop_message = f"Looping measures {start_measure}"
-                    if end_measure:
-                        loop_message += f" to {end_measure}."
-                    else:
-                        loop_message += " to end."
+                    start_pos_str = self._format_beats_to_position(start_beat)
+                    end_pos_str = self._format_beats_to_position(end_beat) if end_beat is not None else "end"
+                    loop_message = f"Looping from {start_pos_str} to {end_pos_str}."
                     print(loop_message)
                 else:
                     print(f"Playing on {len(self.open_ports)} port(s)...")
@@ -845,14 +1094,12 @@ class Sequencer:
                     current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
 
                     # --- Display current measure and beat ---
-                    current_beat_float = current_ticks / ticks_per_beat
-                    current_measure = int(current_beat_float / beats_per_measure)
-                    current_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+                    current_beat_float = start_beat + (current_ticks / ticks_per_beat)
+                    beats_per_measure = self.song.time_signature_numerator
+                    display_measure = int(current_beat_float / beats_per_measure) + 1
+                    display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
 
-                    # Adjust for the original start measure for display
-                    display_measure = current_measure + start_measure
-
-                    print(f"\rPlaying: Measure {display_measure}, Beat {current_beat_in_measure} ", end="")
+                    print(f"\rPlaying: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
                     # --- Check for and send due events ---
                     while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
@@ -908,7 +1155,7 @@ class Sequencer:
             self.playback_state = "stopped"
             print("Playback finished.")
 
-    def play(self, start_measure: Optional[int] = None, end_measure: Optional[int] = None, loop: bool = False):
+    def play(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         if self.playback_state == "playing":
             print("Already playing.")
             return
@@ -916,34 +1163,12 @@ class Sequencer:
             self.pause()
             return
 
-        # Only prompt for measures if not in metronome-only mode (for recording)
-        if not self.metronome_only_mode:
-            try:
-                if start_measure is None:
-                    measure_input = input("Start at measure (default: 1): ").strip()
-                    start_measure = 1 if measure_input == "" else int(measure_input)
+        # This is for the recording count-in, which is not affected by the change
+        if self.metronome_only_mode and start_beat == 0.0:
+            start_beat = 0.0 # Corresponds to measure 1, beat 1
 
-                if end_measure is None:
-                    measure_input = input("End at measure (optional, press Enter for end of song): ").strip()
-                    if measure_input != "":
-                        end_measure = int(measure_input)
-                    else:
-                        end_measure = None # Explicitly set to None if user presses Enter
-
-            except ValueError:
-                print("Error: Invalid measure number.")
-                return
-
-        # If we are in metronome only mode and no start measure was passed, default to 1
-        # This is a safeguard, as record_track should now always pass start_measure=1
-        if self.metronome_only_mode and start_measure is None:
-            start_measure = 1
-
-        if start_measure < 1:
-            print("Error: Start measure must be 1 or greater.")
-            return
-        if end_measure is not None and end_measure < start_measure:
-            print("Error: End measure cannot be before the start measure.")
+        if end_beat is not None and end_beat <= start_beat:
+            print("Error: End position must be after the start position.")
             return
 
         self.total_paused_time = 0.0 # Reset pause timer for new playback
@@ -988,7 +1213,7 @@ class Sequencer:
         self.playback_state = "playing"
         self.playback_thread = threading.Thread(
             target=self._play_thread,
-            kwargs={'start_measure': start_measure, 'end_measure': end_measure, 'loop': loop}
+            kwargs={'start_beat': start_beat, 'end_beat': end_beat, 'loop': loop}
         )
         self.playback_thread.start()
 

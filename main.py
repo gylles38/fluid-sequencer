@@ -22,17 +22,19 @@ Sequencer CLI Commands:
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
-  move <track_index>      - Moves a section of a track to a new measure.
-  record <track_index> [measure] - Records MIDI to a track, optionally starting at a specific measure.
+  copy                    - Copies a section of a track using 'measure:beat' positions.
+  move <track_index>      - Moves a section of a track using 'measure:beat' positions.
+  transpose               - Transposes a section of a track using 'measure:beat' positions.
+  record <track_index>    - Records MIDI to a track, with 'measure:beat' precision.
   delete <track_index>    - Deletes a track after confirmation.
-  erase <track_index>     - Erases all or a range of notes from a track.
+  erase <track_index>     - Erases notes from a track using 'measure:beat' positions.
   tempo <bpm>             - Sets the song tempo in beats per minute.
   timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
   save <filepath>         - Saves only the song to a MIDI file.
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
-  play [start] [end]      - Plays the song, optionally from a start to an end measure.
-  loop [start] [end]      - Loops a section of the song, optionally from a start to an end measure.
+  play [start] [end]      - Plays the song. Start/end positions are in 'measure:beat'.
+  loop [start] [end]      - Loops a section of the song. Start/end positions are in 'measure:beat'.
   pause                   - Pauses or resumes playback.
   stop                    - Stops playback.
   restart                 - Stops and restarts playback from the beginning.
@@ -212,16 +214,13 @@ def main():
                     print("Usage: solo <track_index>")
             elif command == "record":
                 if len(args) == 1:
-                    seq.record_track(track_index=int(args[0]))
-                elif len(args) == 2:
                     try:
                         track_index = int(args[0])
-                        start_measure = int(args[1])
-                        seq.record_track(track_index=track_index, start_measure=start_measure)
+                        seq.record_track(track_index)
                     except ValueError:
-                        print("Error: Invalid track index or measure number.")
+                        print("Error: Invalid track index.")
                 else:
-                    print("Usage: record <track_index> [start_measure]")
+                    print("Usage: record <track_index>")
             elif command == "delete":
                 if len(args) == 1:
                     track_index = int(args[0])
@@ -260,6 +259,10 @@ def main():
                         print("Error: Invalid track index.")
                 else:
                     print("Usage: move <track_index>")
+            elif command == "copy":
+                seq.copy_track_section()
+            elif command == "transpose":
+                seq.transpose_track_section()
             elif command == "tempo":
                 if len(args) == 1:
                     seq.set_tempo(tempo=int(args[0]))
@@ -285,16 +288,22 @@ def main():
             elif command == "play" or command == "loop":
                 try:
                     if len(args) > 2:
-                        print(f"Usage: {command} [start_measure] [end_measure]")
+                        print(f"Usage: {command} [start_position] [end_position]")
                         continue
 
-                    start_measure = int(args[0]) if len(args) >= 1 else None
-                    end_measure = int(args[1]) if len(args) == 2 else None
+                    start_beat = seq.parse_position_to_beats(args[0]) if len(args) >= 1 else 0.0
+                    if start_beat is None:
+                        continue
+
+                    end_beat = seq.parse_position_to_beats(args[1], default=None) if len(args) == 2 else None
+                    if len(args) == 2 and end_beat is None:
+                        continue
 
                     is_looping = command == "loop"
-                    seq.play(start_measure=start_measure, end_measure=end_measure, loop=is_looping)
-                except ValueError:
-                    print("Error: Invalid measure number.")
+                    seq.play(start_beat=start_beat, end_beat=end_beat, loop=is_looping)
+
+                except Exception as e:
+                    print(f"Error during command execution: {e}")
             elif command == "pause":
                 seq.pause()
             elif command == "stop":

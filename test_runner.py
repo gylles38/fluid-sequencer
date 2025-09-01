@@ -21,8 +21,8 @@ seq.add_track(name="midi_track", track_type='midi', instrument=0)
 print("\n3. Assigning port to MIDI track...")
 seq.assign_port(track_index=0, port_name="testport")
 
-print("\n4. Adding Audio track...")
-seq.add_track(name="audio_track", track_type='audio', filepath="test_audio.wav")
+print("\n4. Adding Audio track (OGG)...")
+seq.add_track(name="audio_track_ogg", track_type='audio', filepath="test_audio.ogg")
 
 print("\n5. Listing tracks...")
 track_list = seq.list_tracks()
@@ -30,7 +30,7 @@ print(track_list)
 
 # Verification for step 5
 assert "midi_track (MIDI)" in track_list
-assert "audio_track (Audio)" in track_list
+assert "audio_track_ogg (Audio)" in track_list
 print("--> Verification PASSED")
 
 

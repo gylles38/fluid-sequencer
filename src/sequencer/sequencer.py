@@ -1231,9 +1231,14 @@ class Sequencer:
 
                     # --- Check for end of playback/loop section ---
                     if next_event_index >= len(ranged_event_list):
+                        # Before ending, check if any audio is still playing
+                        while any(p.is_playing() for p in self.active_audio_playbacks):
+                            if self._stop_event.is_set(): break
+                            time.sleep(0.1)
+
                         if not loop:
                             # Add a small delay to allow last notes to be heard before finishing
-                            time.sleep(1.0)
+                            time.sleep(0.5)
                             break # Exit the inner time-driven loop
 
                         # If looping, check if we've played the last note's duration

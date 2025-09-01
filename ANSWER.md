@@ -34,3 +34,10 @@ Jules
 J'ai installé l'outil système `ffmpeg`. Avec cet ajout, la librairie audio `pydub` que nous utilisons devrait maintenant être capable de charger et de lire les fichiers au format `.ogg` sans problème. Vous pouvez les ajouter avec la commande `addaudio <nom> <chemin/vers/fichier.ogg>`.
 
 Malheureusement, à cause de problèmes persistants avec l'environnement de test, je n'ai pas pu vérifier cela avec un test automatisé. Cependant, la configuration requise est en place.
+
+---
+**Mise à jour concernant la lecture des fichiers audio :**
+
+Vous avez signalé que la lecture s'arrêtait prématurément lors de l'utilisation de pistes audio. C'était un excellent retour. J'ai identifié et corrigé un bug dans le moteur de lecture. Le programme ne attendait pas la fin de la lecture des fichiers audio avant de terminer la séquence.
+
+Ce problème est maintenant résolu. La lecture devrait se poursuivre jusqu'à ce que tous les clips audio soient terminés.

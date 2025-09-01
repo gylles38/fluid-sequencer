@@ -59,7 +59,7 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
         self.audio_threads: List[threading.Thread] = []
-        self.audio_player_command: str = "ffplay -nodisp -autoexit -hide_banner -loglevel error -f s16le -ar {ar} -ac {ac} -i -"
+        self.audio_player_command: str = "ffplay -nodisp -autoexit -hide_banner"
 
         self.metronome_only_mode = False
         self.total_paused_time = 0.0
@@ -1024,42 +1024,46 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_with_external_player(self, seg):
+    def _play_audio_file_blocking(self, filepath: str):
+        """
+        Plays an audio file by exporting it to a temporary WAV file and
+        calling a configurable external player command.
+        """
+        import tempfile
         import subprocess
         import shlex
+        import os
 
-        # Replace placeholders manually to avoid KeyError if they don't exist
-        command_str = self.audio_player_command.replace('{ar}', str(seg.frame_rate))
-        command_str = command_str.replace('{ac}', str(seg.channels))
-
-        print(f"\n[DEBUG] Executing audio command: {command_str}")
-
-        command = shlex.split(command_str)
-
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE
-        )
-
-        _, stderr_data = process.communicate(input=seg.raw_data)
-
-        if process.returncode != 0:
-            print(f"\n[ERROR] Audio player exited with code {process.returncode}")
-            if stderr_data:
-                print(f"[ERROR] Audio player stderr:\n{stderr_data.decode('utf-8', errors='ignore')}")
-
-    def _play_audio_file_blocking(self, filepath: str):
-        """Plays an audio file using a robust external player subprocess."""
+        tmp_path = None
         try:
             audio_segment = AudioSegment.from_file(filepath)
             if len(audio_segment) == 0:
                 print(f"\n[ERROR] Audio file at '{filepath}' could not be loaded or is empty.")
                 return
-            self._play_with_external_player(audio_segment)
+
+            # Export the segment to a temporary WAV file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+            audio_segment.export(tmp_path, format="wav")
+
+            # Build the command
+            command = shlex.split(self.audio_player_command)
+            command.append(tmp_path)
+
+            # Run the command
+            result = subprocess.run(command, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                print(f"\n[ERROR] Audio player exited with code {result.returncode}")
+                print(f"[ERROR] stdout: {result.stdout}")
+                print(f"[ERROR] stderr: {result.stderr}")
+
         except Exception as e:
             print(f"\n[ERROR] in audio playback thread for file '{filepath}': {e}")
+        finally:
+            # Clean up the temporary file
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         # Metronome-only mode for recording count-in

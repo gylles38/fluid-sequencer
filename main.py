@@ -17,7 +17,7 @@ Sequencer CLI Commands:
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
-  setaudiocmd <cmd...>    - Sets the command for the external audio player.
+  setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mplayer -ao jack).
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
@@ -193,9 +193,9 @@ def main():
                     cmd_str = " ".join(args)
                     seq.audio_player_command = cmd_str
                     print(f"Audio player command set to: {cmd_str}")
-                    print("Note: Use {ar} for sample rate and {ac} for channels if needed.")
+                    print("Note: The audio filepath will be appended to this command.")
                 else:
-                    print("Usage: setaudiocmd <command_string>")
+                    print("Usage: setaudiocmd <command...>")
                     print(f"Current command: {seq.audio_player_command}")
             elif command == "setbank":
                 if len(args) == 2:

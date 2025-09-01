@@ -1215,8 +1215,10 @@ class Sequencer:
 
                         elif event_details['type'] == 'audio':
                             if should_play_event:
+                                print("\n[DEBUG] Dispatching audio file:", event_details['filepath'])
                                 # _play_audio_file is already non-blocking as it uses _play_with_simpleaudio
                                 self._play_audio_file(event_details['filepath'])
+                                print("\n[DEBUG] Audio file dispatched.")
 
                         elif event_details['type'] == 'metronome':
                              original_tick = event_details['tick'] + start_tick
@@ -1230,10 +1232,13 @@ class Sequencer:
 
                     # --- Check for end of playback/loop section ---
                     if next_event_index >= len(ranged_event_list):
+                        print("\n[DEBUG] Reached end of event list. Checking for active audio...")
                         # Before ending, check if any audio is still playing
                         while any(p.is_playing() for p in self.active_audio_playbacks):
+                            print("\n[DEBUG] Audio still playing, waiting...")
                             if self._stop_event.is_set(): break
                             time.sleep(0.1)
+                        print("\n[DEBUG] All audio finished.")
 
                         if not loop:
                             # Add a small delay to allow last notes to be heard before finishing

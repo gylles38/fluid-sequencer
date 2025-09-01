@@ -17,6 +17,7 @@ Sequencer CLI Commands:
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
+  setaudiodriver <d>      - Sets the audio driver ('default' or 'jack').
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
@@ -187,6 +188,16 @@ def main():
                     seq.unassign_port(track_index=int(args[0]))
                 else:
                     print("Usage: unassign <track_index>")
+            elif command == "setaudiodriver":
+                if len(args) == 1:
+                    driver = args[0].lower()
+                    if driver in ['default', 'jack']:
+                        seq.audio_driver = driver
+                        print(f"Audio driver set to: {driver}")
+                    else:
+                        print("Error: Invalid driver. Choose 'default' or 'jack'.")
+                else:
+                    print("Usage: setaudiodriver <default|jack>")
             elif command == "setbank":
                 if len(args) == 2:
                     seq.set_bank(track_index=int(args[0]), msb=int(args[1]))

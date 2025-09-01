@@ -59,6 +59,7 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
         self.audio_threads: List[threading.Thread] = []
+        self.audio_driver: str = 'default' # 'default' or 'jack'
 
         self.metronome_only_mode = False
         self.total_paused_time = 0.0
@@ -1034,6 +1035,9 @@ class Sequencer:
             "-ac", str(seg.channels),
             "-i", "-"
         ]
+        if self.audio_driver == 'jack':
+            command.extend(["-ao", "jack"])
+
         process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,

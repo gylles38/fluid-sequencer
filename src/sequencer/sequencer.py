@@ -60,6 +60,7 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
         self.active_audio_playbacks: List[simpleaudio.PlayObject] = []
+        self.audio_lock = threading.Lock()
 
         self.metronome_only_mode = False
         self.total_paused_time = 0.0
@@ -1025,11 +1026,12 @@ class Sequencer:
                 print(f"Closed Thru port '{outport_name}'.")
 
     def _play_audio_file(self, filepath: str):
-        """Plays an audio file in a new thread."""
+        """Plays an audio file and adds its playback object to the active list."""
         try:
             audio_segment = AudioSegment.from_file(filepath)
             play_obj = _play_with_simpleaudio(audio_segment)
-            self.active_audio_playbacks.append(play_obj)
+            with self.audio_lock:
+                self.active_audio_playbacks.append(play_obj)
         except Exception as e:
             print(f"\nError playing audio file '{filepath}': {e}")
 
@@ -1215,10 +1217,9 @@ class Sequencer:
 
                         elif event_details['type'] == 'audio':
                             if should_play_event:
-                                print("\n[DEBUG] Dispatching audio file:", event_details['filepath'])
-                                # _play_audio_file is already non-blocking as it uses _play_with_simpleaudio
-                                self._play_audio_file(event_details['filepath'])
-                                print("\n[DEBUG] Audio file dispatched.")
+                                # Play audio in a separate thread to prevent potential deadlocks with simpleaudio
+                                audio_thread = threading.Thread(target=self._play_audio_file, args=(event_details['filepath'],))
+                                audio_thread.start()
 
                         elif event_details['type'] == 'metronome':
                              original_tick = event_details['tick'] + start_tick
@@ -1232,13 +1233,18 @@ class Sequencer:
 
                     # --- Check for end of playback/loop section ---
                     if next_event_index >= len(ranged_event_list):
-                        print("\n[DEBUG] Reached end of event list. Checking for active audio...")
                         # Before ending, check if any audio is still playing
-                        while any(p.is_playing() for p in self.active_audio_playbacks):
-                            print("\n[DEBUG] Audio still playing, waiting...")
-                            if self._stop_event.is_set(): break
+                        while True:
+                            with self.audio_lock:
+                                still_playing = any(p.is_playing() for p in self.active_audio_playbacks)
+
+                            if not still_playing:
+                                break
+
+                            if self._stop_event.is_set():
+                                break
+
                             time.sleep(0.1)
-                        print("\n[DEBUG] All audio finished.")
 
                         if not loop:
                             # Add a small delay to allow last notes to be heard before finishing

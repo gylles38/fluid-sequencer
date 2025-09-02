@@ -871,31 +871,46 @@ class Sequencer:
                     outport = mido.open_output(outport_name)
                     print(f"Listening on '{inport_name}' with MIDI Thru to '{outport_name}'.")
 
-                print("Recording armed. Play along with the track. Recording will start on your first note.")
+                # Clear any stale messages in the MIDI buffer before starting
+                print("DEBUG: Clearing initial MIDI buffer for 0.2s...", flush=True)
+                time.sleep(0.2)
+                for msg in inport.iter_pending():
+                    print(f"DEBUG: Discarding stale message: {msg}", flush=True)
+                print("DEBUG: Buffer cleared. Armed for recording.")
 
                 is_waiting_for_first_note = True
                 recording_start_time_sec = 0
                 first_note_time_beats = 0
+                last_beat_display = -1
 
                 while not self._stop_event.is_set():
+                    # Provide continuous user feedback about the recording state
+                    if is_waiting_for_first_note:
+                        print(f"\rWaiting for first note... ", end="")
+                    else:
+                        elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
+                        current_recording_beat = first_note_time_beats + elapsed_recording_beats
+                        if int(current_recording_beat) > last_beat_display:
+                            last_beat_display = int(current_recording_beat)
+                            print(f"\rRecording at beat {self._format_beats_to_position(current_recording_beat)}...", end="")
+
                     for msg in inport.iter_pending():
+                        print(f"DEBUG: Received MIDI message: {msg}", flush=True)
                         if outport: outport.send(msg)
 
                         now = time.time()
 
                         if is_waiting_for_first_note:
-                            # Ignore notes that are on the same channel as any of our playback tracks
-                            # to prevent MIDI loopback from immediately triggering the recording.
                             playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
 
                             if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels:
-                                print(f"DEBUG: Recording triggered by message: {msg}", flush=True) # DEBUG
                                 recording_start_time_sec = now
                                 beats_per_second = self.song.tempo / 60.0
                                 elapsed_playback_sec = now - self.playback_start_time
                                 current_beat = self.last_start_beat + (elapsed_playback_sec * beats_per_second)
                                 first_note_time_beats = round(current_beat)
-                                print(f"\nRecording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
+                                print("\r" + " " * 50 + "\r", end="") # Clear the "Waiting..." line
+                                print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
                                 is_waiting_for_first_note = False
 
                                 open_notes[msg.note] = (now, msg.velocity)
@@ -932,7 +947,7 @@ class Sequencer:
                 outport.close()
             target_track.is_muted = original_mute_state
             self.is_recording = False
-            print("Recording thread finished.")
+            print("\nRecording thread finished.")
 
     def record_track(self, track_index: int):
         if self.playback_state != "stopped":
@@ -1216,11 +1231,12 @@ class Sequencer:
                     if end_beat is not None and current_beat_float >= end_beat:
                         break
 
-                    # --- Display current measure and beat ---
-                    beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
-                    display_measure = int(current_beat_float / beats_per_measure) + 1
-                    display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
-                    print(f"\rPlaying: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
+                    # --- Display current measure and beat (only if not recording) ---
+                    if not self.is_recording:
+                        beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
+                        display_measure = int(current_beat_float / beats_per_measure) + 1
+                        display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+                        print(f"\rPlaying: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
 
                     # Dispatch events that are due

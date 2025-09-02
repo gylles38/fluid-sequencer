@@ -29,22 +29,15 @@ class CustomSongEncoder(json.JSONEncoder):
 def song_decoder(d):
     if '__type__' in d:
         type_name = d.pop('__type__')
-        # This is a simplified check. For a real app, you might want a more robust
-        # way to map type names to classes, e.g., a dictionary.
+        # Map the type name to the actual class.
+        # The values in 'd' have already been decoded into objects by the hook.
         if type_name == 'Song':
-            # The 'tracks' field needs to be recursively decoded first
-            tracks_data = d.get('tracks', [])
-            d['tracks'] = [song_decoder(t) for t in tracks_data]
             return Song(**d)
         elif type_name == 'MidiTrack':
-            events_data = d.get('events', [])
-            d['events'] = [song_decoder(e) for e in events_data]
             return MidiTrack(**d)
         elif type_name == 'AudioTrack':
             return AudioTrack(**d)
         elif type_name == 'Event':
-            notes_data = d.get('notes', [])
-            d['notes'] = [song_decoder(n) for n in notes_data]
             return Event(**d)
         elif type_name == 'Note':
             return Note(**d)

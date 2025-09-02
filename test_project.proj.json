@@ -1,0 +1,114 @@
+{
+    "song": {
+        "name": "New Song",
+        "tempo": 120,
+        "time_signature_numerator": 4,
+        "time_signature_denominator": 4,
+        "ticks_per_beat": 480,
+        "tracks": [
+            {
+                "name": "drums",
+                "filepath": "Sheep-bass.ogg",
+                "is_muted": false,
+                "is_solo": false,
+                "start_time": 0.0
+            },
+            {
+                "name": "bass",
+                "is_muted": false,
+                "is_solo": false,
+                "channel": 0,
+                "events": [
+                    {
+                        "notes": [
+                            {
+                                "pitch": 40,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 0.0
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 42,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 2.0
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 40,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 4.0
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 42,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 6.0
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 40,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 8.0
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 42,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 10.0
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 40,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 12.0
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 42,
+                                "velocity": 100,
+                                "duration": 1.0
+                            }
+                        ],
+                        "start_time": 14.0
+                    }
+                ],
+                "instrument": 33,
+                "bank_msb": null,
+                "bank_lsb": null,
+                "output_port_name": "test_vport"
+            }
+        ],
+        "metronome_enabled": false,
+        "metronome_port_name": null,
+        "__type__": "Song"
+    },
+    "virtual_ports": []
+}

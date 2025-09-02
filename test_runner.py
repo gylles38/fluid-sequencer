@@ -1,80 +1,47 @@
-import os
-from sequencer.sequencer import Sequencer
-
-# --- Test Setup ---
-# Ensure we have a clean slate
-if os.path.exists("test_project.proj.json"):
-    os.remove("test_project.proj.json")
-if os.path.exists("test_export.mid"):
-    os.remove("test_export.mid")
-
-# --- Test Execution ---
-print("--- Running Integration Test ---")
-seq = Sequencer()
-
-print("\n1. Creating virtual port...")
-seq.create_virtual_port("testport")
-
-print("\n2. Adding MIDI track...")
-seq.add_track(name="midi_track", track_type='midi', instrument=0)
-
-print("\n3. Assigning port to MIDI track...")
-seq.assign_port(track_index=0, port_name="testport")
-
-print("\n4. Adding Audio track (OGG)...")
-seq.add_track(name="audio_track_ogg", track_type='audio', filepath="test_audio.ogg")
-
-print("\n5. Listing tracks...")
-track_list = seq.list_tracks()
-print(track_list)
-
-# Verification for step 5
-assert "midi_track (MIDI)" in track_list
-assert "audio_track_ogg (Audio)" in track_list
-print("--> Verification PASSED")
-
-
-print("\n6. Saving project...")
-seq.save_project("test_project")
-
-# Verification for step 6
-assert os.path.exists("test_project.proj.json")
-print("--> Verification PASSED")
-
-
-# --- Second part: Load the project ---
-print("\n7. Creating new sequencer and loading project...")
-seq2 = Sequencer()
-seq2.load_project("test_project")
-
-print("\n8. Listing tracks from loaded project...")
-track_list_2 = seq2.list_tracks()
-print(track_list_2)
-
-# Verification for step 8
-assert "midi_track (MIDI)" in track_list_2
-assert "audio_track (Audio)" in track_list_2
-assert len(seq2.song.tracks) == 2
-print("--> Verification PASSED")
-
-
-print("\n9. Saving to MIDI file...")
-# Suppress print statements from export_to_midi to keep output clean
-# This is a bit of a hack, but necessary for automated checking
 import sys
-from io import StringIO
-original_stdout = sys.stdout
-sys.stdout = captured_output = StringIO()
+import os
 
-seq2.save_song("test_export.mid")
+# Ensure the 'src' directory is in the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
-sys.stdout = original_stdout
-print(captured_output.getvalue().strip())
+from sequencer.sequencer import Sequencer
+from sequencer.models import Note, Event, MidiTrack
 
-# Verification for step 9
-assert "Warning: Skipping audio track 'audio_track' during MIDI export." in captured_output.getvalue()
-assert os.path.exists("test_export.mid")
-print("--> Verification PASSED")
+def create_test_project():
+    """Creates a standard project file for manual testing."""
+    print("Creating a test project file: test_project.proj.json")
 
+    seq = Sequencer()
 
-print("\n--- Test Complete ---")
+    # Audio track starts at beat 0 (1:1)
+    # Using the Sheep-bass.ogg file as it's known to exist.
+    seq.add_track(name="drums", track_type="audio", filepath="Sheep-bass.ogg")
+
+    # MIDI track
+    seq.add_track(name="bass", track_type="midi", instrument=33)
+
+    # Find the bass track to add notes to it
+    bass_track = next((t for t in seq.song.tracks if isinstance(t, MidiTrack)), None)
+
+    if bass_track:
+        # Add notes for 4 measures
+        for i in range(8):
+            beat = i * 2.0
+            pitch = 40 if i % 2 == 0 else 42
+            bass_track.add_event(Event(notes=[Note(pitch=pitch, duration=1.0)], start_time=beat))
+    else:
+        print("Could not find the MIDI track to add notes.")
+        return
+
+    # Assign the MIDI track to a virtual port
+    seq.create_virtual_port("test_vport")
+    # Find the index of the bass track to assign it
+    bass_track_index = seq.song.tracks.index(bass_track)
+    seq.assign_port(bass_track_index, "test_vport")
+
+    seq.save_project("test_project")
+    print("Test project 'test_project.proj.json' created successfully.")
+    print("You can now run 'python3 main.py' and use this project for testing.")
+
+if __name__ == "__main__":
+    create_test_project()

@@ -2,7 +2,7 @@ from .midi_export import export_to_midi
 from .midi_import import import_song
 from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
+from dataclasses import dataclass, asdict, is_dataclass
 import json
 import mido
 from pydub import AudioSegment

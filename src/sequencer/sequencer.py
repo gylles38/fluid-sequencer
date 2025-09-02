@@ -1337,12 +1337,8 @@ class Sequencer:
             print("Playback finished.")
 
     def play(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
-        if self.playback_state == "playing":
-            print("Already playing.")
-            return
-        if self.playback_state == "paused":
-            self.pause()
-            return
+        if self.playback_state != "stopped":
+            self.stop()
 
         # This is for the recording count-in, which is not affected by the change
         if self.metronome_only_mode and start_beat == 0.0:

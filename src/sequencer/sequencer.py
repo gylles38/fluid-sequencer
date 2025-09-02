@@ -883,7 +883,11 @@ class Sequencer:
                         now = time.time()
 
                         if is_waiting_for_first_note:
-                            if msg.type == 'note_on' and msg.velocity > 0:
+                            # Ignore notes that are on the same channel as any of our playback tracks
+                            # to prevent MIDI loopback from immediately triggering the recording.
+                            playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
+
+                            if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels:
                                 recording_start_time_sec = now
                                 beats_per_second = self.song.tempo / 60.0
                                 elapsed_playback_sec = now - self.playback_start_time

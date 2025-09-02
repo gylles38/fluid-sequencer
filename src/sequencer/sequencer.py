@@ -907,7 +907,7 @@ class Sequencer:
                     print("Invalid choice. Please enter 'r' or 'a'.")
 
         # Handle overwrite logic
-        if overwrite_mode == "replace":
+        if overwrite_mode == 'r':
             end_beat = float('inf')
             if num_beats_to_record is not None:
                 end_beat = start_beat + num_beats_to_record
@@ -1431,4 +1431,5 @@ class Sequencer:
         """Restarts playback from the beginning."""
         if self.playback_state != "stopped":
             self.stop()
-        self.play()
+        # Explicitly play from the beginning (beat 0)
+        self.play(start_beat=0.0)

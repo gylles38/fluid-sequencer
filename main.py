@@ -307,12 +307,14 @@ def main():
                         print(f"Usage: {command} [start_position] [end_position]")
                         continue
 
-                    start_beat = seq.parse_position_to_beats(args[0]) if len(args) >= 1 else 0.0
-                    if start_beat is None:
+                    start_beat_str = args[0] if len(args) >= 1 else None
+                    start_beat = seq.parse_position_to_beats(start_beat_str) if start_beat_str else None
+                    if start_beat_str and start_beat is None: # Handle parsing error
                         continue
 
-                    end_beat = seq.parse_position_to_beats(args[1], default=None) if len(args) == 2 else None
-                    if len(args) == 2 and end_beat is None:
+                    end_beat_str = args[1] if len(args) >= 2 else None
+                    end_beat = seq.parse_position_to_beats(end_beat_str, default=None) if end_beat_str else None
+                    if end_beat_str and end_beat is None: # Handle parsing error
                         continue
 
                     is_looping = command == "loop"

@@ -71,6 +71,7 @@ class Song:
     tempo: int = 120  # Beats per minute (BPM)
     time_signature_numerator: int = 4
     time_signature_denominator: int = 4
+    ticks_per_beat: int = 480
     tracks: List[AnyTrack] = field(default_factory=list)
     metronome_enabled: bool = False
     metronome_port_name: Optional[str] = None

@@ -1200,7 +1200,22 @@ class Sequencer:
             start_tick = int(start_beat * ticks_per_beat)
             end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
 
-            ranged_event_list = [e.copy() for e in master_event_list if start_tick <= e['tick'] < end_tick]
+            ranged_event_list = []
+            for e in master_event_list:
+                is_audio = e['type'] == 'audio'
+                event_tick = e['tick']
+
+                # Audio tracks are treated differently: they are long events that can start before
+                # the playback range but still overlap with it. We check if the audio track's
+                # start time is before the end of our playback window. The offset calculation
+                # during playback will handle slicing the audio correctly.
+                if is_audio:
+                    if event_tick < end_tick:
+                         ranged_event_list.append(e.copy())
+                # For MIDI and metronome events, they must start within the playback window.
+                elif start_tick <= event_tick < end_tick:
+                    ranged_event_list.append(e.copy())
+
             for event in ranged_event_list:
                 event['tick'] -= start_tick
 

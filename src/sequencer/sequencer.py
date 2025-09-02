@@ -1052,7 +1052,7 @@ class Sequencer:
             command = shlex.split(self.audio_player_command)
             command.append(tmp_path)
 
-            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             with self.process_lock:
                 self.active_audio_processes.append(process)
 
@@ -1376,14 +1376,36 @@ class Sequencer:
         if self.playback_state == "stopped":
             print("Nothing to pause.")
             return
+
+        # This command works for players like ffplay and mplayer, where 'p' toggles pause.
+        pause_char = b'p'
+
         if self.playback_state == "playing":
             self._all_notes_off()
-            # Pausing ffplay is not supported in this simple implementation
+            with self.process_lock:
+                for process in self.active_audio_processes:
+                    if process.poll() is None: # Check if process is still running
+                        try:
+                            process.stdin.write(pause_char)
+                            process.stdin.flush()
+                        except (IOError, BrokenPipeError) as e:
+                            print(f"Could not send pause command to an audio process: {e}")
+
             self._run_event.clear()
             self.pause_start_time = time.time()
             self.playback_state = "paused"
-            print("Playback paused. Audio tracks will continue playing in the background.")
+            print("Playback paused.")
+
         elif self.playback_state == "paused":
+            with self.process_lock:
+                for process in self.active_audio_processes:
+                    if process.poll() is None:
+                        try:
+                            process.stdin.write(pause_char)
+                            process.stdin.flush()
+                        except (IOError, BrokenPipeError) as e:
+                            print(f"Could not send resume command to an audio process: {e}")
+
             paused_duration = time.time() - self.pause_start_time
             self.total_paused_time += paused_duration
             self._run_event.set()
@@ -1397,10 +1419,23 @@ class Sequencer:
 
         with self.process_lock:
             for process in self.active_audio_processes:
-                try:
-                    process.kill()
-                except Exception as e:
-                    print(f"Error killing audio process: {e}")
+                if process.poll() is None:  # Check if process is running
+                    try:
+                        # Most command-line players quit with 'q'
+                        process.stdin.write(b'q')
+                        process.stdin.flush()
+                        # Wait a very short moment to allow graceful exit
+                        process.wait(timeout=0.5)
+                    except (IOError, BrokenPipeError):
+                        # Pipe is already closed, likely process exited
+                        pass
+                    except subprocess.TimeoutExpired:
+                        # Process didn't exit gracefully, force it
+                        print("Audio process did not respond to quit command, terminating.")
+                        process.terminate()
+                    except Exception as e:
+                        print(f"Error stopping audio process: {e}")
+                        process.kill() # Last resort
             self.active_audio_processes.clear()
 
         self._all_notes_off()

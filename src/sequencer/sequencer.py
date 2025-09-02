@@ -1056,11 +1056,12 @@ class Sequencer:
             with self.process_lock:
                 self.active_audio_processes.append(process)
 
-            # This will wait for the process to finish
-            _, stderr_data = process.communicate()
+            # Wait for the process to finish without closing stdin, and capture stderr
+            return_code = process.wait()
+            stderr_data = process.stderr.read() if process.stderr else b''
 
-            if process.returncode != 0:
-                print(f"\n[ERROR] Audio player exited with code {process.returncode}")
+            if return_code != 0:
+                print(f"\n[ERROR] Audio player exited with code {return_code}")
                 if stderr_data:
                     print(f"[ERROR] stderr: {stderr_data.decode('utf-8', errors='ignore')}")
 
@@ -1388,7 +1389,7 @@ class Sequencer:
                         try:
                             process.stdin.write(pause_char)
                             process.stdin.flush()
-                        except (IOError, BrokenPipeError, ValueError) as e:
+                        except (IOError, BrokenPipeError) as e:
                             print(f"Could not send pause command to an audio process: {e}")
 
             self._run_event.clear()
@@ -1403,7 +1404,7 @@ class Sequencer:
                         try:
                             process.stdin.write(pause_char)
                             process.stdin.flush()
-                        except (IOError, BrokenPipeError, ValueError) as e:
+                        except (IOError, BrokenPipeError) as e:
                             print(f"Could not send resume command to an audio process: {e}")
 
             paused_duration = time.time() - self.pause_start_time
@@ -1426,7 +1427,7 @@ class Sequencer:
                         process.stdin.flush()
                         # Wait a very short moment to allow graceful exit
                         process.wait(timeout=0.5)
-                    except (IOError, BrokenPipeError, ValueError):
+                    except (IOError, BrokenPipeError):
                         # Pipe is already closed, likely process exited
                         pass
                     except subprocess.TimeoutExpired:

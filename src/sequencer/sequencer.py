@@ -65,6 +65,7 @@ class Sequencer:
         self.pause_start_time = 0.0
         self.last_start_beat = 0.0
         self.recording_thread = None
+        self.is_recording = False
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -930,6 +931,7 @@ class Sequencer:
             if outport:
                 outport.close()
             target_track.is_muted = original_mute_state
+            self.is_recording = False
             print("Recording thread finished.")
 
     def record_track(self, track_index: int):
@@ -990,6 +992,7 @@ class Sequencer:
         original_mute_state = target_track.is_muted
         target_track.is_muted = True
 
+        self.is_recording = True # Set recording flag before starting threads
         # Start playback of all other tracks. This will set self.playback_start_time.
         self.play(start_beat=start_beat)
 
@@ -1248,8 +1251,7 @@ class Sequencer:
                         next_event_index += 1
 
                     # Check for end of material
-                    is_recording_active = self.recording_thread and self.recording_thread.is_alive()
-                    if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads) and not is_recording_active:
+                    if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads) and not self.is_recording:
                         break
 
                     time.sleep(0.01)
@@ -1406,9 +1408,7 @@ class Sequencer:
             self.active_audio_processes.clear()
 
     def stop(self):
-        # If both playback and recording are stopped, there's nothing to do.
-        is_recording = self.recording_thread and self.recording_thread.is_alive()
-        if self.playback_state == "stopped" and not is_recording:
+        if not self.is_recording and self.playback_state == "stopped":
             print("Already stopped.")
             return
 
@@ -1424,9 +1424,10 @@ class Sequencer:
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=2.0)
 
-        # The thread's finally block handles state changes, but we ensure it's correct.
+        # Reset all state
         self.playback_state = "stopped"
         self.recording_thread = None
+        self.is_recording = False
         print("Session stopped.")
 
     def restart(self):

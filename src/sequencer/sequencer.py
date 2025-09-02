@@ -1400,11 +1400,15 @@ class Sequencer:
             self.active_audio_processes.clear()
 
     def stop(self):
-        if self.playback_state == "stopped":
+        # If both playback and recording are stopped, there's nothing to do.
+        is_recording = self.recording_thread and self.recording_thread.is_alive()
+        if self.playback_state == "stopped" and not is_recording:
+            print("Already stopped.")
             return
 
-        print("Stopping playback...")
+        print("Stopping session...")
         self._stop_event.set()
+
         if self.playback_state == "paused":
             self._run_event.set()
 
@@ -1414,10 +1418,10 @@ class Sequencer:
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=2.0)
 
-        # The thread's finally block handles all cleanup and state changes.
-        # We just ensure the state is consistent here.
+        # The thread's finally block handles state changes, but we ensure it's correct.
         self.playback_state = "stopped"
-        print("Playback stopped.")
+        self.recording_thread = None
+        print("Session stopped.")
 
     def restart(self):
         """Restarts playback from the beginning."""

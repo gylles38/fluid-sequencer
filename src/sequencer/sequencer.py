@@ -1197,7 +1197,12 @@ class Sequencer:
                     if end_beat is not None and current_beat_float >= end_beat:
                         break
 
-                    # (Display logic can be added here if needed)
+                    # --- Display current measure and beat ---
+                    beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
+                    display_measure = int(current_beat_float / beats_per_measure) + 1
+                    display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+                    print(f"\rPlaying: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
+
 
                     # Dispatch events that are due
                     while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:

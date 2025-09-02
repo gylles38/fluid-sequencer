@@ -1224,7 +1224,7 @@ class Sequencer:
                         should_play = (not track) or (track.is_solo) or (not is_any_track_soloed and not (track and track.is_muted))
 
                         if should_play:
-                            print(f"  ...dispatching {event['type']} event") # DEBUG
+                            # print(f"  ...dispatching {event['type']} event") # DEBUG
                             if event['type'] == 'midi' or event['type'] == 'metronome':
                                 port = self.open_ports.get(event['port_name'])
                                 if port: port.send(event['message'])

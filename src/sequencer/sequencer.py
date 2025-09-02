@@ -1110,10 +1110,43 @@ class Sequencer:
             port = self.open_ports.get(self.song.metronome_port_name)
             if not port:
                 print(f"Error: Metronome port '{self.song.metronome_port_name}' not open.")
-                self.playback_state = "stopped"
                 return
-            # (Metronome logic remains the same, so it's not shown for brevity)
-            # ...
+
+            try:
+                beat_counter = 0
+                start_time_sec = time.time()
+
+                print("Starting metronome for recording... Press Ctrl+C in the recording window to stop.")
+                while not self._stop_event.is_set():
+                    # Calculate the duration of one beat in seconds
+                    sec_per_beat = 60.0 / self.song.tempo
+
+                    # This logic ensures the metronome stays in time, even if the loop execution time varies
+                    target_real_time_sec = start_time_sec + (beat_counter * sec_per_beat)
+                    sleep_duration = target_real_time_sec - time.time()
+                    if sleep_duration > 0:
+                        time.sleep(sleep_duration)
+
+                    if self._stop_event.is_set():
+                        break
+
+                    is_downbeat = (beat_counter % self.song.time_signature_numerator) == 0
+                    pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
+
+                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
+                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
+
+                    port.send(note_on)
+                    # A very short delay to ensure the note_on is processed before the note_off
+                    time.sleep(0.05)
+                    port.send(note_off)
+
+                    beat_counter += 1
+            except Exception as e:
+                print(f"Error in metronome thread: {e}")
+            finally:
+                if not self._stop_event.is_set():
+                    print("\nMetronome for recording finished.")
             return
 
         # Full playback mode

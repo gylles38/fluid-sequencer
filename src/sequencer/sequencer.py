@@ -1026,10 +1026,10 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_audio_file_blocking(self, filepath: str, seek_seconds: float = 0.0):
+    def _play_audio_file_blocking(self, filepath: str):
         """
         Plays an audio file by exporting it to a temporary WAV file and
-        calling a configurable external player command, optionally seeking to a specific time.
+        calling a configurable external player command.
         """
         import tempfile
         import shlex
@@ -1048,23 +1048,19 @@ class Sequencer:
                 tmp_path = tmp.name
             audio_segment.export(tmp_path, format="wav")
 
-            # Build the command, adding seek if necessary
+            # Build the command
             command = shlex.split(self.audio_player_command)
-            if seek_seconds > 0:
-                # Add seek argument. Assumes ffplay/mplayer-compatible `-ss` flag.
-                command.extend(['-ss', str(seek_seconds)])
             command.append(tmp_path)
 
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             with self.process_lock:
                 self.active_audio_processes.append(process)
 
-            # Wait for the process to finish without closing stdin, and capture stderr
-            return_code = process.wait()
-            stderr_data = process.stderr.read() if process.stderr else b''
+            # This will wait for the process to finish
+            _, stderr_data = process.communicate()
 
-            if return_code != 0:
-                print(f"\n[ERROR] Audio player exited with code {return_code}")
+            if process.returncode != 0:
+                print(f"\n[ERROR] Audio player exited with code {process.returncode}")
                 if stderr_data:
                     print(f"[ERROR] stderr: {stderr_data.decode('utf-8', errors='ignore')}")
 
@@ -1156,40 +1152,14 @@ class Sequencer:
                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_on_msg})
                             master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_off_msg})
                 elif isinstance(track, AudioTrack):
-                    # For ranged playback, we need to check if the audio track's duration
-                    # overlaps with the specified playback range.
-                    try:
-                        audio_segment = AudioSegment.from_file(track.filepath)
-                        duration_ms = len(audio_segment)
-                        duration_beats = (duration_ms / 1000.0) * (self.song.tempo / 60.0)
-                    except Exception as e:
-                        print(f"\n[Warning] Could not get duration of audio file '{track.filepath}': {e}")
-                        duration_beats = float('inf') # Assume it's long if we can't measure it
-
-                    track_end_beat = track.start_time + duration_beats
-                    effective_end_beat = end_beat if end_beat is not None else float('inf')
-
-                    # The track overlaps with the playback range if:
-                    # its start is before the range ends, AND its end is after the range starts.
-                    if track.start_time < effective_end_beat and track_end_beat > start_beat:
-                        seek_beats = 0
-                        if start_beat > track.start_time:
-                            seek_beats = start_beat - track.start_time
-
-                        # The event should be triggered at the start of the range, or the start of the track, whichever is later.
-                        trigger_beat = max(track.start_time, start_beat)
-                        trigger_tick = int(trigger_beat * ticks_per_beat)
-
-                        seek_seconds = seek_beats * 60.0 / self.song.tempo
-
-                        audio_event = {
-                            'type': 'audio',
-                            'tick': trigger_tick,
-                            'track_idx': track_idx,
-                            'filepath': track.filepath,
-                            'seek': seek_seconds
-                        }
-                        master_event_list.append(audio_event)
+                    start_tick = int(track.start_time * ticks_per_beat)
+                    audio_event = {
+                        'type': 'audio',
+                        'tick': start_tick,
+                        'track_idx': track_idx,
+                        'filepath': track.filepath,
+                    }
+                    master_event_list.append(audio_event)
 
 
             # 2. Build metronome events
@@ -1265,6 +1235,11 @@ class Sequencer:
 
                     # --- Display current measure and beat ---
                     current_beat_float = start_beat + (current_ticks / ticks_per_beat)
+
+                    # --- Check for end of ranged playback ---
+                    if end_beat is not None and current_beat_float >= end_beat:
+                        break
+
                     beats_per_measure = self.song.time_signature_numerator
                     display_measure = int(current_beat_float / beats_per_measure) + 1
                     display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
@@ -1290,7 +1265,7 @@ class Sequencer:
 
                         elif event_details['type'] == 'audio':
                             if should_play_event:
-                                audio_thread = threading.Thread(target=self._play_audio_file_blocking, args=(event_details['filepath'], event_details.get('seek', 0)))
+                                audio_thread = threading.Thread(target=self._play_audio_file_blocking, args=(event_details['filepath'],))
                                 audio_thread.start()
                                 self.audio_threads.append(audio_thread)
 
@@ -1327,6 +1302,7 @@ class Sequencer:
         except Exception as e:
             print(f"\nError during playback: {e}")
         finally:
+            self._shutdown_audio_processes()
             self._all_notes_off()
             for port in self.temporary_ports:
                 if not port.closed:
@@ -1337,8 +1313,12 @@ class Sequencer:
             print("Playback finished.")
 
     def play(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
-        if self.playback_state != "stopped":
-            self.stop()
+        if self.playback_state == "playing":
+            print("Already playing.")
+            return
+        if self.playback_state == "paused":
+            self.pause()
+            return
 
         # This is for the recording count-in, which is not affected by the change
         if self.metronome_only_mode and start_beat == 0.0:
@@ -1402,47 +1382,21 @@ class Sequencer:
         if self.playback_state == "stopped":
             print("Nothing to pause.")
             return
-
-        # This command works for players like ffplay and mplayer, where 'p' toggles pause.
-        pause_char = b'p'
-
         if self.playback_state == "playing":
             self._all_notes_off()
-            with self.process_lock:
-                for process in self.active_audio_processes:
-                    if process.poll() is None: # Check if process is still running
-                        try:
-                            process.stdin.write(pause_char)
-                            process.stdin.flush()
-                        except (IOError, BrokenPipeError) as e:
-                            print(f"Could not send pause command to an audio process: {e}")
-
+            # Pausing ffplay is not supported in this simple implementation
             self._run_event.clear()
             self.pause_start_time = time.time()
             self.playback_state = "paused"
-            print("Playback paused.")
-
+            print("Playback paused. Audio tracks will continue playing in the background.")
         elif self.playback_state == "paused":
-            with self.process_lock:
-                for process in self.active_audio_processes:
-                    if process.poll() is None:
-                        try:
-                            process.stdin.write(pause_char)
-                            process.stdin.flush()
-                        except (IOError, BrokenPipeError) as e:
-                            print(f"Could not send resume command to an audio process: {e}")
-
             paused_duration = time.time() - self.pause_start_time
             self.total_paused_time += paused_duration
             self._run_event.set()
             self.playback_state = "playing"
             print("Resuming playback...")
 
-    def stop(self):
-        if self.playback_state == "stopped":
-            print("Already stopped.")
-            return
-
+    def _shutdown_audio_processes(self):
         with self.process_lock:
             for process in self.active_audio_processes:
                 if process.poll() is None:  # Check if process is running
@@ -1463,6 +1417,11 @@ class Sequencer:
                         print(f"Error stopping audio process: {e}")
                         process.kill() # Last resort
             self.active_audio_processes.clear()
+
+    def stop(self):
+        if self.playback_state == "stopped":
+            print("Already stopped.")
+            return
 
         self._all_notes_off()
         self._stop_event.set()

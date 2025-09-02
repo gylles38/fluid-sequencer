@@ -740,6 +740,7 @@ class Sequencer:
             project_data = {
                 "song": self.song,
                 "virtual_ports": [vp.name for vp in self.virtual_ports],
+                "audio_player_command": self.audio_player_command,
             }
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
@@ -754,6 +755,12 @@ class Sequencer:
                 project_data = json.load(f, object_hook=song_decoder)
 
             self.song = project_data.get("song", Song(name="New Song"))
+
+            # Restore audio player command, with a fallback for older projects
+            self.audio_player_command = project_data.get(
+                "audio_player_command",
+                "ffplay -nodisp -autoexit -hide_banner"
+            )
 
             # Restore virtual ports
             self.close_virtual_ports()
@@ -1062,7 +1069,7 @@ class Sequencer:
                 command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=None # Let ffplay print errors to the console
             )
 
             active_process_info = ActiveAudioProcess(process=process, temp_filepath=tmp_path)

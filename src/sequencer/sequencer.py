@@ -1026,10 +1026,10 @@ class Sequencer:
                 outport.close()
                 print(f"Closed Thru port '{outport_name}'.")
 
-    def _play_audio_file_blocking(self, filepath: str):
+    def _play_audio_file_blocking(self, filepath: str, seek_seconds: float = 0.0):
         """
         Plays an audio file by exporting it to a temporary WAV file and
-        calling a configurable external player command.
+        calling a configurable external player command, optionally seeking to a specific time.
         """
         import tempfile
         import shlex
@@ -1048,8 +1048,11 @@ class Sequencer:
                 tmp_path = tmp.name
             audio_segment.export(tmp_path, format="wav")
 
-            # Build the command
+            # Build the command, adding seek if necessary
             command = shlex.split(self.audio_player_command)
+            if seek_seconds > 0:
+                # Add seek argument. Assumes ffplay/mplayer-compatible `-ss` flag.
+                command.extend(['-ss', str(seek_seconds)])
             command.append(tmp_path)
 
             process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -1153,14 +1156,40 @@ class Sequencer:
                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_on_msg})
                             master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': note_off_msg})
                 elif isinstance(track, AudioTrack):
-                    start_tick = int(track.start_time * ticks_per_beat)
-                    audio_event = {
-                        'type': 'audio',
-                        'tick': start_tick,
-                        'track_idx': track_idx,
-                        'filepath': track.filepath,
-                    }
-                    master_event_list.append(audio_event)
+                    # For ranged playback, we need to check if the audio track's duration
+                    # overlaps with the specified playback range.
+                    try:
+                        audio_segment = AudioSegment.from_file(track.filepath)
+                        duration_ms = len(audio_segment)
+                        duration_beats = (duration_ms / 1000.0) * (self.song.tempo / 60.0)
+                    except Exception as e:
+                        print(f"\n[Warning] Could not get duration of audio file '{track.filepath}': {e}")
+                        duration_beats = float('inf') # Assume it's long if we can't measure it
+
+                    track_end_beat = track.start_time + duration_beats
+                    effective_end_beat = end_beat if end_beat is not None else float('inf')
+
+                    # The track overlaps with the playback range if:
+                    # its start is before the range ends, AND its end is after the range starts.
+                    if track.start_time < effective_end_beat and track_end_beat > start_beat:
+                        seek_beats = 0
+                        if start_beat > track.start_time:
+                            seek_beats = start_beat - track.start_time
+
+                        # The event should be triggered at the start of the range, or the start of the track, whichever is later.
+                        trigger_beat = max(track.start_time, start_beat)
+                        trigger_tick = int(trigger_beat * ticks_per_beat)
+
+                        seek_seconds = seek_beats * 60.0 / self.song.tempo
+
+                        audio_event = {
+                            'type': 'audio',
+                            'tick': trigger_tick,
+                            'track_idx': track_idx,
+                            'filepath': track.filepath,
+                            'seek': seek_seconds
+                        }
+                        master_event_list.append(audio_event)
 
 
             # 2. Build metronome events
@@ -1261,7 +1290,7 @@ class Sequencer:
 
                         elif event_details['type'] == 'audio':
                             if should_play_event:
-                                audio_thread = threading.Thread(target=self._play_audio_file_blocking, args=(event_details['filepath'],))
+                                audio_thread = threading.Thread(target=self._play_audio_file_blocking, args=(event_details['filepath'], event_details.get('seek', 0)))
                                 audio_thread.start()
                                 self.audio_threads.append(audio_thread)
 

@@ -2,7 +2,7 @@ from .midi_export import export_to_midi
 from .midi_import import import_song
 from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
 from copy import deepcopy
-from dataclasses import dataclass, asdict, is_dataclass
+from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
 import mido
 from pydub import AudioSegment
@@ -20,11 +20,9 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if is_dataclass(o):
-            d = asdict(o)
-            # Add a type identifier for our custom classes
-            if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note)):
-                d['__type__'] = o.__class__.__name__
+        if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note)):
+            d = {f.name: getattr(o, f.name) for f in fields(o)}
+            d['__type__'] = o.__class__.__name__
             return d
         return super().default(o)
 

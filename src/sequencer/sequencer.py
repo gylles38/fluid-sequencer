@@ -1150,8 +1150,15 @@ class Sequencer:
                     })
 
             if self.song.metronome_enabled and self.song.metronome_port_name:
-                last_tick = max((e['tick'] for e in master_event_list), default=0) if master_event_list else 0
-                num_beats = int(last_tick / ticks_per_beat) + self.song.time_signature_numerator
+                last_note_tick = max((e['tick'] for e in master_event_list if e['type'] != 'metronome'), default=0) if master_event_list else 0
+
+                # Determine how many beats to generate metronome for.
+                # It should be at least the length of the song, but also include the playback range if it's later.
+                num_beats_for_notes = int(last_note_tick / ticks_per_beat) + self.song.time_signature_numerator
+                # Also generate clicks up to the requested end_beat, if provided
+                num_beats_for_range = int(end_beat if end_beat is not None else start_beat) + self.song.time_signature_numerator
+                num_beats = max(num_beats_for_notes, num_beats_for_range)
+
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
                     pitch = self.metronome_pitch_downbeat if (beat % self.song.time_signature_numerator) == 0 else self.metronome_pitch_beat

@@ -1388,7 +1388,7 @@ class Sequencer:
                         try:
                             process.stdin.write(pause_char)
                             process.stdin.flush()
-                        except (IOError, BrokenPipeError) as e:
+                        except (IOError, BrokenPipeError, ValueError) as e:
                             print(f"Could not send pause command to an audio process: {e}")
 
             self._run_event.clear()
@@ -1403,7 +1403,7 @@ class Sequencer:
                         try:
                             process.stdin.write(pause_char)
                             process.stdin.flush()
-                        except (IOError, BrokenPipeError) as e:
+                        except (IOError, BrokenPipeError, ValueError) as e:
                             print(f"Could not send resume command to an audio process: {e}")
 
             paused_duration = time.time() - self.pause_start_time
@@ -1426,7 +1426,7 @@ class Sequencer:
                         process.stdin.flush()
                         # Wait a very short moment to allow graceful exit
                         process.wait(timeout=0.5)
-                    except (IOError, BrokenPipeError):
+                    except (IOError, BrokenPipeError, ValueError):
                         # Pipe is already closed, likely process exited
                         pass
                     except subprocess.TimeoutExpired:

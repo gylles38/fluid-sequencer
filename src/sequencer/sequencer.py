@@ -889,7 +889,7 @@ class Sequencer:
                             playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
 
                             if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels:
-                                print(f"DEBUG: Recording triggered by message: {msg}") # DEBUG
+                                print(f"DEBUG: Recording triggered by message: {msg}", flush=True) # DEBUG
                                 recording_start_time_sec = now
                                 beats_per_second = self.song.tempo / 60.0
                                 elapsed_playback_sec = now - self.playback_start_time

@@ -64,6 +64,7 @@ class Sequencer:
         self.total_paused_time = 0.0
         self.pause_start_time = 0.0
         self.last_start_beat = 0.0
+        self.recording_thread = None
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -859,7 +860,72 @@ class Sequencer:
         else:
             print(f"Error: Virtual port '{name}' not found.")
 
+    def _recording_thread_main(self, target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state):
+        """The main loop for the MIDI recording thread."""
+        open_notes = {}
+        outport = None
+        try:
+            with mido.open_input(inport_name) as inport:
+                if outport_name:
+                    outport = mido.open_output(outport_name)
+                    print(f"Listening on '{inport_name}' with MIDI Thru to '{outport_name}'.")
+
+                print("Recording armed. Waiting for first note...")
+                recording_start_time_sec = None
+                first_note_time_beats = 0
+
+                while not self._stop_event.is_set():
+                    for msg in inport.iter_pending():
+                        if outport: outport.send(msg)
+                        now = time.time()
+
+                        if recording_start_time_sec is None:
+                            recording_start_time_sec = now
+                            # Quantize the start time to the nearest beat based on when the first note was played
+                            # This is a simplification; a real DAW might have more complex quantization options
+                            beats_per_second = self.song.tempo / 60.0
+                            elapsed_playback_sec = (now - self.playback_start_time)
+                            current_beat = self.last_start_beat + (elapsed_playback_sec * beats_per_second)
+                            first_note_time_beats = round(current_beat)
+                            print(f"\nRecording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
+
+                        if msg.type == 'note_on' and msg.velocity > 0:
+                            if msg.note not in open_notes:
+                                open_notes[msg.note] = (now, msg.velocity)
+                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                            if msg.note in open_notes:
+                                note_start_time_sec, velocity = open_notes.pop(msg.note)
+                                duration_sec = now - note_start_time_sec
+                                beats_per_second = self.song.tempo / 60.0
+
+                                start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
+                                duration_beats = duration_sec * beats_per_second
+
+                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
+                                event = Event(notes=[note], start_time=start_time_beats)
+                                target_track.add_event(event)
+
+                    if recording_start_time_sec and num_beats_to_record is not None:
+                        elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
+                        if elapsed_recording_beats >= num_beats_to_record:
+                            print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
+                            self.stop() # Automatically stop playback and recording
+                            break
+
+                    time.sleep(0.001)
+
+        except Exception as e:
+            print(f"\nAn error occurred during recording: {e}")
+        finally:
+            if outport:
+                outport.close()
+            target_track.is_muted = original_mute_state
+            print("Recording thread finished.")
+
     def record_track(self, track_index: int):
+        if self.playback_state != "stopped":
+            print("Error: Please stop playback before starting a new recording.")
+            return
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
@@ -873,163 +939,57 @@ class Sequencer:
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if start_beat is None: return
 
-            # Ask for number of measures to record
             measures_input = input("Record for how long (measures:beats)? (Press Enter for unlimited) ").strip()
             num_beats_to_record = None
             if measures_input:
                 parts = measures_input.split(':')
-                if len(parts) > 2:
-                    print("Error: Invalid format. Please use 'measures:beats' or 'measures'.")
-                    return
-
                 num_measures = int(parts[0])
                 num_beats = int(parts[1]) if len(parts) == 2 else 0
-                beats_per_measure = self.song.time_signature_numerator
-
-                if num_measures < 0 or num_beats < 0 or (num_measures == 0 and num_beats == 0):
-                    print("Error: Recording duration must be positive.")
-                    return
-
-                num_beats_to_record = (num_measures * beats_per_measure) + num_beats
-
+                num_beats_to_record = (num_measures * self.song.time_signature_numerator) + num_beats
         except (ValueError, IndexError):
             print("Error: Invalid number format.")
             return
 
-        # Check for existing notes from the start_beat onwards
-        existing_notes_in_range = [
-            event for event in target_track.events
-            if event.start_time >= start_beat
-        ]
-
-        overwrite_mode = "add"
+        existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
         if existing_notes_in_range:
-            print("There are existing notes from this position onwards.")
-            while True:
-                choice = input("Do you want to (r)eplace the existing notes or (a)dd to them? [r/a] ").lower()
-                if choice in ['r', 'replace', 'a', 'add']:
-                    overwrite_mode = choice[0]
-                    break
-                else:
-                    print("Invalid choice. Please enter 'r' or 'a'.")
+            choice = input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+            if choice.startswith('r'):
+                end_beat = float('inf') if num_beats_to_record is None else start_beat + num_beats_to_record
+                target_track.events = [e for e in target_track.events if not (start_beat <= e.start_time < end_beat)]
+                print(f"Removed existing notes from beat {start_beat} onwards.")
 
-        # Handle overwrite logic
-        if overwrite_mode == 'r':
-            end_beat = float('inf')
-            if num_beats_to_record is not None:
-                end_beat = start_beat + num_beats_to_record
-
-            # Remove events within the specified range
-            initial_event_count = len(target_track.events)
-            target_track.events = [
-                event for event in target_track.events
-                if not (start_beat <= event.start_time < end_beat)
-            ]
-            removed_count = initial_event_count - len(target_track.events)
-            if removed_count > 0:
-                print(f"Removed {removed_count} event(s) from the recording range.")
-
-        inport_name, outport_name = None, None
         try:
             input_ports = mido.get_input_names()
-            if not input_ports:
-                print("Error: No MIDI input ports found.")
-                return
+            if not input_ports: print("Error: No MIDI input ports found."); return
             print("Available MIDI input ports:")
             for i, port in enumerate(input_ports): print(f"  [{i}] {port}")
             inport_idx = int(input("Choose a port to record from: "))
             inport_name = input_ports[inport_idx]
 
-            thru_choice = input("Enable MIDI Thru to an output port? [y/N] ").lower()
-            if thru_choice == 'y':
-                hardware_ports = mido.get_output_names()
-                virtual_port_names = [vp.name for vp in self.virtual_ports]
-                all_outputs = hardware_ports + virtual_port_names
-                if not all_outputs:
-                    print("No MIDI output ports found for Thru.")
-                else:
+            outport_name = None
+            if input("Enable MIDI Thru to an output port? [y/N] ").lower() == 'y':
+                all_outputs = mido.get_output_names() + [vp.name for vp in self.virtual_ports]
+                if all_outputs:
                     print("Available MIDI output ports:")
                     for i, port in enumerate(all_outputs): print(f"  [{i}] {port}")
-                    outport_idx = int(input("Choose a port for MIDI Thru (or -1 to disable): "))
-                    if 0 <= outport_idx < len(all_outputs):
-                        outport_name = all_outputs[outport_idx]
+                    outport_idx = int(input("Choose a port for MIDI Thru: "))
+                    outport_name = all_outputs[outport_idx]
         except (ValueError, IndexError):
-            print("Error: Invalid selection.")
-            return
+            print("Error: Invalid selection."); return
 
-        open_notes = {}
-        outport = None
-        try:
-            if self.song.metronome_enabled:
-                self.metronome_only_mode = True
-                self.play(start_beat=0.0)
+        original_mute_state = target_track.is_muted
+        target_track.is_muted = True
 
-            with mido.open_input(inport_name) as inport:
-                if outport_name:
-                    outport = mido.open_output(outport_name)
-                    print(f"Listening on '{inport_name}' with MIDI Thru to '{outport_name}'. Waiting for first note...")
-                else:
-                    print(f"Listening on '{inport_name}'. Waiting for first note...")
+        # Start playback of all other tracks. This will set self.playback_start_time.
+        self.play(start_beat=start_beat)
 
-                recording_start_time_sec = None
-                beats_per_second = self.song.tempo / 60
-
-                max_duration_beats = num_beats_to_record
-                if max_duration_beats is not None:
-                    print(f"Recording for {max_duration_beats:.2f} beats.")
-
-                is_recording = True
-                while is_recording:
-                    # Process all pending messages non-blockingly
-                    for msg in inport.iter_pending():
-                        if outport: outport.send(msg)
-                        now = time.time()
-
-                        if recording_start_time_sec is None:
-                            recording_start_time_sec = now
-                            print("\nRecording started... Press Ctrl+C to stop.")
-
-                        if msg.type == 'note_on' and msg.velocity > 0:
-                            if msg.note not in open_notes:
-                                open_notes[msg.note] = (now, msg.velocity)
-                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                            if msg.note in open_notes:
-                                start_time_sec, velocity = open_notes.pop(msg.note)
-                                duration_sec = now - start_time_sec
-                                start_time_beats = start_beat + (start_time_sec - recording_start_time_sec) * beats_per_second
-                                duration_beats = duration_sec * beats_per_second
-                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                event = Event(notes=[note], start_time=start_time_beats)
-                                target_track.add_event(event)
-
-                    # Live display and timing logic
-                    if recording_start_time_sec:
-                        elapsed_beats = (time.time() - recording_start_time_sec) * beats_per_second
-
-                        current_beat_float = start_beat + elapsed_beats
-                        beats_per_measure = self.song.time_signature_numerator
-                        current_measure = int(current_beat_float / beats_per_measure) + 1
-                        current_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
-                        print(f"\rRecording: Measure {current_measure}, Beat {current_beat_in_measure} ", end="")
-
-                        if max_duration_beats is not None and elapsed_beats >= max_duration_beats:
-                            print(f"\nFinished recording for {max_duration_beats:.2f} beats.")
-                            is_recording = False
-
-                    time.sleep(0.01) # 10ms sleep to prevent high CPU usage
-
-        except KeyboardInterrupt:
-            print("\nRecording stopped.")
-        except Exception as e:
-            print(f"An error occurred during recording: {e}")
-        finally:
-            if self.metronome_only_mode:
-                self.stop()
-                self.metronome_only_mode = False
-
-            if outport:
-                outport.close()
-                print(f"Closed Thru port '{outport_name}'.")
+        self.recording_thread = threading.Thread(
+            target=self._recording_thread_main,
+            args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state)
+        )
+        self.recording_thread.daemon = True
+        self.recording_thread.start()
+        print("Overdub recording session started. Type 'stop' to finish.")
 
     def _play_audio_file_blocking(self, filepath: str, start_offset_sec: float = 0.0):
         """
@@ -1362,6 +1322,7 @@ class Sequencer:
         self._stop_event.clear()
         self._run_event.set()
         self.playback_state = "playing"
+        self.playback_start_time = time.time() # Set start time for recording sync
         self.playback_thread = threading.Thread(
             target=self._play_thread,
             kwargs={'start_beat': start_beat, 'end_beat': end_beat, 'loop': loop}
@@ -1443,6 +1404,9 @@ class Sequencer:
 
         if self.playback_thread and self.playback_thread.is_alive():
             self.playback_thread.join(timeout=2.0)
+
+        if self.recording_thread and self.recording_thread.is_alive():
+            self.recording_thread.join(timeout=2.0)
 
         # The thread's finally block handles all cleanup and state changes.
         # We just ensure the state is consistent here.

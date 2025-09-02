@@ -888,6 +888,7 @@ class Sequencer:
                             playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
 
                             if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels:
+                                print(f"DEBUG: Recording triggered by message: {msg}") # DEBUG
                                 recording_start_time_sec = now
                                 beats_per_second = self.song.tempo / 60.0
                                 elapsed_playback_sec = now - self.playback_start_time
@@ -1247,7 +1248,8 @@ class Sequencer:
                         next_event_index += 1
 
                     # Check for end of material
-                    if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads):
+                    is_recording_active = self.recording_thread and self.recording_thread.is_alive()
+                    if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads) and not is_recording_active:
                         break
 
                     time.sleep(0.01)

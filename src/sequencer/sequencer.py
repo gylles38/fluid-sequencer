@@ -66,7 +66,6 @@ class Sequencer:
         self.last_start_beat = 0.0
         self.recording_thread = None
         self.is_recording = False
-        self._recording_started_event = threading.Event()
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -863,7 +862,14 @@ class Sequencer:
             print(f"Error: Virtual port '{name}' not found.")
 
     def _recording_thread_main(self, target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state):
-        """The main loop for the MIDI recording thread."""
+        """
+        The main loop for the MIDI recording thread. This is a two-phase process.
+        1. Waiting Phase: A blocking call waits for the first valid note_on message.
+           During this time, no other tracks are playing.
+        2. Recording Phase: Once the first note is received, playback of other tracks
+           is started, and this thread switches to a non-blocking poll to record
+           all subsequent notes in sync with the playback.
+        """
         open_notes = {}
         outport = None
         try:
@@ -871,63 +877,55 @@ class Sequencer:
                 if outport_name:
                     outport = mido.open_output(outport_name)
 
-                # Clear any stale messages in the MIDI buffer before starting
-                time.sleep(0.2)
-                for _ in inport.iter_pending():
-                    pass
-
-                is_waiting_for_first_note = True
-                recording_start_time_sec = 0
-                first_note_time_beats = 0
-                last_beat_display = -1
-
+                # --- 1. Waiting Phase ---
+                print("Waiting for first note to start recording...")
+                first_msg = None
                 while not self._stop_event.is_set():
-                    # Provide continuous user feedback about the recording state
-                    if not is_waiting_for_first_note:
-                        elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
-                        current_recording_beat = first_note_time_beats + elapsed_recording_beats
-                        if int(current_recording_beat) > last_beat_display:
-                            last_beat_display = int(current_recording_beat)
-                            print(f"\rRecording at beat {self._format_beats_to_position(current_recording_beat)}...", end="")
+                    msg = inport.receive() # Blocking call
+                    if outport: outport.send(msg)
 
+                    # We are only looking for a real note played by the user
+                    if msg.type == 'note_on' and msg.velocity > 0:
+                        first_msg = msg
+                        break # Got it, proceed to recording phase
+
+                if self._stop_event.is_set():
+                    return
+
+                # --- 2. Recording Phase ---
+                # We have the first note, now start playback and polling
+                first_note_time_beats = start_beat # The first note defines the starting beat
+                recording_start_time_sec = time.time()
+                self.play(start_beat=first_note_time_beats)
+                print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
+
+                # Handle the first note that we already received
+                open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
+
+                # Polling loop for subsequent notes
+                while not self._stop_event.is_set():
                     for msg in inport.iter_pending():
                         if outport: outport.send(msg)
-
                         now = time.time()
 
-                        if is_waiting_for_first_note:
-                            playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
-
-                            if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels and msg.channel != self.metronome_channel:
-                                self._recording_started_event.set()
-                                recording_start_time_sec = now
-                                beats_per_second = self.song.tempo / 60.0
-                                elapsed_playback_sec = now - self.playback_start_time
-                                current_beat = self.last_start_beat + (elapsed_playback_sec * beats_per_second)
-                                first_note_time_beats = round(current_beat)
-                                print("\r" + " " * 80 + "\r", end="") # Clear the "Waiting at..." line
-                                print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
-                                is_waiting_for_first_note = False
-
+                        if msg.type == 'note_on' and msg.velocity > 0:
+                            if msg.note not in open_notes:
                                 open_notes[msg.note] = (now, msg.velocity)
-                        else: # Already recording
-                            if msg.type == 'note_on' and msg.velocity > 0:
-                                if msg.note not in open_notes:
-                                    open_notes[msg.note] = (now, msg.velocity)
-                            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                                if msg.note in open_notes:
-                                    note_start_time_sec, velocity = open_notes.pop(msg.note)
-                                    duration_sec = now - note_start_time_sec
-                                    beats_per_second = self.song.tempo / 60.0
+                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                            if msg.note in open_notes:
+                                note_start_time_sec, velocity = open_notes.pop(msg.note)
+                                duration_sec = now - note_start_time_sec
+                                beats_per_second = self.song.tempo / 60.0
 
-                                    start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
-                                    duration_beats = duration_sec * beats_per_second
+                                start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
+                                duration_beats = duration_sec * beats_per_second
 
-                                    note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                    event = Event(notes=[note], start_time=start_time_beats)
-                                    target_track.add_event(event)
+                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
+                                event = Event(notes=[note], start_time=start_time_beats)
+                                target_track.add_event(event)
 
-                    if not is_waiting_for_first_note and num_beats_to_record is not None:
+                    # Check for recording duration limit
+                    if num_beats_to_record is not None:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
                         if elapsed_recording_beats >= num_beats_to_record:
                             print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
@@ -1004,11 +1002,6 @@ class Sequencer:
         target_track.is_muted = True
 
         self.is_recording = True # Set recording flag before starting threads
-        self._recording_started_event.clear()
-        # Start playback of all other tracks. This will set self.playback_start_time.
-        self.play(start_beat=start_beat)
-
-        print("Waiting for first note to start recording...")
         self.recording_thread = threading.Thread(
             target=self._recording_thread_main,
             args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state)

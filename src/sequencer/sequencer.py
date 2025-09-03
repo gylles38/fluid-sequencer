@@ -66,7 +66,6 @@ class Sequencer:
         self.last_start_beat = 0.0
         self.recording_thread = None
         self.is_recording = False
-        self._recording_started_event = threading.Event()
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -870,11 +869,14 @@ class Sequencer:
             with mido.open_input(inport_name) as inport:
                 if outport_name:
                     outport = mido.open_output(outport_name)
+                    print(f"Listening on '{inport_name}' with MIDI Thru to '{outport_name}'.")
 
                 # Clear any stale messages in the MIDI buffer before starting
+                print("DEBUG: Clearing initial MIDI buffer for 0.2s...", flush=True)
                 time.sleep(0.2)
-                for _ in inport.iter_pending():
-                    pass
+                for msg in inport.iter_pending():
+                    print(f"DEBUG: Discarding stale message: {msg}", flush=True)
+                print("DEBUG: Buffer cleared. Armed for recording.")
 
                 is_waiting_for_first_note = True
                 recording_start_time_sec = 0
@@ -883,7 +885,9 @@ class Sequencer:
 
                 while not self._stop_event.is_set():
                     # Provide continuous user feedback about the recording state
-                    if not is_waiting_for_first_note:
+                    if is_waiting_for_first_note:
+                        print(f"\rWaiting for first note... ", end="")
+                    else:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
                         current_recording_beat = first_note_time_beats + elapsed_recording_beats
                         if int(current_recording_beat) > last_beat_display:
@@ -891,6 +895,7 @@ class Sequencer:
                             print(f"\rRecording at beat {self._format_beats_to_position(current_recording_beat)}...", end="")
 
                     for msg in inport.iter_pending():
+                        print(f"DEBUG: Received MIDI message: {msg}", flush=True)
                         if outport: outport.send(msg)
 
                         now = time.time()
@@ -899,7 +904,6 @@ class Sequencer:
                             playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
 
                             if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels:
-                                self._recording_started_event.set()
                                 recording_start_time_sec = now
                                 beats_per_second = self.song.tempo / 60.0
                                 elapsed_playback_sec = now - self.playback_start_time
@@ -1004,17 +1008,16 @@ class Sequencer:
         target_track.is_muted = True
 
         self.is_recording = True # Set recording flag before starting threads
-        self._recording_started_event.clear()
         # Start playback of all other tracks. This will set self.playback_start_time.
         self.play(start_beat=start_beat)
 
-        print("Waiting for first note to start recording...")
         self.recording_thread = threading.Thread(
             target=self._recording_thread_main,
             args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state)
         )
         self.recording_thread.daemon = True
         self.recording_thread.start()
+        print("Overdub recording session started. Type 'stop' to finish.")
 
     def _play_audio_file_blocking(self, filepath: str, start_offset_sec: float = 0.0):
         """
@@ -1175,10 +1178,6 @@ class Sequencer:
                 num_beats_for_range = int(end_beat if end_beat is not None else start_beat) + self.song.time_signature_numerator
                 num_beats = max(num_beats_for_notes, num_beats_for_range)
 
-                # If we're in recording mode, we need a long metronome track to play while waiting
-                if self.is_recording:
-                    num_beats = max(num_beats, 10000) # ~2000 measures of 4/4, should be plenty
-
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
                     pitch = self.metronome_pitch_downbeat if (beat % self.song.time_signature_numerator) == 0 else self.metronome_pitch_beat
@@ -1218,10 +1217,18 @@ class Sequencer:
             while not self._stop_event.is_set():
                 start_time_sec = time.time()
                 next_event_index = 0
+                has_reset_for_recording = False
 
                 while not self._stop_event.is_set():
                     self._run_event.wait()
                     if self._stop_event.is_set(): break
+
+                    # If recording has just started, reset the clock and event queue so that playback starts from the beginning
+                    if self.is_recording and self._recording_started_event.is_set() and not has_reset_for_recording:
+                        start_time_sec = time.time()
+                        next_event_index = 0
+                        self.total_paused_time = 0.0
+                        has_reset_for_recording = True
 
                     elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
                     mido_tempo = mido.bpm2tempo(self.song.tempo)
@@ -1232,15 +1239,12 @@ class Sequencer:
                     if end_beat is not None and current_beat_float >= end_beat:
                         break
 
-                    # --- Display current measure and beat ---
-                    # This display is active during normal playback, and during the 'waiting' phase of recording.
-                    show_display = not self.is_recording or (self.is_recording and not self._recording_started_event.is_set())
-                    if show_display:
+                    # --- Display current measure and beat (only if not recording) ---
+                    if not self.is_recording:
                         beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
                         display_measure = int(current_beat_float / beats_per_measure) + 1
                         display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
-                        prefix = "Waiting at" if self.is_recording else "Playing"
-                        print(f"\r{prefix}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
+                        print(f"\rPlaying: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
 
                     # Dispatch events that are due
@@ -1251,11 +1255,8 @@ class Sequencer:
                         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                         should_play = (not track) or (track.is_solo) or (not is_any_track_soloed and not (track and track.is_muted))
 
-                        # If we are waiting for the first note of a recording, only play metronome events
-                        if self.is_recording and not self._recording_started_event.is_set() and event['type'] != 'metronome':
-                            should_play = False
-
                         if should_play:
+                            # print(f"  ...dispatching {event['type']} event") # DEBUG
                             if event['type'] == 'midi' or event['type'] == 'metronome':
                                 port = self.open_ports.get(event['port_name'])
                                 if port: port.send(event['message'])

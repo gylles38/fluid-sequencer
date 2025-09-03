@@ -60,7 +60,7 @@ class Sequencer:
         self.audio_threads: List[threading.Thread] = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
-        self.audio_player_command: str = "ffplay -nodisp -autoexit -hide_banner"
+        self.audio_player_command: str = "mplayer -nogui -really-quiet -slave"
 
         self.total_paused_time = 0.0
         self.pause_start_time = 0.0
@@ -762,7 +762,7 @@ class Sequencer:
             # Restore audio player command, with a fallback for older projects
             self.audio_player_command = project_data.get(
                 "audio_player_command",
-                "ffplay -nodisp -autoexit -hide_banner"
+                "mplayer -nogui -really-quiet -slave"
             )
 
             # Restore virtual ports
@@ -1061,7 +1061,7 @@ class Sequencer:
                 command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
-                stderr=None # Let ffplay print errors to the console
+                stderr=subprocess.DEVNULL # Redirige les erreurs vers le néant
             )
 
             active_process_info = ActiveAudioProcess(process=process, temp_filepath=tmp_path)
@@ -1375,7 +1375,7 @@ class Sequencer:
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     if ap.process.poll() is None and ap.process.stdin:
-                        try: ap.process.stdin.write(b'p'); ap.process.stdin.flush()
+                        try: ap.process.stdin.write(b'pause\n'); ap.process.stdin.flush()
                         except (IOError, ValueError): pass
 
             self.playback_state = "paused"
@@ -1390,7 +1390,7 @@ class Sequencer:
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     if ap.process.poll() is None and ap.process.stdin:
-                        try: ap.process.stdin.write(b'p'); ap.process.stdin.flush()
+                        try: ap.process.stdin.write(b'pause\n'); ap.process.stdin.flush()
                         except (IOError, ValueError): pass
 
             self.playback_state = "playing"
@@ -1405,7 +1405,7 @@ class Sequencer:
                     if ap.process.poll() is None:
                         if ap.process.stdin:
                             try:
-                                ap.process.stdin.write(b'q')
+                                ap.process.stdin.write(b'quit\n')
                                 ap.process.stdin.flush()
                             except (IOError, ValueError):
                                 ap.process.kill()

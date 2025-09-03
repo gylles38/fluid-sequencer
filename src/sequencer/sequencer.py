@@ -50,6 +50,7 @@ class Sequencer:
         self.song = Song(name="New Song", tempo=tempo)
         self.playback_state = "stopped"
         self.playback_thread = None
+        self.metronome_thread = None # Nouveau thread pour le métronome
         self.open_ports = {}
         self.virtual_ports = []
         self.temporary_ports = []
@@ -61,7 +62,6 @@ class Sequencer:
         self.process_lock = threading.Lock()
         self.audio_player_command: str = "ffplay -nodisp -autoexit -hide_banner"
 
-        self.metronome_only_mode = False
         self.total_paused_time = 0.0
         self.pause_start_time = 0.0
         self.last_start_beat = 0.0
@@ -906,6 +906,9 @@ class Sequencer:
                 # We have the first note, now start playback and polling
                 first_note_time_beats = start_beat # The first note defines the starting beat
                 recording_start_time_sec = time.time()
+                # Correction: Appel de play() pour démarrer le playback des autres pistes et le métronome
+                # Correction : La méthode play() gère maintenant le métronome, donc nous l'appelons
+                # pour démarrer le métronome et les autres pistes.
                 self.play(start_beat=first_note_time_beats)
                 print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
 
@@ -952,6 +955,7 @@ class Sequencer:
                 outport.close()
             target_track.is_muted = original_mute_state
             self.is_recording = False
+            # Le thread de lecture est géré par la fonction stop()
             print("\nRecording thread finished.")
         
     def record_track(self, track_index: int):
@@ -979,8 +983,7 @@ class Sequencer:
                 num_beats = int(parts[1]) if len(parts) == 2 else 0
                 num_beats_to_record = (num_measures * self.song.time_signature_numerator) + num_beats
         except (ValueError, IndexError):
-            print("Error: Invalid number format.")
-            return
+            print("Error: Invalid number format."); return
 
         existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
         if existing_notes_in_range:
@@ -991,7 +994,7 @@ class Sequencer:
                 print(f"Removed existing notes from beat {start_beat} onwards.")
 
         try:
-            input_ports = mido.get_input_names() # type: ignore
+            input_ports = mido.get_input_names() # type_ignore
             if not input_ports: print("Error: No MIDI input ports found."); return
             print("Available MIDI input ports:")
             for i, port in enumerate(input_ports): print(f"  [{i}] {port}")
@@ -1091,57 +1094,59 @@ class Sequencer:
                         # This might fail if _shutdown_audio_processes already cleaned it up, which is fine.
                         pass
 
-    def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
-        # Metronome-only mode for recording count-in is a separate logic path
-        if self.metronome_only_mode:
-            port = self.open_ports.get(self.song.metronome_port_name)
-            if not port:
-                print(f"Error: Metronome port '{self.song.metronome_port_name}' not open.")
-                return
-
-            try:
-                beat_counter = 0
-                start_time_sec = time.time()
-
-                print("Starting metronome for recording... Press Ctrl+C in the recording window to stop.")
-                while not self._stop_event.is_set():
-                    # Calculate the duration of one beat in seconds
-                    sec_per_beat = 60.0 / self.song.tempo
-
-                    # This logic ensures the metronome stays in time, even if the loop execution time varies
-                    target_real_time_sec = start_time_sec + (beat_counter * sec_per_beat)
-                    sleep_duration = target_real_time_sec - time.time()
-                    if sleep_duration > 0:
-                        time.sleep(sleep_duration)
-
-                    if self._stop_event.is_set():
-                        break
-
-                    is_downbeat = (beat_counter % self.song.time_signature_numerator) == 0
-                    pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
-
-                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
-                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
-
-                    port.send(note_on)
-                    # A very short delay to ensure the note_on is processed before the note_off
-                    time.sleep(0.05)
-                    port.send(note_off)
-
-                    beat_counter += 1
-            except Exception as e:
-                print(f"Error in metronome thread: {e}")
-            finally:
-                if not self._stop_event.is_set():
-                    print("\nMetronome for recording finished.")
+    def _metronome_thread_main(self):
+        """
+        Thread dédié au métronome. Il joue des clics en continu.
+        """
+        beats_per_measure = self.song.time_signature_numerator
+        
+        # Pour une précision optimale, on calcule le temps d'une pulsation.
+        # on évite les divisions par zéro
+        if self.song.tempo <= 0 or beats_per_measure <= 0:
             return
 
-        # Full playback mode
+        beat_duration_sec = 60.0 / self.song.tempo
+        downbeat_tick_message = mido.Message('note_on', channel=self.metronome_channel, note=self.metronome_pitch_downbeat, velocity=100)
+        beat_tick_message = mido.Message('note_on', channel=self.metronome_channel, note=self.metronome_pitch_beat, velocity=100)
+        note_off_message = mido.Message('note_off', channel=self.metronome_channel, note=self.metronome_pitch_beat, velocity=0) # Note off for either pitch
+
+        last_tick_time = time.time()
+        beat_count = 0
+        
+        metro_port = self.open_ports.get(self.song.metronome_port_name)
+
+        while not self._stop_event.is_set():
+            self._run_event.wait()
+            if self._stop_event.is_set(): break
+
+            now = time.time()
+            # On utilise un calcul basé sur le temps réel pour éviter la dérive
+            expected_time = last_tick_time + beat_duration_sec
+            if now >= expected_time:
+                # C'est l'heure d'un clic
+                last_tick_time = now # Réinitialiser le temps pour le prochain beat
+                
+                # On détermine le type de clic (downbeat ou beat)
+                pitch_to_send = self.metronome_pitch_downbeat if (beat_count % beats_per_measure) == 0 else self.metronome_pitch_beat
+                note_on_message = mido.Message('note_on', channel=self.metronome_channel, note=pitch_to_send, velocity=100)
+                note_off_message.note = pitch_to_send # Mettre à jour la note pour le message off
+
+                if metro_port:
+                    metro_port.send(note_on_message)
+                    # Envoie un message note_off après un petit délai
+                    time.sleep(0.05)
+                    metro_port.send(note_off_message)
+
+                beat_count += 1
+            
+            time.sleep(0.001) # Petite pause pour ne pas surcharger le CPU
+            
+    def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         try:
             master_event_list = []
             ticks_per_beat = self.song.ticks_per_beat
-
-            # 1. Build master list of all events (MIDI, Audio, Metronome)
+            
+            # 1. Build master list of all events (MIDI, Audio)
             for track_idx, track in enumerate(self.song.tracks):
                 if isinstance(track, MidiTrack):
                     if not track.output_port_name:
@@ -1169,23 +1174,6 @@ class Sequencer:
                         'track_start_beat': track.start_time
                     })
 
-            if self.song.metronome_enabled and self.song.metronome_port_name:
-                last_note_tick = max((e['tick'] for e in master_event_list if e['type'] != 'metronome'), default=0) if master_event_list else 0
-
-                # Determine how many beats to generate metronome for.
-                # It should be at least the length of the song, but also include the playback range if it's later.
-                num_beats_for_notes = int(last_note_tick / ticks_per_beat) + self.song.time_signature_numerator
-                # Also generate clicks up to the requested end_beat, if provided
-                num_beats_for_range = int(end_beat if end_beat is not None else start_beat) + self.song.time_signature_numerator
-                num_beats = max(num_beats_for_notes, num_beats_for_range)
-                
-                for beat in range(num_beats):
-                    tick = beat * ticks_per_beat
-                    pitch = self.metronome_pitch_downbeat if (beat % self.song.time_signature_numerator) == 0 else self.metronome_pitch_beat
-                    master_event_list.append({'type': 'metronome', 'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)})
-                    master_event_list.append({'type': 'metronome', 'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)})
-                    #print(f"\rRecording: Measure {beat}, Beat {beat} ", end="")                    
-
             # 2. Filter and normalize events based on playback range
             start_tick = int(start_beat * ticks_per_beat)
             end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
@@ -1195,17 +1183,13 @@ class Sequencer:
                 is_audio = e['type'] == 'audio'
                 event_tick = e['tick']
 
-                # Audio tracks are treated differently: they are long events that can start before
-                # the playback range but still overlap with it. We check if the audio track's
-                # start time is before the end of our playback window. The offset calculation
-                # during playback will handle slicing the audio correctly.
                 if is_audio:
                     if event_tick < end_tick:
                          ranged_event_list.append(e.copy())
-                # For MIDI and metronome events, they must start within the playback window.
+                # Pour les événements MIDI et métronome, ils doivent démarrer dans la fenêtre de lecture.
                 elif start_tick <= event_tick < end_tick:
                     ranged_event_list.append(e.copy())
-
+            
             for event in ranged_event_list:
                 event['tick'] -= start_tick
 
@@ -1271,12 +1255,14 @@ class Sequencer:
                         next_event_index += 1
 
                     # Check for end of material
-                    #if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads) and not self.is_recording:
-                    #    break
+                    if not self.is_recording and next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads):
+                        break
 
                     time.sleep(0.01)
 
-                if not loop or self._stop_event.is_set():
+                if not loop or self._stop_event.is_set() or self.is_recording:
+                    # En mode enregistrement, la boucle s'arrête uniquement si on appelle stop()
+                    # En mode lecture, la boucle s'arrête à la fin du morceau
                     break
 
                 # If looping, reset state for the next iteration
@@ -1299,7 +1285,9 @@ class Sequencer:
             self.playback_state = "stopped"
             if not self._stop_event.is_set():
                 print("\nPlayback finished.")
-
+                if self.is_recording:
+                    self.stop()
+                
     def play(self, start_beat: Optional[float] = None, end_beat: Optional[float] = None, loop: bool = False):
         # Case 1: play() is called with no args, which means "resume" or "play from last position"
         if start_beat is None:
@@ -1334,8 +1322,9 @@ class Sequencer:
             required_ports.add(self.song.metronome_port_name)
 
         has_audio_tracks = any(isinstance(track, AudioTrack) for track in self.song.tracks)
-        if not required_ports and not has_audio_tracks and not self.metronome_only_mode:
-            print("Nothing to play: No MIDI ports assigned and no audio tracks found.")
+        # Correction: Vérifier aussi le métronome pour l'absence de contenu
+        if not required_ports and not has_audio_tracks and not self.song.metronome_enabled:
+            print("Nothing to play: No MIDI ports assigned, no audio tracks, and metronome is off.")
             return
 
         # Open all required ports
@@ -1357,6 +1346,13 @@ class Sequencer:
         self._run_event.set()
         self.playback_state = "playing"
         self.playback_start_time = time.time() # Set start time for recording sync
+        
+        # Démarrer le thread du métronome si activé
+        if self.song.metronome_enabled and self.song.metronome_port_name:
+            self.metronome_thread = threading.Thread(target=self._metronome_thread_main)
+            self.metronome_thread.daemon = True
+            self.metronome_thread.start()
+
         self.playback_thread = threading.Thread(
             target=self._play_thread,
             kwargs={'start_beat': start_beat, 'end_beat': end_beat, 'loop': loop}
@@ -1440,6 +1436,11 @@ class Sequencer:
 
         if self.playback_thread and self.playback_thread.is_alive():
             self.playback_thread.join(timeout=2.0)
+        
+        # Assurez-vous d'arrêter aussi le thread du métronome
+        if self.metronome_thread and self.metronome_thread.is_alive():
+            self.metronome_thread.join(timeout=2.0)
+
 
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=2.0)

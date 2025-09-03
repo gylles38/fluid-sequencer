@@ -869,14 +869,11 @@ class Sequencer:
             with mido.open_input(inport_name) as inport:
                 if outport_name:
                     outport = mido.open_output(outport_name)
-                    print(f"Listening on '{inport_name}' with MIDI Thru to '{outport_name}'.")
 
                 # Clear any stale messages in the MIDI buffer before starting
-                print("DEBUG: Clearing initial MIDI buffer for 0.2s...", flush=True)
                 time.sleep(0.2)
-                for msg in inport.iter_pending():
-                    print(f"DEBUG: Discarding stale message: {msg}", flush=True)
-                print("DEBUG: Buffer cleared. Armed for recording.")
+                for _ in inport.iter_pending():
+                    pass
 
                 is_waiting_for_first_note = True
                 recording_start_time_sec = 0
@@ -895,7 +892,6 @@ class Sequencer:
                             print(f"\rRecording at beat {self._format_beats_to_position(current_recording_beat)}...", end="")
 
                     for msg in inport.iter_pending():
-                        print(f"DEBUG: Received MIDI message: {msg}", flush=True)
                         if outport: outport.send(msg)
 
                         now = time.time()
@@ -1248,7 +1244,6 @@ class Sequencer:
                         should_play = (not track) or (track.is_solo) or (not is_any_track_soloed and not (track and track.is_muted))
 
                         if should_play:
-                            # print(f"  ...dispatching {event['type']} event") # DEBUG
                             if event['type'] == 'midi' or event['type'] == 'metronome':
                                 port = self.open_ports.get(event['port_name'])
                                 if port: port.send(event['message'])

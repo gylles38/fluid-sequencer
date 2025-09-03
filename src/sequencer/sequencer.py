@@ -66,6 +66,7 @@ class Sequencer:
         self.last_start_beat = 0.0
         self.recording_thread = None
         self.is_recording = False
+        self._recording_started_event = threading.Event()
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -900,6 +901,7 @@ class Sequencer:
                             playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
 
                             if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels:
+                                self._recording_started_event.set()
                                 recording_start_time_sec = now
                                 beats_per_second = self.song.tempo / 60.0
                                 elapsed_playback_sec = now - self.playback_start_time
@@ -1004,6 +1006,7 @@ class Sequencer:
         target_track.is_muted = True
 
         self.is_recording = True # Set recording flag before starting threads
+        self._recording_started_event.clear()
         # Start playback of all other tracks. This will set self.playback_start_time.
         self.play(start_beat=start_beat)
 
@@ -1242,6 +1245,10 @@ class Sequencer:
 
                         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                         should_play = (not track) or (track.is_solo) or (not is_any_track_soloed and not (track and track.is_muted))
+
+                        # If we are waiting for the first note of a recording, only play metronome events
+                        if self.is_recording and not self._recording_started_event.is_set() and event['type'] != 'metronome':
+                            should_play = False
 
                         if should_play:
                             if event['type'] == 'midi' or event['type'] == 'metronome':

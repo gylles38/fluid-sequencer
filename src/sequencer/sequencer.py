@@ -862,84 +862,17 @@ class Sequencer:
             print(f"Error: Virtual port '{name}' not found.")
 
     def _recording_thread_main(self, target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state):
-        """
-        The main loop for the MIDI recording thread. This is a two-phase process.
-        1. Waiting Phase: A blocking call waits for the first valid note_on message.
-           During this time, no other tracks are playing.
-        2. Recording Phase: Once the first note is received, playback of other tracks
-           is started, and this thread switches to a non-blocking poll to record
-           all subsequent notes in sync with the playback.
-        """
-        open_notes = {}
-        outport = None
+        print(f"DEBUG: Recording thread started for port '{inport_name}'")
         try:
+            print("DEBUG: Opening input port...")
             with mido.open_input(inport_name) as inport:
-                if outport_name:
-                    outport = mido.open_output(outport_name)
-
-                # --- 1. Waiting Phase ---
-                print("Waiting for first note to start recording...")
-                first_msg = None
-                while not self._stop_event.is_set():
-                    msg = inport.receive() # Blocking call
-                    if outport: outport.send(msg)
-
-                    # We are only looking for a real note played by the user
-                    if msg.type == 'note_on' and msg.velocity > 0:
-                        first_msg = msg
-                        break # Got it, proceed to recording phase
-
-                if self._stop_event.is_set():
-                    return
-
-                # --- 2. Recording Phase ---
-                # We have the first note, now start playback and polling
-                first_note_time_beats = start_beat # The first note defines the starting beat
-                recording_start_time_sec = time.time()
-                self.play(start_beat=first_note_time_beats)
-                print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
-
-                # Handle the first note that we already received
-                open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
-
-                # Polling loop for subsequent notes
-                while not self._stop_event.is_set():
-                    for msg in inport.iter_pending():
-                        if outport: outport.send(msg)
-                        now = time.time()
-
-                        if msg.type == 'note_on' and msg.velocity > 0:
-                            if msg.note not in open_notes:
-                                open_notes[msg.note] = (now, msg.velocity)
-                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                            if msg.note in open_notes:
-                                note_start_time_sec, velocity = open_notes.pop(msg.note)
-                                duration_sec = now - note_start_time_sec
-                                beats_per_second = self.song.tempo / 60.0
-
-                                start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
-                                duration_beats = duration_sec * beats_per_second
-
-                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                event = Event(notes=[note], start_time=start_time_beats)
-                                target_track.add_event(event)
-
-                    # Check for recording duration limit
-                    if num_beats_to_record is not None:
-                        elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
-                        if elapsed_recording_beats >= num_beats_to_record:
-                            print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
-                            self.stop()
-                            break
-
-                    time.sleep(0.001)
-
+                print("DEBUG: Port opened. Waiting for message...")
+                msg = inport.receive()
+                print(f"DEBUG: Received message: {msg}")
         except Exception as e:
-            print(f"\nAn error occurred during recording: {e}")
+            print(f"DEBUG: An exception occurred: {e}")
         finally:
-            if outport:
-                outport.close()
-            target_track.is_muted = original_mute_state
+            print("DEBUG: Recording thread entering finally block.")
             self.is_recording = False
             print("\nRecording thread finished.")
 

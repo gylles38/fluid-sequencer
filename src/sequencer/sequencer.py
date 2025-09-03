@@ -898,7 +898,7 @@ class Sequencer:
                         if is_waiting_for_first_note:
                             playback_channels = {t.channel for t in self.song.tracks if isinstance(t, MidiTrack) and not t.is_muted and t != target_track}
 
-                            if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels:
+                            if msg.type == 'note_on' and msg.velocity > 0 and msg.channel not in playback_channels and msg.channel != self.metronome_channel:
                                 self._recording_started_event.set()
                                 recording_start_time_sec = now
                                 beats_per_second = self.song.tempo / 60.0

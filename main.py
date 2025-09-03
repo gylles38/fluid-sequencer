@@ -137,7 +137,7 @@ def main():
                             print("Error: Invalid track index.")
                             continue
 
-                        hardware_ports = mido.get_output_names()
+                        hardware_ports = mido.get_output_names() # type: ignore
                         virtual_port_names = [vp.name for vp in seq.virtual_ports]
                         all_outputs = hardware_ports + virtual_port_names
 
@@ -161,7 +161,7 @@ def main():
                 else:
                     print("Usage: assign <track_index>")
             elif command == "assignmetro":
-                hardware_ports = mido.get_output_names()
+                hardware_ports = mido.get_output_names() # type: ignore
                 virtual_port_names = [vp.name for vp in seq.virtual_ports]
                 all_outputs = hardware_ports + virtual_port_names
 
@@ -313,7 +313,7 @@ def main():
                         continue
 
                     end_beat_str = args[1] if len(args) >= 2 else None
-                    end_beat = seq.parse_position_to_beats(end_beat_str, default=None) if end_beat_str else None
+                    end_beat = seq.parse_position_to_beats(end_beat_str, default="") if end_beat_str else None
                     if end_beat_str and end_beat is None: # Handle parsing error
                         continue
 

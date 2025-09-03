@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
 import mido
-from mido import get_input_names, get_output_names, open_output
+from mido import get_input_names, get_output_names, open_output # type: ignore
 from pydub import AudioSegment
 import subprocess
 import threading
@@ -866,15 +866,20 @@ class Sequencer:
         """
         The main loop for the MIDI recording thread. This is a two-phase process.
         1. Waiting Phase: A blocking call waits for the first valid note_on message.
-           During this time, no other tracks are playing.
+        During this time, no other tracks are playing.
         2. Recording Phase: Once the first note is received, playback of other tracks
-           is started, and this thread switches to a non-blocking poll to record
-           all subsequent notes in sync with the playback.
+        is started, and this thread switches to a non-blocking poll to record
+        all subsequent notes in sync with the playback.
         """
         open_notes = {}
         outport = None
+        # Vérifier si l'event d'arrêt est déjà activé
+        if self._stop_event.is_set():
+            self._stop_event.clear()  # Réinitialiser l'event d'arrêt
+            print("Reset _stop_event before starting recording")
+            
         try:
-            with mido.open_input(inport_name) as inport:
+            with mido.open_input(inport_name) as inport: # type: ignore
                 if outport_name:
                     outport = open_output(outport_name)
 
@@ -905,7 +910,8 @@ class Sequencer:
                 print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
 
                 # Handle the first note that we already received
-                open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
+                if first_msg is not None:
+                    open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
 
                 # Polling loop for subsequent notes
                 while not self._stop_event.is_set():
@@ -934,7 +940,7 @@ class Sequencer:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
                         if elapsed_recording_beats >= num_beats_to_record:
                             print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
-                            self.stop()
+                            # Ne pas appeler self.stop() ici, seulement sortir de la boucle
                             break
 
                     time.sleep(0.001)
@@ -947,7 +953,7 @@ class Sequencer:
             target_track.is_muted = original_mute_state
             self.is_recording = False
             print("\nRecording thread finished.")
-
+        
     def record_track(self, track_index: int):
         if self.playback_state != "stopped":
             print("Error: Please stop playback before starting a new recording.")
@@ -985,7 +991,7 @@ class Sequencer:
                 print(f"Removed existing notes from beat {start_beat} onwards.")
 
         try:
-            input_ports = mido.get_input_names()
+            input_ports = mido.get_input_names() # type: ignore
             if not input_ports: print("Error: No MIDI input ports found."); return
             print("Available MIDI input ports:")
             for i, port in enumerate(input_ports): print(f"  [{i}] {port}")
@@ -1172,12 +1178,13 @@ class Sequencer:
                 # Also generate clicks up to the requested end_beat, if provided
                 num_beats_for_range = int(end_beat if end_beat is not None else start_beat) + self.song.time_signature_numerator
                 num_beats = max(num_beats_for_notes, num_beats_for_range)
-
+                
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
                     pitch = self.metronome_pitch_downbeat if (beat % self.song.time_signature_numerator) == 0 else self.metronome_pitch_beat
                     master_event_list.append({'type': 'metronome', 'tick': tick, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)})
                     master_event_list.append({'type': 'metronome', 'tick': tick + ticks_per_beat // 4, 'track_idx': -1, 'port_name': self.song.metronome_port_name, 'message': mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)})
+                    #print(f"\rRecording: Measure {beat}, Beat {beat} ", end="")                    
 
             # 2. Filter and normalize events based on playback range
             start_tick = int(start_beat * ticks_per_beat)
@@ -1226,13 +1233,15 @@ class Sequencer:
                     if end_beat is not None and current_beat_float >= end_beat:
                         break
 
-                    # --- Display current measure and beat (only if not recording) ---
+                    # --- Display current measure and beat
                     if not self.is_recording:
-                        beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
-                        display_measure = int(current_beat_float / beats_per_measure) + 1
-                        display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
-                        print(f"\rPlaying: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
-
+                        mode = "Playing"
+                    else:
+                        mode = "Recording"
+                    beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
+                    display_measure = int(current_beat_float / beats_per_measure) + 1
+                    display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+                    print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
                     # Dispatch events that are due
                     while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
@@ -1262,8 +1271,8 @@ class Sequencer:
                         next_event_index += 1
 
                     # Check for end of material
-                    if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads) and not self.is_recording:
-                        break
+                    #if next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads) and not self.is_recording:
+                    #    break
 
                     time.sleep(0.01)
 

@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
 import mido
+from mido import get_input_names, get_output_names, open_output
 from pydub import AudioSegment
 import subprocess
 import threading
@@ -705,7 +706,7 @@ class Sequencer:
                         break
 
                 if not found_virtual:
-                    port = mido.open_output(port_name)
+                    port = open_output(port_name)
                     is_temp_port = True
 
                 if port:
@@ -811,14 +812,14 @@ class Sequencer:
         lines = []
         try:
             lines.append("Available MIDI Input Ports:")
-            input_ports = mido.get_input_names()
+            input_ports = get_input_names()
             if input_ports:
                 for i, port in enumerate(input_ports): lines.append(f"  [{i}] {port}")
             else:
                 lines.append("  (None found)")
 
             lines.append("\nAvailable MIDI Output Ports:")
-            output_ports = mido.get_output_names()
+            output_ports = get_output_names()
             virtual_port_names = [vp.name for vp in self.virtual_ports]
             all_outputs = output_ports + virtual_port_names
             if all_outputs:
@@ -831,7 +832,7 @@ class Sequencer:
 
     def create_virtual_port(self, name: str):
         try:
-            port = mido.open_output(name, virtual=True)
+            port = open_output(name, virtual=True)
             self.virtual_ports.append(port)
             print(f"Created virtual MIDI port: '{name}'")
         except Exception as e:
@@ -875,7 +876,7 @@ class Sequencer:
         try:
             with mido.open_input(inport_name) as inport:
                 if outport_name:
-                    outport = mido.open_output(outport_name)
+                    outport = open_output(outport_name)
 
                 # --- 1. Waiting Phase ---
                 print("Waiting for first note to start recording...")
@@ -993,7 +994,7 @@ class Sequencer:
 
             outport_name = None
             if input("Enable MIDI Thru to an output port? [y/N] ").lower() == 'y':
-                all_outputs = mido.get_output_names() + [vp.name for vp in self.virtual_ports]
+                all_outputs = get_output_names() + [vp.name for vp in self.virtual_ports]
                 if all_outputs:
                     print("Available MIDI output ports:")
                     for i, port in enumerate(all_outputs): print(f"  [{i}] {port}")
@@ -1335,7 +1336,7 @@ class Sequencer:
                 self.open_ports[name] = vp
             else:
                 try:
-                    self.open_ports[name] = mido.open_output(name)
+                    self.open_ports[name] = open_output(name)
                     self.temporary_ports.append(self.open_ports[name])
                 except Exception as e:
                     print(f"Error opening port '{name}': {e}. Aborting playback.")

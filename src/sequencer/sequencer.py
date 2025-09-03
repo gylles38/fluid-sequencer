@@ -883,9 +883,7 @@ class Sequencer:
 
                 while not self._stop_event.is_set():
                     # Provide continuous user feedback about the recording state
-                    if is_waiting_for_first_note:
-                        print(f"\rWaiting for first note... ", end="")
-                    else:
+                    if not is_waiting_for_first_note:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
                         current_recording_beat = first_note_time_beats + elapsed_recording_beats
                         if int(current_recording_beat) > last_beat_display:
@@ -1010,13 +1008,13 @@ class Sequencer:
         # Start playback of all other tracks. This will set self.playback_start_time.
         self.play(start_beat=start_beat)
 
+        print("Waiting for first note to start recording...")
         self.recording_thread = threading.Thread(
             target=self._recording_thread_main,
             args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state)
         )
         self.recording_thread.daemon = True
         self.recording_thread.start()
-        print("Overdub recording session started. Type 'stop' to finish.")
 
     def _play_audio_file_blocking(self, filepath: str, start_offset_sec: float = 0.0):
         """
@@ -1177,6 +1175,10 @@ class Sequencer:
                 num_beats_for_range = int(end_beat if end_beat is not None else start_beat) + self.song.time_signature_numerator
                 num_beats = max(num_beats_for_notes, num_beats_for_range)
 
+                # If we're in recording mode, we need a long metronome track to play while waiting
+                if self.is_recording:
+                    num_beats = max(num_beats, 10000) # ~2000 measures of 4/4, should be plenty
+
                 for beat in range(num_beats):
                     tick = beat * ticks_per_beat
                     pitch = self.metronome_pitch_downbeat if (beat % self.song.time_signature_numerator) == 0 else self.metronome_pitch_beat
@@ -1230,12 +1232,15 @@ class Sequencer:
                     if end_beat is not None and current_beat_float >= end_beat:
                         break
 
-                    # --- Display current measure and beat (only if not recording) ---
-                    if not self.is_recording:
+                    # --- Display current measure and beat ---
+                    # This display is active during normal playback, and during the 'waiting' phase of recording.
+                    show_display = not self.is_recording or (self.is_recording and not self._recording_started_event.is_set())
+                    if show_display:
                         beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
                         display_measure = int(current_beat_float / beats_per_measure) + 1
                         display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
-                        print(f"\rPlaying: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
+                        prefix = "Waiting at" if self.is_recording else "Playing"
+                        print(f"\r{prefix}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
 
                     # Dispatch events that are due

@@ -1054,7 +1054,7 @@ class Sequencer:
 
             # --- MODIFICATION CRUCIALE POUR DÉTACHER LE PROCESSUS ---
             kwargs = {
-                'stdin': subprocess.PIPE,
+                'stdin': subprocess.DEVNULL,
                 'stdout': subprocess.DEVNULL,
                 'stderr': subprocess.DEVNULL
             }

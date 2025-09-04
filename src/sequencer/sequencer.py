@@ -1082,10 +1082,15 @@ class Sequencer:
                 print(f"\n[ERROR] in audio playback thread for file '{filepath}': {e}")
         finally:
             if active_process_info:
-                with self.process_lock:
-                    if active_process_info in self.active_audio_processes:
-                        self.active_audio_processes.remove(active_process_info)
+                # If a global stop is not in progress, it means the process finished on its own.
+                # In this case, we remove it from the active list.
+                # If a stop IS in progress, _shutdown_audio_processes() will handle cleanup.
+                if not self._stop_event.is_set():
+                    with self.process_lock:
+                        if active_process_info in self.active_audio_processes:
+                            self.active_audio_processes.remove(active_process_info)
 
+                # The temporary file can be cleaned up regardless.
                 if tmp_path and os.path.exists(tmp_path):
                     try:
                         os.remove(tmp_path)

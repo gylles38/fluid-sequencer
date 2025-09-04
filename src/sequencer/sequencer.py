@@ -7,6 +7,8 @@ import json
 import mido
 from mido import get_input_names, get_output_names, open_output # type: ignore
 from pydub import AudioSegment
+import os
+import sys
 import subprocess
 import threading
 import time
@@ -60,7 +62,7 @@ class Sequencer:
         self.audio_threads: List[threading.Thread] = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
-        self.audio_player_command: str = "mplayer -nogui -really-quiet -slave"
+        self.audio_player_command: str = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc"
 
         self.total_paused_time = 0.0
         self.pause_start_time = 0.0
@@ -762,7 +764,7 @@ class Sequencer:
             # Restore audio player command, with a fallback for older projects
             self.audio_player_command = project_data.get(
                 "audio_player_command",
-                "mplayer -nogui -really-quiet -slave"
+                "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc"
             )
 
             # Restore virtual ports
@@ -1025,13 +1027,12 @@ class Sequencer:
 
     def _play_audio_file_blocking(self, filepath: str, start_offset_sec: float = 0.0):
         """
-        Plays an audio file by exporting it to a temporary WAV file and
-        calling a configurable external player command.
+        Plays an audio file by calling an external player, completely detached
+        from the controlling terminal to avoid any interference.
         This method is blocking and should be run in a separate thread.
         """
         import tempfile
         import shlex
-        import os
 
         tmp_path = None
         process = None
@@ -1039,61 +1040,58 @@ class Sequencer:
         try:
             audio_segment = AudioSegment.from_file(filepath)
             if start_offset_sec > 0:
-                # pydub uses milliseconds
                 audio_segment = audio_segment[int(start_offset_sec * 1000):]
 
             if len(audio_segment) == 0:
-                # This can happen if the start offset is past the end of the file.
-                # It's not an error, just nothing to play.
                 return
 
-            # Export the segment to a temporary WAV file
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp_path = tmp.name
             audio_segment.export(tmp_path, format="wav")
 
-            # Build the command
             command = shlex.split(self.audio_player_command)
             command.append(tmp_path)
 
-            # Use Popen with stdin=subprocess.PIPE to allow sending commands like 'q' or 'p'
-            process = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL # Redirige les erreurs vers le néant
-            )
+            # --- MODIFICATION CRUCIALE POUR DÉTACHER LE PROCESSUS ---
+            kwargs = {
+                'stdin': subprocess.PIPE,
+                'stdout': subprocess.DEVNULL,
+                'stderr': subprocess.DEVNULL
+            }
+
+            if sys.platform == "win32":
+                # Sous Windows, on utilise DETACHED_PROCESS
+                kwargs['creationflags'] = subprocess.DETACHED_PROCESS
+            else:
+                # Sous Linux/macOS, on utilise os.setsid pour créer une nouvelle session
+                # sans terminal de contrôle. C'est la méthode la plus robuste.
+                kwargs['preexec_fn'] = os.setsid
+            
+            process = subprocess.Popen(command, **kwargs)
+            # -----------------------------------------------------------
 
             active_process_info = ActiveAudioProcess(process=process, temp_filepath=tmp_path)
             with self.process_lock:
                 self.active_audio_processes.append(active_process_info)
 
-            # Wait for the process to finish on its own.
-            # communicate() is NOT used here to avoid closing stdin prematurely.
             if not self._stop_event.is_set():
                 process.wait()
 
         except Exception as e:
-            # Avoid printing errors if the process was killed by stop()
             if not self._stop_event.is_set():
                 print(f"\n[ERROR] in audio playback thread for file '{filepath}': {e}")
         finally:
-            # This 'finally' block handles the case where the audio file plays to completion.
-            # The main _shutdown_audio_processes() handles cleanup if stop() is called.
             if active_process_info:
                 with self.process_lock:
-                    # Remove it from the list if it's still there
                     if active_process_info in self.active_audio_processes:
                         self.active_audio_processes.remove(active_process_info)
 
-                # Clean up the temp file associated with this specific process
                 if tmp_path and os.path.exists(tmp_path):
                     try:
                         os.remove(tmp_path)
                     except OSError:
-                        # This might fail if _shutdown_audio_processes already cleaned it up, which is fine.
                         pass
-
+  
     def _metronome_thread_main(self):
         """
         Thread dédié au métronome. Il joue des clics en continu.

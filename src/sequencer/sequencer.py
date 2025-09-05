@@ -48,6 +48,8 @@ def song_decoder(d):
 
 
 class Sequencer:
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc -idle"
+
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
         self.playback_state = "stopped"
@@ -62,7 +64,7 @@ class Sequencer:
         self.audio_threads: List[threading.Thread] = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
-        self.audio_player_command: str = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc -idle"
+        self.audio_player_command: str = self.DEFAULT_AUDIO_PLAYER_COMMAND
 
         self.total_paused_time = 0.0
         self.pause_start_time = 0.0
@@ -764,7 +766,7 @@ class Sequencer:
             # Restore audio player command, with a fallback for older projects
             self.audio_player_command = project_data.get(
                 "audio_player_command",
-                "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc"
+                self.DEFAULT_AUDIO_PLAYER_COMMAND
             )
 
             # Restore virtual ports
@@ -1117,11 +1119,10 @@ class Sequencer:
             command = shlex.split(self.audio_player_command)
             command.append(filepath)
 
-            error_log = open("mplayer_errors.log", "a")
             kwargs = {
                 'stdin': subprocess.PIPE,
                 'stdout': subprocess.DEVNULL,
-                'stderr': error_log
+                'stderr': subprocess.DEVNULL
             }
 
             if sys.platform == "win32":
@@ -1142,10 +1143,17 @@ class Sequencer:
             if not self._stop_event.is_set():
                 print(f"\n[ERROR] in audio playback thread for mixed file: {e}")
         finally:
-            # All cleanup is now handled by _shutdown_audio_processes,
-            # which is called from the main _play_thread's finally block.
-            # This avoids race conditions.
-            pass
+            # If the song finishes naturally (i.e., not via a 'stop' command),
+            # this thread needs to clean up its own process and temp file.
+            if not self._stop_event.is_set() and active_process_info:
+                with self.process_lock:
+                    if active_process_info in self.active_audio_processes:
+                        self.active_audio_processes.remove(active_process_info)
+                if os.path.exists(filepath):
+                    try:
+                        os.remove(filepath)
+                    except OSError:
+                        pass
   
     def _metronome_thread_main(self):
         """

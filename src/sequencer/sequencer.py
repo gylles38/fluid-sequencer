@@ -187,17 +187,7 @@ class Sequencer:
             print("Error: Erasing events is only supported for MIDI tracks.")
             return
 
-        # Ask whether to erase all or a range
-        erase_all_choice = input(f"Erase ALL events from track '{track.name}'? [y/N]: ").lower()
-        if erase_all_choice == 'y':
-            if input("This cannot be undone. Are you sure? [y/N]: ").lower() == 'y':
-                track.events.clear()
-                print(f"Erased all events from track '{track.name}'.")
-            else:
-                print("Erase cancelled.")
-            return
-
-        # Ranged erase
+        # --- Get range from user ---
         try:
             start_pos_str = input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
@@ -219,22 +209,52 @@ class Sequencer:
             return
 
         # --- Confirmation ---
-        end_str = f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
-        confirm_message = f"Erase events from {start_pos_str} {end_str} on track '{track.name}'? [y/N] "
+        end_str_display = f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
+        confirm_message = f"Erase events from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
         if input(confirm_message).lower() != 'y':
             print("Erase cancelled.")
             return
 
+        # --- Partition events ---
+        events_to_keep = []
+        events_to_shift = []
+        removed_count = 0
+
+        for event in track.events:
+            if event.start_time < start_beat:
+                events_to_keep.append(event)
+            elif event.start_time >= end_beat:
+                events_to_shift.append(event)
+            else: # event.start_time >= start_beat and event.start_time < end_beat
+                removed_count += 1
+
+        # --- Handle shifting ---
+        final_events = events_to_keep
+        shift_confirmed = False
+        if events_to_shift:
+            shift_choice = input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
+            if shift_choice == 'y':
+                # This offset calculation correctly "closes the gap" by moving the subsequent events back.
+                shift_offset = end_beat - start_beat
+                for event in events_to_shift:
+                    event.start_time -= shift_offset
+                shift_confirmed = True
+
+        final_events.extend(events_to_shift)
+
         # --- Execution ---
+        track.events = final_events
+        track.events.sort(key=lambda e: e.start_time) # Keep it sorted
 
-        initial_event_count = len(track.events)
-        track.events = [
-            event for event in track.events
-            if not (start_beat <= event.start_time < end_beat)
-        ]
-        removed_count = initial_event_count - len(track.events)
+        # --- Report results ---
+        report = [f"Erased {removed_count} event(s)"]
+        if shift_confirmed:
+            report.append(f"shifted {len(events_to_shift)} event(s)")
 
-        print(f"Erased {removed_count} event(s) from track '{track.name}'.")
+        if removed_count > 0 or shift_confirmed:
+             print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
+        else:
+             print("No events were erased or shifted.")
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):

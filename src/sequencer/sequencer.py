@@ -1025,34 +1025,98 @@ class Sequencer:
         self.recording_thread.daemon = True
         self.recording_thread.start()
 
-    def _play_audio_file_blocking(self, filepath: str, start_offset_sec: float = 0.0):
+    def _generate_mixed_audio_file(self, start_beat: float, end_beat: Optional[float]) -> Optional[str]:
         """
-        Plays an audio file by calling an external player, completely detached
-        from the controlling terminal to avoid any interference.
-        This method is blocking and should be run in a separate thread.
+        Mixes all audible audio tracks into a single temporary WAV file.
+        Returns the path to the temporary file, or None if no audio is to be played.
         """
         import tempfile
-        import shlex
+        from pydub import AudioSegment
 
-        tmp_path = None
+        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+
+        tracks_to_mix = []
+        for track in self.song.tracks:
+            if not isinstance(track, AudioTrack):
+                continue
+
+            should_play = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
+            if not should_play:
+                continue
+
+            if end_beat is not None and track.start_time >= end_beat:
+                continue
+
+            tracks_to_mix.append(track)
+
+        if not tracks_to_mix:
+            return None
+
+        max_end_beat = start_beat
+        for track in tracks_to_mix:
+            try:
+                segment = AudioSegment.from_file(track.filepath)
+                duration_beats = (len(segment) / 1000.0) * (self.song.tempo / 60.0)
+                track_end_beat = track.start_time + duration_beats
+                if track_end_beat > max_end_beat:
+                    max_end_beat = track_end_beat
+            except Exception as e:
+                print(f"Warning: Could not read audio file {track.filepath} to determine duration: {e}")
+
+        if end_beat is not None and max_end_beat > end_beat:
+            max_end_beat = end_beat
+
+        duration_beats = max_end_beat - start_beat
+        if duration_beats <= 0:
+            return None
+
+        beats_per_second = self.song.tempo / 60.0
+        duration_ms = int((duration_beats / beats_per_second) * 1000)
+
+        final_mix = AudioSegment.silent(duration=duration_ms)
+
+        for track in tracks_to_mix:
+            try:
+                segment = AudioSegment.from_file(track.filepath)
+
+                position_beats = track.start_time - start_beat
+
+                if position_beats < 0:
+                    chop_ms = (-position_beats / beats_per_second) * 1000
+                    segment = segment[int(chop_ms):]
+                    position_beats = 0
+
+                position_ms = int((position_beats / beats_per_second) * 1000)
+
+                final_mix = final_mix.overlay(segment, position=position_ms)
+
+            except Exception as e:
+                print(f"Error processing audio file {track.filepath}: {e}")
+                continue
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+            final_mix.export(tmp_path, format="wav")
+            return tmp_path
+        except Exception as e:
+            print(f"Error exporting mixed audio: {e}")
+            return None
+
+    def _play_mixed_audio_file_blocking(self, filepath: str):
+        """
+        Plays a pre-mixed audio file by calling an external player,
+        completely detached from the controlling terminal.
+        This method is blocking and should be run in a separate thread.
+        The provided filepath is a temporary file that will be cleaned up.
+        """
+        import shlex
         process = None
         active_process_info = None
         try:
-            audio_segment = AudioSegment.from_file(filepath)
-            if start_offset_sec > 0:
-                audio_segment = audio_segment[int(start_offset_sec * 1000):]
-
-            if len(audio_segment) == 0:
-                return
-
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp_path = tmp.name
-            audio_segment.export(tmp_path, format="wav")
-
             command = shlex.split(self.audio_player_command)
-            command.append(tmp_path)
+            command.append(filepath)
 
-            # --- MODIFICATION CRUCIALE POUR DÉTACHER LE PROCESSUS ---
             kwargs = {
                 'stdin': subprocess.DEVNULL,
                 'stdout': subprocess.DEVNULL,
@@ -1060,17 +1124,13 @@ class Sequencer:
             }
 
             if sys.platform == "win32":
-                # Sous Windows, on utilise DETACHED_PROCESS
                 kwargs['creationflags'] = subprocess.DETACHED_PROCESS
             else:
-                # Sous Linux/macOS, on utilise os.setsid pour créer une nouvelle session
-                # sans terminal de contrôle. C'est la méthode la plus robuste.
                 kwargs['preexec_fn'] = os.setsid
             
             process = subprocess.Popen(command, **kwargs)
-            # -----------------------------------------------------------
 
-            active_process_info = ActiveAudioProcess(process=process, temp_filepath=tmp_path)
+            active_process_info = ActiveAudioProcess(process=process, temp_filepath=filepath)
             with self.process_lock:
                 self.active_audio_processes.append(active_process_info)
 
@@ -1079,23 +1139,12 @@ class Sequencer:
 
         except Exception as e:
             if not self._stop_event.is_set():
-                print(f"\n[ERROR] in audio playback thread for file '{filepath}': {e}")
+                print(f"\n[ERROR] in audio playback thread for mixed file: {e}")
         finally:
-            if active_process_info:
-                # If a global stop is not in progress, it means the process finished on its own.
-                # In this case, we remove it from the active list.
-                # If a stop IS in progress, _shutdown_audio_processes() will handle cleanup.
-                if not self._stop_event.is_set():
-                    with self.process_lock:
-                        if active_process_info in self.active_audio_processes:
-                            self.active_audio_processes.remove(active_process_info)
-
-                # The temporary file can be cleaned up regardless.
-                if tmp_path and os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except OSError:
-                        pass
+            # All cleanup is now handled by _shutdown_audio_processes,
+            # which is called from the main _play_thread's finally block.
+            # This avoids race conditions.
+            pass
   
     def _metronome_thread_main(self):
         """
@@ -1149,7 +1198,7 @@ class Sequencer:
             master_event_list = []
             ticks_per_beat = self.song.ticks_per_beat
             
-            # 1. Build master list of all events (MIDI, Audio)
+            # 1. Build master list of MIDI events only
             for track_idx, track in enumerate(self.song.tracks):
                 if isinstance(track, MidiTrack):
                     if not track.output_port_name:
@@ -1168,39 +1217,24 @@ class Sequencer:
                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)})
                             master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
 
-                elif isinstance(track, AudioTrack):
-                    master_event_list.append({
-                        'type': 'audio',
-                        'tick': int(track.start_time * ticks_per_beat),
-                        'track_idx': track_idx,
-                        'filepath': track.filepath,
-                        'track_start_beat': track.start_time
-                    })
-
             # 2. Filter and normalize events based on playback range
             start_tick = int(start_beat * ticks_per_beat)
             end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
 
             ranged_event_list = []
             for e in master_event_list:
-                is_audio = e['type'] == 'audio'
-                event_tick = e['tick']
-
-                if is_audio:
-                    if event_tick < end_tick:
-                         ranged_event_list.append(e.copy())
-                # Pour les événements MIDI et métronome, ils doivent démarrer dans la fenêtre de lecture.
-                elif start_tick <= event_tick < end_tick:
+                if start_tick <= e['tick'] < end_tick:
                     ranged_event_list.append(e.copy())
             
             for event in ranged_event_list:
                 event['tick'] -= start_tick
 
             if not ranged_event_list:
-                print("No events to play in the selected range.")
-                return
-
-            ranged_event_list.sort(key=lambda e: e['tick'])
+                if not any(isinstance(t, AudioTrack) and not t.is_muted for t in self.song.tracks):
+                     print("No events to play in the selected range.")
+                # This thread will now wait for audio to finish before exiting.
+            else:
+                ranged_event_list.sort(key=lambda e: e['tick'])
 
             # 3. Main playback loop
             while not self._stop_event.is_set():
@@ -1216,11 +1250,9 @@ class Sequencer:
                     current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
                     current_beat_float = start_beat + (current_ticks / ticks_per_beat)
 
-                    # Check for end of range
                     if end_beat is not None and current_beat_float >= end_beat:
                         break
 
-                    # --- Display current measure and beat
                     if not self.is_recording:
                         mode = "Playing"
                     else:
@@ -1230,45 +1262,34 @@ class Sequencer:
                     display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
                     print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
-                    # Dispatch events that are due
+                    # Dispatch MIDI events that are due
                     while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
                         event = ranged_event_list[next_event_index]
-                        track = self.song.tracks[event['track_idx']] if event.get('track_idx', -1) != -1 else None
+                        track = self.song.tracks[event['track_idx']]
 
                         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                        should_play = (not track) or (track.is_solo) or (not is_any_track_soloed and not (track and track.is_muted))
+                        should_play = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
 
                         if should_play:
-                            # print(f"  ...dispatching {event['type']} event") # DEBUG
-                            if event['type'] == 'midi' or event['type'] == 'metronome':
+                            if event['type'] == 'midi':
                                 port = self.open_ports.get(event['port_name'])
                                 if port: port.send(event['message'])
 
-                            elif event['type'] == 'audio':
-                                track_start_beat = event['track_start_beat']
-                                offset_beats = max(0, start_beat - track_start_beat)
-                                bps = self.song.tempo / 60.0
-                                offset_sec = offset_beats / bps if bps > 0 else 0
-
-                                audio_thread = threading.Thread(target=self._play_audio_file_blocking, args=(event['filepath'], offset_sec))
-                                audio_thread.daemon = True
-                                audio_thread.start()
-                                self.audio_threads.append(audio_thread)
-
                         next_event_index += 1
 
-                    # Check for end of material
-                    if not self.is_recording and next_event_index >= len(ranged_event_list) and not any(t.is_alive() for t in self.audio_threads):
+                    if not self.is_recording and next_event_index >= len(ranged_event_list):
                         break
 
                     time.sleep(0.01)
 
+                # After MIDI is done, wait for any audio to finish before looping or exiting.
+                for t in self.audio_threads:
+                    while t.is_alive() and not self._stop_event.is_set():
+                        t.join(timeout=0.1)
+
                 if not loop or self._stop_event.is_set() or self.is_recording:
-                    # En mode enregistrement, la boucle s'arrête uniquement si on appelle stop()
-                    # En mode lecture, la boucle s'arrête à la fin du morceau
                     break
 
-                # If looping, reset state for the next iteration
                 self._all_notes_off()
                 time.sleep(0.1)
                 self.total_paused_time = 0.0
@@ -1303,9 +1324,11 @@ class Sequencer:
         # Case 2: A new start position is given. Stop any current playback.
         if self.playback_state != "stopped":
             self.stop()
-            # Give a moment for the stop command to be processed
             if self.playback_thread and self.playback_thread.is_alive():
-                self.playback_thread.join(timeout=0.5)
+                self.playback_thread.join(timeout=1.0)
+            for t in self.audio_threads:
+                if t.is_alive():
+                    t.join(timeout=1.0)
 
         # Remember this start position for future resume/restart
         self.last_start_beat = start_beat
@@ -1314,23 +1337,33 @@ class Sequencer:
             print("Error: End position must be after the start position.")
             return
 
-        # --- Port and state setup ---
+        # --- Reset state for new playback ---
         self.total_paused_time = 0.0
         self.open_ports.clear()
         self.temporary_ports = []
-        self.audio_threads = []
+        self.audio_threads = [] # Clear the list for new audio threads
 
+        # --- Audio Pre-mixing and Playback ---
+        mixed_audio_filepath = self._generate_mixed_audio_file(start_beat, end_beat)
+        audio_thread = None
+        if mixed_audio_filepath:
+            audio_thread = threading.Thread(target=self._play_mixed_audio_file_blocking, args=(mixed_audio_filepath,))
+            audio_thread.daemon = True
+            self.audio_threads.append(audio_thread)
+
+        # --- MIDI Port Setup ---
         required_ports = {track.output_port_name for track in self.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
         if self.song.metronome_enabled and self.song.metronome_port_name:
             required_ports.add(self.song.metronome_port_name)
 
-        has_audio_tracks = any(isinstance(track, AudioTrack) for track in self.song.tracks)
-        # Correction: Vérifier aussi le métronome pour l'absence de contenu
-        if not required_ports and not has_audio_tracks and not self.song.metronome_enabled:
+        has_audio_to_play = audio_thread is not None
+        if not required_ports and not has_audio_to_play:
             print("Nothing to play: No MIDI ports assigned, no audio tracks, and metronome is off.")
+            if mixed_audio_filepath and os.path.exists(mixed_audio_filepath):
+                os.remove(mixed_audio_filepath)
             return
 
-        # Open all required ports
+        # Open all required MIDI ports
         for name in required_ports:
             vp = next((p for p in self.virtual_ports if p.name == name), None)
             if vp:
@@ -1344,13 +1377,12 @@ class Sequencer:
                     for p in self.temporary_ports: p.close()
                     return
 
-        # --- Start playback thread ---
+        # --- Start Playback Threads ---
         self._stop_event.clear()
         self._run_event.set()
         self.playback_state = "playing"
-        self.playback_start_time = time.time() # Set start time for recording sync
-        
-        # Démarrer le thread du métronome si activé
+        self.playback_start_time = time.time()
+
         if self.song.metronome_enabled and self.song.metronome_port_name:
             self.metronome_thread = threading.Thread(target=self._metronome_thread_main)
             self.metronome_thread.daemon = True
@@ -1362,6 +1394,9 @@ class Sequencer:
         )
         self.playback_thread.daemon = True
         self.playback_thread.start()
+
+        if audio_thread:
+            audio_thread.start()
 
     def pause(self):
         if self.playback_state == "stopped":

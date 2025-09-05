@@ -1203,6 +1203,41 @@ class Sequencer:
             
             time.sleep(0.001) # Petite pause pour ne pas surcharger le CPU
             
+    def _get_song_length_in_beats(self) -> float:
+        """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""
+        max_beats = 0.0
+
+        # Find the end of the last MIDI event
+        for track in self.song.tracks:
+            if isinstance(track, MidiTrack):
+                for event in track.events:
+                    for note in event.notes:
+                        event_end_beat = event.start_time + note.duration
+                        if event_end_beat > max_beats:
+                            max_beats = event_end_beat
+
+        # Find the end of the last audio track
+        for track in self.song.tracks:
+            if isinstance(track, AudioTrack):
+                try:
+                    # This check is to avoid including muted/soloed tracks that won't be played
+                    is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                    should_play = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
+                    if not should_play:
+                        continue
+
+                    segment = AudioSegment.from_file(track.filepath)
+                    duration_beats = (len(segment) / 1000.0) * (self.song.tempo / 60.0)
+                    track_end_beat = track.start_time + duration_beats
+                    if track_end_beat > max_beats:
+                        max_beats = track_end_beat
+                except Exception as e:
+                    # Ignore files that can't be read or other errors
+                    print(f"Could not calculate duration for {track.filepath}: {e}")
+                    pass
+
+        return max_beats
+
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         try:
             master_event_list = []
@@ -1246,11 +1281,16 @@ class Sequencer:
             else:
                 ranged_event_list.sort(key=lambda e: e['tick'])
 
-            # 3. Main playback loop
+            # 3. Determine song length and main playback loop
+            song_length_beats = self._get_song_length_in_beats()
+            if end_beat is not None:
+                song_length_beats = min(song_length_beats, end_beat)
+
             while not self._stop_event.is_set():
                 start_time_sec = time.time()
                 next_event_index = 0
 
+                # This is the main loop that drives the playback counter
                 while not self._stop_event.is_set():
                     self._run_event.wait()
                     if self._stop_event.is_set(): break
@@ -1260,9 +1300,11 @@ class Sequencer:
                     current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
                     current_beat_float = start_beat + (current_ticks / ticks_per_beat)
 
-                    if end_beat is not None and current_beat_float >= end_beat:
+                    # The loop should break if we've passed the calculated song length
+                    if current_beat_float >= song_length_beats:
                         break
 
+                    # Display counter
                     if not self.is_recording:
                         mode = "Playing"
                     else:
@@ -1284,15 +1326,12 @@ class Sequencer:
                             if event['type'] == 'midi':
                                 port = self.open_ports.get(event['port_name'])
                                 if port: port.send(event['message'])
-
                         next_event_index += 1
-
-                    if not self.is_recording and next_event_index >= len(ranged_event_list):
-                        break
 
                     time.sleep(0.01)
 
-                # After MIDI is done, wait for any audio to finish before looping or exiting.
+                # After the counter loop is finished, wait for any audio threads to complete.
+                # This ensures that even if the counter stops, the program waits for the sound to finish.
                 for t in self.audio_threads:
                     while t.is_alive() and not self._stop_event.is_set():
                         t.join(timeout=0.1)

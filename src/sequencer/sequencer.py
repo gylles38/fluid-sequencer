@@ -1043,7 +1043,7 @@ class Sequencer:
             if not isinstance(track, AudioTrack):
                 continue
             
-            should_play = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
+            should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
             if not should_play:
                 continue
             
@@ -1222,7 +1222,7 @@ class Sequencer:
                 try:
                     # This check is to avoid including muted/soloed tracks that won't be played
                     is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                    should_play = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
+                    should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                     if not should_play:
                         continue
 
@@ -1277,71 +1277,65 @@ class Sequencer:
             if not ranged_event_list:
                 if not any(isinstance(t, AudioTrack) and not t.is_muted for t in self.song.tracks):
                      print("No events to play in the selected range.")
-                # This thread will now wait for audio to finish before exiting.
             else:
                 ranged_event_list.sort(key=lambda e: e['tick'])
 
-            # 3. Determine song length and main playback loop
-            song_length_beats = self._get_song_length_in_beats()
+            # 3. Main playback loop
+            start_time_sec = time.time()
+            next_event_index = 0
+
+            song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
             if end_beat is not None:
                 song_length_beats = min(song_length_beats, end_beat)
 
             while not self._stop_event.is_set():
-                start_time_sec = time.time()
-                next_event_index = 0
+                self._run_event.wait()
+                if self._stop_event.is_set(): break
 
-                # This is the main loop that drives the playback counter
-                while not self._stop_event.is_set():
-                    self._run_event.wait()
-                    if self._stop_event.is_set(): break
+                elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
+                mido_tempo = mido.bpm2tempo(self.song.tempo)
+                current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
+                current_beat_float = start_beat + (current_ticks / ticks_per_beat)
 
-                    elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
-                    mido_tempo = mido.bpm2tempo(self.song.tempo)
-                    current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
-                    current_beat_float = start_beat + (current_ticks / ticks_per_beat)
-
-                    # The loop should break if we've passed the calculated song length
-                    if current_beat_float >= song_length_beats:
-                        break
-
-                    # Display counter
-                    if not self.is_recording:
-                        mode = "Playing"
+                if current_beat_float >= song_length_beats:
+                    if loop and not self.is_recording:
+                        # Reset for next loop
+                        start_time_sec = time.time()
+                        next_event_index = 0
+                        self.total_paused_time = 0.0
+                        self._all_notes_off()
+                        time.sleep(0.1)
+                        continue
                     else:
-                        mode = "Recording"
-                    beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
-                    display_measure = int(current_beat_float / beats_per_measure) + 1
-                    display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
-                    print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
+                        break # Exit the loop
 
-                    # Dispatch MIDI events that are due
-                    while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
-                        event = ranged_event_list[next_event_index]
-                        track = self.song.tracks[event['track_idx']]
+                # Display counter
+                mode = "Recording" if self.is_recording else "Playing"
+                beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
+                display_measure = int(current_beat_float / beats_per_measure) + 1
+                display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
+                print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
-                        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                        should_play = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
+                # Dispatch MIDI events that are due
+                while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
+                    event = ranged_event_list[next_event_index]
+                    track = self.song.tracks[event['track_idx']]
 
-                        if should_play:
-                            if event['type'] == 'midi':
-                                port = self.open_ports.get(event['port_name'])
-                                if port: port.send(event['message'])
-                        next_event_index += 1
+                    is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                    should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
 
-                    time.sleep(0.01)
+                    if should_play:
+                        if event['type'] == 'midi':
+                            port = self.open_ports.get(event['port_name'])
+                            if port: port.send(event['message'])
+                    next_event_index += 1
 
-                # After the counter loop is finished, wait for any audio threads to complete.
-                # This ensures that even if the counter stops, the program waits for the sound to finish.
-                for t in self.audio_threads:
-                    while t.is_alive() and not self._stop_event.is_set():
-                        t.join(timeout=0.1)
+                time.sleep(0.01)
 
-                if not loop or self._stop_event.is_set() or self.is_recording:
-                    break
-
-                self._all_notes_off()
-                time.sleep(0.1)
-                self.total_paused_time = 0.0
+            # After the loop is finished, wait for any audio threads to complete.
+            for t in self.audio_threads:
+                while t.is_alive() and not self._stop_event.is_set():
+                    t.join(timeout=0.1)
 
         except Exception as e:
             if not self._stop_event.is_set():

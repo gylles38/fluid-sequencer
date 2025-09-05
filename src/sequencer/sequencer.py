@@ -1118,7 +1118,7 @@ class Sequencer:
             command.append(filepath)
 
             kwargs = {
-                'stdin': subprocess.DEVNULL,
+                'stdin': subprocess.PIPE,
                 'stdout': subprocess.DEVNULL,
                 'stderr': subprocess.DEVNULL
             }

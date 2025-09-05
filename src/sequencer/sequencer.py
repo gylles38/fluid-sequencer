@@ -867,7 +867,7 @@ class Sequencer:
         else:
             print(f"Error: Virtual port '{name}' not found.")
 
-    def _recording_thread_main(self, target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state):
+    def _recording_thread_main(self, target_track: MidiTrack, start_beat: float, inport_name: str, outport_name: Optional[str], num_beats_to_record: Optional[float], original_mute_state: bool):
         """
         The main loop for the MIDI recording thread. This is a two-phase process.
         1. Waiting Phase: A blocking call waits for the first valid note_on message.
@@ -878,55 +878,52 @@ class Sequencer:
         """
         open_notes = {}
         outport = None
-        # Vérifier si l'event d'arrêt est déjà activé
         if self._stop_event.is_set():
-            self._stop_event.clear()  # Réinitialiser l'event d'arrêt
-            print("Reset _stop_event before starting recording")
+            self._stop_event.clear()
             
         try:
-            with mido.open_input(inport_name) as inport: # type: ignore
+            with mido.open_input(inport_name) as inport:
                 if outport_name:
                     outport = open_output(outport_name)
+                    # Send program change to the MIDI Thru port
+                    print(f"Setting MIDI Thru instrument for track '{target_track.name}' on port '{outport_name}' to Ch:{target_track.channel + 1}, Prog:{target_track.instrument + 1}")
+                    if target_track.bank_msb is not None:
+                        outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
+                    if target_track.bank_lsb is not None:
+                        outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
+                    outport.send(mido.Message('program_change', channel=target_track.channel, program=target_track.instrument))
 
                 # --- 1. Waiting Phase ---
                 print("Waiting for first note to start recording...")
                 first_msg = None
                 while not self._stop_event.is_set():
-                    # It's good practice to clear any pending messages before a blocking call
-                    for _ in inport.iter_pending():
-                        pass
-
-                    msg = inport.receive() # Blocking call
-                    if outport: outport.send(msg)
-
-                    # We are only looking for a real note played by the user
+                    for _ in inport.iter_pending(): pass
+                    msg = inport.receive()
+                    if outport:
+                        thru_msg = msg.copy(channel=target_track.channel)
+                        outport.send(thru_msg)
                     if msg.type == 'note_on' and msg.velocity > 0:
                         first_msg = msg
-                        break # Got it, proceed to recording phase
+                        break
 
-                if self._stop_event.is_set():
-                    return
+                if self._stop_event.is_set(): return
 
                 # --- 2. Recording Phase ---
-                # We have the first note, now start playback and polling
-                first_note_time_beats = start_beat # The first note defines the starting beat
+                first_note_time_beats = start_beat
                 recording_start_time_sec = time.time()
-                # Correction: Appel de play() pour démarrer le playback des autres pistes et le métronome
-                # Correction : La méthode play() gère maintenant le métronome, donc nous l'appelons
-                # pour démarrer le métronome et les autres pistes.
                 self.play(start_beat=first_note_time_beats)
                 print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
 
-                # Handle the first note that we already received
                 if first_msg is not None:
                     open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
 
-                # Polling loop for subsequent notes
                 while not self._stop_event.is_set():
                     for msg in inport.iter_pending():
-                        if outport: outport.send(msg)
-                        now = time.time()
+                        if outport:
+                            thru_msg = msg.copy(channel=target_track.channel)
+                            outport.send(thru_msg)
 
+                        now = time.time()
                         if msg.type == 'note_on' and msg.velocity > 0:
                             if msg.note not in open_notes:
                                 open_notes[msg.note] = (now, msg.velocity)
@@ -935,24 +932,18 @@ class Sequencer:
                                 note_start_time_sec, velocity = open_notes.pop(msg.note)
                                 duration_sec = now - note_start_time_sec
                                 beats_per_second = self.song.tempo / 60.0
-
                                 start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
                                 duration_beats = duration_sec * beats_per_second
-
                                 note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                                 event = Event(notes=[note], start_time=start_time_beats)
                                 target_track.add_event(event)
 
-                    # Check for recording duration limit
                     if num_beats_to_record is not None:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
                         if elapsed_recording_beats >= num_beats_to_record:
                             print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
-                            # Ne pas appeler self.stop() ici, seulement sortir de la boucle
                             break
-
                     time.sleep(0.001)
-
         except Exception as e:
             print(f"\nAn error occurred during recording: {e}")
         finally:
@@ -960,7 +951,6 @@ class Sequencer:
                 outport.close()
             target_track.is_muted = original_mute_state
             self.is_recording = False
-            # Le thread de lecture est géré par la fonction stop()
             print("\nRecording thread finished.")
         
     def record_track(self, track_index: int):
@@ -1006,14 +996,9 @@ class Sequencer:
             inport_idx = int(input("Choose a port to record from: "))
             inport_name = input_ports[inport_idx]
 
-            outport_name = None
-            if input("Enable MIDI Thru to an output port? [y/N] ").lower() == 'y':
-                all_outputs = get_output_names() + [vp.name for vp in self.virtual_ports]
-                if all_outputs:
-                    print("Available MIDI output ports:")
-                    for i, port in enumerate(all_outputs): print(f"  [{i}] {port}")
-                    outport_idx = int(input("Choose a port for MIDI Thru: "))
-                    outport_name = all_outputs[outport_idx]
+            # MIDI Thru is now handled automatically by the recording thread
+            # using the track's assigned output port.
+            outport_name = target_track.output_port_name
         except (ValueError, IndexError):
             print("Error: Invalid selection."); return
 
@@ -1210,6 +1195,10 @@ class Sequencer:
         # Find the end of the last MIDI event
         for track in self.song.tracks:
             if isinstance(track, MidiTrack):
+                is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                if not should_play:
+                    continue
                 for event in track.events:
                     for note in event.notes:
                         event_end_beat = event.start_time + note.duration

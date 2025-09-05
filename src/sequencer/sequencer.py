@@ -1037,19 +1037,19 @@ class Sequencer:
         from pydub import AudioSegment
 
         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-
+        
         tracks_to_mix = []
         for track in self.song.tracks:
             if not isinstance(track, AudioTrack):
                 continue
-
+            
             should_play = (track.is_solo) or (not is_any_track_soloed and not track.is_muted)
             if not should_play:
                 continue
-
+            
             if end_beat is not None and track.start_time >= end_beat:
                 continue
-
+                
             tracks_to_mix.append(track)
 
         if not tracks_to_mix:
@@ -1068,11 +1068,11 @@ class Sequencer:
 
         if end_beat is not None and max_end_beat > end_beat:
             max_end_beat = end_beat
-
+            
         duration_beats = max_end_beat - start_beat
         if duration_beats <= 0:
             return None
-
+            
         beats_per_second = self.song.tempo / 60.0
         duration_ms = int((duration_beats / beats_per_second) * 1000)
 
@@ -1081,18 +1081,18 @@ class Sequencer:
         for track in tracks_to_mix:
             try:
                 segment = AudioSegment.from_file(track.filepath)
-
+                
                 position_beats = track.start_time - start_beat
-
+                
                 if position_beats < 0:
                     chop_ms = (-position_beats / beats_per_second) * 1000
                     segment = segment[int(chop_ms):]
                     position_beats = 0
 
                 position_ms = int((position_beats / beats_per_second) * 1000)
-
+                
                 final_mix = final_mix.overlay(segment, position=position_ms)
-
+                
             except Exception as e:
                 print(f"Error processing audio file {track.filepath}: {e}")
                 continue

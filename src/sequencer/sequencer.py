@@ -1531,7 +1531,7 @@ class Sequencer:
         if self.playback_state == "paused":
             self._run_event.set()
 
-        if self.playback_thread and self.playback_thread.is_alive():
+        if self.playback_thread and self.playback_thread.is_alive() and threading.current_thread() != self.playback_thread:
             self.playback_thread.join(timeout=2.0)
         
         # Assurez-vous d'arrêter aussi le thread du métronome

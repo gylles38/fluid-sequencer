@@ -62,7 +62,7 @@ class Sequencer:
         self.audio_threads: List[threading.Thread] = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
-        self.audio_player_command: str = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc"
+        self.audio_player_command: str = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc -idle"
 
         self.total_paused_time = 0.0
         self.pause_start_time = 0.0
@@ -1117,10 +1117,11 @@ class Sequencer:
             command = shlex.split(self.audio_player_command)
             command.append(filepath)
 
+            error_log = open("mplayer_errors.log", "a")
             kwargs = {
                 'stdin': subprocess.PIPE,
                 'stdout': subprocess.DEVNULL,
-                'stderr': subprocess.DEVNULL
+                'stderr': error_log
             }
 
             if sys.platform == "win32":
@@ -1413,8 +1414,11 @@ class Sequencer:
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     if ap.process.poll() is None and ap.process.stdin:
-                        try: ap.process.stdin.write(b'pause\n'); ap.process.stdin.flush()
-                        except (IOError, ValueError): pass
+                        try:
+                            ap.process.stdin.write(b'pause\n')
+                            ap.process.stdin.flush()
+                        except (IOError, ValueError):
+                            pass
 
             self.playback_state = "paused"
             print("Playback paused.")
@@ -1428,8 +1432,11 @@ class Sequencer:
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     if ap.process.poll() is None and ap.process.stdin:
-                        try: ap.process.stdin.write(b'pause\n'); ap.process.stdin.flush()
-                        except (IOError, ValueError): pass
+                        try:
+                            ap.process.stdin.write(b'pause\n')
+                            ap.process.stdin.flush()
+                        except (IOError, ValueError):
+                            pass
 
             self.playback_state = "playing"
             print("Resuming playback...")

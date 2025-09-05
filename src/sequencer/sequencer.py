@@ -878,20 +878,20 @@ class Sequencer:
         """
         open_notes = {}
         outport = None
+        is_virtual_port = False
         if self._stop_event.is_set():
             self._stop_event.clear()
             
         try:
             with mido.open_input(inport_name) as inport:
                 if outport_name:
-                    # Check if the port is a virtual port we manage
                     vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
                     if vp:
                         outport = vp
+                        is_virtual_port = True
                     else:
                         outport = open_output(outport_name)
 
-                    # Send program change to the MIDI Thru port
                     print(f"Setting MIDI Thru instrument for track '{target_track.name}' on port '{outport_name}' to Ch:{target_track.channel + 1}, Prog:{target_track.instrument + 1}")
                     if target_track.bank_msb is not None:
                         outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
@@ -953,7 +953,7 @@ class Sequencer:
         except Exception as e:
             print(f"\nAn error occurred during recording: {e}")
         finally:
-            if outport:
+            if outport and not is_virtual_port:
                 outport.close()
             target_track.is_muted = original_mute_state
             self.is_recording = False

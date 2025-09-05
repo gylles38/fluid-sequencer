@@ -8,6 +8,7 @@ import mido
 from mido import get_input_names, get_output_names, open_output # type: ignore
 from pydub import AudioSegment
 import os
+import signal
 import sys
 import subprocess
 import threading
@@ -48,7 +49,7 @@ def song_decoder(d):
 
 
 class Sequencer:
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc -idle"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc"
 
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
@@ -1418,15 +1419,11 @@ class Sequencer:
             self.pause_start_time = time.time()
             self._all_notes_off()
 
-            # Pause all active audio processes
+            # Pause all active audio processes using SIGSTOP
             with self.process_lock:
                 for ap in self.active_audio_processes:
-                    if ap.process.poll() is None and ap.process.stdin:
-                        try:
-                            ap.process.stdin.write(b'pause\n')
-                            ap.process.stdin.flush()
-                        except (IOError, ValueError):
-                            pass
+                    if ap.process.poll() is None:
+                        os.kill(ap.process.pid, signal.SIGSTOP)
 
             self.playback_state = "paused"
             print("Playback paused.")
@@ -1436,15 +1433,11 @@ class Sequencer:
             self.total_paused_time += time.time() - self.pause_start_time
             self._run_event.set()
 
-            # Resume all active audio processes
+            # Resume all active audio processes using SIGCONT
             with self.process_lock:
                 for ap in self.active_audio_processes:
-                    if ap.process.poll() is None and ap.process.stdin:
-                        try:
-                            ap.process.stdin.write(b'pause\n')
-                            ap.process.stdin.flush()
-                        except (IOError, ValueError):
-                            pass
+                    if ap.process.poll() is None:
+                        os.kill(ap.process.pid, signal.SIGCONT)
 
             self.playback_state = "playing"
             print("Resuming playback...")

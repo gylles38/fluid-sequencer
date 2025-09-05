@@ -884,7 +884,13 @@ class Sequencer:
         try:
             with mido.open_input(inport_name) as inport:
                 if outport_name:
-                    outport = open_output(outport_name)
+                    # Check if the port is a virtual port we manage
+                    vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
+                    if vp:
+                        outport = vp
+                    else:
+                        outport = open_output(outport_name)
+
                     # Send program change to the MIDI Thru port
                     print(f"Setting MIDI Thru instrument for track '{target_track.name}' on port '{outport_name}' to Ch:{target_track.channel + 1}, Prog:{target_track.instrument + 1}")
                     if target_track.bank_msb is not None:

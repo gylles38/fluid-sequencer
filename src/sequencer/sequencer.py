@@ -11,6 +11,8 @@ import os
 import signal
 import sys
 import subprocess
+import tempfile
+import socket
 import threading
 import time
 from typing import List, Optional
@@ -20,6 +22,7 @@ from typing import List, Optional
 class ActiveAudioProcess:
     process: subprocess.Popen
     temp_filepath: str
+    socket_path: str
 
 
 class CustomSongEncoder(json.JSONEncoder):
@@ -49,7 +52,7 @@ def song_decoder(d):
 
 
 class Sequencer:
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --no-video --really-quiet --idle --input-terminal=no --input-file=-"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle"
 
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
@@ -789,6 +792,10 @@ class Sequencer:
                 "audio_player_command",
                 self.DEFAULT_AUDIO_PLAYER_COMMAND
             )
+            # Handle migration from mplayer to mpv
+            if "mplayer" in self.audio_player_command:
+                print("Warning: Old 'mplayer' command found in project. Updating to 'mpv' default.")
+                self.audio_player_command = self.DEFAULT_AUDIO_PLAYER_COMMAND
 
             # Restore virtual ports
             self.close_virtual_ports()
@@ -1117,6 +1124,24 @@ class Sequencer:
             print(f"Error exporting mixed audio: {e}")
             return None
 
+    def _send_ipc_command(self, socket_path: str, command: dict):
+        """Sends a JSON command to the mpv IPC socket."""
+        if not os.path.exists(socket_path):
+            return  # Socket not ready yet
+        try:
+            # This only supports UNIX sockets for now.
+            if sys.platform != "win32":
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(0.1)  # Don't block for too long
+                    sock.connect(socket_path)
+                    sock.sendall(json.dumps(command).encode('utf-8') + b'\n')
+        except (socket.timeout, ConnectionRefusedError, FileNotFoundError):
+            # These errors are expected if the socket is not ready, so we can ignore them.
+            pass
+        except Exception as e:
+            # Log other, unexpected errors.
+            print(f"\nError sending IPC command: {e}")
+
     def _play_mixed_audio_file_blocking(self, filepath: str):
         """
         Plays a pre-mixed audio file by calling an external player,
@@ -1127,12 +1152,20 @@ class Sequencer:
         import shlex
         process = None
         active_process_info = None
+        socket_path = ""
+        tmp_sock = None
         try:
+            # Create a persistent temporary file for the socket
+            tmp_sock = tempfile.NamedTemporaryFile(prefix="mpv-socket-", delete=False)
+            socket_path = tmp_sock.name
+            tmp_sock.close() # Close the file handle, but the file remains
+
             command = shlex.split(self.audio_player_command)
+            command.append(f"--input-ipc-server={socket_path}")
             command.append(filepath)
 
             kwargs = {
-                'stdin': subprocess.PIPE,
+                'stdin': subprocess.DEVNULL,
                 'stdout': subprocess.DEVNULL,
                 'stderr': subprocess.DEVNULL
             }
@@ -1141,10 +1174,15 @@ class Sequencer:
                 kwargs['creationflags'] = subprocess.DETACHED_PROCESS
             else:
                 kwargs['preexec_fn'] = os.setsid
-            
-            process = subprocess.Popen(command, **kwargs)
 
-            active_process_info = ActiveAudioProcess(process=process, temp_filepath=filepath)
+            process = subprocess.Popen(command, **kwargs)
+            time.sleep(0.1) # Give mpv a moment to create the socket
+
+            active_process_info = ActiveAudioProcess(
+                process=process,
+                temp_filepath=filepath,
+                socket_path=socket_path
+            )
             with self.process_lock:
                 self.active_audio_processes.append(active_process_info)
 
@@ -1166,7 +1204,12 @@ class Sequencer:
                         os.remove(filepath)
                     except OSError:
                         pass
-  
+                if socket_path and os.path.exists(socket_path):
+                    try:
+                        os.remove(socket_path)
+                    except OSError:
+                        pass
+
     def _metronome_thread_main(self):
         """
         Thread dédié au métronome. Il joue des clics en continu.
@@ -1467,17 +1510,12 @@ class Sequencer:
             self.pause_start_time = time.time()
             self._all_notes_off()
 
-            # Pause all active audio processes by sending commands
+            # Pause all active audio processes by sending IPC commands
             with self.process_lock:
                 for ap in self.active_audio_processes:
-                    if ap.process.poll() is None:
-                        try:
-                            if ap.process.stdin:
-                                ap.process.stdin.write(b'pause\n')
-                                ap.process.stdin.write(b'mute 1\n')
-                                ap.process.stdin.flush()
-                        except (IOError, ValueError, ProcessLookupError):
-                            pass
+                    # Per user request: pause, then mute.
+                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
+                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", True]})
 
             self.playback_state = "paused"
             print("Playback paused.")
@@ -1487,17 +1525,12 @@ class Sequencer:
             self.total_paused_time += time.time() - self.pause_start_time
             self._run_event.set()
 
-            # Resume all active audio processes by sending commands
+            # Resume all active audio processes by sending IPC commands
             with self.process_lock:
                 for ap in self.active_audio_processes:
-                    if ap.process.poll() is None:
-                        try:
-                            if ap.process.stdin:
-                                ap.process.stdin.write(b'mute 0\n')
-                                ap.process.stdin.write(b'pause\n')
-                                ap.process.stdin.flush()
-                        except (IOError, ValueError, ProcessLookupError):
-                            pass
+                    # Per user request: unmute, then unpause.
+                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", False]})
+                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
 
             self.playback_state = "playing"
             print("Resuming playback...")
@@ -1508,15 +1541,13 @@ class Sequencer:
         with self.process_lock:
             for ap in list(self.active_audio_processes):
                 try:
+                    # Use the quit command via IPC if possible
+                    if ap.socket_path and os.path.exists(ap.socket_path):
+                         self._send_ipc_command(ap.socket_path, {"command": ["quit"]})
+                         time.sleep(0.1) # Give it a moment to quit
+
                     if ap.process.poll() is None:
-                        if ap.process.stdin:
-                            try:
-                                ap.process.stdin.write(b'quit\n')
-                                ap.process.stdin.flush()
-                            except (IOError, ValueError):
-                                ap.process.kill()
-                        else:
-                            ap.process.terminate()
+                        ap.process.terminate()
                         ap.process.wait(timeout=1.0)
                 except (subprocess.TimeoutExpired, Exception):
                     if ap.process.poll() is None:
@@ -1525,6 +1556,11 @@ class Sequencer:
                 if ap.temp_filepath and os.path.exists(ap.temp_filepath):
                     try:
                         os.remove(ap.temp_filepath)
+                    except OSError:
+                        pass
+                if ap.socket_path and os.path.exists(ap.socket_path):
+                    try:
+                        os.remove(ap.socket_path)
                     except OSError:
                         pass
             self.active_audio_processes.clear()

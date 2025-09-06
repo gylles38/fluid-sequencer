@@ -49,7 +49,7 @@ def song_decoder(d):
 
 
 class Sequencer:
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mplayer -nogui -really-quiet -slave -noconsolecontrols -nolirc"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --no-video --really-quiet --idle --input-terminal=no --input-file=-"
 
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)

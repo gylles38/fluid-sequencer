@@ -797,6 +797,41 @@ class Sequencer:
         status = "Solo" if target_track.is_solo else "Un-soloed"
         print(f"Track '{target_track.name}' is now {status}.")
 
+    def send_cc_message(self, port_name: str, channel: int, control: int, value: int):
+        """Sends a single MIDI Control Change message to a specified port."""
+        port = None
+        is_temp_port = False
+        try:
+            # Check if the port is one of the open virtual ports
+            found_virtual = False
+            for vp in self.virtual_ports:
+                if vp.name == port_name:
+                    port = vp
+                    found_virtual = True
+                    break
+
+            # If not a virtual port, open it as a temporary hardware port
+            if not found_virtual:
+                port = open_output(port_name)
+                is_temp_port = True
+
+            if port:
+                # The channel from the user is 1-16, mido needs 0-15
+                msg = mido.Message('control_change', channel=channel - 1, control=control, value=value)
+                port.send(msg)
+                print(f"Sent CC message to '{port_name}': Ch={channel}, CC={control}, Val={value}")
+                return True # Indicate success
+            else:
+                print(f"Error: Could not find or open port '{port_name}'.")
+                return False # Indicate failure
+
+        except Exception as e:
+            print(f"Error sending CC message to port '{port_name}': {e}")
+            return False # Indicate failure
+        finally:
+            if is_temp_port and port and not port.closed:
+                port.close()
+
     def prime_all_tracks(self):
         """Sends the current program/bank state for all assigned MIDI tracks."""
         print("Priming all assigned MIDI tracks...")

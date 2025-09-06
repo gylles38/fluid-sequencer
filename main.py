@@ -38,6 +38,7 @@ Sequencer CLI Commands:
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
+  cc                      - Sends a MIDI Control Change message to a selected port.
   setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
@@ -339,6 +340,55 @@ def process_command(user_input, seq):
             seq.save_project(basename=args[0])
         else:
             print("Usage: saveproject <basename>")
+    elif command == "cc":
+        if args:
+            print("Usage: cc (command is interactive)")
+            return True
+
+        hardware_ports = mido.get_output_names() # type: ignore
+        virtual_port_names = [vp.name for vp in seq.virtual_ports]
+        all_outputs = hardware_ports + virtual_port_names
+
+        if not all_outputs:
+            print("No MIDI output ports available.")
+            return True
+
+        print("Available output ports:")
+        for i, name in enumerate(all_outputs):
+            print(f"  [{i}] {name}")
+
+        try:
+            port_index_str = input("Choose a port to send the CC message to: ")
+            port_index = int(port_index_str)
+            if not 0 <= port_index < len(all_outputs):
+                print("Error: Invalid port index.")
+                return True
+            port_name = all_outputs[port_index]
+
+            channel_str = input("Enter MIDI channel (1-16): ")
+            channel = int(channel_str)
+            if not 1 <= channel <= 16:
+                print("Error: Channel must be between 1 and 16.")
+                return True
+
+            control_str = input("Enter CC number (0-127): ")
+            control = int(control_str)
+            if not 0 <= control <= 127:
+                print("Error: CC number must be between 0 and 127.")
+                return True
+
+            value_str = input("Enter CC value (0-127): ")
+            value = int(value_str)
+            if not 0 <= value <= 127:
+                print("Error: CC value must be between 0 and 127.")
+                return True
+
+            # The sequencer method will handle channel conversion (1-16 -> 0-15)
+            seq.send_cc_message(port_name, channel, control, value)
+
+        except (ValueError, IndexError):
+            print("Error: Invalid input.")
+
     elif command == "prime":
         seq.prime_all_tracks()
     elif command == "play" or command == "loop":

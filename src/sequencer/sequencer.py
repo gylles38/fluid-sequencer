@@ -83,6 +83,8 @@ class Sequencer:
         self.metronome_pitch_downbeat = 76  # High Wood Block
         self.metronome_pitch_beat = 77  # Low Wood Block
 
+        self.last_record_settings = None
+
     def _all_notes_off(self):
         for port in self.open_ports.values():
             if port and not port.closed:
@@ -1035,6 +1037,31 @@ class Sequencer:
             self.is_recording = False
             print("\nRecording thread finished.")
         
+    def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool):
+        target_track = self.song.tracks[track_index]
+        if not isinstance(target_track, MidiTrack):
+            # This check is a safeguard, should be checked before calling
+            print("Error: Recording is only supported for MIDI tracks.")
+            return
+
+        if replace_notes:
+            end_beat = float('inf') if num_beats_to_record is None else start_beat + num_beats_to_record
+            target_track.events = [e for e in target_track.events if not (start_beat <= e.start_time < end_beat)]
+            print(f"Removed existing notes from beat {self._format_beats_to_position(start_beat)} onwards.")
+
+        outport_name = target_track.output_port_name
+        original_mute_state = target_track.is_muted
+        target_track.is_muted = True
+
+        self.is_recording = True
+        self.recording_thread = threading.Thread(
+            target=self._recording_thread_main,
+            args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state)
+        )
+        self.recording_thread.daemon = True
+        self.recording_thread.start()
+
+
     def record_track(self, track_index: int):
         if self.playback_state != "stopped":
             print("Error: Please stop playback before starting a new recording.")
@@ -1048,6 +1075,7 @@ class Sequencer:
             return
 
         try:
+            # --- Gather Parameters ---
             start_pos_str = input(f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if start_beat is None: return
@@ -1059,41 +1087,59 @@ class Sequencer:
                 num_measures = int(parts[0])
                 num_beats = int(parts[1]) if len(parts) == 2 else 0
                 num_beats_to_record = (num_measures * self.song.time_signature_numerator) + num_beats
-        except (ValueError, IndexError):
-            print("Error: Invalid number format."); return
 
-        existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
-        if existing_notes_in_range:
-            choice = input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
-            if choice.startswith('r'):
-                end_beat = float('inf') if num_beats_to_record is None else start_beat + num_beats_to_record
-                target_track.events = [e for e in target_track.events if not (start_beat <= e.start_time < end_beat)]
-                print(f"Removed existing notes from beat {start_beat} onwards.")
+            replace_notes = False
+            existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
+            if existing_notes_in_range:
+                choice = input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                if choice.startswith('r'):
+                    replace_notes = True
 
-        try:
-            input_ports = mido.get_input_names() # type_ignore
-            if not input_ports: print("Error: No MIDI input ports found."); return
+            input_ports = mido.get_input_names() # type: ignore
+            if not input_ports:
+                print("Error: No MIDI input ports found.")
+                return
             print("Available MIDI input ports:")
             for i, port in enumerate(input_ports): print(f"  [{i}] {port}")
             inport_idx = int(input("Choose a port to record from: "))
+            if not 0 <= inport_idx < len(input_ports):
+                print("Error: Invalid port index.")
+                return
             inport_name = input_ports[inport_idx]
 
-            # MIDI Thru is now handled automatically by the recording thread
-            # using the track's assigned output port.
-            outport_name = target_track.output_port_name
         except (ValueError, IndexError):
-            print("Error: Invalid selection."); return
+            print("Error: Invalid number format or selection."); return
 
-        original_mute_state = target_track.is_muted
-        target_track.is_muted = True
+        # --- Store settings and start recording ---
+        self.last_record_settings = {
+            "track_index": track_index,
+            "start_beat": start_beat,
+            "num_beats_to_record": num_beats_to_record,
+            "inport_name": inport_name,
+            "replace_notes": replace_notes,
+        }
 
-        self.is_recording = True # Set recording flag before starting threads
-        self.recording_thread = threading.Thread(
-            target=self._recording_thread_main,
-            args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state)
+        self._start_recording_internal(
+            track_index=track_index,
+            start_beat=start_beat,
+            num_beats_to_record=num_beats_to_record,
+            inport_name=inport_name,
+            replace_notes=replace_notes
         )
-        self.recording_thread.daemon = True
-        self.recording_thread.start()
+
+    def record_bis(self):
+        """Re-records using the last saved parameters."""
+        if self.playback_state != "stopped":
+            print("Error: Please stop playback before starting a new recording.")
+            return
+
+        if self.last_record_settings is None:
+            print("Error: No previous recording settings found. Use 'record' first.")
+            return
+
+        print("Re-recording with last used settings...")
+        # Unpack the stored settings and call the internal recording function
+        self._start_recording_internal(**self.last_record_settings)
 
     def _send_ipc_command(self, socket_path: str, command: dict):
         """Sends a JSON command to the mpv IPC socket."""

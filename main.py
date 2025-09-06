@@ -29,7 +29,6 @@ Sequencer CLI Commands:
   move <track_index>      - Moves a section of a track using 'measure:beat' positions.
   transpose               - Transposes a section of a track using 'measure:beat' positions.
   record <track_index>    - Records MIDI to a track, with 'measure:beat' precision.
-  bis                     - Re-records with the last used 'record' settings.
   delete <track_index>    - Deletes a track after confirmation.
   erase <track_index>     - Erases notes from a track using 'measure:beat' positions.
   tempo <bpm>             - Sets the song tempo in beats per minute.
@@ -250,8 +249,6 @@ def main():
                         print("Error: Invalid track index.")
                 else:
                     print("Usage: record <track_index>")
-            elif command == "bis":
-                seq.record_bis()
             elif command == "delete":
                 if len(args) == 1:
                     track_index = int(args[0])

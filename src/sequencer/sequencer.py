@@ -726,6 +726,24 @@ class Sequencer:
                     midi_volume = int(volume * 127)
                     port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
 
+    def set_track_velocity(self, track_index: int, velocity: float):
+        """Sets the velocity multiplier for a specific MIDI track."""
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: Velocity can only be set for MIDI tracks.")
+            return
+
+        if not 0.0 <= velocity:
+            print("Error: Velocity multiplier must be a positive number.")
+            return
+
+        track.velocity = velocity
+        print(f"Velocity for track '{track.name}' set to {velocity:.2f}.")
+
     def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
@@ -896,8 +914,9 @@ class Sequencer:
                 ch_info = f"Ch: {track.channel + 1}"
                 prog_info = f"Prog: {track.instrument + 1}"
                 vol_info = f"Vol: {track.volume:.2f}"
+                vel_info = f"Vel: {track.velocity:.2f}"
                 port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
-                lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {vol_info}, {len(track.events)} events){port_info}")
+                lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {vol_info}, {vel_info}, {len(track.events)} events){port_info}")
             elif isinstance(track, AudioTrack):
                 start_pos_str = self._format_beats_to_position(track.start_time)
                 lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str}, Vol: {track.volume:.2f})")
@@ -1374,7 +1393,9 @@ class Sequencer:
                         for note in event.notes:
                             start_tick = int(event.start_time * ticks_per_beat)
                             end_tick = start_tick + int(note.duration * ticks_per_beat)
-                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)})
+                            scaled_velocity = int(note.velocity * track.velocity)
+                            clamped_velocity = max(0, min(127, scaled_velocity))
+                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=clamped_velocity)})
                             master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
 
             # 2. Filter and normalize events based on playback range

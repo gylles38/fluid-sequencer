@@ -733,6 +733,16 @@ class Sequencer:
         status = "Muted" if track.is_muted else "Unmuted"
         print(f"Track '{track.name}' is now {status}.")
 
+        if isinstance(track, AudioTrack) and self.playback_state != "stopped":
+            with self.process_lock:
+                for ap in self.active_audio_processes:
+                    if ap.track_index == track_index:
+                        self._send_ipc_command(
+                            ap.socket_path,
+                            {"command": ["set_property", "mute", track.is_muted]}
+                        )
+                        break
+
     def toggle_solo(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")

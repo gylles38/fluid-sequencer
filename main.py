@@ -245,17 +245,17 @@ def process_command(user_input, seq):
                 print("Error: Invalid track index or volume.")
         else:
             print("Usage: volume <track_index>")
-            elif command == "velocity":
-                if len(args) == 1:
-                    try:
-                        track_index = int(args[0])
-                        velocity_str = input("Enter velocity multiplier (e.g., 1.0): ").strip()
-                        velocity = float(velocity_str)
-                        seq.set_track_velocity(track_index, velocity)
-                    except ValueError:
-                        print("Error: Invalid track index or velocity.")
-                else:
-                    print("Usage: velocity <track_index>")
+    elif command == "velocity":
+        if len(args) == 1:
+            try:
+                track_index = int(args[0])
+                velocity_str = input("Enter velocity multiplier (e.g., 1.0): ").strip()
+                velocity = float(velocity_str)
+                seq.set_track_velocity(track_index, velocity)
+            except ValueError:
+                print("Error: Invalid track index or velocity.")
+        else:
+            print("Usage: velocity <track_index>")
     elif command == "mute":
         if len(args) == 1:
             seq.toggle_mute(track_index=int(args[0]))

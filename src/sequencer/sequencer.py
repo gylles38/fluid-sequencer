@@ -1322,12 +1322,32 @@ class Sequencer:
 
                 if current_beat_float >= song_length_beats:
                     if loop and not self.is_recording:
-                        # Reset for next loop
+                        # Stop old audio processes
+                        self._shutdown_audio_processes()
+                        for t in self.audio_threads:
+                            if t.is_alive():
+                                t.join(timeout=0.5)
+
+                        # Relancer les pistes audio
+                        self.audio_threads = []
+                        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                        for i, track in enumerate(self.song.tracks):
+                            if isinstance(track, AudioTrack):
+                                should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                                if should_play:
+                                    audio_thread = threading.Thread(
+                                        target=self._play_audio_track,
+                                        args=(track, i, start_beat)
+                                    )
+                                    audio_thread.daemon = True
+                                    self.audio_threads.append(audio_thread)
+                                    audio_thread.start()
+
+                        # Reset pour la nouvelle boucle
                         start_time_sec = time.time()
                         next_event_index = 0
                         self.total_paused_time = 0.0
                         self._all_notes_off()
-                        time.sleep(0.1)
                         continue
                     else:
                         break # Exit the loop

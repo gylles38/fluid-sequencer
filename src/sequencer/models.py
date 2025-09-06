@@ -38,6 +38,7 @@ class MidiTrack(BaseTrack):
     is_muted: bool = False
     is_solo: bool = False
     channel: int = 0  # MIDI channel (0-15)
+    volume: float = 0.8 # Default volume (0.0 to 1.0, maps to 0-127)
     events: List[Event] = field(default_factory=list)
     instrument: int = 0  # MIDI program number (0-127)
     bank_msb: Optional[int] = None  # Bank Select MSB (CC#0)

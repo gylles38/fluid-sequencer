@@ -689,14 +689,14 @@ class Sequencer:
         print(f"Set program for track '{track.name}' to {program + 1}.")
 
     def set_track_volume(self, track_index: int, volume: float):
-        """Sets the volume for a specific audio track."""
+        """Sets the volume for a specific audio or MIDI track."""
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
 
         track = self.song.tracks[track_index]
-        if not isinstance(track, AudioTrack):
-            print("Error: Volume can only be set for audio tracks.")
+        if not isinstance(track, (AudioTrack, MidiTrack)):
+            print("Error: Volume can only be set for audio or MIDI tracks.")
             return
 
         if not 0.0 <= volume <= 1.0:
@@ -706,15 +706,23 @@ class Sequencer:
         track.volume = volume
         print(f"Volume for track '{track.name}' set to {volume:.2f}.")
 
-        # If playback is active, send a live volume change command
-        with self.process_lock:
-            for ap in self.active_audio_processes:
-                if ap.track_index == track_index:
-                    self._send_ipc_command(
-                        ap.socket_path,
-                        {"command": ["set_property", "volume", volume * 100]}
-                    )
-                    break
+        if isinstance(track, AudioTrack):
+            # If playback is active, send a live volume change command
+            with self.process_lock:
+                for ap in self.active_audio_processes:
+                    if ap.track_index == track_index:
+                        self._send_ipc_command(
+                            ap.socket_path,
+                            {"command": ["set_property", "volume", volume * 100]}
+                        )
+                        break
+        elif isinstance(track, MidiTrack):
+            # If playback is active, send a live CC#7 message
+            if self.playback_state == "playing" and track.output_port_name:
+                port = self.open_ports.get(track.output_port_name)
+                if port:
+                    midi_volume = int(volume * 127)
+                    port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
 
     def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -861,8 +869,9 @@ class Sequencer:
                 if track.bank_msb is not None: bank_info = f", Bank: {track.bank_msb}:{track.bank_lsb or 0}"
                 ch_info = f"Ch: {track.channel + 1}"
                 prog_info = f"Prog: {track.instrument + 1}"
+                vol_info = f"Vol: {track.volume:.2f}"
                 port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
-                lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
+                lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {vol_info}, {len(track.events)} events){port_info}")
             elif isinstance(track, AudioTrack):
                 start_pos_str = self._format_beats_to_position(track.start_time)
                 lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str}, Vol: {track.volume:.2f})")
@@ -1262,6 +1271,7 @@ class Sequencer:
                     if track.bank_lsb is not None:
                         master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb)})
                     master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('program_change', channel=track.channel, program=track.instrument)})
+                    master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127))})
 
                     for event in track.events:
                         for note in event.notes:

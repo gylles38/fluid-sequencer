@@ -21,7 +21,7 @@ Sequencer CLI Commands:
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
-  volume <track_index>    - Sets the volume for an audio track (0.0 to 1.0).
+  volume <track_index>    - Sets the volume for an audio or MIDI track (0.0 to 1.0).
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.

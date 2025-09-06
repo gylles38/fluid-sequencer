@@ -1194,6 +1194,11 @@ class Sequencer:
             self._run_event.wait()
             if self._stop_event.is_set(): break
 
+            # Live check to see if the metronome has been disabled
+            if not self.song.metronome_enabled:
+                time.sleep(0.1)
+                continue
+
             now = time.time()
             # On utilise un calcul basé sur le temps réel pour éviter la dérive
             expected_time = last_tick_time + beat_duration_sec

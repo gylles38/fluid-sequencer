@@ -1467,15 +1467,15 @@ class Sequencer:
             self.pause_start_time = time.time()
             self._all_notes_off()
 
-            # Mute and then pause all active audio processes
+            # Pause all active audio processes by sending commands
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     if ap.process.poll() is None:
                         try:
                             if ap.process.stdin:
+                                ap.process.stdin.write(b'pause\n')
                                 ap.process.stdin.write(b'mute 1\n')
                                 ap.process.stdin.flush()
-                            os.kill(ap.process.pid, signal.SIGSTOP)
                         except (IOError, ValueError, ProcessLookupError):
                             pass
 
@@ -1487,14 +1487,14 @@ class Sequencer:
             self.total_paused_time += time.time() - self.pause_start_time
             self._run_event.set()
 
-            # Resume and then unmute all active audio processes
+            # Resume all active audio processes by sending commands
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     if ap.process.poll() is None:
                         try:
-                            os.kill(ap.process.pid, signal.SIGCONT)
                             if ap.process.stdin:
                                 ap.process.stdin.write(b'mute 0\n')
+                                ap.process.stdin.write(b'pause\n')
                                 ap.process.stdin.flush()
                         except (IOError, ValueError, ProcessLookupError):
                             pass

@@ -1017,8 +1017,11 @@ class Sequencer:
                     for _ in inport.iter_pending(): pass
                     msg = inport.receive()
                     if outport:
-                        thru_msg = msg.copy(channel=target_track.channel)
-                        outport.send(thru_msg)
+                        if hasattr(msg, 'channel'):
+                            thru_msg = msg.copy(channel=target_track.channel)
+                            outport.send(thru_msg)
+                        else:
+                            outport.send(msg)
                     if msg.type == 'note_on' and msg.velocity > 0:
                         first_msg = msg
                         break
@@ -1037,8 +1040,11 @@ class Sequencer:
                 while not self._stop_event.is_set():
                     for msg in inport.iter_pending():
                         if outport:
-                            thru_msg = msg.copy(channel=target_track.channel)
-                            outport.send(thru_msg)
+                            if hasattr(msg, 'channel'):
+                                thru_msg = msg.copy(channel=target_track.channel)
+                                outport.send(thru_msg)
+                            else:
+                                outport.send(msg)
 
                         now = time.time()
                         if msg.type == 'note_on' and msg.velocity > 0:

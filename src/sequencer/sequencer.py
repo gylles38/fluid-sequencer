@@ -22,8 +22,9 @@ from typing import List, Optional
 @dataclass
 class ActiveAudioProcess:
     process: subprocess.Popen
-    temp_filepath: str
     socket_path: str
+    track_index: int
+    temp_filepath: Optional[str] = None # No longer mixing to a temp file
 
 
 class CustomSongEncoder(json.JSONEncoder):
@@ -705,6 +706,16 @@ class Sequencer:
         track.volume = volume
         print(f"Volume for track '{track.name}' set to {volume:.2f}.")
 
+        # If playback is active, send a live volume change command
+        with self.process_lock:
+            for ap in self.active_audio_processes:
+                if ap.track_index == track_index:
+                    self._send_ipc_command(
+                        ap.socket_path,
+                        {"command": ["set_property", "volume", volume * 100]}
+                    )
+                    break
+
     def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
@@ -1065,91 +1076,6 @@ class Sequencer:
         self.recording_thread.daemon = True
         self.recording_thread.start()
 
-    def _generate_mixed_audio_file(self, start_beat: float, end_beat: Optional[float]) -> Optional[str]:
-        """
-        Mixes all audible audio tracks into a single temporary WAV file.
-        Returns the path to the temporary file, or None if no audio is to be played.
-        """
-        import tempfile
-        from pydub import AudioSegment
-
-        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-        
-        tracks_to_mix = []
-        for track in self.song.tracks:
-            if not isinstance(track, AudioTrack):
-                continue
-            
-            should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-            if not should_play:
-                continue
-            
-            if end_beat is not None and track.start_time >= end_beat:
-                continue
-                
-            tracks_to_mix.append(track)
-
-        if not tracks_to_mix:
-            return None
-
-        max_end_beat = start_beat
-        for track in tracks_to_mix:
-            try:
-                segment = AudioSegment.from_file(track.filepath)
-                duration_beats = (len(segment) / 1000.0) * (self.song.tempo / 60.0)
-                track_end_beat = track.start_time + duration_beats
-                if track_end_beat > max_end_beat:
-                    max_end_beat = track_end_beat
-            except Exception as e:
-                print(f"Warning: Could not read audio file {track.filepath} to determine duration: {e}")
-
-        if end_beat is not None and max_end_beat > end_beat:
-            max_end_beat = end_beat
-            
-        duration_beats = max_end_beat - start_beat
-        if duration_beats <= 0:
-            return None
-            
-        beats_per_second = self.song.tempo / 60.0
-        duration_ms = int((duration_beats / beats_per_second) * 1000)
-
-        final_mix = AudioSegment.silent(duration=duration_ms)
-
-        for track in tracks_to_mix:
-            try:
-                if track.volume <= 0:
-                    continue
-
-                segment = AudioSegment.from_file(track.filepath)
-
-                # Apply volume change
-                db_change = 20 * math.log10(track.volume)
-                segment = segment.apply_gain(db_change)
-                
-                position_beats = track.start_time - start_beat
-                
-                if position_beats < 0:
-                    chop_ms = (-position_beats / beats_per_second) * 1000
-                    segment = segment[int(chop_ms):]
-                    position_beats = 0
-
-                position_ms = int((position_beats / beats_per_second) * 1000)
-                
-                final_mix = final_mix.overlay(segment, position=position_ms)
-                
-            except Exception as e:
-                print(f"Error processing audio file {track.filepath}: {e}")
-                continue
-
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp_path = tmp.name
-            final_mix.export(tmp_path, format="wav")
-            return tmp_path
-        except Exception as e:
-            print(f"Error exporting mixed audio: {e}")
-            return None
-
     def _send_ipc_command(self, socket_path: str, command: dict):
         """Sends a JSON command to the mpv IPC socket."""
         if not os.path.exists(socket_path):
@@ -1168,27 +1094,35 @@ class Sequencer:
             # Log other, unexpected errors.
             print(f"\nError sending IPC command: {e}")
 
-    def _play_mixed_audio_file_blocking(self, filepath: str):
-        """
-        Plays a pre-mixed audio file by calling an external player,
-        completely detached from the controlling terminal.
-        This method is blocking and should be run in a separate thread.
-        The provided filepath is a temporary file that will be cleaned up.
-        """
+    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float):
+        """Plays a single audio track in a separate mpv process."""
         import shlex
         process = None
-        active_process_info = None
         socket_path = ""
         tmp_sock = None
         try:
             # Create a persistent temporary file for the socket
             tmp_sock = tempfile.NamedTemporaryFile(prefix="mpv-socket-", delete=False)
             socket_path = tmp_sock.name
-            tmp_sock.close() # Close the file handle, but the file remains
+            tmp_sock.close()
+
+            beats_per_second = self.song.tempo / 60.0
 
             command = shlex.split(self.audio_player_command)
             command.append(f"--input-ipc-server={socket_path}")
-            command.append(filepath)
+            command.append(f"--volume={track.volume * 100}")
+
+            if track.start_time >= start_beat:
+                delay_beats = track.start_time - start_beat
+                if delay_beats > 0:
+                    delay_seconds = delay_beats / beats_per_second
+                    command.append(f"--audio-delay={delay_seconds}")
+            else:  # Track starts before the playback start point
+                seek_beats = start_beat - track.start_time
+                seek_seconds = seek_beats / beats_per_second
+                command.append(f"--start={seek_seconds}")
+
+            command.append(track.filepath)
 
             kwargs = {
                 'stdin': subprocess.DEVNULL,
@@ -1202,39 +1136,29 @@ class Sequencer:
                 kwargs['preexec_fn'] = os.setsid
 
             process = subprocess.Popen(command, **kwargs)
-            time.sleep(0.1) # Give mpv a moment to create the socket
+            time.sleep(0.1)
 
             active_process_info = ActiveAudioProcess(
                 process=process,
-                temp_filepath=filepath,
-                socket_path=socket_path
+                socket_path=socket_path,
+                track_index=track_index
             )
             with self.process_lock:
                 self.active_audio_processes.append(active_process_info)
 
-            if not self._stop_event.is_set():
-                process.wait()
+            process.wait()
 
         except Exception as e:
             if not self._stop_event.is_set():
-                print(f"\n[ERROR] in audio playback thread for mixed file: {e}")
+                print(f"\n[ERROR] in audio playback thread for track '{track.name}': {e}")
         finally:
-            # If the song finishes naturally (i.e., not via a 'stop' command),
-            # this thread needs to clean up its own process and temp file.
-            if not self._stop_event.is_set() and active_process_info:
-                with self.process_lock:
-                    if active_process_info in self.active_audio_processes:
-                        self.active_audio_processes.remove(active_process_info)
-                if os.path.exists(filepath):
-                    try:
-                        os.remove(filepath)
-                    except OSError:
-                        pass
-                if socket_path and os.path.exists(socket_path):
-                    try:
-                        os.remove(socket_path)
-                    except OSError:
-                        pass
+            # Cleanup for the socket file is handled by _shutdown_audio_processes
+            # when the main playback stops.
+            if socket_path and os.path.exists(socket_path):
+                 try:
+                     os.remove(socket_path)
+                 except OSError:
+                     pass
 
     def _metronome_thread_main(self):
         """
@@ -1470,24 +1394,29 @@ class Sequencer:
         self.temporary_ports = []
         self.audio_threads = [] # Clear the list for new audio threads
 
-        # --- Audio Pre-mixing and Playback ---
-        mixed_audio_filepath = self._generate_mixed_audio_file(start_beat, end_beat)
-        audio_thread = None
-        if mixed_audio_filepath:
-            audio_thread = threading.Thread(target=self._play_mixed_audio_file_blocking, args=(mixed_audio_filepath,))
-            audio_thread.daemon = True
-            self.audio_threads.append(audio_thread)
+        # --- Audio Playback ---
+        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+        has_audio_to_play = False
+        for i, track in enumerate(self.song.tracks):
+            if isinstance(track, AudioTrack):
+                should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                # Check if the track is within the playback range at all
+                if should_play and track.start_time < (end_beat if end_beat is not None else float('inf')):
+                    audio_thread = threading.Thread(
+                        target=self._play_audio_track,
+                        args=(track, i, start_beat)
+                    )
+                    audio_thread.daemon = True
+                    self.audio_threads.append(audio_thread)
+                    has_audio_to_play = True
 
         # --- MIDI Port Setup ---
         required_ports = {track.output_port_name for track in self.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
         if self.song.metronome_enabled and self.song.metronome_port_name:
             required_ports.add(self.song.metronome_port_name)
 
-        has_audio_to_play = audio_thread is not None
         if not required_ports and not has_audio_to_play:
             print("Nothing to play: No MIDI ports assigned, no audio tracks, and metronome is off.")
-            if mixed_audio_filepath and os.path.exists(mixed_audio_filepath):
-                os.remove(mixed_audio_filepath)
             return
 
         # Open all required MIDI ports
@@ -1522,8 +1451,9 @@ class Sequencer:
         self.playback_thread.daemon = True
         self.playback_thread.start()
 
-        if audio_thread:
-            audio_thread.start()
+        # Start all audio threads
+        for t in self.audio_threads:
+            t.start()
 
     def pause(self):
         if self.playback_state == "stopped":

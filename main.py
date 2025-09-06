@@ -21,6 +21,7 @@ Sequencer CLI Commands:
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
+  volume <track_index>    - Sets the volume for an audio track (0.0 to 1.0).
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
@@ -218,6 +219,17 @@ def main():
                     seq.set_program(track_index=int(args[0]), program=prog - 1)
                 else:
                     print("Usage: setprog <track_index> <program>")
+            elif command == "volume":
+                if len(args) == 1:
+                    try:
+                        track_index = int(args[0])
+                        volume_str = input("Enter volume (0.0 - 1.0): ").strip()
+                        volume = float(volume_str)
+                        seq.set_track_volume(track_index, volume)
+                    except ValueError:
+                        print("Error: Invalid track index or volume.")
+                else:
+                    print("Usage: volume <track_index>")
             elif command == "mute":
                 if len(args) == 1:
                     seq.toggle_mute(track_index=int(args[0]))

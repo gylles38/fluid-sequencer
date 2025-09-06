@@ -56,8 +56,7 @@ class AudioTrack(BaseTrack):
     is_muted: bool = False
     is_solo: bool = False
     start_time: float = 0.0 # Start time in beats from the beginning of the track
-    # Volume/pan controls could be added here in the future
-    # volume: float = 1.0 # (0.0 to 1.0)
+    volume: float = 0.5 # (0.0 to 1.0)
     # pan: float = 0.0 # (-1.0 for left, 0.0 for center, 1.0 for right)
 
 

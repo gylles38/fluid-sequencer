@@ -4,6 +4,7 @@ from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
+import math
 import mido
 from mido import get_input_names, get_output_names, open_output # type: ignore
 from pydub import AudioSegment
@@ -686,6 +687,24 @@ class Sequencer:
         track.instrument = program
         print(f"Set program for track '{track.name}' to {program + 1}.")
 
+    def set_track_volume(self, track_index: int, volume: float):
+        """Sets the volume for a specific audio track."""
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        if not isinstance(track, AudioTrack):
+            print("Error: Volume can only be set for audio tracks.")
+            return
+
+        if not 0.0 <= volume <= 1.0:
+            print("Error: Volume must be between 0.0 and 1.0.")
+            return
+
+        track.volume = volume
+        print(f"Volume for track '{track.name}' set to {volume:.2f}.")
+
     def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
@@ -835,7 +854,7 @@ class Sequencer:
                 lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {len(track.events)} events){port_info}")
             elif isinstance(track, AudioTrack):
                 start_pos_str = self._format_beats_to_position(track.start_time)
-                lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str})")
+                lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str}, Vol: {track.volume:.2f})")
             else:
                 lines.append(f"[{i}] {track.name} (Unknown Type){status_info}")
         return "\n".join(lines)
@@ -1098,7 +1117,14 @@ class Sequencer:
 
         for track in tracks_to_mix:
             try:
+                if track.volume <= 0:
+                    continue
+
                 segment = AudioSegment.from_file(track.filepath)
+
+                # Apply volume change
+                db_change = 20 * math.log10(track.volume)
+                segment = segment.apply_gain(db_change)
                 
                 position_beats = track.start_time - start_beat
                 

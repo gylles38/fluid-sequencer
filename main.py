@@ -389,14 +389,18 @@ def main():
                 break
 
             elif char == ' ':
-                # Clear the current line and show the pause message
-                print("\r" + " " * (len(command_buffer) + 2) + "\r", end="")
-                print("> Pausing...", end="", flush=True)
-                seq.pause()
-                time.sleep(0.5) # Display the message for a moment
-                # Restore the prompt and the command buffer
-                print("\r" + " " * (len("> Pausing...") + 2) + "\r", end="")
-                print(f"> {command_buffer}", end="", flush=True)
+                if seq.playback_state != "stopped":
+                    # If playing, spacebar is a shortcut for pause
+                    print("\r" + " " * (len(command_buffer) + 2) + "\r", end="")
+                    print("> Pausing...", end="", flush=True)
+                    seq.pause()
+                    time.sleep(0.5)
+                    print("\r" + " " * (len("> Pausing...") + 2) + "\r", end="")
+                    print(f"> {command_buffer}", end="", flush=True)
+                else:
+                    # Otherwise, it's a normal character
+                    command_buffer += ' '
+                    print(' ', end="", flush=True)
                 continue
 
             elif char in ('\r', '\n'):

@@ -80,6 +80,32 @@ def process_command(user_input, seq):
     args = parts[1:]
 
     if command == "quit":
+        if seq.is_dirty:
+            while True:
+                choice = input("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
+                if choice == 'c':
+                    print("Quit cancelled.")
+                    return True # Continue main loop
+                elif choice == 'd':
+                    break # Proceed to quit
+                elif choice == 's':
+                    basename_to_save = seq.last_project_basename
+                    if basename_to_save:
+                        overwrite = input(f"Save over '{basename_to_save}.proj.json'? [Y/n] ").lower()
+                        if overwrite == 'n':
+                            basename_to_save = input("Enter new project basename: ").strip()
+                    else:
+                        basename_to_save = input("Enter project basename to save: ").strip()
+
+                    if basename_to_save:
+                        seq.save_project(basename_to_save)
+                        break # Proceed to quit
+                    else:
+                        print("Save cancelled. Please provide a name.")
+                        # Loop again
+                else:
+                    print("Invalid choice.")
+
         if seq.playback_state != "stopped":
             print("Stopping playback before exiting...")
             seq.stop()
@@ -221,9 +247,7 @@ def process_command(user_input, seq):
     elif command == "setaudiocmd":
         if args:
             cmd_str = " ".join(args)
-            seq.audio_player_command = cmd_str
-            print(f"Audio player command set to: {cmd_str}")
-            print("Note: The audio filepath will be appended to this command.")
+            seq.set_audio_player_command(cmd_str)
         else:
             print("Usage: setaudiocmd <command...>")
             print(f"Current command: {seq.audio_player_command}")

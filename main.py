@@ -503,7 +503,8 @@ def main():
                 if not process_command(command_buffer, seq):
                     break # Exit if process_command returns False (for 'quit')
                 command_buffer = ""
-                print("> ", end="", flush=True)
+                if seq.playback_state == "stopped":
+                    print("> ", end="", flush=True)
 
             elif char in ('\x7f', '\b'): # Handle backspace
                 if len(command_buffer) > 0:

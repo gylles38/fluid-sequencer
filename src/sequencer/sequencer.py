@@ -1647,6 +1647,9 @@ class Sequencer:
                 print("Playback finished.")
                 if self.is_recording:
                     self.stop()
+                else:
+                    # After natural playback, reprint the prompt for the user
+                    print("> ", end="", flush=True)
                 
     def play(self, start_beat: Optional[float] = None, end_beat: Optional[float] = None, loop: bool = False):
         # Case 1: play() is called with no args, which means "resume" or "play from last position"

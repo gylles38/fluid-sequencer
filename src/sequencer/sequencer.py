@@ -1233,7 +1233,7 @@ class Sequencer:
             # Log other, unexpected errors.
             print(f"\nError sending IPC command: {e}")
 
-    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float):
+    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float, end_beat: Optional[float] = None):
         """Plays a single audio track in a separate mpv process."""
         import shlex
         process = None
@@ -1246,20 +1246,41 @@ class Sequencer:
             tmp_sock.close()
 
             beats_per_second = self.song.tempo / 60.0
+            if beats_per_second <= 0: return # Avoid division by zero
 
+            # --- Build the mpv command ---
             command = shlex.split(self.audio_player_command)
             command.append(f"--input-ipc-server={socket_path}")
             command.append(f"--volume={track.volume * 100}")
 
-            if track.start_time >= start_beat:
+            # --- Calculate seek, delay, and length ---
+            # 1. Calculate seek or delay
+            if track.start_time < start_beat:
+                # Track starts before playback begins, so we seek into the audio file.
+                seek_beats = start_beat - track.start_time
+                seek_seconds = seek_beats / beats_per_second
+                command.append(f"--start={seek_seconds}")
+            else:
+                # Track starts after playback begins, so we delay the audio.
                 delay_beats = track.start_time - start_beat
                 if delay_beats > 0:
                     delay_seconds = delay_beats / beats_per_second
                     command.append(f"--audio-delay={delay_seconds}")
-            else:  # Track starts before the playback start point
-                seek_beats = start_beat - track.start_time
-                seek_seconds = seek_beats / beats_per_second
-                command.append(f"--start={seek_seconds}")
+
+            # 2. Calculate playback length if end_beat is specified
+            if end_beat is not None:
+                # The effective start of playback for this track is the later of the global start_beat or the track's own start_time.
+                effective_start_beat = max(start_beat, track.start_time)
+
+                # The duration is from the effective start to the global end.
+                duration_beats = end_beat - effective_start_beat
+
+                if duration_beats > 0:
+                    length_seconds = duration_beats / beats_per_second
+                    command.append(f"--length={length_seconds}")
+                else:
+                    # If duration is non-positive, the track shouldn't be played at all.
+                    return
 
             command.append(track.filepath)
 
@@ -1593,7 +1614,7 @@ class Sequencer:
                 if should_play and track.start_time < (end_beat if end_beat is not None else float('inf')):
                     audio_thread = threading.Thread(
                         target=self._play_audio_track,
-                        args=(track, i, start_beat)
+                        args=(track, i, start_beat, end_beat)
                     )
                     audio_thread.daemon = True
                     self.audio_threads.append(audio_thread)

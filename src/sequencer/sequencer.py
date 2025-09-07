@@ -1634,7 +1634,8 @@ class Sequencer:
                 print(f"\nError during playback: {e}")
         finally:
             # This is the single point of truth for all cleanup
-            print() # Ensures we move to a new line after the progress indicator
+            # Clear the "Playing..." line before printing final messages
+            print(f"\r\x1b[2K", end="")
             self._shutdown_audio_processes()
             self._all_notes_off()
             for port in self.temporary_ports:

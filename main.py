@@ -413,6 +413,8 @@ def process_command(user_input, seq):
             seq.song.metronome_enabled = is_enabled
             status = "enabled" if is_enabled else "disabled"
             print(f"Metronome is now {status}.")
+            if is_enabled and seq.playback_state != "stopped":
+                seq.start_metronome()
         else:
             print("Usage: metronome <on|off>")
     else:

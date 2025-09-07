@@ -1600,6 +1600,23 @@ class Sequencer:
                 print("\nPlayback finished. Press Enter to continue...")
                 if self.is_recording:
                     self.stop()
+
+    def start_metronome(self):
+        if self.song.metronome_enabled and self.song.metronome_port_name:
+            if not self.metronome_thread or not self.metronome_thread.is_alive():
+                # Open port if necessary
+                if self.song.metronome_port_name not in self.open_ports:
+                    try:
+                        port = open_output(self.song.metronome_port_name)
+                        self.open_ports[self.song.metronome_port_name] = port
+                        self.temporary_ports.append(port)
+                    except Exception as e:
+                        print(f"Error opening metronome port '{self.song.metronome_port_name}': {e}")
+                        return
+
+                self.metronome_thread = threading.Thread(target=self._metronome_thread_main)
+                self.metronome_thread.daemon = True
+                self.metronome_thread.start()
                 
     def play(self, start_beat: Optional[float] = None, end_beat: Optional[float] = None, loop: bool = False):
         # Case 1: play() is called with no args, which means "resume" or "play from last position"
@@ -1677,10 +1694,7 @@ class Sequencer:
         self.playback_state = "playing"
         self.playback_start_time = time.time()
 
-        if self.song.metronome_enabled and self.song.metronome_port_name:
-            self.metronome_thread = threading.Thread(target=self._metronome_thread_main)
-            self.metronome_thread.daemon = True
-            self.metronome_thread.start()
+        self.start_metronome()
 
         self.playback_thread = threading.Thread(
             target=self._play_thread,

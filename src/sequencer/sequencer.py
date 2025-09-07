@@ -1,6 +1,6 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
-from .models import AnyTrack, AudioTrack, CCMessage, Event, MidiTrack, Note, Song
+from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
@@ -29,7 +29,7 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note, CCMessage)):
+        if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note)):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
             return d
@@ -50,8 +50,6 @@ def song_decoder(d):
             return Event(**d)
         elif type_name == 'Note':
             return Note(**d)
-        elif type_name == 'CCMessage':
-            return CCMessage(**d)
     return d
 
 
@@ -86,15 +84,13 @@ class Sequencer:
         self.metronome_pitch_beat = 77  # Low Wood Block
 
         self.last_record_settings = None
-        self.is_dirty = False
-        self.last_project_basename = None
 
     def _all_notes_off(self):
         for port in self.open_ports.values():
             if port and not port.closed:
                 for channel in range(16):
                     port.send(mido.Message('control_change', channel=channel, control=123, value=0))
-        # print("Sent all notes off to all open ports.")
+        print("Sent all notes off to all open ports.")
 
     def parse_position_to_beats(self, position_str: str, default: str = "1:1") -> Optional[float]:
         """Parses a 'measure:beat' string into a float representing the absolute beat count."""
@@ -143,7 +139,6 @@ class Sequencer:
         if tempo <= 0:
             raise ValueError("Tempo must be positive.")
         self.song.tempo = tempo
-        self.is_dirty = True
         print(f"Tempo set to {self.song.tempo} BPM.")
 
     def set_time_signature(self, numerator: int, denominator: int):
@@ -153,7 +148,6 @@ class Sequencer:
             return
         self.song.time_signature_numerator = numerator
         self.song.time_signature_denominator = denominator
-        self.is_dirty = True
         print(f"Time signature set to {numerator}/{denominator}.")
 
     def add_track(self, name: str, track_type: str = 'midi', instrument: int = 0, filepath: Optional[str] = None):
@@ -181,7 +175,6 @@ class Sequencer:
             return
 
         self.song.add_track(track)
-        self.is_dirty = True
 
     def delete_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -189,49 +182,8 @@ class Sequencer:
             return False
         track_name = self.song.tracks[track_index].name
         self.song.tracks.pop(track_index)
-        self.is_dirty = True
         print(f"Track '{track_name}' deleted.")
         return True
-
-    def add_cc_event(self, track_index: int, position_str: str, control: int, value: int):
-        """Adds a CC event to a specific track at a given position."""
-        if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
-
-        track = self.song.tracks[track_index]
-        if not isinstance(track, MidiTrack):
-            print("Error: CC events can only be added to MIDI tracks.")
-            return
-
-        start_beat = self.parse_position_to_beats(position_str)
-        if start_beat is None:
-            return # Error is printed by parse_position_to_beats
-
-        try:
-            # Create the CC message, which will validate its own values
-            new_cc = CCMessage(control=control, value=value)
-        except ValueError as e:
-            print(f"Error: Invalid CC value. {e}")
-            return
-
-        # Check if an event already exists at this exact start time
-        existing_event = None
-        for event in track.events:
-            if math.isclose(event.start_time, start_beat):
-                existing_event = event
-                break
-
-        if existing_event:
-            # Add the CC message to the existing event
-            existing_event.cc_messages.append(new_cc)
-            print(f"Added CC to existing event at position {position_str} on track '{track.name}'.")
-        else:
-            # Create a new event with this CC message and add it to the track
-            new_event = Event(start_time=start_beat, cc_messages=[new_cc])
-            track.add_event(new_event) # add_event handles sorting
-            print(f"Added new CC event at position {position_str} on track '{track.name}'.")
-        self.is_dirty = True
 
     def erase_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -307,7 +259,6 @@ class Sequencer:
             report.append(f"shifted {len(events_to_shift)} event(s)")
 
         if removed_count > 0 or shift_confirmed:
-             self.is_dirty = True
              print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
         else:
              print("No events were erased or shifted.")
@@ -319,7 +270,6 @@ class Sequencer:
 
         old_name = self.song.tracks[track_index].name
         self.song.tracks[track_index].name = new_name
-        self.is_dirty = True
         print(f"Track '{old_name}' renamed to '{new_name}'.")
 
     def move_track_section(self, track_index: int):
@@ -463,7 +413,6 @@ class Sequencer:
         if not report:
             print("No notes were found in the source range to move.")
         else:
-            self.is_dirty = True
             print(f"Operation complete: {', '.join(report)}.")
 
     def copy_track_section(self):
@@ -588,7 +537,6 @@ class Sequencer:
         if not report:
             print("No notes were found in the source range to copy.")
         else:
-            self.is_dirty = True
             print(f"Operation complete: {', '.join(report)}.")
 
     def transpose_track_section(self):
@@ -666,7 +614,6 @@ class Sequencer:
                     note.pitch = new_pitch
                 transposed_note_count += 1
 
-        self.is_dirty = True
         print(f"Transposed {transposed_note_count} note(s) on track '{track.name}'.")
         if clamped_note_count > 0:
             print(f"{clamped_note_count} note(s) were clamped to the valid MIDI pitch range (0-127).")
@@ -680,7 +627,6 @@ class Sequencer:
             print("Error: Port assignment is currently only supported for MIDI tracks.")
             return
         track.output_port_name = port_name
-        self.is_dirty = True
         print(f"Assigned port '{port_name}' to track '{track.name}'.")
 
     def unassign_port(self, track_index: int):
@@ -695,16 +641,8 @@ class Sequencer:
         if track.output_port_name:
             print(f"Un-assigned port from track '{track.name}'.")
             track.output_port_name = None
-            self.is_dirty = True
         else:
             print(f"Track '{track.name}' has no port assigned.")
-
-    def set_audio_player_command(self, command: str):
-        """Sets the command for the external audio player."""
-        self.audio_player_command = command
-        self.is_dirty = True
-        print(f"Audio player command set to: {command}")
-        print("Note: The audio filepath will be appended to this command.")
 
     def set_bank(self, track_index: int, msb: int, lsb: int = 0):
         if not 0 <= track_index < len(self.song.tracks):
@@ -720,7 +658,6 @@ class Sequencer:
 
         track.bank_msb = msb
         track.bank_lsb = lsb
-        self.is_dirty = True
         print(f"Set bank for track '{track.name}' to MSB={msb}, LSB={lsb}.")
 
     def set_channel(self, track_index: int, channel: int):
@@ -736,7 +673,6 @@ class Sequencer:
             return
 
         track.channel = channel - 1 # Convert to 0-indexed for mido
-        self.is_dirty = True
         print(f"Set MIDI channel for track '{track.name}' to {channel}.")
 
     def set_program(self, track_index: int, program: int):
@@ -752,7 +688,6 @@ class Sequencer:
             return
 
         track.instrument = program
-        self.is_dirty = True
         print(f"Set program for track '{track.name}' to {program + 1}.")
 
     def set_track_volume(self, track_index: int, volume: float):
@@ -771,7 +706,6 @@ class Sequencer:
             return
 
         track.volume = volume
-        self.is_dirty = True
         print(f"Volume for track '{track.name}' set to {volume:.2f}.")
 
         if isinstance(track, AudioTrack):
@@ -808,7 +742,6 @@ class Sequencer:
             return
 
         track.velocity = velocity
-        self.is_dirty = True
         print(f"Velocity for track '{track.name}' set to {velocity:.2f}.")
 
     def toggle_mute(self, track_index: int):
@@ -819,7 +752,6 @@ class Sequencer:
         track = self.song.tracks[track_index]
         track.is_muted = not track.is_muted
         status = "Muted" if track.is_muted else "Unmuted"
-        self.is_dirty = True
         print(f"Track '{track.name}' is now {status}.")
 
         if isinstance(track, AudioTrack) and self.playback_state != "stopped":
@@ -863,33 +795,7 @@ class Sequencer:
                     print(f"Track '{other_track.name}' is now Un-soloed.")
 
         status = "Solo" if target_track.is_solo else "Un-soloed"
-        self.is_dirty = True
         print(f"Track '{target_track.name}' is now {status}.")
-
-    def send_cc_message(self, port_name: str, channel: int, control: int, value: int):
-        """
-        Sends a single MIDI Control Change message to a specified virtual port.
-        """
-        port = None
-        try:
-            # Find the virtual port by name
-            for vp in self.virtual_ports:
-                if vp.name == port_name:
-                    port = vp
-                    break
-
-            if port:
-                msg = mido.Message('control_change', channel=channel - 1, control=control, value=value)
-                port.send(msg)
-                print(f"Sent CC message to virtual port '{port_name}': Ch={channel}, CC={control}, Val={value}")
-                return True
-            else:
-                print(f"Error: Virtual port '{port_name}' not found.")
-                return False
-
-        except Exception as e:
-            print(f"Error sending CC message to port '{port_name}': {e}")
-            return False
 
     def prime_all_tracks(self):
         """Sends the current program/bank state for all assigned MIDI tracks."""
@@ -930,8 +836,6 @@ class Sequencer:
     def load_song(self, filepath: str):
         try:
             self.song = import_song(filepath)
-            self.is_dirty = True
-            self.last_project_basename = None
             print(f"Successfully loaded song from '{filepath}'.")
         except Exception as e:
             print(f"Error loading MIDI file: {e}")
@@ -953,8 +857,6 @@ class Sequencer:
             }
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
-            self.is_dirty = False
-            self.last_project_basename = basename
             print(f"Project saved to '{project_filepath}'")
         except Exception as e:
             print(f"Error saving project file: {e}")
@@ -983,8 +885,6 @@ class Sequencer:
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
 
-            self.is_dirty = False
-            self.last_project_basename = basename
             print(f"Successfully loaded project from '{project_filepath}'")
         except FileNotFoundError:
             print(f"Error: Project file not found at '{project_filepath}'")
@@ -1050,7 +950,6 @@ class Sequencer:
         try:
             port = open_output(name, virtual=True)
             self.virtual_ports.append(port)
-            self.is_dirty = True
             print(f"Created virtual MIDI port: '{name}'")
         except Exception as e:
             print(f"Error creating virtual port: {e}")
@@ -1075,7 +974,6 @@ class Sequencer:
                     print(f"Un-assigned port from track '{track.name}'.")
             port_to_delete.close()
             self.virtual_ports.remove(port_to_delete)
-            self.is_dirty = True
             print(f"Virtual port '{name}' deleted.")
         else:
             print(f"Error: Virtual port '{name}' not found.")
@@ -1160,9 +1058,8 @@ class Sequencer:
                                 start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
                                 duration_beats = duration_sec * beats_per_second
                                 note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                event = Event(start_time=start_time_beats, notes=[note])
+                                event = Event(notes=[note], start_time=start_time_beats)
                                 target_track.add_event(event)
-                                self.is_dirty = True
 
                     if num_beats_to_record is not None:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
@@ -1301,7 +1198,7 @@ class Sequencer:
             # Log other, unexpected errors.
             print(f"\nError sending IPC command: {e}")
 
-    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float, end_beat: Optional[float] = None):
+    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float):
         """Plays a single audio track in a separate mpv process."""
         import shlex
         process = None
@@ -1314,41 +1211,20 @@ class Sequencer:
             tmp_sock.close()
 
             beats_per_second = self.song.tempo / 60.0
-            if beats_per_second <= 0: return # Avoid division by zero
 
-            # --- Build the mpv command ---
             command = shlex.split(self.audio_player_command)
             command.append(f"--input-ipc-server={socket_path}")
             command.append(f"--volume={track.volume * 100}")
 
-            # --- Calculate seek, delay, and length ---
-            # 1. Calculate seek or delay
-            if track.start_time < start_beat:
-                # Track starts before playback begins, so we seek into the audio file.
-                seek_beats = start_beat - track.start_time
-                seek_seconds = seek_beats / beats_per_second
-                command.append(f"--start={seek_seconds}")
-            else:
-                # Track starts after playback begins, so we delay the audio.
+            if track.start_time >= start_beat:
                 delay_beats = track.start_time - start_beat
                 if delay_beats > 0:
                     delay_seconds = delay_beats / beats_per_second
                     command.append(f"--audio-delay={delay_seconds}")
-
-            # 2. Calculate playback length if end_beat is specified
-            if end_beat is not None:
-                # The effective start of playback for this track is the later of the global start_beat or the track's own start_time.
-                effective_start_beat = max(start_beat, track.start_time)
-
-                # The duration is from the effective start to the global end.
-                duration_beats = end_beat - effective_start_beat
-
-                if duration_beats > 0:
-                    length_seconds = duration_beats / beats_per_second
-                    command.append(f"--length={length_seconds}")
-                else:
-                    # If duration is non-positive, the track shouldn't be played at all.
-                    return
+            else:  # Track starts before the playback start point
+                seek_beats = start_beat - track.start_time
+                seek_seconds = seek_beats / beats_per_second
+                command.append(f"--start={seek_seconds}")
 
             command.append(track.filepath)
 
@@ -1520,19 +1396,13 @@ class Sequencer:
                     master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127))})
 
                     for event in track.events:
-                        start_tick = int(event.start_time * ticks_per_beat)
-
-                        # Process notes
                         for note in event.notes:
+                            start_tick = int(event.start_time * ticks_per_beat)
                             end_tick = start_tick + int(note.duration * ticks_per_beat)
                             scaled_velocity = int(note.velocity * track.velocity)
                             clamped_velocity = max(0, min(127, scaled_velocity))
                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=clamped_velocity)})
                             master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
-
-                        # Process CC messages
-                        for cc in event.cc_messages:
-                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
 
             # 2. Filter and normalize events based on playback range
             start_tick = int(start_beat * ticks_per_beat)
@@ -1634,8 +1504,6 @@ class Sequencer:
                 print(f"\nError during playback: {e}")
         finally:
             # This is the single point of truth for all cleanup
-            # Clear the "Playing..." line before printing final messages
-            print(f"\r\x1b[2K", end="")
             self._shutdown_audio_processes()
             self._all_notes_off()
             for port in self.temporary_ports:
@@ -1645,7 +1513,7 @@ class Sequencer:
             self.open_ports.clear()
             self.playback_state = "stopped"
             if not self._stop_event.is_set():
-                print("Playback finished.")
+                print("\nPlayback finished. Press Enter to continue...")
                 if self.is_recording:
                     self.stop()
                 
@@ -1690,7 +1558,7 @@ class Sequencer:
                 if should_play and track.start_time < (end_beat if end_beat is not None else float('inf')):
                     audio_thread = threading.Thread(
                         target=self._play_audio_track,
-                        args=(track, i, start_beat, end_beat)
+                        args=(track, i, start_beat)
                     )
                     audio_thread.daemon = True
                     self.audio_threads.append(audio_thread)

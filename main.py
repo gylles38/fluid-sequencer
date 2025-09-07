@@ -7,17 +7,20 @@ import time
 try:
     # Windows
     import msvcrt
-    def get_char_non_blocking():
-        if msvcrt.kbhit():
-            return msvcrt.getch().decode('utf-8')
-        return None
+    def get_char():
+        return msvcrt.getch().decode('utf-8')
 except ImportError:
     # POSIX (Linux, macOS)
-    import tty, termios, select
-    def get_char_non_blocking():
-        if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
-            return sys.stdin.read(1)
-        return None
+    import tty, termios
+    def get_char():
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
 
 def print_help():
     """Prints the help message with available commands."""
@@ -26,7 +29,6 @@ Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
   addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
-  addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
   list                    - Shows all tracks in the current song.
@@ -36,7 +38,6 @@ Sequencer CLI Commands:
   assign <track_index>    - Assigns a track to an output port from a list of choices.
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
-  cc                      - Sends a MIDI Control Change message to a selected port.
   setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
@@ -77,32 +78,6 @@ def process_command(user_input, seq):
     args = parts[1:]
 
     if command == "quit":
-        if seq.is_dirty:
-            while True:
-                choice = input("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
-                if choice == 'c':
-                    print("Quit cancelled.")
-                    return True # Continue main loop
-                elif choice == 'd':
-                    break # Proceed to quit
-                elif choice == 's':
-                    basename_to_save = seq.last_project_basename
-                    if basename_to_save:
-                        overwrite = input(f"Save over '{basename_to_save}.proj.json'? [Y/n] ").lower()
-                        if overwrite == 'n':
-                            basename_to_save = input("Enter new project basename: ").strip()
-                    else:
-                        basename_to_save = input("Enter project basename to save: ").strip()
-
-                    if basename_to_save:
-                        seq.save_project(basename_to_save)
-                        break # Proceed to quit
-                    else:
-                        print("Save cancelled. Please provide a name.")
-                        # Loop again
-                else:
-                    print("Invalid choice.")
-
         if seq.playback_state != "stopped":
             print("Stopping playback before exiting...")
             seq.stop()
@@ -125,18 +100,6 @@ def process_command(user_input, seq):
             seq.add_track(name=args[0], track_type='audio', filepath=args[1])
         else:
             print("Usage: addaudio <name> <filepath>")
-    elif command == "addcc":
-        if len(args) == 4:
-            try:
-                track_index = int(args[0])
-                position_str = args[1]
-                control = int(args[2])
-                value = int(args[3])
-                seq.add_cc_event(track_index, position_str, control, value)
-            except ValueError:
-                print("Error: Invalid number for track index, CC, or value.")
-        else:
-            print("Usage: addcc <track_index> <position> <cc_number> <value>")
     elif command == "load":
         if len(args) == 1:
             confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
@@ -244,7 +207,9 @@ def process_command(user_input, seq):
     elif command == "setaudiocmd":
         if args:
             cmd_str = " ".join(args)
-            seq.set_audio_player_command(cmd_str)
+            seq.audio_player_command = cmd_str
+            print(f"Audio player command set to: {cmd_str}")
+            print("Note: The audio filepath will be appended to this command.")
         else:
             print("Usage: setaudiocmd <command...>")
             print(f"Current command: {seq.audio_player_command}")
@@ -374,51 +339,6 @@ def process_command(user_input, seq):
             seq.save_project(basename=args[0])
         else:
             print("Usage: saveproject <basename>")
-    elif command == "cc":
-        if args:
-            print("Usage: cc (command is interactive)")
-            return True
-
-        virtual_port_names = [vp.name for vp in seq.virtual_ports]
-        if not virtual_port_names:
-            print("No virtual MIDI ports available. Create one with 'vport <name>'.")
-            return True
-
-        print("Available virtual ports:")
-        for i, name in enumerate(virtual_port_names):
-            print(f"  [{i}] {name}")
-
-        try:
-            port_index_str = input("Choose a virtual port to send the CC message to: ")
-            port_index = int(port_index_str)
-            if not 0 <= port_index < len(virtual_port_names):
-                print("Error: Invalid port index.")
-                return True
-            port_name = virtual_port_names[port_index]
-
-            channel_str = input("Enter MIDI channel (1-16): ")
-            channel = int(channel_str)
-            if not 1 <= channel <= 16:
-                print("Error: Channel must be between 1 and 16.")
-                return True
-
-            control_str = input("Enter CC number (0-127): ")
-            control = int(control_str)
-            if not 0 <= control <= 127:
-                print("Error: CC number must be between 0 and 127.")
-                return True
-
-            value_str = input("Enter CC value (0-127): ")
-            value = int(value_str)
-            if not 0 <= value <= 127:
-                print("Error: CC value must be between 0 and 127.")
-                return True
-
-            seq.send_cc_message(port_name, channel, control, value)
-
-        except (ValueError, IndexError):
-            print("Error: Invalid input.")
-
     elif command == "prime":
         seq.prime_all_tracks()
     elif command == "play" or command == "loop":
@@ -466,73 +386,63 @@ def main():
     seq = Sequencer()
     print_help()
 
-    # Set up terminal for raw, non-blocking input
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setcbreak(sys.stdin.fileno())
+    command_buffer = ""
+    print("> ", end="", flush=True)
 
-        command_buffer = ""
-        prompt_printed = False
+    while True:
+        try:
+            char = get_char()
 
-        while True:
-            # Print prompt if necessary
-            if seq.playback_state == "stopped" and not prompt_printed:
+            # Handle Ctrl+C or Ctrl+D for exit
+            if char in ('\x03', '\x04'):
+                if seq.playback_state != "stopped":
+                    print("\nStopping playback before exiting...")
+                    seq.stop()
+                break
+
+            elif char == ' ':
+                if seq.playback_state != "stopped":
+                    # If playing, spacebar is a shortcut for pause
+                    print("\r" + " " * (len(command_buffer) + 2) + "\r", end="")
+                    print("> Pausing...", end="", flush=True)
+                    seq.pause()
+                    time.sleep(0.5)
+                    print("\r" + " " * (len("> Pausing...") + 2) + "\r", end="")
+                    print(f"> {command_buffer}", end="", flush=True)
+                else:
+                    # Otherwise, it's a normal character
+                    command_buffer += ' '
+                    print(' ', end="", flush=True)
+                continue
+
+            elif char in ('\r', '\n'):
+                print()  # Move to the next line
+                if not process_command(command_buffer, seq):
+                    break # Exit if process_command returns False (for 'quit')
+                command_buffer = ""
                 print("> ", end="", flush=True)
-                prompt_printed = True
 
-            char = get_char_non_blocking()
+            elif char in ('\x7f', '\b'): # Handle backspace
+                if len(command_buffer) > 0:
+                    command_buffer = command_buffer[:-1]
+                    print("\b \b", end="", flush=True) # Erase character on screen
 
-            if char:
-                # A character was typed, so we will need a new prompt
-                prompt_printed = False
+            elif char.isprintable():
+                command_buffer += char
+                print(char, end="", flush=True)
 
-                # Handle Ctrl+C or Ctrl+D for exit
-                if char in ('\x03', '\x04'):
-                    if seq.playback_state != "stopped":
-                        print("\nStopping playback before exiting...")
-                        seq.stop()
-                    break
+        except (ValueError, IndexError) as e:
+            print(f"\nError: Invalid argument. Please check your input. ({e})")
+            command_buffer = ""
+            print(f"> {command_buffer}", end="", flush=True)
+        except Exception as e:
+            print(f"\nAn unexpected error occurred: {e}")
+            command_buffer = ""
+            print(f"> {command_buffer}", end="", flush=True)
 
-                elif char == ' ':
-                    if seq.playback_state != "stopped":
-                        # If playing, spacebar is a shortcut for pause
-                        print("\r" + " " * 50 + "\r", end="") # Clear line
-                        print("> Pausing...", end="", flush=True)
-                        seq.pause()
-                        time.sleep(0.5)
-                        print("\r" + " " * 50 + "\r", end="") # Clear line
-                        # Don't print a prompt, playback is still active
-                    else:
-                        # Otherwise, it's a normal character
-                        command_buffer += ' '
-                        print(' ', end="", flush=True)
-                    continue
-
-                elif char in ('\r', '\n'):
-                    print() # cbreak mode handles the newline correctly
-                    if not process_command(command_buffer, seq):
-                        break # Exit if process_command returns False (for 'quit')
-                    command_buffer = ""
-                    # New prompt will be printed by the loop condition
-
-                elif char in ('\x7f', '\b'): # Handle backspace
-                    if len(command_buffer) > 0:
-                        command_buffer = command_buffer[:-1]
-                        # cbreak mode handles the visual backspace
-
-                elif char.isprintable():
-                    command_buffer += char
-                    # cbreak mode handles echoing the character
-
-            # Prevent busy-waiting
-            time.sleep(0.01)
-
-    finally:
-        # Restore terminal settings
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        print("\nExiting sequencer. Goodbye!")
-        seq.close_virtual_ports()
+    # Clean up before exiting
+    print("\nExiting sequencer. Goodbye!")
+    seq.close_virtual_ports()
 
 if __name__ == "__main__":
     main()

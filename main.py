@@ -29,6 +29,7 @@ Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
   addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
+  addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
   list                    - Shows all tracks in the current song.
@@ -100,6 +101,18 @@ def process_command(user_input, seq):
             seq.add_track(name=args[0], track_type='audio', filepath=args[1])
         else:
             print("Usage: addaudio <name> <filepath>")
+    elif command == "addcc":
+        if len(args) == 4:
+            try:
+                track_index = int(args[0])
+                position_str = args[1]
+                control = int(args[2])
+                value = int(args[3])
+                seq.add_cc_event(track_index, position_str, control, value)
+            except ValueError:
+                print("Error: Invalid number for track index, CC, or value.")
+        else:
+            print("Usage: addcc <track_index> <position> <cc_number> <value>")
     elif command == "load":
         if len(args) == 1:
             confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()

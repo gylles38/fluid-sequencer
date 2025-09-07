@@ -1,6 +1,6 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
-from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
+from .models import AnyTrack, AudioTrack, CCMessage, Event, MidiTrack, Note, Song
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
@@ -29,7 +29,7 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note)):
+        if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note, CCMessage)):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
             return d
@@ -50,6 +50,8 @@ def song_decoder(d):
             return Event(**d)
         elif type_name == 'Note':
             return Note(**d)
+        elif type_name == 'CCMessage':
+            return CCMessage(**d)
     return d
 
 
@@ -184,6 +186,45 @@ class Sequencer:
         self.song.tracks.pop(track_index)
         print(f"Track '{track_name}' deleted.")
         return True
+
+    def add_cc_event(self, track_index: int, position_str: str, control: int, value: int):
+        """Adds a CC event to a specific track at a given position."""
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: CC events can only be added to MIDI tracks.")
+            return
+
+        start_beat = self.parse_position_to_beats(position_str)
+        if start_beat is None:
+            return # Error is printed by parse_position_to_beats
+
+        try:
+            # Create the CC message, which will validate its own values
+            new_cc = CCMessage(control=control, value=value)
+        except ValueError as e:
+            print(f"Error: Invalid CC value. {e}")
+            return
+
+        # Check if an event already exists at this exact start time
+        existing_event = None
+        for event in track.events:
+            if math.isclose(event.start_time, start_beat):
+                existing_event = event
+                break
+
+        if existing_event:
+            # Add the CC message to the existing event
+            existing_event.cc_messages.append(new_cc)
+            print(f"Added CC to existing event at position {position_str} on track '{track.name}'.")
+        else:
+            # Create a new event with this CC message and add it to the track
+            new_event = Event(start_time=start_beat, cc_messages=[new_cc])
+            track.add_event(new_event) # add_event handles sorting
+            print(f"Added new CC event at position {position_str} on track '{track.name}'.")
 
     def erase_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -1396,13 +1437,19 @@ class Sequencer:
                     master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127))})
 
                     for event in track.events:
+                        start_tick = int(event.start_time * ticks_per_beat)
+
+                        # Process notes
                         for note in event.notes:
-                            start_tick = int(event.start_time * ticks_per_beat)
                             end_tick = start_tick + int(note.duration * ticks_per_beat)
                             scaled_velocity = int(note.velocity * track.velocity)
                             clamped_velocity = max(0, min(127, scaled_velocity))
                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=clamped_velocity)})
                             master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
+
+                        # Process CC messages
+                        for cc in event.cc_messages:
+                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
 
             # 2. Filter and normalize events based on playback range
             start_tick = int(start_beat * ticks_per_beat)

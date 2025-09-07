@@ -415,9 +415,9 @@ def main():
 
             elif char == ' ':
                 if seq.playback_state != "stopped":
-                    # If playing, spacebar is always a shortcut for pause
+                    # If playing, spacebar is always a shortcut for the pause command
                     print() # Move to a new line to not mess up the current command line
-                    seq.pause()
+                    process_command("pause", seq)
                     # After pausing, we clear the buffer to avoid sending a partial command
                     command_buffer = ""
                     print(f"> ", end="", flush=True)

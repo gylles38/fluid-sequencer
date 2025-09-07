@@ -492,7 +492,7 @@ def main():
 
     # Clean up before exiting
     print("\nExiting sequencer. Goodbye!")
-    seq.close_virtual_ports()
+    seq.close_all_open_ports()
 
 if __name__ == "__main__":
     main()

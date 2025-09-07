@@ -62,6 +62,7 @@ class Sequencer:
         self.playback_thread = None
         self.metronome_thread = None # Nouveau thread pour le métronome
         self.open_ports = {}
+        self.open_cc_ports = {}
         self.virtual_ports = []
         self.temporary_ports = []
         self._stop_event = threading.Event()
@@ -798,42 +799,43 @@ class Sequencer:
         print(f"Track '{target_track.name}' is now {status}.")
 
     def send_cc_message(self, port_name: str, channel: int, control: int, value: int):
-        """Sends a single MIDI Control Change message to a specified port."""
+        """
+        Sends a single MIDI Control Change message to a specified port.
+        This method manages a persistent dictionary of ports (`self.open_cc_ports`)
+        to avoid repeatedly opening and closing them, which can cause issues in
+        some MIDI environments (like ALSA -> JACK bridges).
+        """
         port = None
-        is_temp_port = False
         try:
-            # Check if the port is one of the open virtual ports
-            found_virtual = False
+            # Check if the port is a virtual port first. Virtual ports are managed separately.
             for vp in self.virtual_ports:
                 if vp.name == port_name:
                     port = vp
-                    found_virtual = True
                     break
 
-            # If not a virtual port, open it as a temporary hardware port
-            if not found_virtual:
-                port = open_output(port_name)
-                is_temp_port = True
-                # Add a small delay to allow the port connection to stabilize,
-                # especially for bridged setups like ALSA/JACK.
-                time.sleep(0.1)
+            # If it's not a virtual port, manage it in our persistent dictionary.
+            if port is None:
+                if port_name not in self.open_cc_ports:
+                    print(f"Opening persistent port for '{port_name}'...")
+                    self.open_cc_ports[port_name] = open_output(port_name)
+                port = self.open_cc_ports[port_name]
 
             if port:
-                # The channel from the user is 1-16, mido needs 0-15
                 msg = mido.Message('control_change', channel=channel - 1, control=control, value=value)
                 port.send(msg)
                 print(f"Sent CC message to '{port_name}': Ch={channel}, CC={control}, Val={value}")
-                return True # Indicate success
+                return True
             else:
+                # This case should be unlikely if mido.open_output raises an exception on failure
                 print(f"Error: Could not find or open port '{port_name}'.")
-                return False # Indicate failure
+                return False
 
         except Exception as e:
             print(f"Error sending CC message to port '{port_name}': {e}")
-            return False # Indicate failure
-        finally:
-            if is_temp_port and port and not port.closed:
-                port.close()
+            # If we failed to open the port, remove it from the dictionary if it was added
+            if port_name in self.open_cc_ports:
+                del self.open_cc_ports[port_name]
+            return False
 
     def prime_all_tracks(self):
         """Sends the current program/bank state for all assigned MIDI tracks."""
@@ -918,7 +920,7 @@ class Sequencer:
                 self.audio_player_command = self.DEFAULT_AUDIO_PLAYER_COMMAND
 
             # Restore virtual ports
-            self.close_virtual_ports()
+            self.close_all_open_ports()
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
@@ -992,11 +994,21 @@ class Sequencer:
         except Exception as e:
             print(f"Error creating virtual port: {e}")
 
-    def close_virtual_ports(self):
+    def close_all_open_ports(self):
+        """Closes all managed ports (virtual, cc) that are still open."""
+        print("Closing all open ports...")
         for port in self.virtual_ports:
             if not port.closed:
                 port.close()
-        print("Virtual ports closed.")
+        print(f"  - Closed {len(self.virtual_ports)} virtual port(s).")
+
+        for port_name, port in self.open_cc_ports.items():
+            if not port.closed:
+                port.close()
+                print(f"  - Closed persistent CC port: {port_name}")
+
+        # Also clear the dictionary
+        self.open_cc_ports.clear()
 
     def delete_virtual_port(self, name: str):
         port_to_delete = None

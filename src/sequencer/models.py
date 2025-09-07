@@ -17,10 +17,23 @@ class Note:
             raise ValueError("Duration must be positive.")
 
 @dataclass
+class CCMessage:
+    """Represents a single MIDI Control Change message."""
+    control: int  # CC number (0-127)
+    value: int    # CC value (0-127)
+
+    def __post_init__(self):
+        if not 0 <= self.control <= 127:
+            raise ValueError("Control number must be between 0 and 127.")
+        if not 0 <= self.value <= 127:
+            raise ValueError("Value must be between 0 and 127.")
+
+@dataclass
 class Event:
-    """Represents a musical event, which can contain multiple notes (e.g., a chord)."""
-    notes: List[Note]
+    """Represents a musical event, which can contain multiple notes (e.g., a chord) and CC messages."""
     start_time: float  # Start time in beats from the beginning of the track
+    notes: List[Note] = field(default_factory=list)
+    cc_messages: List[CCMessage] = field(default_factory=list)
 
     def __post_init__(self):
         if self.start_time < 0:

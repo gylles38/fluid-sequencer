@@ -38,15 +38,33 @@ def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
 
         # --- Convert absolute time events to delta time MIDI messages ---
 
-        # 1. Create a flat list of all note on/off events with absolute times in ticks
+        # 1. Create a flat list of all MIDI messages with absolute times in ticks
         all_midi_events = []
         for event in track.events:
-            for note in event.notes:
-                start_tick = int(event.start_time * ticks_per_beat)
-                end_tick = start_tick + int(note.duration * ticks_per_beat)
+            start_tick = int(event.start_time * ticks_per_beat)
 
-                all_midi_events.append({'tick': start_tick, 'type': 'note_on', 'pitch': note.pitch, 'velocity': note.velocity})
-                all_midi_events.append({'tick': end_tick, 'type': 'note_off', 'pitch': note.pitch, 'velocity': note.velocity})
+            # Add CC messages for this event
+            for cc in event.cc_messages:
+                all_midi_events.append({
+                    'tick': start_tick,
+                    'msg': mido.Message('control_change', channel=channel, control=cc.control, value=cc.value)
+                })
+
+            # Add note messages for this event
+            for note in event.notes:
+                end_tick = start_tick + int(note.duration * ticks_per_beat)
+                # Apply track velocity multiplier and clamp
+                final_velocity = int(note.velocity * track.velocity)
+                final_velocity = max(0, min(127, final_velocity))
+
+                all_midi_events.append({
+                    'tick': start_tick,
+                    'msg': mido.Message('note_on', channel=channel, note=note.pitch, velocity=final_velocity)
+                })
+                all_midi_events.append({
+                    'tick': end_tick,
+                    'msg': mido.Message('note_off', channel=channel, note=note.pitch, velocity=0)
+                })
 
         # 2. Sort events by tick time
         all_midi_events.sort(key=lambda e: e['tick'])
@@ -55,13 +73,8 @@ def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
         last_tick = 0
         for event in all_midi_events:
             delta_ticks = event['tick'] - last_tick
-            midi_track.append(mido.Message(
-                event['type'],
-                channel=channel,
-                note=event['pitch'],
-                velocity=event['velocity'],
-                time=delta_ticks
-            ))
+            event['msg'].time = delta_ticks
+            midi_track.append(event['msg'])
             last_tick = event['tick']
 
     mid.save(filename)

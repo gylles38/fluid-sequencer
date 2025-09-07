@@ -345,25 +345,22 @@ def process_command(user_input, seq):
             print("Usage: cc (command is interactive)")
             return True
 
-        hardware_ports = mido.get_output_names() # type: ignore
         virtual_port_names = [vp.name for vp in seq.virtual_ports]
-        all_outputs = hardware_ports + virtual_port_names
-
-        if not all_outputs:
-            print("No MIDI output ports available.")
+        if not virtual_port_names:
+            print("No virtual MIDI ports available. Create one with 'vport <name>'.")
             return True
 
-        print("Available output ports:")
-        for i, name in enumerate(all_outputs):
+        print("Available virtual ports:")
+        for i, name in enumerate(virtual_port_names):
             print(f"  [{i}] {name}")
 
         try:
-            port_index_str = input("Choose a port to send the CC message to: ")
+            port_index_str = input("Choose a virtual port to send the CC message to: ")
             port_index = int(port_index_str)
-            if not 0 <= port_index < len(all_outputs):
+            if not 0 <= port_index < len(virtual_port_names):
                 print("Error: Invalid port index.")
                 return True
-            port_name = all_outputs[port_index]
+            port_name = virtual_port_names[port_index]
 
             channel_str = input("Enter MIDI channel (1-16): ")
             channel = int(channel_str)
@@ -383,7 +380,6 @@ def process_command(user_input, seq):
                 print("Error: CC value must be between 0 and 127.")
                 return True
 
-            # The sequencer method will handle channel conversion (1-16 -> 0-15)
             seq.send_cc_message(port_name, channel, control, value)
 
         except (ValueError, IndexError):
@@ -492,7 +488,7 @@ def main():
 
     # Clean up before exiting
     print("\nExiting sequencer. Goodbye!")
-    seq.close_all_open_ports()
+    seq.close_virtual_ports()
 
 if __name__ == "__main__":
     main()

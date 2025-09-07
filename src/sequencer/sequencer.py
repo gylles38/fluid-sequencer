@@ -4,7 +4,6 @@ from .models import AnyTrack, AudioTrack, Event, MidiTrack, Note, Song
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
-import re
 import math
 import mido
 from mido import get_input_names, get_output_names, open_output # type: ignore
@@ -802,35 +801,28 @@ class Sequencer:
         """Sends a single MIDI Control Change message to a specified port."""
         port = None
         is_temp_port = False
-        port_to_open = port_name
-
         try:
-            # For ALSA ports, the name can be 'Client Name:Port Name client:port'.
-            # It's more reliable to connect directly to the 'client:port' address.
-            match = re.search(r'(\d+:\d+)$', port_name)
-            if match:
-                port_to_open = match.group(1)
-                print(f"Found ALSA port ID: {port_to_open}")
-
-
             # Check if the port is one of the open virtual ports
             found_virtual = False
             for vp in self.virtual_ports:
-                if vp.name == port_name: # Match against the full, original name
+                if vp.name == port_name:
                     port = vp
                     found_virtual = True
                     break
 
             # If not a virtual port, open it as a temporary hardware port
             if not found_virtual:
-                port = open_output(port_to_open)
+                port = open_output(port_name)
                 is_temp_port = True
+                # Add a small delay to allow the port connection to stabilize,
+                # especially for bridged setups like ALSA/JACK.
+                time.sleep(0.1)
 
             if port:
                 # The channel from the user is 1-16, mido needs 0-15
                 msg = mido.Message('control_change', channel=channel - 1, control=control, value=value)
                 port.send(msg)
-                print(f"Sent CC message to '{port_name}' (via '{port_to_open}'): Ch={channel}, CC={control}, Val={value}")
+                print(f"Sent CC message to '{port_name}': Ch={channel}, CC={control}, Val={value}")
                 return True # Indicate success
             else:
                 print(f"Error: Could not find or open port '{port_name}'.")

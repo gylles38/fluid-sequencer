@@ -414,15 +414,14 @@ def main():
                 break
 
             elif char == ' ':
-                if seq.playback_state != "stopped":
-                    # If playing, spacebar is always a shortcut for the pause command
+                if seq.playback_state != "stopped" and not command_buffer:
+                    # If playing and command buffer is empty, spacebar is a shortcut for pause
                     print() # Move to a new line to not mess up the current command line
                     process_command("pause", seq)
-                    # After pausing, we clear the buffer to avoid sending a partial command
-                    command_buffer = ""
+                    command_buffer = "" # Clear buffer after pausing
                     print(f"> ", end="", flush=True)
                 else:
-                    # Otherwise, it's a normal character
+                    # Otherwise, it's a normal character (part of a command)
                     command_buffer += ' '
                     print(' ', end="", flush=True)
                 continue

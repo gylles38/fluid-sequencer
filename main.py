@@ -470,7 +470,7 @@ def main():
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
-        tty.setraw(sys.stdin.fileno())
+        tty.setcbreak(sys.stdin.fileno())
 
         command_buffer = ""
         prompt_printed = False
@@ -478,7 +478,7 @@ def main():
         while True:
             # Print prompt if necessary
             if seq.playback_state == "stopped" and not prompt_printed:
-                print("\r> ", end="", flush=True)
+                print("> ", end="", flush=True)
                 prompt_printed = True
 
             char = get_char_non_blocking()
@@ -510,7 +510,7 @@ def main():
                     continue
 
                 elif char in ('\r', '\n'):
-                    print("\r\n", end="", flush=True)  # Move to the next line
+                    print() # cbreak mode handles the newline correctly
                     if not process_command(command_buffer, seq):
                         break # Exit if process_command returns False (for 'quit')
                     command_buffer = ""
@@ -519,12 +519,11 @@ def main():
                 elif char in ('\x7f', '\b'): # Handle backspace
                     if len(command_buffer) > 0:
                         command_buffer = command_buffer[:-1]
-                        # Erase character on screen
-                        print("\b \b", end="", flush=True)
+                        # cbreak mode handles the visual backspace
 
                 elif char.isprintable():
                     command_buffer += char
-                    print(char, end="", flush=True)
+                    # cbreak mode handles echoing the character
 
             # Prevent busy-waiting
             time.sleep(0.01)

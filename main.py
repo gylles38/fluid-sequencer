@@ -7,20 +7,17 @@ import time
 try:
     # Windows
     import msvcrt
-    def get_char():
-        return msvcrt.getch().decode('utf-8')
+    def get_char_non_blocking():
+        if msvcrt.kbhit():
+            return msvcrt.getch().decode('utf-8')
+        return None
 except ImportError:
     # POSIX (Linux, macOS)
-    import tty, termios
-    def get_char():
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(sys.stdin.fileno())
-            ch = sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
+    import tty, termios, select
+    def get_char_non_blocking():
+        if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+            return sys.stdin.read(1)
+        return None
 
 def print_help():
     """Prints the help message with available commands."""
@@ -469,64 +466,74 @@ def main():
     seq = Sequencer()
     print_help()
 
-    command_buffer = ""
-    print("> ", end="", flush=True)
+    # Set up terminal for raw, non-blocking input
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
 
-    while True:
-        try:
-            char = get_char()
+        command_buffer = ""
+        prompt_printed = False
 
-            # Handle Ctrl+C or Ctrl+D for exit
-            if char in ('\x03', '\x04'):
-                if seq.playback_state != "stopped":
-                    print("\nStopping playback before exiting...")
-                    seq.stop()
-                break
+        while True:
+            # Print prompt if necessary
+            if seq.playback_state == "stopped" and not prompt_printed:
+                print("\r> ", end="", flush=True)
+                prompt_printed = True
 
-            elif char == ' ':
-                if seq.playback_state != "stopped":
-                    # If playing, spacebar is a shortcut for pause
-                    print("\r" + " " * (len(command_buffer) + 2) + "\r", end="")
-                    print("> Pausing...", end="", flush=True)
-                    seq.pause()
-                    time.sleep(0.5)
-                    print("\r" + " " * (len("> Pausing...") + 2) + "\r", end="")
-                    print(f"> {command_buffer}", end="", flush=True)
-                else:
-                    # Otherwise, it's a normal character
-                    command_buffer += ' '
-                    print(' ', end="", flush=True)
-                continue
+            char = get_char_non_blocking()
 
-            elif char in ('\r', '\n'):
-                print()  # Move to the next line
-                if not process_command(command_buffer, seq):
-                    break # Exit if process_command returns False (for 'quit')
-                command_buffer = ""
-                if seq.playback_state == "stopped":
-                    print("> ", end="", flush=True)
+            if char:
+                # A character was typed, so we will need a new prompt
+                prompt_printed = False
 
-            elif char in ('\x7f', '\b'): # Handle backspace
-                if len(command_buffer) > 0:
-                    command_buffer = command_buffer[:-1]
-                    print("\b \b", end="", flush=True) # Erase character on screen
+                # Handle Ctrl+C or Ctrl+D for exit
+                if char in ('\x03', '\x04'):
+                    if seq.playback_state != "stopped":
+                        print("\nStopping playback before exiting...")
+                        seq.stop()
+                    break
 
-            elif char.isprintable():
-                command_buffer += char
-                print(char, end="", flush=True)
+                elif char == ' ':
+                    if seq.playback_state != "stopped":
+                        # If playing, spacebar is a shortcut for pause
+                        print("\r" + " " * 50 + "\r", end="") # Clear line
+                        print("> Pausing...", end="", flush=True)
+                        seq.pause()
+                        time.sleep(0.5)
+                        print("\r" + " " * 50 + "\r", end="") # Clear line
+                        # Don't print a prompt, playback is still active
+                    else:
+                        # Otherwise, it's a normal character
+                        command_buffer += ' '
+                        print(' ', end="", flush=True)
+                    continue
 
-        except (ValueError, IndexError) as e:
-            print(f"\nError: Invalid argument. Please check your input. ({e})")
-            command_buffer = ""
-            print(f"> {command_buffer}", end="", flush=True)
-        except Exception as e:
-            print(f"\nAn unexpected error occurred: {e}")
-            command_buffer = ""
-            print(f"> {command_buffer}", end="", flush=True)
+                elif char in ('\r', '\n'):
+                    print("\r\n", end="", flush=True)  # Move to the next line
+                    if not process_command(command_buffer, seq):
+                        break # Exit if process_command returns False (for 'quit')
+                    command_buffer = ""
+                    # New prompt will be printed by the loop condition
 
-    # Clean up before exiting
-    print("\nExiting sequencer. Goodbye!")
-    seq.close_virtual_ports()
+                elif char in ('\x7f', '\b'): # Handle backspace
+                    if len(command_buffer) > 0:
+                        command_buffer = command_buffer[:-1]
+                        # Erase character on screen
+                        print("\b \b", end="", flush=True)
+
+                elif char.isprintable():
+                    command_buffer += char
+                    print(char, end="", flush=True)
+
+            # Prevent busy-waiting
+            time.sleep(0.01)
+
+    finally:
+        # Restore terminal settings
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        print("\nExiting sequencer. Goodbye!")
+        seq.close_virtual_ports()
 
 if __name__ == "__main__":
     main()

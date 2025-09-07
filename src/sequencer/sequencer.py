@@ -62,7 +62,7 @@ class Sequencer:
         self.song = Song(name="New Song", tempo=tempo)
         self.playback_state = "stopped"
         self.playback_thread = None
-        self.metronome_thread = None # Nouveau thread pour le métronome
+        self.metronome_thread = None # New thread for the metronome
         self.open_ports = {}
         self.virtual_ports = []
         self.temporary_ports = []
@@ -1807,3 +1807,47 @@ class Sequencer:
             self.stop()
         # Explicitly play from the beginning (beat 0)
         self.play(start_beat=0.0)
+
+    def send_cc_message(self, port_name: str, channel: int, control: int, value: int):
+        """Sends a single CC message to a specified port."""
+        port = self.open_ports.get(port_name)
+
+        # Check if the port is a virtual port that is already open
+        if not port:
+            vp = next((p for p in self.virtual_ports if p.name == port_name), None)
+            if vp:
+                port = vp
+
+        is_temp_port = False
+        if not port:
+            try:
+                # If not found in open or virtual ports, try to open it as a hardware port
+                port = open_output(port_name)
+                is_temp_port = True
+            except Exception as e:
+                print(f"Error: Could not open MIDI port '{port_name}': {e}")
+                return
+
+        if port:
+            try:
+                if not 0 <= channel <= 15:
+                    print("Error: Channel must be between 0 and 15.")
+                    return
+                if not 0 <= control <= 127:
+                    print("Error: CC number must be between 0 and 127.")
+                    return
+                if not 0 <= value <= 127:
+                    print("Error: CC value must be between 0 and 127.")
+                    return
+
+                msg = mido.Message('control_change', channel=channel, control=control, value=value)
+                port.send(msg)
+                # Add a small delay to ensure the message is sent, especially for temporary ports.
+                time.sleep(0.01)
+                print(f"Sent CC message to {port_name}: Ch={channel+1}, CC={control}, Val={value}")
+
+            except Exception as e:
+                print(f"Error sending CC message: {e}")
+            finally:
+                if is_temp_port and port:
+                    port.close()

@@ -60,6 +60,7 @@ Sequencer CLI Commands:
   save <filepath>         - Saves only the song to a MIDI file.
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
+  cc                      - Sends a single MIDI CC message to a port.
   play [start] [end]      - Plays the song. Start/end positions are in 'measure:beat'.
   loop [start] [end]      - Loops a section of the song. Start/end positions are in 'measure:beat'.
   pause                   - Pauses or resumes playback.
@@ -380,6 +381,41 @@ def process_command(user_input, seq):
             print("Usage: saveproject <basename>")
     elif command == "prime":
         seq.prime_all_tracks()
+    elif command == "cc":
+        try:
+            hardware_ports = mido.get_output_names()
+            virtual_port_names = [vp.name for vp in seq.virtual_ports]
+            all_outputs = hardware_ports + virtual_port_names
+
+            if not all_outputs:
+                print("No output ports available.")
+                return True
+
+            print("Available output ports:")
+            for i, name in enumerate(all_outputs):
+                print(f"  [{i}] {name}")
+
+            port_idx_str = input("Choose a port to send to: ").strip()
+            port_idx = int(port_idx_str)
+            if not 0 <= port_idx < len(all_outputs):
+                print("Error: Invalid port index.")
+                return True
+            port_name = all_outputs[port_idx]
+
+            channel_str = input("Enter MIDI channel (1-16): ").strip()
+            channel = int(channel_str) - 1 # To 0-indexed
+
+            control_str = input("Enter CC number (0-127): ").strip()
+            control = int(control_str)
+
+            value_str = input("Enter CC value (0-127): ").strip()
+            value = int(value_str)
+
+            seq.send_cc_message(port_name, channel, control, value)
+
+        except (ValueError, IndexError):
+            print("Error: Invalid input.")
+
     elif command == "play" or command == "loop":
         try:
             if len(args) > 2:

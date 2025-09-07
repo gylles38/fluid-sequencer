@@ -94,7 +94,7 @@ class Sequencer:
             if port and not port.closed:
                 for channel in range(16):
                     port.send(mido.Message('control_change', channel=channel, control=123, value=0))
-        print("Sent all notes off to all open ports.")
+        # print("Sent all notes off to all open ports.")
 
     def parse_position_to_beats(self, position_str: str, default: str = "1:1") -> Optional[float]:
         """Parses a 'measure:beat' string into a float representing the absolute beat count."""
@@ -1634,6 +1634,7 @@ class Sequencer:
                 print(f"\nError during playback: {e}")
         finally:
             # This is the single point of truth for all cleanup
+            print() # Ensures we move to a new line after the progress indicator
             self._shutdown_audio_processes()
             self._all_notes_off()
             for port in self.temporary_ports:
@@ -1643,7 +1644,7 @@ class Sequencer:
             self.open_ports.clear()
             self.playback_state = "stopped"
             if not self._stop_event.is_set():
-                print("\nPlayback finished.")
+                print("Playback finished.")
                 if self.is_recording:
                     self.stop()
                 

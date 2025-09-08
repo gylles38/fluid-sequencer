@@ -1657,10 +1657,10 @@ class Sequencer:
 
 
         param_map = {
-            "volume": {"type": "midi_cc", "control": 7},
+            "vol": {"type": "midi_cc", "control": 7},
             "pan": {"type": "midi_cc", "control": 10},
-            "velocity": {"type": "velocity_multiplier"},
-            "program": {"type": "program_change"},
+            "vel": {"type": "velocity_multiplier"},
+            "prog": {"type": "program_change"},
             # Generic CCs like "cc1", "cc11", etc.
             **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}
         }

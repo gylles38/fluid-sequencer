@@ -104,12 +104,12 @@ class TestModels(unittest.TestCase):
     def test_automation_point_validation(self):
         """Tests validation for the AutomationPoint dataclass."""
         # Valid points
-        AutomationPoint(start_time=0, parameter="volume", value=0.5, curve="step")
+        AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="step")
         AutomationPoint(start_time=1.0, parameter="pan", value=-0.5, curve="linear")
 
         # Invalid start_time
         with self.assertRaises(ValueError):
-            AutomationPoint(start_time=-1, parameter="volume", value=0.5)
+            AutomationPoint(start_time=-1, parameter="vol", value=0.5)
 
         # Invalid parameter
         with self.assertRaises(ValueError):
@@ -117,14 +117,14 @@ class TestModels(unittest.TestCase):
 
         # Invalid curve
         with self.assertRaises(ValueError):
-            AutomationPoint(start_time=0, parameter="volume", value=0.5, curve="invalid_curve")
+            AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="invalid_curve")
 
     def test_automation_track_add_point(self):
         """Tests that AutomationTrack.add_point keeps the points list sorted."""
         track = AutomationTrack(name="Auto Track", target_track_index=0)
-        point1 = AutomationPoint(start_time=4.0, parameter="volume", value=0.8)
-        point2 = AutomationPoint(start_time=0.0, parameter="volume", value=0.1)
-        point3 = AutomationPoint(start_time=2.0, parameter="volume", value=0.5)
+        point1 = AutomationPoint(start_time=4.0, parameter="vol", value=0.8)
+        point2 = AutomationPoint(start_time=0.0, parameter="vol", value=0.1)
+        point3 = AutomationPoint(start_time=2.0, parameter="vol", value=0.5)
 
         track.add_point(point1)
         track.add_point(point2)

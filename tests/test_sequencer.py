@@ -170,19 +170,19 @@ class TestSequencer(unittest.TestCase):
         self.sequencer.add_track(name="MIDI 1", track_type='midi')
         self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
 
-        self.sequencer.add_automation_point(track_index=1, position_str="1:1", parameter="volume", value=0.5, curve="linear")
+        self.sequencer.add_automation_point(track_index=1, position_str="1:1", parameter="vol", value=0.5, curve="linear")
 
         auto_track = self.sequencer.song.tracks[1]
         self.assertEqual(len(auto_track.points), 1)
         point = auto_track.points[0]
         self.assertEqual(point.start_time, 0.0)
-        self.assertEqual(point.parameter, "volume")
+        self.assertEqual(point.parameter, "vol")
         self.assertEqual(point.value, 0.5)
         self.assertEqual(point.curve, "linear")
-        mock_print.assert_called_with("Added 'volume' automation point to track 'Volume Automation' at position 1:1.")
+        mock_print.assert_called_with("Added 'vol' automation point to track 'Volume Automation' at position 1:1.")
 
         # Test adding to a non-automation track
-        self.sequencer.add_automation_point(track_index=0, position_str="1:1", parameter="volume", value=0.5, curve="step")
+        self.sequencer.add_automation_point(track_index=0, position_str="1:1", parameter="vol", value=0.5, curve="step")
         mock_print.assert_called_with("Error: Automation points can only be added to automation tracks.")
 
     @patch('src.sequencer.sequencer.open_output')
@@ -195,8 +195,8 @@ class TestSequencer(unittest.TestCase):
         self.sequencer.song.tracks[0].output_port_name = 'test_port'
         self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
 
-        self.sequencer.add_automation_point(track_index=1, position_str="1:1", parameter="volume", value=0.5, curve="linear")
-        self.sequencer.add_automation_point(track_index=1, position_str="1:2", parameter="volume", value=1.0, curve="step")
+        self.sequencer.add_automation_point(track_index=1, position_str="1:1", parameter="vol", value=0.5, curve="linear")
+        self.sequencer.add_automation_point(track_index=1, position_str="1:2", parameter="vol", value=1.0, curve="step")
 
         note = Note(pitch=60, velocity=127, duration=4.0)
         event = Event(start_time=0.0, notes=[note])

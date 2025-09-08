@@ -12,8 +12,8 @@ class TestAutomation(unittest.TestCase):
     def test_generate_step_automation(self):
         """Test generation of 'step' automation events."""
         auto_track = AutomationTrack(name="Step", target_track_index=0)
-        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="volume", value=0.5, curve="step"))
-        auto_track.add_point(AutomationPoint(start_time=1.0, parameter="volume", value=1.0, curve="step"))
+        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="vol", value=0.5, curve="step"))
+        auto_track.add_point(AutomationPoint(start_time=1.0, parameter="vol", value=1.0, curve="step"))
 
         events = self.sequencer._generate_automation_events(auto_track)
 
@@ -58,7 +58,7 @@ class TestAutomation(unittest.TestCase):
     def test_generate_multi_parameter_automation(self):
         """Test automation with multiple different parameters on the same track."""
         auto_track = AutomationTrack(name="Multi", target_track_index=0)
-        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="volume", value=0.5, curve="step"))
+        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="vol", value=0.5, curve="step"))
         auto_track.add_point(AutomationPoint(start_time=0.5, parameter="pan", value=1.0, curve="step"))
 
         events = self.sequencer._generate_automation_events(auto_track)

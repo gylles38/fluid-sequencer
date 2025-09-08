@@ -217,9 +217,9 @@ L'automation permet de faire évoluer un paramètre (comme le volume, le pan, et
 3.  **Créez les points d'automation :**
     *   Nous allons créer un fondu qui commence à la mesure 1 et se termine à la mesure 3.
     *   **Point de départ :** volume à 0 au début de la mesure 1. On utilise une courbe `linear` pour indiquer que la valeur doit progresser vers le point suivant.
-        *   `> addap 1 1:1 volume 0.0 linear`
+        *   `> addap 1 1:1 vol 0.0 linear`
     *   **Point d'arrivée :** volume à 1 (maximum) au début de la mesure 3. La courbe `step` est utilisée ici car c'est la fin de notre rampe.
-        *   `> addap 1 3:1 volume 1.0 step`
+        *   `> addap 1 3:1 vol 1.0 step`
 
 4.  **Jouez la piste :**
     *   `> play`

@@ -30,7 +30,7 @@ Sequencer CLI Commands:
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
   addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
   addauto <name> <target_idx> - Adds an automation track targeting another track.
-  addap <track> <pos> <param> <val> [curve] - Adds an automation point (curve: step, linear).
+  addap <track> <pos> <p> <val> [curve] - Adds an automation point (p: vol,pan,vel,prog,ccX).
   addprog <track> <pos> <prog> - Adds a Program Change event to a track at a 'measure:beat' position.
   addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.

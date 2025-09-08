@@ -325,25 +325,65 @@ class Sequencer:
             print("Error: Invalid number format.")
             return
 
+        # --- Get what to erase ---
+        erase_choice = "all"
+        erase_options = {
+            "a": "all",
+            "n": "notes",
+            "c": "cc",
+            "p": "program",
+        }
+        while True:
+            choice_str = input(
+                "What do you want to erase? (a)ll, (n)otes, (c)c, (p)rogram changes: "
+            ).lower()
+            if choice_str in erase_options:
+                erase_choice = erase_options[choice_str]
+                break
+            else:
+                print("Invalid choice. Please try again.")
+
         # --- Confirmation ---
-        end_str_display = f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
-        confirm_message = f"Erase events from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
-        if input(confirm_message).lower() != 'y':
+        end_str_display = (
+            f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
+        )
+        confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
+        if input(confirm_message).lower() != "y":
             print("Erase cancelled.")
             return
 
-        # --- Partition events ---
+        # --- Partition and process events ---
         events_to_keep = []
         events_to_shift = []
-        removed_count = 0
+        modified_count = 0
 
         for event in track.events:
             if event.start_time < start_beat:
                 events_to_keep.append(event)
             elif event.start_time >= end_beat:
                 events_to_shift.append(event)
-            else: # event.start_time >= start_beat and event.start_time < end_beat
-                removed_count += 1
+            else:  # This event is within the erase range
+                event_modified = False
+                if erase_choice == "all" or erase_choice == "notes":
+                    if event.notes:
+                        event.notes.clear()
+                        event_modified = True
+                if erase_choice == "all" or erase_choice == "cc":
+                    if event.cc_messages:
+                        event.cc_messages.clear()
+                        event_modified = True
+                if erase_choice == "all" or erase_choice == "program":
+                    if event.program_change_messages:
+                        event.program_change_messages.clear()
+                        event_modified = True
+
+                # If the event is now empty, don't keep it. Otherwise, keep the modified event.
+                is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
+                if not is_empty:
+                    events_to_keep.append(event)
+
+                if event_modified:
+                    modified_count += 1
 
         # --- Handle shifting ---
         final_events = events_to_keep
@@ -364,15 +404,15 @@ class Sequencer:
         track.events.sort(key=lambda e: e.start_time) # Keep it sorted
 
         # --- Report results ---
-        report = [f"Erased {removed_count} event(s)"]
+        report = [f"Modified {modified_count} event(s)"]
         if shift_confirmed:
             report.append(f"shifted {len(events_to_shift)} event(s)")
 
-        if removed_count > 0 or shift_confirmed:
+        if modified_count > 0 or shift_confirmed:
              self.is_dirty = True
              print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
         else:
-             print("No events were erased or shifted.")
+             print("No events were modified or shifted.")
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):

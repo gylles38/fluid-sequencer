@@ -1,8 +1,17 @@
 import unittest
 from unittest.mock import patch, MagicMock, mock_open, call
 from src.sequencer.sequencer import Sequencer
-from src.sequencer.models import Song, MidiTrack, AudioTrack, Note, Event, CCMessage
+from src.sequencer.models import (
+    Song,
+    MidiTrack,
+    AudioTrack,
+    Note,
+    Event,
+    CCMessage,
+    ProgramChangeMessage,
+)
 import json
+
 
 class TestSequencer(unittest.TestCase):
 
@@ -164,6 +173,92 @@ class TestSequencer(unittest.TestCase):
         self.assertEqual(new_sequencer.song.tempo, 99)
         self.assertEqual(len(new_sequencer.song.tracks), 1)
         self.assertEqual(new_sequencer.song.tracks[0].name, "Test MIDI")
+
+
+class TestSequencerErase(unittest.TestCase):
+    def setUp(self):
+        """Set up a sequencer with a populated track for erase tests."""
+        self.sequencer = Sequencer()
+        self.sequencer.add_track(name="MIDI", track_type="midi")
+        track = self.sequencer.song.tracks[0]
+        track.add_event(
+            Event(
+                start_time=0.0,
+                notes=[Note(pitch=60, duration=1)],
+                cc_messages=[CCMessage(control=7, value=100)],
+                program_change_messages=[ProgramChangeMessage(program=1)],
+            )
+        )
+        track.add_event(
+            Event(
+                start_time=2.0,
+                notes=[Note(pitch=62, duration=1)],
+                cc_messages=[CCMessage(control=10, value=120)],
+            )
+        )
+        track.add_event(Event(start_time=4.0, notes=[Note(pitch=64, duration=1)]))
+
+    @patch("builtins.input", side_effect=["1:1", "2:1", "n", "y", "n"])
+    @patch("builtins.print")
+    def test_erase_only_notes(self, mock_print, mock_input):
+        """Test erasing only notes within a range."""
+        self.sequencer.erase_track(0)
+        track = self.sequencer.song.tracks[0]
+
+        # Event at 0.0 should have notes removed, but other messages remain
+        self.assertEqual(len(track.events), 3)
+        self.assertEqual(track.events[0].start_time, 0.0)
+        self.assertEqual(len(track.events[0].notes), 0)
+        self.assertEqual(len(track.events[0].cc_messages), 1)
+        self.assertEqual(len(track.events[0].program_change_messages), 1)
+
+        # Event at 2.0 has its notes removed and becomes empty, so it's deleted.
+        # This is incorrect, the original test had a bug. Let's fix the check.
+        # Event at 2.0 should have notes removed, but other messages remain
+        self.assertEqual(track.events[1].start_time, 2.0)
+        self.assertEqual(len(track.events[1].notes), 0)
+        self.assertEqual(len(track.events[1].cc_messages), 1)
+
+        # Event at 4.0 is outside the range [0, 4), should be untouched
+        self.assertEqual(track.events[2].start_time, 4.0)
+        self.assertEqual(len(track.events[2].notes), 1)
+
+        mock_print.assert_any_call(
+            "Operation complete: Modified 2 event(s) from track 'MIDI'."
+        )
+
+    @patch("builtins.input", side_effect=["1:1", "5:1", "c", "y", "n"])
+    @patch("builtins.print")
+    def test_erase_only_cc(self, mock_print, mock_input):
+        """Test erasing only CC messages, leaving an empty event that gets removed."""
+        self.sequencer.erase_track(0)
+        track = self.sequencer.song.tracks[0]
+
+        # Event at 0.0 should have CCs removed, but other messages remain
+        self.assertEqual(len(track.events), 3)
+        self.assertEqual(track.events[0].start_time, 0.0)
+        self.assertEqual(len(track.events[0].notes), 1)
+        self.assertEqual(len(track.events[0].cc_messages), 0)
+
+        # Event at 2.0 should have CCs removed, but other messages remain
+        self.assertEqual(track.events[1].start_time, 2.0)
+        self.assertEqual(len(track.events[1].notes), 1)
+        self.assertEqual(len(track.events[1].cc_messages), 0)
+
+    @patch("builtins.input", side_effect=["1:1", "1:3", "a", "y", "n"])
+    @patch("builtins.print")
+    def test_erase_all_removes_event(self, mock_print, mock_input):
+        """Test that erasing 'all' removes the entire event."""
+        self.sequencer.erase_track(0)
+        track = self.sequencer.song.tracks[0]
+
+        # The event at 0.0 should be completely gone, events at 2.0 and 4.0 remain
+        self.assertEqual(len(track.events), 2)
+        self.assertEqual(track.events[0].start_time, 2.0)
+        self.assertEqual(track.events[1].start_time, 4.0)
+        mock_print.assert_any_call(
+            "Operation complete: Modified 1 event(s) from track 'MIDI'."
+        )
 
 
 if __name__ == '__main__':

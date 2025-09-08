@@ -30,7 +30,7 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note, CCMessage)):
+        if isinstance(o, (Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, ProgramChangeMessage, AutomationPoint)):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
             return d
@@ -47,12 +47,18 @@ def song_decoder(d):
             return MidiTrack(**d)
         elif type_name == 'AudioTrack':
             return AudioTrack(**d)
+        elif type_name == 'AutomationTrack':
+            return AutomationTrack(**d)
         elif type_name == 'Event':
             return Event(**d)
         elif type_name == 'Note':
             return Note(**d)
         elif type_name == 'CCMessage':
             return CCMessage(**d)
+        elif type_name == 'ProgramChangeMessage':
+            return ProgramChangeMessage(**d)
+        elif type_name == 'AutomationPoint':
+            return AutomationPoint(**d)
     return d
 
 

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock, mock_open, call
 from src.sequencer.sequencer import Sequencer
-from src.sequencer.models import Song, MidiTrack, AudioTrack, Note, Event, CCMessage, AutomationTrack
+from src.sequencer.models import Song, MidiTrack, AudioTrack, Note, Event, CCMessage, AutomationTrack, AutomationPoint
 import json
 import mido
 
@@ -265,6 +265,35 @@ class TestSequencer(unittest.TestCase):
         self.assertEqual(len(track.events[0].notes), 0)
         self.assertEqual(len(track.events[0].cc_messages), 1)
         self.assertEqual(track.events[0].cc_messages[0].control, 7)
+
+    @patch('builtins.input', side_effect=['1:1', '', 'vol', 'y'])
+    def test_erase_automation_track_specific_param(self, mock_input):
+        """Test erasing a specific parameter from an automation track."""
+        self.sequencer.add_track(name="Target", track_type='midi')
+        self.sequencer.add_automation_track(name="Auto", target_track_index=0)
+        auto_track = self.sequencer.song.tracks[1]
+        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="vol", value=0.5))
+        auto_track.add_point(AutomationPoint(start_time=1.0, parameter="pan", value=-0.5))
+        auto_track.add_point(AutomationPoint(start_time=2.0, parameter="vol", value=1.0))
+
+        self.sequencer.erase_track(1)
+
+        self.assertEqual(len(auto_track.points), 1)
+        self.assertEqual(auto_track.points[0].parameter, "pan")
+
+    @patch('builtins.input', side_effect=['1:1', '5:1', 'all', 'y'])
+    def test_erase_automation_track_all_params_in_range(self, mock_input):
+        """Test erasing all parameters from an automation track in a range."""
+        self.sequencer.add_track(name="Target", track_type='midi')
+        self.sequencer.add_automation_track(name="Auto", target_track_index=0)
+        auto_track = self.sequencer.song.tracks[1]
+        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="vol", value=0.5))
+        auto_track.add_point(AutomationPoint(start_time=1.0, parameter="pan", value=-0.5))
+        auto_track.add_point(AutomationPoint(start_time=5.0, parameter="vol", value=1.0)) # This one is outside the erase range
+
+        self.sequencer.erase_track(1)
+
+        self.assertEqual(len(auto_track.points), 0)
 
 
 if __name__ == '__main__':

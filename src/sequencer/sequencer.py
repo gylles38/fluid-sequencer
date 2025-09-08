@@ -332,11 +332,11 @@ class Sequencer:
             print("Error: Invalid track index.")
             return
         track = self.song.tracks[track_index]
-        if not isinstance(track, MidiTrack):
-            print("Error: Erasing events is only supported for MIDI tracks.")
+
+        if not isinstance(track, (MidiTrack, AutomationTrack)):
+            print("Error: Erasing is only supported for MIDI and Automation tracks.")
             return
 
-        # --- Get range from user ---
         try:
             start_pos_str = input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
@@ -352,100 +352,147 @@ class Sequencer:
             if end_beat <= start_beat:
                 print("Error: End position must be after the start position.")
                 return
-
         except ValueError:
             print("Error: Invalid number format.")
             return
 
-        # --- Get what to erase ---
-        erase_choice = "all"
-        erase_options = {
-            "a": "all",
-            "n": "notes",
-            "c": "cc",
-            "p": "program",
-        }
-        while True:
-            choice_str = input(
-                "What do you want to erase? (a)ll, (n)otes, (c)c, (p)rogram changes: "
-            ).lower()
-            if choice_str in erase_options:
-                erase_choice = erase_options[choice_str]
-                break
-            else:
-                print("Invalid choice. Please try again.")
+        if isinstance(track, MidiTrack):
+            # --- Get what to erase ---
+            erase_choice = "all"
+            erase_options = {
+                "a": "all",
+                "n": "notes",
+                "c": "cc",
+                "p": "program",
+            }
+            while True:
+                choice_str = input(
+                    "What do you want to erase? (a)ll, (n)otes, (c)c, (p)rogram changes: "
+                ).lower()
+                if choice_str in erase_options:
+                    erase_choice = erase_options[choice_str]
+                    break
+                else:
+                    print("Invalid choice. Please try again.")
 
-        # --- Confirmation ---
-        end_str_display = (
-            f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
-        )
-        confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
-        if input(confirm_message).lower() != "y":
-            print("Erase cancelled.")
-            return
+            # --- Confirmation ---
+            end_str_display = (
+                f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
+            )
+            confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
+            if input(confirm_message).lower() != "y":
+                print("Erase cancelled.")
+                return
 
-        # --- Process events ---
-        final_events = []
-        events_to_shift = []
-        modified_count = 0
-        deleted_count = 0
+            # --- Process events ---
+            final_events = []
+            events_to_shift = []
+            modified_count = 0
+            deleted_count = 0
 
-        for event in list(track.events): # Iterate over a copy
-            if start_beat <= event.start_time < end_beat:
-                # This event is within the erase range
-                event_modified = False
-                if erase_choice == "all" or erase_choice == "notes":
-                    if event.notes:
-                        event.notes.clear()
-                        event_modified = True
-                if erase_choice == "all" or erase_choice == "cc":
-                    if event.cc_messages:
-                        event.cc_messages.clear()
-                        event_modified = True
-                if erase_choice == "all" or erase_choice == "program":
-                    if event.program_change_messages:
-                        event.program_change_messages.clear()
-                        event_modified = True
+            for event in list(track.events): # Iterate over a copy
+                if start_beat <= event.start_time < end_beat:
+                    # This event is within the erase range
+                    event_modified = False
+                    if erase_choice == "all" or erase_choice == "notes":
+                        if event.notes:
+                            event.notes.clear()
+                            event_modified = True
+                    if erase_choice == "all" or erase_choice == "cc":
+                        if event.cc_messages:
+                            event.cc_messages.clear()
+                            event_modified = True
+                    if erase_choice == "all" or erase_choice == "program":
+                        if event.program_change_messages:
+                            event.program_change_messages.clear()
+                            event_modified = True
 
-                if event_modified:
-                    modified_count += 1
+                    if event_modified:
+                        modified_count += 1
 
-                # If the event is now empty, don't keep it.
-                is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
-                if not is_empty:
+                    # If the event is now empty, don't keep it.
+                    is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
+                    if not is_empty:
+                        final_events.append(event)
+                    else:
+                        deleted_count += 1
+                elif event.start_time >= end_beat:
+                    events_to_shift.append(event)
+                else:
+                    # This event is before the range, so keep it
                     final_events.append(event)
+
+            # --- Handle shifting ---
+            shift_confirmed = False
+            if events_to_shift:
+                shift_choice = input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
+                if shift_choice == 'y':
+                    shift_offset = end_beat - start_beat
+                    for event in events_to_shift:
+                        event.start_time -= shift_offset
+                    shift_confirmed = True
+
+            final_events.extend(events_to_shift)
+            track.events = final_events
+            track.events.sort(key=lambda e: e.start_time)
+
+            # --- Report results ---
+            report = [f"Modified {modified_count} event(s)"]
+            if shift_confirmed:
+                report.append(f"shifted {len(events_to_shift)} event(s)")
+
+            if modified_count > 0 or shift_confirmed:
+                 self.is_dirty = True
+                 print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
+            else:
+                 print("No events were modified or shifted.")
+
+        elif isinstance(track, AutomationTrack):
+            # --- Get what to erase ---
+            params_in_range = sorted(list({p.parameter for p in track.points if start_beat <= p.start_time < end_beat}))
+            if not params_in_range:
+                print("No automation points found in the specified range.")
+                return
+
+            prompt = "What do you want to erase? (all"
+            for p in params_in_range:
+                prompt += f", {p}"
+            prompt += "): "
+
+            erase_choice = "all"
+            while True:
+                choice_str = input(prompt).lower()
+                if choice_str == "all" or choice_str in params_in_range:
+                    erase_choice = choice_str
+                    break
+                else:
+                    print("Invalid choice. Please try again.")
+
+            # --- Confirmation ---
+            end_str_display = (f"up to {end_pos_str}" if end_pos_str else "to the end of the track")
+            confirm_message = f"Erase {erase_choice} points from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
+            if input(confirm_message).lower() != "y":
+                print("Erase cancelled.")
+                return
+
+            # --- Process points ---
+            points_to_keep = []
+            deleted_count = 0
+            for point in track.points:
+                is_in_range = start_beat <= point.start_time < end_beat
+                should_delete = is_in_range and (erase_choice == "all" or point.parameter == erase_choice)
+
+                if not should_delete:
+                    points_to_keep.append(point)
                 else:
                     deleted_count += 1
-            elif event.start_time >= end_beat:
-                events_to_shift.append(event)
+
+            if deleted_count > 0:
+                track.points = points_to_keep
+                self.is_dirty = True
+                print(f"Erased {deleted_count} point(s) from track '{track.name}'.")
             else:
-                # This event is before the range, so keep it
-                final_events.append(event)
-
-        # --- Handle shifting ---
-        shift_confirmed = False
-        if events_to_shift:
-            shift_choice = input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
-            if shift_choice == 'y':
-                shift_offset = end_beat - start_beat
-                for event in events_to_shift:
-                    event.start_time -= shift_offset
-                shift_confirmed = True
-
-        final_events.extend(events_to_shift)
-        track.events = final_events
-        track.events.sort(key=lambda e: e.start_time)
-
-        # --- Report results ---
-        report = [f"Modified {modified_count} event(s)"]
-        if shift_confirmed:
-            report.append(f"shifted {len(events_to_shift)} event(s)")
-
-        if modified_count > 0 or shift_confirmed:
-             self.is_dirty = True
-             print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
-        else:
-             print("No events were modified or shifted.")
+                print("No points were erased.")
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):

@@ -29,8 +29,10 @@ Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
   addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
-  addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
+  addauto <name> <target_idx> - Adds an automation track targeting another track.
+  addap <track> <pos> <param> <val> [curve] - Adds an automation point (curve: step, linear).
   addprog <track> <pos> <prog> - Adds a Program Change event to a track at a 'measure:beat' position.
+  addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
   list                    - Shows all tracks in the current song.
@@ -130,6 +132,45 @@ def process_command(user_input, seq):
             seq.add_track(name=args[0], track_type='audio', filepath=args[1])
         else:
             print("Usage: addaudio <name> <filepath>")
+    elif command == "addauto":
+        if len(args) == 2:
+            try:
+                name = args[0]
+                target_index = int(args[1])
+                seq.add_automation_track(name, target_index)
+            except ValueError:
+                print("Error: Invalid target track index.")
+        else:
+            print("Usage: addauto <name> <target_track_index>")
+    elif command == "addap":
+        if len(args) >= 4:
+            try:
+                track_index = int(args[0])
+                position_str = args[1]
+                param = args[2]
+                value = float(args[3])
+                curve = args[4] if len(args) > 4 else "step"
+                seq.add_automation_point(track_index, position_str, param, value, curve)
+            except ValueError:
+                print("Error: Invalid number for track index or value.")
+            except Exception as e:
+                print(f"Error: {e}")
+        else:
+            print("Usage: addap <track_index> <position> <param> <value> [curve]")
+    elif command == "addprog":
+        if len(args) == 3:
+            try:
+                track_index = int(args[0])
+                position_str = args[1]
+                program = int(args[2])
+                if not 1 <= program <= 128:
+                    print("Error: Program number must be between 1 and 128.")
+                else:
+                    seq.add_program_change_event(track_index, position_str, program - 1)
+            except ValueError:
+                print("Error: Invalid number for track index or program.")
+        else:
+            print("Usage: addprog <track_index> <position> <program>")
     elif command == "addcc":
         if len(args) == 4:
             try:
@@ -142,22 +183,6 @@ def process_command(user_input, seq):
                 print("Error: Invalid number for track index, CC, or value.")
         else:
             print("Usage: addcc <track_index> <position> <cc_number> <value>")
-    elif command == "addprog":
-        if len(args) == 3:
-            try:
-                track_index = int(args[0])
-                position_str = args[1]
-                program = int(args[2])
-                if not 1 <= program <= 128:
-                    print("Error: Program number must be between 1 and 128.")
-                else:
-                    seq.add_program_change_event(
-                        track_index, position_str, program - 1
-                    )
-            except ValueError:
-                print("Error: Invalid number for track index or program.")
-        else:
-            print("Usage: addprog <track_index> <position> <program_number>")
     elif command == "load":
         if len(args) == 1:
             confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
@@ -311,7 +336,7 @@ def process_command(user_input, seq):
                 pan = float(pan_str)
                 seq.set_track_pan(track_index, pan)
             except ValueError:
-                print("Error: Invalid track index or pan value.")
+                print("Error: Invalid track index or pan.")
         else:
             print("Usage: pan <track_index>")
     elif command == "velocity":

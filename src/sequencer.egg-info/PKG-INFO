@@ -8,6 +8,8 @@ Author-email: jules@example.com
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: mido[ports-rtmidi]>=1.2.10
+Requires-Dist: pydub>=0.25.1
+Requires-Dist: simpleaudio>=1.0.4
 Dynamic: author
 Dynamic: author-email
 Dynamic: description

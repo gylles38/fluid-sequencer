@@ -30,43 +30,58 @@ python3 main.py
 ```
 Vous verrez un message de bienvenue et une invite `>`. Tapez `help` pour voir la liste des commandes.
 
-### Commandes disponibles
+Pour afficher l'aide sans lancer le séquenceur, vous pouvez utiliser :
+```bash
+python3 main.py --help
+```
 
-| Commande                 | Description                                                                 |
-| ------------------------ | --------------------------------------------------------------------------- |
-| `help`                   | Affiche le message d'aide.                                                  |
-| `add <nom> [prog]`       | Ajoute une nouvelle piste. `prog` est le numéro de programme (1-128).        |
-| `load <fichier>`         | Charge uniquement un fichier MIDI.                                          |
-| `loadproject <basename>` | Charge un projet complet (`.mid` et `.proj.json`).                          |
-| `list`                   | Affiche toutes les pistes de la chanson en cours, avec leurs détails.       |
-| `ports`                  | Liste les ports d'entrée et de sortie MIDI disponibles.                     |
-| `vport <nom>`            | Crée un port de sortie MIDI virtuel.                                        |
-| `delvport`               | Supprime un port de sortie MIDI virtuel existant.                           |
-| `assign <piste>`         | Assigne une piste à un port de sortie à partir d'une liste de choix.        |
-| `unassign <piste>`       | Désassigne une piste de son port de sortie.                                 |
-| `setbank <piste> <msb> [lsb]` | Définit la banque MIDI pour une piste (MSB=CC0, LSB=CC32, 0-127).          |
-| `setch <piste> <canal>`  | Définit le canal MIDI (1-16) pour une piste.                                |
-| `setprog <piste> <prog>` | Définit le programme MIDI (1-128) pour une piste.                           |
-| `prime`                  | Envoie l'état (banque/programme) de toutes les pistes aux ports assignés.   |
-| `mute <piste>`           | Met une piste en sourdine ou réactive son son.                              |
-| `solo <piste>`           | Isole une piste pour l'écoute ou la désactive.                              |
-| `rename <piste> <nom>`   | Renomme une piste.                                                          |
-| `copy`                   | Copie une section d'une piste en utilisant des positions `mesure:temps`.    |
-| `move <piste>`           | Déplace une section d'une piste en utilisant des positions `mesure:temps`.    |
-| `erase <piste>`          | Efface des notes d'une piste en utilisant des positions `mesure:temps`.       |
-| `transpose`              | Transpose une section d'une piste en utilisant des positions `mesure:temps`.  |
-| `record <piste>`         | Enregistre le MIDI sur une piste, avec une précision `mesure:temps`.          |
-| `delete <piste>`         | Supprime une piste après confirmation.                                      |
-| `tempo <bpm>`            | Règle le tempo de la chanson en battements par minute.                      |
-| `timesig <num> <den>`    | Définit la signature rythmique du morceau (ex: 4 4).                        |
-| `save <fichier>`         | Sauvegarde uniquement la chanson dans un fichier MIDI.                      |
-| `saveproject <basename>` | Sauvegarde le projet complet (MIDI et configuration).                       |
-| `play [début] [fin]`     | Joue la chanson. Les positions de début/fin sont au format `mesure:temps`.   |
-| `loop [début] [fin]`     | Joue une section en boucle. Les positions sont au format `mesure:temps`.      |
-| `pause`                  | Met en pause ou reprend la lecture.                                         |
-| `stop`                   | Arrête la lecture et réinitialise la position.                              |
-| `restart`                | Arrête et redémarre la lecture depuis le début.                             |
-| `quit`                   | Quitte le séquenceur.                                                       |
+## Commandes disponibles
+
+```
+Sequencer CLI Commands:
+  help                    - Shows this help message.
+  add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
+  addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
+  addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
+  load <filepath>         - Loads a song from a MIDI file.
+  loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
+  list                    - Shows all tracks in the current song.
+  ports                   - Lists available MIDI input and output ports.
+  vport <name>            - Creates a virtual MIDI output port.
+  delvport                - Deletes an existing virtual port.
+  assign <track_index>    - Assigns a track to an output port from a list of choices.
+  assignmetro             - Assigns an output port for the metronome click.
+  unassign <track_index>  - Un-assigns a track from its output port.
+  setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
+  setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
+  setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
+  setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
+  volume <track_index>    - Sets the volume for an audio or MIDI track (0.0 to 1.0).
+  velocity <track_index>  - Sets the velocity multiplier for a MIDI track (e.g., 1.0).
+  mute <track_index>      - Toggles mute for a track.
+  solo <track_index>      - Toggles solo for a track.
+  rename <index> <new_name> - Renames a track.
+  copy                    - Copies a section of a track using 'measure:beat' positions.
+  move <track_index>      - Moves a section of a track using 'measure:beat' positions.
+  transpose               - Transposes a section of a track using 'measure:beat' positions.
+  record <track_index>    - Records MIDI to a track, with 'measure:beat' precision.
+  bis                     - Re-records with the last used 'record' settings.
+  delete <track_index>    - Deletes a track after confirmation.
+  erase <track_index>     - Erases notes from a track using 'measure:beat' positions.
+  tempo <bpm>             - Sets the song tempo in beats per minute.
+  timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
+  save <filepath>         - Saves only the song to a MIDI file.
+  saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
+  prime                   - Sends current program/bank state to all assigned ports.
+  cc                      - Sends a single MIDI CC message to a port.
+  play [start] [end]      - Plays the song. Start/end positions are in 'measure:beat'.
+  loop [start] [end]      - Loops a section of the song. Start/end positions are in 'measure:beat'.
+  pause                   - Pauses or resumes playback.
+  stop                    - Stops playback.
+  restart                 - Stops and restarts playback from the beginning.
+  metronome <on|off>      - Enables or disables the metronome.
+  quit                    - Exits the sequencer.
+```
 
 ---
 
@@ -76,7 +91,7 @@ Pour éviter de reconfigurer vos ports virtuels et vos assignations de pistes à
 
 -   **`saveproject <nom>`** : Cette commande sauvegarde deux fichiers :
     1.  `<nom>.mid` : Le fichier MIDI standard contenant toutes vos notes.
-    2.  `<nom>.proj.json` : Un fichier de configuration qui mémorise les ports virtuels que vous avez créés et quelles pistes leur sont assignées.
+    2.  `<nom>.proj.json` : Un fichier de configuration qui mémorise les ports virtuels que vous avez créés, les assignations de pistes, le chemin des pistes audio et d'autres réglages.
 
 -   **`loadproject <nom>`** : Cette commande charge un projet complet. Elle va :
     1.  Lire le fichier `<nom>.proj.json`.
@@ -88,9 +103,9 @@ Pour éviter de reconfigurer vos ports virtuels et vos assignations de pistes à
 
 ## Exemples d'utilisation
 
-### How-To : Configurer et enregistrer une piste
+### How-To : Configurer et enregistrer une piste MIDI
 
-Voici un exemple de workflow complet.
+Voici un exemple de workflow complet pour une piste MIDI.
 
 1.  **Ajouter une piste :**
     *   `> add piano` (ajoute une piste nommée "piano" avec le programme 1 par défaut)
@@ -101,12 +116,13 @@ Voici un exemple de workflow complet.
     *   Changer le canal MIDI pour le canal 10 : `> setch 0 10`
     *   Définir la banque de sons (ex: MSB=1, LSB=1) : `> setbank 0 1 1`
     *   Définir la signature rythmique : `> timesig 3 4`
+    *   Ajuster le volume (ex: 0.8) et la vélocité (ex: 1.2) : `> volume 0` (entrez 0.8), `> velocity 0` (entrez 1.2)
 
 3.  **Lister les pistes** pour vérifier la configuration : `list`
     ```
     Song: New Song | Tempo: 120 BPM | Time Signature: 3/4
     ====================
-    [0] Grand Piano (Ch: 10, Prog: 5, Bank: 1:1, 0 events)
+    [0] Grand Piano (Ch: 10, Prog: 5, Bank: 1:1, Vol: 0.8, Vel: 1.2, 0 events)
     ```
 
 4.  **Connecter à un synthétiseur (via Carla) :**
@@ -120,6 +136,7 @@ Voici un exemple de workflow complet.
     *   `> prime`
 
 6.  **Enregistrer la piste en s'écoutant en direct :**
+    *   Activer le métronome : `> metronome on`
     *   Lancer l'enregistrement : `> record 0`
     *   Choisir votre clavier physique comme port d'entrée.
     *   Activer le "MIDI Thru" (`y`) et choisir `mon-synth` comme port de sortie.
@@ -130,6 +147,28 @@ Voici un exemple de workflow complet.
 
 8.  Plus tard, vous pourrez tout recharger avec `loadproject mon_morceau`.
 
+---
+
+### How-To : Utiliser une piste Audio
+
+Le séquenceur peut également gérer des pistes audio, lues par un lecteur externe comme `mpv` ou `ffplay`.
+
+1.  **Configurer le lecteur audio :**
+    *   Indiquez au séquenceur quelle commande lancer pour jouer un fichier audio.
+    *   `> setaudiocmd mpv --no-video`
+    *   Le chemin du fichier audio sera ajouté à la fin de cette commande.
+
+2.  **Ajouter une piste audio :**
+    *   Ajoutez un fichier audio (ex: une boucle de batterie) au projet.
+    *   `> addaudio drums /chemin/vers/ma/boucle.wav`
+
+3.  **Ajuster le volume :**
+    *   Le volume des pistes audio peut être contrôlé (si le lecteur externe le supporte via son volume système).
+    *   `> volume 1` (entrez 0.7 pour baisser le volume)
+
+4.  **Jouer le projet :**
+    *   `> play`
+    *   Le séquenceur lancera `mpv --no-video /chemin/vers/ma/boucle.wav` en même temps que la lecture MIDI.
 
 ---
 
@@ -140,30 +179,24 @@ Une fois que vous avez enregistré des notes, vous pouvez les manipuler avec pr�
 1.  **Copier une section :**
     *   Copier les deux premières mesures de la piste 0 pour les coller à partir de la mesure 5.
     *   `> copy`
-    *   Suivez les invites :
-        *   `Copy from track index: 0`
-        *   `Copy from position on track '...' (measure:beat) [default: 1:1]: 1:1`
-        *   `Copy up to position on track '...' (measure:beat): 3:1`
-        *   `Copy to destination track index (default: 0): 0`
-        *   `Copy to destination position on track '...' (measure:beat) [default: 1:1]: 5:1`
+    *   Suivez les invites pour définir la source (piste, début, fin) et la destination.
 
 2.  **Déplacer une section :**
     *   Déplacer la mesure 5 de la piste 0 pour la mettre à la mesure 10.
     *   `> move 0`
-    *   Suivez les invites :
-        *   `Move from position...: 5:1`
-        *   `Move up to position...: 6:1`
-        *   `Move to destination track...: 0`
-        *   `Move to destination position...: 10:1`
+    *   Suivez les invites pour définir la source et la destination.
 
-3.  **Transposer une section :**
+3.  **Effacer des notes :**
+    *   Effacer les notes de la première mesure de la piste 0.
+    *   `> erase 0`
+    *   Suivez les invites :
+        *   `Erase from position...: 1:1`
+        *   `Erase up to position...: 2:1`
+
+4.  **Transposer une section :**
     *   Transposer toute la piste 0 d'une octave vers le haut (12 demi-tons).
     *   `> transpose`
-    *   Suivez les invites :
-        *   `Transpose track index: 0`
-        *   `Transpose from position...: 1:1`
-        *   `Transpose up to position...:` (laisser vide pour aller jusqu'à la fin)
-        *   `Transpose by how many semitones...: 12`
+    *   Suivez les invites pour définir la piste, la plage et le nombre de demi-tons.
 
 ---
 

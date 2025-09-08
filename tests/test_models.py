@@ -1,5 +1,14 @@
 import unittest
-from src.sequencer.models import Note, CCMessage, Event, MidiTrack, AudioTrack, Song
+from src.sequencer.models import (
+    Note,
+    CCMessage,
+    Event,
+    MidiTrack,
+    AudioTrack,
+    Song,
+    ProgramChangeMessage,
+)
+
 
 class TestModels(unittest.TestCase):
     """
@@ -45,6 +54,17 @@ class TestModels(unittest.TestCase):
             CCMessage(control=7, value=-1)
         with self.assertRaises(ValueError, msg="Value above 127 should fail"):
             CCMessage(control=7, value=128)
+
+    def test_program_change_message_validation(self):
+        """Tests the validation rules for the ProgramChangeMessage dataclass."""
+        # Valid ProgramChange message
+        ProgramChangeMessage(program=42)
+
+        # Test program validation
+        with self.assertRaises(ValueError, msg="Program below 0 should fail"):
+            ProgramChangeMessage(program=-1)
+        with self.assertRaises(ValueError, msg="Program above 127 should fail"):
+            ProgramChangeMessage(program=128)
 
     def test_event_validation(self):
         """Tests the validation rules for the Event dataclass."""

@@ -1,6 +1,15 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
-from .models import AnyTrack, AudioTrack, CCMessage, Event, MidiTrack, Note, Song
+from .models import (
+    AnyTrack,
+    AudioTrack,
+    CCMessage,
+    Event,
+    MidiTrack,
+    Note,
+    ProgramChangeMessage,
+    Song,
+)
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
@@ -29,29 +38,34 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, (Song, MidiTrack, AudioTrack, Event, Note, CCMessage)):
+        if isinstance(
+            o, (Song, MidiTrack, AudioTrack, Event, Note, CCMessage, ProgramChangeMessage)
+        ):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
-            d['__type__'] = o.__class__.__name__
+            d["__type__"] = o.__class__.__name__
             return d
         return super().default(o)
 
+
 def song_decoder(d):
-    if '__type__' in d:
-        type_name = d.pop('__type__')
+    if "__type__" in d:
+        type_name = d.pop("__type__")
         # Map the type name to the actual class.
         # The values in 'd' have already been decoded into objects by the hook.
-        if type_name == 'Song':
+        if type_name == "Song":
             return Song(**d)
-        elif type_name == 'MidiTrack':
+        elif type_name == "MidiTrack":
             return MidiTrack(**d)
-        elif type_name == 'AudioTrack':
+        elif type_name == "AudioTrack":
             return AudioTrack(**d)
-        elif type_name == 'Event':
+        elif type_name == "Event":
             return Event(**d)
-        elif type_name == 'Note':
+        elif type_name == "Note":
             return Note(**d)
-        elif type_name == 'CCMessage':
+        elif type_name == "CCMessage":
             return CCMessage(**d)
+        elif type_name == "ProgramChangeMessage":
+            return ProgramChangeMessage(**d)
     return d
 
 
@@ -231,6 +245,54 @@ class Sequencer:
             new_event = Event(start_time=start_beat, cc_messages=[new_cc])
             track.add_event(new_event) # add_event handles sorting
             print(f"Added new CC event at position {position_str} on track '{track.name}'.")
+        self.is_dirty = True
+
+    def add_program_change_event(
+        self, track_index: int, position_str: str, program: int
+    ):
+        """Adds a program change event to a specific track at a given position."""
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            print("Error: Program change events can only be added to MIDI tracks.")
+            return
+
+        start_beat = self.parse_position_to_beats(position_str)
+        if start_beat is None:
+            return  # Error is printed by parse_position_to_beats
+
+        try:
+            # Create the program change message, which will validate its own values
+            new_prog_change = ProgramChangeMessage(program=program)
+        except ValueError as e:
+            print(f"Error: Invalid program change value. {e}")
+            return
+
+        # Check if an event already exists at this exact start time
+        existing_event = None
+        for event in track.events:
+            if math.isclose(event.start_time, start_beat):
+                existing_event = event
+                break
+
+        if existing_event:
+            # Add the program change message to the existing event
+            existing_event.program_change_messages.append(new_prog_change)
+            print(
+                f"Added program change to existing event at position {position_str} on track '{track.name}'."
+            )
+        else:
+            # Create a new event with this program change message and add it to the track
+            new_event = Event(
+                start_time=start_beat, program_change_messages=[new_prog_change]
+            )
+            track.add_event(new_event)  # add_event handles sorting
+            print(
+                f"Added new program change event at position {position_str} on track '{track.name}'."
+            )
         self.is_dirty = True
 
     def erase_track(self, track_index: int):
@@ -1487,6 +1549,10 @@ class Sequencer:
                         # Process CC messages
                         for cc in event.cc_messages:
                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
+
+                        # Process Program Change messages
+                        for pc in event.program_change_messages:
+                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('program_change', channel=track.channel, program=pc.program)})
 
             # 2. Filter and normalize events based on playback range
             start_tick = int(start_beat * ticks_per_beat)

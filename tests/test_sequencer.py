@@ -113,6 +113,26 @@ class TestSequencer(unittest.TestCase):
         self.assertEqual(cc.value, 100)
         mock_print.assert_called_with("Added new CC event at position 1:2 on track 'MIDI'.")
 
+    @patch("builtins.print")
+    def test_add_program_change_event(self, mock_print):
+        """Test adding a Program Change event to a track."""
+        self.sequencer.add_track(name="MIDI", track_type="midi")
+        self.sequencer.add_program_change_event(
+            track_index=0, position_str="2:3", program=42
+        )
+
+        track = self.sequencer.song.tracks[0]
+        self.assertEqual(len(track.events), 1)
+        event = track.events[0]
+        # In a 4/4 time signature, 2:3 is the 7th beat, which is at time 6.0
+        self.assertEqual(event.start_time, 6.0)
+        self.assertEqual(len(event.program_change_messages), 1)
+        pc = event.program_change_messages[0]
+        self.assertEqual(pc.program, 42)
+        mock_print.assert_called_with(
+            "Added new program change event at position 2:3 on track 'MIDI'."
+        )
+
     @patch('mido.open_output')
     def test_assign_port(self, mock_open_output):
         """Test assigning a port to a track."""

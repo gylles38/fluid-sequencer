@@ -29,11 +29,21 @@ class CCMessage:
             raise ValueError("Value must be between 0 and 127.")
 
 @dataclass
+class ProgramChangeMessage:
+    """Represents a single MIDI Program Change message."""
+    program: int  # Program number (0-127)
+
+    def __post_init__(self):
+        if not 0 <= self.program <= 127:
+            raise ValueError("Program number must be between 0 and 127.")
+
+@dataclass
 class Event:
     """Represents a musical event, which can contain multiple notes (e.g., a chord) and CC messages."""
     start_time: float  # Start time in beats from the beginning of the track
     notes: List[Note] = field(default_factory=list)
     cc_messages: List[CCMessage] = field(default_factory=list)
+    program_change_messages: List[ProgramChangeMessage] = field(default_factory=list)
 
     def __post_init__(self):
         if self.start_time < 0:

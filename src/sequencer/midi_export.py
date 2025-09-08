@@ -1,5 +1,5 @@
 import mido
-from .models import Song, MidiTrack, AudioTrack
+from .models import Song, MidiTrack, AudioTrack, ProgramChangeMessage
 
 def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
     """
@@ -49,6 +49,17 @@ def export_to_midi(song: Song, filename: str, ticks_per_beat: int = 480):
                     'tick': start_tick,
                     'msg': mido.Message('control_change', channel=channel, control=cc.control, value=cc.value)
                 })
+
+            # Add program change messages for this event
+            for pc in event.program_change_messages:
+                all_midi_events.append(
+                    {
+                        "tick": start_tick,
+                        "msg": mido.Message(
+                            "program_change", channel=channel, program=pc.program
+                        ),
+                    }
+                )
 
             # Add note messages for this event
             for note in event.notes:

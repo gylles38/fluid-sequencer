@@ -200,6 +200,33 @@ Une fois que vous avez enregistré des notes, vous pouvez les manipuler avec pr�
 
 ---
 
+### How-To : Créer une courbe d'automation de volume
+
+L'automation permet de faire évoluer un paramètre (comme le volume, le pan, etc.) au fil du temps. Voici comment créer un fondu de volume (fade-in) sur une piste.
+
+1.  **Créez vos pistes :**
+    *   `> add piano` (crée la piste MIDI 0)
+    *   `> addauto "Piano Volume" 0` (crée une piste d'automation qui cible la piste 0)
+
+2.  **Affichez la liste des pistes** pour vérifier : `list`
+    ```
+    [0] piano (MIDI) ...
+    [1] Piano Volume (Automation) (Target: 0 'piano', 0 points)
+    ```
+
+3.  **Créez les points d'automation :**
+    *   Nous allons créer un fondu qui commence à la mesure 1 et se termine à la mesure 3.
+    *   **Point de départ :** volume à 0 au début de la mesure 1. On utilise une courbe `linear` pour indiquer que la valeur doit progresser vers le point suivant.
+        *   `> addap 1 1:1 volume 0.0 linear`
+    *   **Point d'arrivée :** volume à 1 (maximum) au début de la mesure 3. La courbe `step` est utilisée ici car c'est la fin de notre rampe.
+        *   `> addap 1 3:1 volume 1.0 step`
+
+4.  **Jouez la piste :**
+    *   `> play`
+    *   Si vous avez des notes sur la piste "piano" entre les mesures 1 et 3, vous entendrez le volume augmenter progressivement. Le séquenceur calcule automatiquement toutes les étapes intermédiaires (via des messages MIDI CC) pour créer une rampe fluide.
+
+---
+
 ### Utilisation programmatique (API)
 
 Il est également possible d'utiliser les modules du séquenceur directement dans votre propre code Python.

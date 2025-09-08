@@ -1602,18 +1602,33 @@ class Sequencer:
                     self.stop()
 
     def start_metronome(self):
+        """
+        Starts the metronome thread if it's enabled and a port is assigned.
+        This method is safe to call even if playback is already active.
+        """
         if self.song.metronome_enabled and self.song.metronome_port_name:
             if not self.metronome_thread or not self.metronome_thread.is_alive():
-                # Open port if necessary
-                if self.song.metronome_port_name not in self.open_ports:
-                    try:
-                        port = open_output(self.song.metronome_port_name)
-                        self.open_ports[self.song.metronome_port_name] = port
-                        self.temporary_ports.append(port)
-                    except Exception as e:
-                        print(f"Error opening metronome port '{self.song.metronome_port_name}': {e}")
-                        return
+                port_name = self.song.metronome_port_name
 
+                # Check if the port is already open (from the main play() call)
+                if port_name not in self.open_ports:
+                    port = None
+                    # Check if it's a known virtual port
+                    vp = next((p for p in self.virtual_ports if p.name == port_name), None)
+                    if vp:
+                        port = vp
+                        self.open_ports[port_name] = port
+                    else:
+                        # Otherwise, try to open it as a new hardware port
+                        try:
+                            port = open_output(port_name)
+                            self.open_ports[port_name] = port
+                            self.temporary_ports.append(port) # Mark for cleanup
+                        except Exception as e:
+                            print(f"Error opening metronome port '{port_name}': {e}")
+                            return
+
+                # Now that the port is guaranteed to be in self.open_ports, start the thread.
                 self.metronome_thread = threading.Thread(target=self._metronome_thread_main)
                 self.metronome_thread.daemon = True
                 self.metronome_thread.start()

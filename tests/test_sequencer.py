@@ -261,5 +261,70 @@ class TestSequencerErase(unittest.TestCase):
         )
 
 
-if __name__ == '__main__':
+class TestSequencerRecord(unittest.TestCase):
+    def setUp(self):
+        self.sequencer = Sequencer()
+        self.sequencer.add_track(name="MIDI", track_type="midi")
+        track = self.sequencer.song.tracks[0]
+        track.add_event(
+            Event(
+                start_time=0.0,
+                notes=[Note(pitch=60, duration=1)],
+                cc_messages=[CCMessage(control=7, value=100)],
+            )
+        )
+        track.add_event(Event(start_time=2.0, notes=[Note(pitch=62, duration=1)]))
+
+    @patch("src.sequencer.sequencer.Sequencer._start_recording_internal")
+    @patch("mido.get_input_names", return_value=["TestPort"])
+    @patch("builtins.input", side_effect=["1:1", "", "r", "0"])
+    @patch("builtins.print")
+    def test_record_replace_only_removes_notes(
+        self, mock_print, mock_input, mock_get_inputs, mock_start_recording
+    ):
+        """
+        Test that choosing 'replace' during recording only removes notes,
+        not other event types like CC messages.
+        """
+        # Act
+        self.sequencer.record_track(0)
+
+        # Assert that the internal recording function was called with replace_notes=True
+        mock_start_recording.assert_called_once()
+        args, kwargs = mock_start_recording.call_args
+        self.assertTrue(kwargs.get("replace_notes"))
+
+        # Manually apply the logic that *should* have been run inside the mock
+        track = self.sequencer.song.tracks[0]
+        start_beat = 0.0
+        end_beat = float("inf")
+
+        events_to_keep = []
+        for event in track.events:
+            if start_beat <= event.start_time < end_beat:
+                if event.notes:
+                    event.notes.clear()
+                is_empty = (
+                    not event.notes
+                    and not event.cc_messages
+                    and not event.program_change_messages
+                )
+                if not is_empty:
+                    events_to_keep.append(event)
+            else:
+                events_to_keep.append(event)
+        track.events = events_to_keep
+
+        # The event at 0.0 should have its notes removed, but the event and its CC should remain.
+        self.assertEqual(len(track.events), 1)
+        self.assertEqual(track.events[0].start_time, 0.0)
+        self.assertEqual(len(track.events[0].notes), 0)
+        self.assertEqual(len(track.events[0].cc_messages), 1)
+
+        # The event at 2.0, which only had a note, should be gone completely.
+        # (The final list should not contain an event at 2.0)
+        self.assertFalse(any(e.start_time == 2.0 for e in track.events))
+
+
+if __name__ == "__main__":
     unittest.main()

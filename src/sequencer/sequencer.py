@@ -1264,9 +1264,32 @@ class Sequencer:
             return
 
         if replace_notes:
-            end_beat = float('inf') if num_beats_to_record is None else start_beat + num_beats_to_record
-            target_track.events = [e for e in target_track.events if not (start_beat <= e.start_time < end_beat)]
-            print(f"Removed existing notes from beat {self._format_beats_to_position(start_beat)} onwards.")
+            end_beat = (
+                float("inf")
+                if num_beats_to_record is None
+                else start_beat + num_beats_to_record
+            )
+
+            events_to_keep = []
+            for event in target_track.events:
+                if start_beat <= event.start_time < end_beat:
+                    # This event is in the range to be cleared of notes
+                    if event.notes:
+                        event.notes.clear()
+
+                    # If the event is now empty, we don't add it to the keep list.
+                    # Otherwise, we keep the event with its other messages intact.
+                    is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
+                    if not is_empty:
+                        events_to_keep.append(event)
+                else:
+                    # This event is outside the range, so we keep it as is.
+                    events_to_keep.append(event)
+
+            target_track.events = events_to_keep
+            print(
+                f"Removed existing notes from beat {self._format_beats_to_position(start_beat)} onwards."
+            )
 
         outport_name = target_track.output_port_name
         original_mute_state = target_track.is_muted

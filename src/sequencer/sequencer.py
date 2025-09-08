@@ -894,6 +894,47 @@ class Sequencer:
                     midi_volume = int(volume * 127)
                     port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
 
+    def set_track_pan(self, track_index: int, pan: float):
+        """Sets the pan for a specific audio or MIDI track."""
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        if not isinstance(track, (AudioTrack, MidiTrack)):
+            print("Error: Pan can only be set for audio or MIDI tracks.")
+            return
+
+        if not -1.0 <= pan <= 1.0:
+            print("Error: Pan must be between -1.0 (left) and 1.0 (right).")
+            return
+
+        track.pan = pan
+        self.is_dirty = True
+        print(f"Pan for track '{track.name}' set to {pan:.2f}.")
+
+        if isinstance(track, AudioTrack):
+            # If playback is active, send a live pan change command
+            with self.process_lock:
+                for ap in self.active_audio_processes:
+                    if ap.track_index == track_index:
+                        self._send_ipc_command(
+                            ap.socket_path, {"command": ["set_property", "pan", pan]}
+                        )
+                        break
+        elif isinstance(track, MidiTrack):
+            # If playback is active, send a live CC#10 message
+            if self.playback_state == "playing" and track.output_port_name:
+                port = self.open_ports.get(track.output_port_name)
+                if port:
+                    # Map pan from -1.0..1.0 to 0..127
+                    midi_pan = int((pan + 1.0) / 2.0 * 127)
+                    port.send(
+                        mido.Message(
+                            "control_change", channel=track.channel, control=10, value=midi_pan
+                        )
+                    )
+
     def set_track_velocity(self, track_index: int, velocity: float):
         """Sets the velocity multiplier for a specific MIDI track."""
         if not 0 <= track_index < len(self.song.tracks):
@@ -1091,12 +1132,13 @@ class Sequencer:
                 ch_info = f"Ch: {track.channel + 1}"
                 prog_info = f"Prog: {track.instrument + 1}"
                 vol_info = f"Vol: {track.volume:.2f}"
+                pan_info = f"Pan: {track.pan:.2f}"
                 vel_info = f"Vel: {track.velocity:.2f}"
                 port_info = f" -> Port: {track.output_port_name}" if track.output_port_name else ""
-                lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {vol_info}, {vel_info}, {len(track.events)} events){port_info}")
+                lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {vol_info}, {pan_info}, {vel_info}, {len(track.events)} events){port_info}")
             elif isinstance(track, AudioTrack):
                 start_pos_str = self._format_beats_to_position(track.start_time)
-                lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str}, Vol: {track.volume:.2f})")
+                lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str}, Vol: {track.volume:.2f}, Pan: {track.pan:.2f})")
             else:
                 lines.append(f"[{i}] {track.name} (Unknown Type){status_info}")
         return "\n".join(lines)
@@ -1443,7 +1485,10 @@ class Sequencer:
                 kwargs['preexec_fn'] = os.setsid
 
             process = subprocess.Popen(command, **kwargs)
-            time.sleep(0.1)
+            time.sleep(0.1) # Give mpv a moment to create the socket
+
+            # Set initial pan via IPC
+            self._send_ipc_command(socket_path, {"command": ["set_property", "pan", track.pan]})
 
             active_process_info = ActiveAudioProcess(
                 process=process,
@@ -1597,6 +1642,10 @@ class Sequencer:
                         master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb)})
                     master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('program_change', channel=track.channel, program=track.instrument)})
                     master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127))})
+
+                    # Add initial pan message (CC#10)
+                    midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                    master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=10, value=midi_pan)})
 
                     for event in track.events:
                         start_tick = int(event.start_time * ticks_per_beat)

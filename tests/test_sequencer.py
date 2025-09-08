@@ -149,6 +149,31 @@ class TestSequencer(unittest.TestCase):
         self.sequencer.assign_port(0, "MyMIDIPort")
         self.assertEqual(self.sequencer.song.tracks[0].output_port_name, "MyMIDIPort")
 
+    @patch("src.sequencer.sequencer.Sequencer._send_ipc_command")
+    @patch("builtins.print")
+    def test_set_track_pan(self, mock_print, mock_send_ipc):
+        """Test setting the pan for both MIDI and Audio tracks."""
+        # Test MIDI Track
+        self.sequencer.add_track(name="MIDI", track_type="midi")
+        self.sequencer.set_track_pan(0, -0.5)
+        self.assertEqual(self.sequencer.song.tracks[0].pan, -0.5)
+        mock_print.assert_called_with("Pan for track 'MIDI' set to -0.50.")
+
+        # Test Audio Track
+        with patch("pydub.AudioSegment.from_file", MagicMock()):
+            self.sequencer.add_track(
+                name="Audio", track_type="audio", filepath="test.wav"
+            )
+        self.sequencer.set_track_pan(1, 1.0)
+        self.assertEqual(self.sequencer.song.tracks[1].pan, 1.0)
+        mock_print.assert_called_with("Pan for track 'Audio' set to 1.00.")
+
+        # Test invalid value
+        self.sequencer.set_track_pan(0, 1.1)
+        mock_print.assert_called_with(
+            "Error: Pan must be between -1.0 (left) and 1.0 (right)."
+        )
+
     def test_save_and_load_project(self):
         """Test saving and loading a project file."""
         self.sequencer.add_track(name="Test MIDI", track_type='midi')

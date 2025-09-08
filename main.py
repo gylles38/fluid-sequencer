@@ -45,6 +45,7 @@ Sequencer CLI Commands:
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
   volume <track_index>    - Sets the volume for an audio or MIDI track (0.0 to 1.0).
+  pan <track_index>       - Sets the pan for an audio or MIDI track (-1.0 to 1.0).
   velocity <track_index>  - Sets the velocity multiplier for a MIDI track (e.g., 1.0).
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
@@ -302,6 +303,17 @@ def process_command(user_input, seq):
                 print("Error: Invalid track index or volume.")
         else:
             print("Usage: volume <track_index>")
+    elif command == "pan":
+        if len(args) == 1:
+            try:
+                track_index = int(args[0])
+                pan_str = input("Enter pan (-1.0 to 1.0): ").strip()
+                pan = float(pan_str)
+                seq.set_track_pan(track_index, pan)
+            except ValueError:
+                print("Error: Invalid track index or pan value.")
+        else:
+            print("Usage: pan <track_index>")
     elif command == "velocity":
         if len(args) == 1:
             try:

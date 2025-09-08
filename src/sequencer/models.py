@@ -62,6 +62,7 @@ class MidiTrack(BaseTrack):
     is_solo: bool = False
     channel: int = 0  # MIDI channel (0-15)
     volume: float = 0.8 # Default volume (0.0 to 1.0, maps to 0-127)
+    pan: float = 0.0  # Pan (-1.0 left to 1.0 right, maps to 0-127)
     velocity: float = 1.0 # Velocity multiplier (0.0 to 2.0+)
     events: List[Event] = field(default_factory=list)
     instrument: int = 0  # MIDI program number (0-127)
@@ -82,7 +83,7 @@ class AudioTrack(BaseTrack):
     is_solo: bool = False
     start_time: float = 0.0 # Start time in beats from the beginning of the track
     volume: float = 0.5 # (0.0 to 1.0)
-    # pan: float = 0.0 # (-1.0 for left, 0.0 for center, 1.0 for right)
+    pan: float = 0.0 # (-1.0 for left, 0.0 for center, 1.0 for right)
 
 
 # Using Union to allow the list to contain both MidiTrack and AudioTrack objects

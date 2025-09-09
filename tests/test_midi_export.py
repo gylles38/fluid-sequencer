@@ -1,14 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch, call, ANY
-from src.sequencer.models import (
-    Song,
-    MidiTrack,
-    AudioTrack,
-    Note,
-    CCMessage,
-    Event,
-    ProgramChangeMessage,
-)
+from src.sequencer.models import Song, MidiTrack, AudioTrack, Note, CCMessage, Event
 from src.sequencer.midi_export import export_to_midi
 import mido
 
@@ -71,6 +63,11 @@ class TestMidiExport(unittest.TestCase):
         mock_mid = MagicMock()
         mock_midi_file_constructor.return_value = mock_mid
 
+        # Add a note to the midi track to ensure it's not considered empty
+        note = Note(pitch=60, velocity=100, duration=1.0)
+        event = Event(start_time=1.0, notes=[note])
+        self.midi_track.add_event(event)
+
         # Act
         export_to_midi(self.song, "audio_skip.mid")
 
@@ -100,31 +97,6 @@ class TestMidiExport(unittest.TestCase):
         # Assert
         cc_call = call(mido.Message('control_change', channel=0, control=7, value=120, time=240))
         mock_midi_track.append.assert_has_calls([cc_call])
-
-    @patch("src.sequencer.midi_export.mido.MidiTrack")
-    @patch("src.sequencer.midi_export.mido.MidiFile")
-    def test_export_with_program_change_message(
-        self, mock_midi_file_constructor, mock_midi_track_constructor
-    ):
-        """Tests that Program Change messages are exported correctly."""
-        # Arrange
-        mock_mid = MagicMock()
-        mock_midi_file_constructor.return_value = mock_mid
-        mock_midi_track = MagicMock()
-        mock_midi_track_constructor.side_effect = [MagicMock(), mock_midi_track]
-
-        pc = ProgramChangeMessage(program=42)
-        event = Event(start_time=1.5, program_change_messages=[pc])  # at 720 ticks
-        self.midi_track.add_event(event)
-
-        # Act
-        export_to_midi(self.song, "pc_export.mid")
-
-        # Assert
-        pc_call = call(
-            mido.Message("program_change", channel=0, program=42, time=720)
-        )
-        mock_midi_track.append.assert_has_calls([pc_call])
 
     @patch('src.sequencer.midi_export.mido.MidiTrack')
     @patch('src.sequencer.midi_export.mido.MidiFile')

@@ -1,14 +1,5 @@
 import unittest
-from src.sequencer.models import (
-    Note,
-    CCMessage,
-    Event,
-    MidiTrack,
-    AudioTrack,
-    Song,
-    ProgramChangeMessage,
-)
-
+from src.sequencer.models import Note, CCMessage, Event, MidiTrack, AudioTrack, Song, AutomationPoint, AutomationTrack
 
 class TestModels(unittest.TestCase):
     """
@@ -54,17 +45,6 @@ class TestModels(unittest.TestCase):
             CCMessage(control=7, value=-1)
         with self.assertRaises(ValueError, msg="Value above 127 should fail"):
             CCMessage(control=7, value=128)
-
-    def test_program_change_message_validation(self):
-        """Tests the validation rules for the ProgramChangeMessage dataclass."""
-        # Valid ProgramChange message
-        ProgramChangeMessage(program=42)
-
-        # Test program validation
-        with self.assertRaises(ValueError, msg="Program below 0 should fail"):
-            ProgramChangeMessage(program=-1)
-        with self.assertRaises(ValueError, msg="Program above 127 should fail"):
-            ProgramChangeMessage(program=128)
 
     def test_event_validation(self):
         """Tests the validation rules for the Event dataclass."""
@@ -120,6 +100,40 @@ class TestModels(unittest.TestCase):
             # Any more tracks get channel 15
             else:
                 self.assertEqual(mt.channel, 15)
+
+    def test_automation_point_validation(self):
+        """Tests validation for the AutomationPoint dataclass."""
+        # Valid points
+        AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="step")
+        AutomationPoint(start_time=1.0, parameter="pan", value=-0.5, curve="linear")
+
+        # Invalid start_time
+        with self.assertRaises(ValueError):
+            AutomationPoint(start_time=-1, parameter="vol", value=0.5)
+
+        # Invalid parameter
+        with self.assertRaises(ValueError):
+            AutomationPoint(start_time=0, parameter="invalid_param", value=0.5)
+
+        # Invalid curve
+        with self.assertRaises(ValueError):
+            AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="invalid_curve")
+
+    def test_automation_track_add_point(self):
+        """Tests that AutomationTrack.add_point keeps the points list sorted."""
+        track = AutomationTrack(name="Auto Track", target_track_index=0)
+        point1 = AutomationPoint(start_time=4.0, parameter="vol", value=0.8)
+        point2 = AutomationPoint(start_time=0.0, parameter="vol", value=0.1)
+        point3 = AutomationPoint(start_time=2.0, parameter="vol", value=0.5)
+
+        track.add_point(point1)
+        track.add_point(point2)
+        track.add_point(point3)
+
+        self.assertEqual(len(track.points), 3)
+        self.assertEqual(track.points[0].start_time, 0.0)
+        self.assertEqual(track.points[1].start_time, 2.0)
+        self.assertEqual(track.points[2].start_time, 4.0)
 
 if __name__ == '__main__':
     unittest.main()

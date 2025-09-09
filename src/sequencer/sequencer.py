@@ -1,21 +1,13 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
-from .models import (
-    AnyTrack,
-    AudioTrack,
-    CCMessage,
-    Event,
-    MidiTrack,
-    Note,
-    ProgramChangeMessage,
-    Song,
-)
+from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
 import math
 import mido
 from mido import get_input_names, get_output_names, open_output # type: ignore
+import numpy as np
 from pydub import AudioSegment
 import os
 import signal
@@ -38,34 +30,33 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(
-            o, (Song, MidiTrack, AudioTrack, Event, Note, CCMessage, ProgramChangeMessage)
-        ):
+        if isinstance(o, (Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint)):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
-            d["__type__"] = o.__class__.__name__
+            d['__type__'] = o.__class__.__name__
             return d
         return super().default(o)
 
-
 def song_decoder(d):
-    if "__type__" in d:
-        type_name = d.pop("__type__")
+    if '__type__' in d:
+        type_name = d.pop('__type__')
         # Map the type name to the actual class.
         # The values in 'd' have already been decoded into objects by the hook.
-        if type_name == "Song":
+        if type_name == 'Song':
             return Song(**d)
-        elif type_name == "MidiTrack":
+        elif type_name == 'MidiTrack':
             return MidiTrack(**d)
-        elif type_name == "AudioTrack":
+        elif type_name == 'AudioTrack':
             return AudioTrack(**d)
-        elif type_name == "Event":
+        elif type_name == 'AutomationTrack':
+            return AutomationTrack(**d)
+        elif type_name == 'Event':
             return Event(**d)
-        elif type_name == "Note":
+        elif type_name == 'Note':
             return Note(**d)
-        elif type_name == "CCMessage":
+        elif type_name == 'CCMessage':
             return CCMessage(**d)
-        elif type_name == "ProgramChangeMessage":
-            return ProgramChangeMessage(**d)
+        elif type_name == 'AutomationPoint':
+            return AutomationPoint(**d)
     return d
 
 
@@ -197,6 +188,45 @@ class Sequencer:
         self.song.add_track(track)
         self.is_dirty = True
 
+    def add_automation_track(self, name: str, target_track_index: int):
+        """Adds a new automation track to the song."""
+        if not 0 <= target_track_index < len(self.song.tracks):
+            print("Error: Invalid target track index.")
+            return
+
+        target_track = self.song.tracks[target_track_index]
+        if isinstance(target_track, AutomationTrack):
+            print("Error: Automation tracks cannot target other automation tracks.")
+            return
+
+        track = AutomationTrack(name=name, target_track_index=target_track_index)
+        self.song.add_track(track)
+        self.is_dirty = True
+        print(f"Automation track '{name}' added, targeting track {target_track_index} ('{target_track.name}').")
+
+    def add_automation_point(self, track_index: int, position_str: str, parameter: str, value: float, curve: str):
+        """Adds an automation point to a specific automation track."""
+        if not 0 <= track_index < len(self.song.tracks):
+            print("Error: Invalid track index.")
+            return
+
+        track = self.song.tracks[track_index]
+        if not isinstance(track, AutomationTrack):
+            print("Error: Automation points can only be added to automation tracks.")
+            return
+
+        start_beat = self.parse_position_to_beats(position_str)
+        if start_beat is None:
+            return
+
+        try:
+            point = AutomationPoint(start_time=start_beat, parameter=parameter, value=value, curve=curve)
+            track.add_point(point)
+            self.is_dirty = True
+            print(f"Added '{parameter}' automation point to track '{track.name}' at position {position_str}.")
+        except ValueError as e:
+            print(f"Error: {e}")
+
     def delete_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
@@ -247,64 +277,16 @@ class Sequencer:
             print(f"Added new CC event at position {position_str} on track '{track.name}'.")
         self.is_dirty = True
 
-    def add_program_change_event(
-        self, track_index: int, position_str: str, program: int
-    ):
-        """Adds a program change event to a specific track at a given position."""
-        if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
-
-        track = self.song.tracks[track_index]
-        if not isinstance(track, MidiTrack):
-            print("Error: Program change events can only be added to MIDI tracks.")
-            return
-
-        start_beat = self.parse_position_to_beats(position_str)
-        if start_beat is None:
-            return  # Error is printed by parse_position_to_beats
-
-        try:
-            # Create the program change message, which will validate its own values
-            new_prog_change = ProgramChangeMessage(program=program)
-        except ValueError as e:
-            print(f"Error: Invalid program change value. {e}")
-            return
-
-        # Check if an event already exists at this exact start time
-        existing_event = None
-        for event in track.events:
-            if math.isclose(event.start_time, start_beat):
-                existing_event = event
-                break
-
-        if existing_event:
-            # Add the program change message to the existing event
-            existing_event.program_change_messages.append(new_prog_change)
-            print(
-                f"Added program change to existing event at position {position_str} on track '{track.name}'."
-            )
-        else:
-            # Create a new event with this program change message and add it to the track
-            new_event = Event(
-                start_time=start_beat, program_change_messages=[new_prog_change]
-            )
-            track.add_event(new_event)  # add_event handles sorting
-            print(
-                f"Added new program change event at position {position_str} on track '{track.name}'."
-            )
-        self.is_dirty = True
-
     def erase_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
         track = self.song.tracks[track_index]
-        if not isinstance(track, MidiTrack):
-            print("Error: Erasing events is only supported for MIDI tracks.")
+
+        if not isinstance(track, (MidiTrack, AutomationTrack)):
+            print("Error: Erasing is only supported for MIDI and Automation tracks.")
             return
 
-        # --- Get range from user ---
         try:
             start_pos_str = input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
@@ -320,99 +302,142 @@ class Sequencer:
             if end_beat <= start_beat:
                 print("Error: End position must be after the start position.")
                 return
-
         except ValueError:
             print("Error: Invalid number format.")
             return
 
-        # --- Get what to erase ---
-        erase_choice = "all"
-        erase_options = {
-            "a": "all",
-            "n": "notes",
-            "c": "cc",
-            "p": "program",
-        }
-        while True:
-            choice_str = input(
-                "What do you want to erase? (a)ll, (n)otes, (c)c, (p)rogram changes: "
-            ).lower()
-            if choice_str in erase_options:
-                erase_choice = erase_options[choice_str]
-                break
+        if isinstance(track, MidiTrack):
+            # --- Get what to erase ---
+            erase_choice = "all"
+            erase_options = {
+                "a": "all",
+                "n": "notes",
+                "c": "cc",
+            }
+            while True:
+                choice_str = input(
+                    "What do you want to erase? (a)ll, (n)otes, (c)c: "
+                ).lower()
+                if choice_str in erase_options:
+                    erase_choice = erase_options[choice_str]
+                    break
+                else:
+                    print("Invalid choice. Please try again.")
+
+            # --- Confirmation ---
+            end_str_display = (
+                f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
+            )
+            confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
+            if input(confirm_message).lower() != "y":
+                print("Erase cancelled.")
+                return
+
+            # --- Process events ---
+            final_events = []
+            events_to_shift = []
+            modified_count = 0
+            deleted_count = 0
+
+            for event in list(track.events): # Iterate over a copy
+                if start_beat <= event.start_time < end_beat:
+                    # This event is within the erase range
+                    event_modified = False
+                    if erase_choice == "all" or erase_choice == "notes":
+                        if event.notes:
+                            event.notes.clear()
+                            event_modified = True
+                    if erase_choice == "all" or erase_choice == "cc":
+                        if event.cc_messages:
+                            event.cc_messages.clear()
+                            event_modified = True
+
+                    if event_modified:
+                        modified_count += 1
+
+                    # If the event is now empty, don't keep it.
+                    is_empty = not event.notes and not event.cc_messages
+                    if not is_empty:
+                        final_events.append(event)
+                    else:
+                        deleted_count += 1
+                elif event.start_time >= end_beat:
+                    events_to_shift.append(event)
+                else:
+                    # This event is before the range, so keep it
+                    final_events.append(event)
+
+            # --- Handle shifting ---
+            shift_confirmed = False
+            if events_to_shift:
+                shift_choice = input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
+                if shift_choice == 'y':
+                    shift_offset = end_beat - start_beat
+                    for event in events_to_shift:
+                        event.start_time -= shift_offset
+                    shift_confirmed = True
+
+            final_events.extend(events_to_shift)
+            track.events = final_events
+            track.events.sort(key=lambda e: e.start_time)
+
+            # --- Report results ---
+            report = [f"Modified {modified_count} event(s)"]
+            if shift_confirmed:
+                report.append(f"shifted {len(events_to_shift)} event(s)")
+
+            if modified_count > 0 or shift_confirmed:
+                 self.is_dirty = True
+                 print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
             else:
-                print("Invalid choice. Please try again.")
+                 print("No events were modified or shifted.")
 
-        # --- Confirmation ---
-        end_str_display = (
-            f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
-        )
-        confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
-        if input(confirm_message).lower() != "y":
-            print("Erase cancelled.")
-            return
+        elif isinstance(track, AutomationTrack):
+            # --- Get what to erase ---
+            params_in_range = sorted(list({p.parameter for p in track.points if start_beat <= p.start_time < end_beat}))
+            if not params_in_range:
+                print("No automation points found in the specified range.")
+                return
 
-        # --- Partition and process events ---
-        events_to_keep = []
-        events_to_shift = []
-        modified_count = 0
+            prompt = "What do you want to erase? (all"
+            for p in params_in_range:
+                prompt += f", {p}"
+            prompt += "): "
 
-        for event in track.events:
-            if event.start_time < start_beat:
-                events_to_keep.append(event)
-            elif event.start_time >= end_beat:
-                events_to_shift.append(event)
-            else:  # This event is within the erase range
-                event_modified = False
-                if erase_choice == "all" or erase_choice == "notes":
-                    if event.notes:
-                        event.notes.clear()
-                        event_modified = True
-                if erase_choice == "all" or erase_choice == "cc":
-                    if event.cc_messages:
-                        event.cc_messages.clear()
-                        event_modified = True
-                if erase_choice == "all" or erase_choice == "program":
-                    if event.program_change_messages:
-                        event.program_change_messages.clear()
-                        event_modified = True
+            erase_choice = "all"
+            while True:
+                choice_str = input(prompt).lower()
+                if choice_str == "all" or choice_str in params_in_range:
+                    erase_choice = choice_str
+                    break
+                else:
+                    print("Invalid choice. Please try again.")
 
-                # If the event is now empty, don't keep it. Otherwise, keep the modified event.
-                is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
-                if not is_empty:
-                    events_to_keep.append(event)
+            # --- Confirmation ---
+            end_str_display = (f"up to {end_pos_str}" if end_pos_str else "to the end of the track")
+            confirm_message = f"Erase {erase_choice} points from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
+            if input(confirm_message).lower() != "y":
+                print("Erase cancelled.")
+                return
 
-                if event_modified:
-                    modified_count += 1
+            # --- Process points ---
+            points_to_keep = []
+            deleted_count = 0
+            for point in track.points:
+                is_in_range = start_beat <= point.start_time < end_beat
+                should_delete = is_in_range and (erase_choice == "all" or point.parameter == erase_choice)
 
-        # --- Handle shifting ---
-        final_events = events_to_keep
-        shift_confirmed = False
-        if events_to_shift:
-            shift_choice = input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
-            if shift_choice == 'y':
-                # This offset calculation correctly "closes the gap" by moving the subsequent events back.
-                shift_offset = end_beat - start_beat
-                for event in events_to_shift:
-                    event.start_time -= shift_offset
-                shift_confirmed = True
+                if not should_delete:
+                    points_to_keep.append(point)
+                else:
+                    deleted_count += 1
 
-        final_events.extend(events_to_shift)
-
-        # --- Execution ---
-        track.events = final_events
-        track.events.sort(key=lambda e: e.start_time) # Keep it sorted
-
-        # --- Report results ---
-        report = [f"Modified {modified_count} event(s)"]
-        if shift_confirmed:
-            report.append(f"shifted {len(events_to_shift)} event(s)")
-
-        if modified_count > 0 or shift_confirmed:
-             self.is_dirty = True
-             print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
-        else:
-             print("No events were modified or shifted.")
+            if deleted_count > 0:
+                track.points = points_to_keep
+                self.is_dirty = True
+                print(f"Erased {deleted_count} point(s) from track '{track.name}'.")
+            else:
+                print("No points were erased.")
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):
@@ -1123,8 +1148,8 @@ class Sequencer:
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):
             status_info = ""
-            if track.is_muted: status_info += " [M]"
-            if track.is_solo: status_info += " [S]"
+            if hasattr(track, 'is_muted') and track.is_muted: status_info += " [M]"
+            if hasattr(track, 'is_solo') and track.is_solo: status_info += " [S]"
 
             if isinstance(track, MidiTrack):
                 bank_info = ""
@@ -1138,7 +1163,14 @@ class Sequencer:
                 lines.append(f"[{i}] {track.name} (MIDI){status_info} ({ch_info}, {prog_info}{bank_info}, {vol_info}, {pan_info}, {vel_info}, {len(track.events)} events){port_info}")
             elif isinstance(track, AudioTrack):
                 start_pos_str = self._format_beats_to_position(track.start_time)
-                lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str}, Vol: {track.volume:.2f}, Pan: {track.pan:.2f})")
+                vol_info = f"Vol: {track.volume:.2f}"
+                pan_info = f"Pan: {track.pan:.2f}"
+                lines.append(f"[{i}] {track.name} (Audio){status_info} (File: {track.filepath}, Starts at: {start_pos_str}, {vol_info}, {pan_info})")
+            elif isinstance(track, AutomationTrack):
+                target_track_name = "N/A"
+                if 0 <= track.target_track_index < len(self.song.tracks):
+                    target_track_name = self.song.tracks[track.target_track_index].name
+                lines.append(f"[{i}] {track.name} (Automation){status_info} (Target: {track.target_track_index} '{target_track_name}', {len(track.points)} points)")
             else:
                 lines.append(f"[{i}] {track.name} (Unknown Type){status_info}")
         return "\n".join(lines)
@@ -1321,7 +1353,7 @@ class Sequencer:
 
                     # If the event is now empty, we don't add it to the keep list.
                     # Otherwise, we keep the event with its other messages intact.
-                    is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
+                    is_empty = not event.notes and not event.cc_messages
                     if not is_empty:
                         events_to_keep.append(event)
                 else:
@@ -1485,10 +1517,7 @@ class Sequencer:
                 kwargs['preexec_fn'] = os.setsid
 
             process = subprocess.Popen(command, **kwargs)
-            time.sleep(0.1) # Give mpv a moment to create the socket
-
-            # Set initial pan via IPC
-            self._send_ipc_command(socket_path, {"command": ["set_property", "pan", track.pan]})
+            time.sleep(0.1)
 
             active_process_info = ActiveAudioProcess(
                 process=process,
@@ -1603,6 +1632,103 @@ class Sequencer:
 
         return max_beats
 
+    def _generate_automation_events(self, auto_track: 'AutomationTrack') -> List[dict]:
+        """
+        Generates a list of concrete MIDI/audio events from an automation track.
+        """
+        generated_events = []
+        points = sorted(auto_track.points, key=lambda p: p.start_time)
+        if not points:
+            return []
+
+        # Find the target track and its type
+        target_track_index = auto_track.target_track_index
+        if not 0 <= target_track_index < len(self.song.tracks):
+            return [] # Invalid target
+        target_track = self.song.tracks[target_track_index]
+
+
+        param_map = {
+            "vol": {"type": "midi_cc", "control": 7},
+            "pan": {"type": "midi_cc", "control": 10},
+            "vel": {"type": "velocity_multiplier"},
+            "prog": {"type": "program_change"},
+            # Generic CCs like "cc1", "cc11", etc.
+            **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}
+        }
+
+
+        for i, start_point in enumerate(points):
+            param_config = param_map.get(start_point.parameter.lower())
+            if not param_config:
+                continue # Skip unknown parameters
+
+            # Always add the start point of any curve
+            generated_events.append({
+                "time": start_point.start_time,
+                "target_track_index": target_track_index,
+                "param_config": param_config,
+                "value": start_point.value
+            })
+
+            # If there's no next point or the curve is 'none', we're done with this point.
+            if i + 1 >= len(points) or start_point.curve == "none":
+                continue
+
+            end_point = points[i+1]
+
+            # A curve can only be formed between points of the same parameter
+            if start_point.parameter != end_point.parameter:
+                continue
+
+            start_time = start_point.start_time
+            end_time = end_point.start_time
+            start_val = start_point.value
+            end_val = end_point.value
+
+            time_diff = end_time - start_time
+            if time_diff <= 0:
+                continue
+
+            # Granularity: 1/16th of a beat
+            granularity = 1.0 / 16.0
+            num_steps = int(time_diff / granularity)
+            if num_steps <= 1:
+                continue
+
+            # Generate normalized time steps (from 0 to 1), excluding the first step (t=0)
+            # because the start_point is already added.
+            t = np.linspace(0, 1, num_steps, endpoint=False)[1:]
+            time_steps = start_time + t * time_diff
+            value_range = end_val - start_val
+            value_steps = None
+
+            if start_point.curve == "linear":
+                value_steps = start_val + t * value_range
+            elif start_point.curve == "ease-in":
+                # y = x^2
+                value_steps = start_val + (t**2) * value_range
+            elif start_point.curve == "ease-out":
+                # y = 1 - (1-x)^2
+                value_steps = start_val + (1 - (1 - t)**2) * value_range
+            elif start_point.curve in ["ease-in-out", "sine"]:
+                # y = 0.5 * (1 - cos(pi * x))
+                value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
+            else:
+                # Unknown curve type, do nothing more for this segment
+                continue
+
+            # Append the generated intermediate points
+            for step_time, step_value in zip(time_steps, value_steps):
+                generated_events.append({
+                    "time": step_time,
+                    "target_track_index": target_track_index,
+                    "param_config": param_config,
+                    "value": step_value
+                })
+
+        return generated_events
+
     def _get_current_beat(self) -> float:
         """Calculates the current playback position in beats."""
         if self.playback_state == "stopped":
@@ -1625,72 +1751,71 @@ class Sequencer:
         current_beat = start_beat + (current_ticks / ticks_per_beat)
         return current_beat
 
+    def _prepare_playback_events(self, start_beat: float, end_beat: Optional[float]) -> List[dict]:
+        master_event_list = []
+        ticks_per_beat = self.song.ticks_per_beat
+
+        # 1. Build master list of MIDI events
+        for track_idx, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack):
+                for event in track.events:
+                    start_tick = int(event.start_time * ticks_per_beat)
+                    for note in event.notes:
+                        end_tick = start_tick + int(note.duration * ticks_per_beat)
+                        master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)})
+                        master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
+                    for cc in event.cc_messages:
+                        master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
+
+        # 2. Generate and add automation events
+        for track_idx, track in enumerate(self.song.tracks):
+            if isinstance(track, AutomationTrack):
+                automation_events = self._generate_automation_events(track)
+                for auto_event in automation_events:
+                    master_event_list.append({
+                        'type': 'automation',
+                        'tick': int(auto_event['time'] * ticks_per_beat),
+                        'track_idx': track_idx,
+                        'payload': auto_event
+                    })
+
+        # 3. Filter and normalize events based on playback range
+        start_tick = int(start_beat * ticks_per_beat)
+        end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
+
+        ranged_event_list = []
+        for e in master_event_list:
+            if start_tick <= e['tick'] < end_tick:
+                new_event = e.copy()
+                new_event['tick'] -= start_tick
+                ranged_event_list.append(new_event)
+
+        # Add initial state for all tracks at the beginning of the playback range
+        for track_idx, track in enumerate(self.song.tracks):
+             if isinstance(track, MidiTrack):
+                ranged_event_list.append({'type': 'initial_state', 'tick': 0, 'track_idx': track_idx})
+
+        if not ranged_event_list:
+            if not any(isinstance(t, AudioTrack) and not t.is_muted for t in self.song.tracks):
+                 print("No events to play in the selected range.")
+        else:
+            event_type_priority = {'initial_state': 0, 'automation': 1, 'midi': 2}
+            ranged_event_list.sort(key=lambda e: (e['tick'], event_type_priority.get(e['type'], 99)))
+
+        return ranged_event_list
+
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         try:
-            master_event_list = []
+            ranged_event_list = self._prepare_playback_events(start_beat, end_beat)
             ticks_per_beat = self.song.ticks_per_beat
-            
-            # 1. Build master list of MIDI events only
-            for track_idx, track in enumerate(self.song.tracks):
-                if isinstance(track, MidiTrack):
-                    if not track.output_port_name:
-                        continue
-                    # Add initial state messages (bank/program change)
-                    if track.bank_msb is not None:
-                        master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb)})
-                    if track.bank_lsb is not None:
-                        master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb)})
-                    master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('program_change', channel=track.channel, program=track.instrument)})
-                    master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127))})
 
-                    # Add initial pan message (CC#10)
-                    midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                    master_event_list.append({'type': 'midi', 'tick': 0, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=10, value=midi_pan)})
-
-                    for event in track.events:
-                        start_tick = int(event.start_time * ticks_per_beat)
-
-                        # Process notes
-                        for note in event.notes:
-                            end_tick = start_tick + int(note.duration * ticks_per_beat)
-                            scaled_velocity = int(note.velocity * track.velocity)
-                            clamped_velocity = max(0, min(127, scaled_velocity))
-                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=clamped_velocity)})
-                            master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
-
-                        # Process CC messages
-                        for cc in event.cc_messages:
-                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
-
-                        # Process Program Change messages
-                        for pc in event.program_change_messages:
-                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'port_name': track.output_port_name, 'message': mido.Message('program_change', channel=track.channel, program=pc.program)})
-
-            # 2. Filter and normalize events based on playback range
-            start_tick = int(start_beat * ticks_per_beat)
-            end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
-
-            ranged_event_list = []
-            for e in master_event_list:
-                if start_tick <= e['tick'] < end_tick:
-                    ranged_event_list.append(e.copy())
-            
-            for event in ranged_event_list:
-                event['tick'] -= start_tick
-
-            if not ranged_event_list:
-                if not any(isinstance(t, AudioTrack) and not t.is_muted for t in self.song.tracks):
-                     print("No events to play in the selected range.")
-            else:
-                ranged_event_list.sort(key=lambda e: e['tick'])
-
-            # 3. Main playback loop
-            start_time_sec = time.time()
-            next_event_index = 0
-
+            # Main playback loop
             song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
             if end_beat is not None:
                 song_length_beats = min(song_length_beats, end_beat)
+
+            start_time_sec = time.time()
+            next_event_index = 0
 
             while not self._stop_event.is_set():
                 self._run_event.wait()
@@ -1703,69 +1828,138 @@ class Sequencer:
 
                 if current_beat_float >= song_length_beats:
                     if loop and not self.is_recording:
-                        # Stop old audio processes
                         self._shutdown_audio_processes()
                         for t in self.audio_threads:
-                            if t.is_alive():
-                                t.join(timeout=0.5)
-
-                        # Relancer les pistes audio
+                            if t.is_alive(): t.join(timeout=0.5)
                         self.audio_threads = []
                         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                         for i, track in enumerate(self.song.tracks):
                             if isinstance(track, AudioTrack):
                                 should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                                 if should_play:
-                                    audio_thread = threading.Thread(
-                                        target=self._play_audio_track,
-                                        args=(track, i, start_beat)
-                                    )
+                                    audio_thread = threading.Thread(target=self._play_audio_track, args=(track, i, start_beat))
                                     audio_thread.daemon = True
                                     self.audio_threads.append(audio_thread)
                                     audio_thread.start()
-
-                        # Reset pour la nouvelle boucle
                         start_time_sec = time.time()
                         next_event_index = 0
                         self.total_paused_time = 0.0
                         self._all_notes_off()
                         continue
                     else:
-                        break # Exit the loop
+                        break
 
-                # Display counter
                 mode = "Recording" if self.is_recording else "Playing"
                 beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
                 display_measure = int(current_beat_float / beats_per_measure) + 1
                 display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
                 print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
 
-                # Dispatch MIDI events that are due
+                # Dispatch events that are due
                 while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
                     event = ranged_event_list[next_event_index]
                     track = self.song.tracks[event['track_idx']]
 
                     is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                    should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                    should_play_track = (hasattr(track, 'is_solo') and track.is_solo or not is_any_track_soloed) and (hasattr(track, 'is_muted') and not track.is_muted)
 
-                    if should_play:
-                        if event['type'] == 'midi':
-                            port = self.open_ports.get(event['port_name'])
-                            if port: port.send(event['message'])
+                    if event['type'] == 'initial_state':
+                        if isinstance(track, MidiTrack) and track.output_port_name:
+                             port = self.open_ports.get(track.output_port_name)
+                             if port:
+                                if track.bank_msb is not None: port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                                if track.bank_lsb is not None: port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                                port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                                port.send(mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127)))
+                                port.send(mido.Message('control_change', channel=track.channel, control=10, value=int((track.pan + 1.0) / 2.0 * 127)))
+
+                    elif event['type'] == 'midi':
+                        if isinstance(track, MidiTrack) and should_play_track and track.output_port_name:
+                            port = self.open_ports.get(track.output_port_name)
+                            if port:
+                                msg = event['message']
+                                if msg.type == 'note_on':
+                                    # Apply live velocity multiplier
+                                    scaled_velocity = int(msg.velocity * track.velocity)
+                                    clamped_velocity = max(0, min(127, scaled_velocity))
+                                    port.send(msg.copy(velocity=clamped_velocity))
+                                else:
+                                    port.send(msg)
+
+                    elif event['type'] == 'automation':
+                        payload = event['payload']
+                        target_idx = payload['target_track_index']
+                        target_track = self.song.tracks[target_idx]
+
+                        is_any_soloed = any(t.is_solo for t in self.song.tracks)
+                        should_apply_automation = (target_track.is_solo or not is_any_soloed) and not target_track.is_muted
+
+                        if should_apply_automation:
+                            param_config = payload['param_config']
+                            value = payload['value']
+
+                            if param_config['type'] == 'velocity_multiplier':
+                                if isinstance(target_track, MidiTrack):
+                                    target_track.velocity = value
+
+                            elif param_config['type'] == 'program_change':
+                                if isinstance(target_track, MidiTrack) and target_track.output_port_name:
+                                    port = self.open_ports.get(target_track.output_port_name)
+                                    if port:
+                                        program = max(0, min(127, int(value)))
+                                        port.send(mido.Message('program_change', channel=target_track.channel, program=program))
+
+                            elif param_config['type'] == 'midi_cc':
+                                control = param_config['control']
+                                # Handle volume and pan for both MIDI and Audio tracks
+                                if control == 7: # Volume
+                                    if isinstance(target_track, (MidiTrack, AudioTrack)):
+                                        target_track.volume = max(0.0, min(1.0, value))
+                                        if isinstance(target_track, MidiTrack) and target_track.output_port_name:
+                                            port = self.open_ports.get(target_track.output_port_name)
+                                            if port: port.send(mido.Message('control_change', channel=target_track.channel, control=7, value=int(target_track.volume * 127)))
+                                        elif isinstance(target_track, AudioTrack):
+                                            with self.process_lock:
+                                                for ap in self.active_audio_processes:
+                                                    if ap.track_index == target_idx:
+                                                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", target_track.volume * 100]})
+                                                        break
+                                elif control == 10: # Pan
+                                    if isinstance(target_track, (MidiTrack, AudioTrack)):
+                                        target_track.pan = max(-1.0, min(1.0, value))
+                                        if isinstance(target_track, MidiTrack) and target_track.output_port_name:
+                                            port = self.open_ports.get(target_track.output_port_name)
+                                            if port: port.send(mido.Message('control_change', channel=target_track.channel, control=10, value=int((target_track.pan + 1.0) / 2.0 * 127)))
+                                        elif isinstance(target_track, AudioTrack):
+                                            with self.process_lock:
+                                                for ap in self.active_audio_processes:
+                                                    if ap.track_index == target_idx:
+                                                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pan", target_track.pan]})
+                                                        break
+                                else: # Other CCs
+                                    if isinstance(target_track, MidiTrack) and target_track.output_port_name:
+                                        port = self.open_ports.get(target_track.output_port_name)
+                                        if port:
+                                            cc_val = max(0, min(127, int(value)))
+                                            port.send(mido.Message('control_change', channel=target_track.channel, control=control, value=cc_val))
+
                     next_event_index += 1
 
-                time.sleep(0.01)
+                time.sleep(0.001)
 
-            # After the loop is finished, wait for any audio threads to complete.
+            # After the loop is finished...
             for t in self.audio_threads:
                 while t.is_alive() and not self._stop_event.is_set():
                     t.join(timeout=0.1)
 
         except Exception as e:
             if not self._stop_event.is_set():
-                print(f"\nError during playback: {e}")
+                # Use repr(e) to get more details, especially for exceptions that might not have a clean string representation
+                print(f"\nError during playback: {type(e).__name__} - {repr(e)}")
+                import traceback
+                traceback.print_exc()
         finally:
-            # This is the single point of truth for all cleanup
+            # Cleanup
             self._shutdown_audio_processes()
             self._all_notes_off()
             for port in self.temporary_ports:

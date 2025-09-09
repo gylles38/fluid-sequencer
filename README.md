@@ -42,6 +42,8 @@ Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
   addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
+  addauto <name> <target_idx> - Adds an automation track targeting another track.
+  addap <track> <pos> <p> <val> [curve] - Adds an automation point. Curves: none, linear, ease-in, ease-out, ease-in-out, sine.
   addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
@@ -57,6 +59,7 @@ Sequencer CLI Commands:
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
   volume <track_index>    - Sets the volume for an audio or MIDI track (0.0 to 1.0).
+  pan <track_index>       - Sets the pan for an audio or MIDI track (-1.0 to 1.0).
   velocity <track_index>  - Sets the velocity multiplier for a MIDI track (e.g., 1.0).
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
@@ -197,6 +200,46 @@ Une fois que vous avez enregistré des notes, vous pouvez les manipuler avec pr�
     *   Transposer toute la piste 0 d'une octave vers le haut (12 demi-tons).
     *   `> transpose`
     *   Suivez les invites pour définir la piste, la plage et le nombre de demi-tons.
+
+---
+
+### How-To : Utiliser les Pistes d'Automation
+
+L'automation permet de faire évoluer un paramètre au fil du temps. Les paramètres supportés sont : `vol`, `pan`, `vel`, `prog`, et les CC génériques (`cc0` à `cc127`).
+
+1.  **Créez vos pistes :**
+    *   `> add piano` (crée la piste MIDI 0)
+    *   `> addauto "Piano Automation" 0` (crée une piste d'automation qui cible la piste 0)
+
+2.  **Affichez la liste des pistes** pour vérifier : `list`
+    ```
+    [0] piano (MIDI) ...
+    [1] Piano Automation (Automation) (Target: 0 'piano', 0 points)
+    ```
+
+3.  **Créez des points d'automation :**
+    *   Chaque point est défini par une position, un paramètre, une valeur et une courbe (`none`, `linear`, `ease-in`, `ease-out`, `ease-in-out`, `sine`).
+    *   La courbe définit la transition *vers le point suivant*. Le dernier point d'une séquence doit utiliser `none`.
+
+    *   **Exemple 1 : Fondu de volume (vol) avec une courbe `ease-in`**
+        *   `> addap 1 1:1 vol 0.0 ease-in`  (Démarre à 0, commence lentement)
+        *   `> addap 1 3:1 vol 1.0 none`      (Atteint 1.0 à la mesure 3)
+
+    *   **Exemple 2 : Panoramique (pan) de gauche à droite**
+        *   `> addap 1 3:1 pan -1.0 linear` (Commence à gauche à la mesure 3)
+        *   `> addap 1 5:1 pan 1.0 none`    (Atteint la droite à la mesure 5)
+
+    *   **Exemple 3 : Changement de programme (prog) au milieu d'une mesure**
+        *   `> addap 1 5:3 prog 24 none` (Passe au programme 25 à 5:3)
+        *   *Note : la valeur du programme est 0-127, donc 24 correspond au programme 25.*
+
+    *   **Exemple 4 : Automation de la molette de modulation (cc1)**
+        *   `> addap 1 6:1 cc1 0 ease-in-out` (Module à 0 à la mesure 6)
+        *   `> addap 1 7:1 cc1 127 none`        (Atteint 127 à la mesure 7)
+
+4.  **Jouez la piste :**
+    *   `> play`
+    *   Le séquenceur calcule automatiquement toutes les étapes intermédiaires pour créer des transitions fluides selon les courbes choisies.
 
 ---
 

@@ -29,21 +29,11 @@ class CCMessage:
             raise ValueError("Value must be between 0 and 127.")
 
 @dataclass
-class ProgramChangeMessage:
-    """Represents a single MIDI Program Change message."""
-    program: int  # Program number (0-127)
-
-    def __post_init__(self):
-        if not 0 <= self.program <= 127:
-            raise ValueError("Program number must be between 0 and 127.")
-
-@dataclass
 class Event:
     """Represents a musical event, which can contain multiple notes (e.g., a chord) and CC messages."""
     start_time: float  # Start time in beats from the beginning of the track
     notes: List[Note] = field(default_factory=list)
     cc_messages: List[CCMessage] = field(default_factory=list)
-    program_change_messages: List[ProgramChangeMessage] = field(default_factory=list)
 
     def __post_init__(self):
         if self.start_time < 0:
@@ -85,9 +75,50 @@ class AudioTrack(BaseTrack):
     volume: float = 0.5 # (0.0 to 1.0)
     pan: float = 0.0 # (-1.0 for left, 0.0 for center, 1.0 for right)
 
+@dataclass
+class AutomationPoint:
+    """Represents a single point in an automation curve."""
+    start_time: float  # Start time in beats
+    parameter: str  # e.g., "volume", "pan", "cc_10"
+    value: float  # The value of the parameter at this point
+    curve: str = "none"  # "none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"
+
+    def __post_init__(self):
+        if self.start_time < 0:
+            raise ValueError("Start time cannot be negative.")
+
+        valid_curves = ["none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"]
+        if self.curve not in valid_curves:
+            raise ValueError(f"Curve type must be one of {valid_curves}.")
+
+        # Validate parameter format
+        param_lower = self.parameter.lower()
+        if param_lower.startswith("cc"):
+            try:
+                cc_num = int(param_lower[2:])
+                if not 0 <= cc_num <= 127:
+                    raise ValueError("CC number must be between 0 and 127.")
+            except (ValueError, IndexError):
+                 raise ValueError(f"Invalid CC parameter format: {self.parameter}")
+        elif param_lower not in ["vol", "pan", "vel", "prog"]:
+             raise ValueError(f"Invalid parameter name: {self.parameter}")
+
+@dataclass
+class AutomationTrack(BaseTrack):
+    """A track that contains automation data for another track."""
+    target_track_index: int
+    is_muted: bool = False
+    is_solo: bool = False
+    points: List[AutomationPoint] = field(default_factory=list)
+
+    def add_point(self, point: AutomationPoint):
+        """Adds an automation point and keeps the list sorted."""
+        self.points.append(point)
+        self.points.sort(key=lambda p: p.start_time)
+
 
 # Using Union to allow the list to contain both MidiTrack and AudioTrack objects
-AnyTrack = Union[MidiTrack, AudioTrack]
+AnyTrack = Union[MidiTrack, AudioTrack, AutomationTrack]
 
 @dataclass
 class Song:

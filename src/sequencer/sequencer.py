@@ -1,6 +1,6 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
-from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song
+from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
@@ -30,7 +30,7 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, (Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint)):
+        if isinstance(o, (Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint, MidiMapping)):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
             return d
@@ -57,6 +57,8 @@ def song_decoder(d):
             return CCMessage(**d)
         elif type_name == 'AutomationPoint':
             return AutomationPoint(**d)
+        elif type_name == 'MidiMapping':
+            return MidiMapping(**d)
     return d
 
 
@@ -94,12 +96,20 @@ class Sequencer:
         self.is_dirty = False
         self.last_project_basename = None
 
+        # MIDI Mapping
+        self.control_in_port_name: Optional[str] = None
+        self.midi_listener_thread: Optional[threading.Thread] = None
+        self._stop_midi_listener_event = threading.Event()
+
     def new_project(self):
         """
         Resets the sequencer to a new, empty project state.
         """
         if self.playback_state != "stopped":
             self.stop()
+
+        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
+            self.unset_control_port()
 
         self.song = Song(name="New Song", tempo=120)
         self.close_virtual_ports()
@@ -1991,6 +2001,61 @@ class Sequencer:
                 if self.is_recording:
                     self.stop()
 
+    def _midi_listener_thread_main(self):
+        """
+        The main loop for the MIDI listener thread.
+        This thread listens for incoming MIDI messages for real-time control.
+        """
+        try:
+            with mido.open_input(self.control_in_port_name) as inport:
+                print(f"Listening for MIDI control messages on '{self.control_in_port_name}'...")
+                while not self._stop_midi_listener_event.is_set():
+                    for msg in inport.iter_pending():
+                        if msg.type == 'control_change':
+                            for mapping in self.song.midi_mappings:
+                                if mapping.channel == msg.channel and mapping.control == msg.control:
+                                    if mapping.action == 'volume':
+                                        # Scale 0-127 to 0.0-1.0
+                                        volume = msg.value / 127.0
+                                        self.set_track_volume(mapping.track_index, volume)
+                                    elif mapping.action == 'pan':
+                                        # Scale 0-127 to -1.0-1.0
+                                        pan = (msg.value / 127.0) * 2.0 - 1.0
+                                        self.set_track_pan(mapping.track_index, pan)
+                                    elif mapping.action == 'program':
+                                        self.set_program(mapping.track_index, msg.value)
+                    time.sleep(0.01)
+        except Exception as e:
+            print(f"\nAn error occurred in the MIDI listener thread: {e}")
+        finally:
+            print("MIDI listener thread stopped.")
+
+    def set_control_port(self, port_name: str):
+        """Sets the MIDI input port for control messages and starts the listener."""
+        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
+            print("A control port is already set. Please unset it first.")
+            return
+
+        self.control_in_port_name = port_name
+        self._stop_midi_listener_event.clear()
+        self.midi_listener_thread = threading.Thread(target=self._midi_listener_thread_main)
+        self.midi_listener_thread.daemon = True
+        self.midi_listener_thread.start()
+        self.is_dirty = True
+
+    def unset_control_port(self):
+        """Stops the MIDI listener thread and unsets the control port."""
+        if not self.midi_listener_thread or not self.midi_listener_thread.is_alive():
+            print("No control port is set.")
+            return
+
+        self._stop_midi_listener_event.set()
+        self.midi_listener_thread.join(timeout=2.0)
+        self.control_in_port_name = None
+        self.midi_listener_thread = None
+        print("MIDI control port unset.")
+        self.is_dirty = True
+
     def start_metronome(self):
         """
         Starts the metronome thread if it's enabled and a port is assigned.
@@ -2196,6 +2261,9 @@ class Sequencer:
         if self.metronome_thread and self.metronome_thread.is_alive():
             self.metronome_thread.join(timeout=2.0)
 
+        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
+            self._stop_midi_listener_event.set()
+            self.midi_listener_thread.join(timeout=2.0)
 
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=2.0)

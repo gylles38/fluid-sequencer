@@ -73,6 +73,13 @@ Sequencer CLI Commands:
   restart                 - Stops and restarts playback from the beginning.
   metronome <on|off>      - Enables or disables the metronome.
   quit                    - Exits the sequencer.
+
+MIDI Mapping:
+  setcontrolport <port>   - Sets the MIDI input port for control messages.
+  unsetcontrolport        - Unsets the MIDI control port.
+  map <chan> <cc> <track> <action> - Maps a MIDI CC to an action (volume, pan, program).
+  unmap <chan> <cc>       - Removes a MIDI CC mapping.
+  listmaps                - Lists all active MIDI CC mappings.
 """
     print(help_text)
 
@@ -511,6 +518,85 @@ def process_command(user_input, seq):
                 seq.start_metronome()
         else:
             print("Usage: metronome <on|off>")
+    elif command == "setcontrolport":
+        if len(args) == 1:
+            try:
+                port_index = int(args[0])
+                input_ports = mido.get_input_names()
+                if 0 <= port_index < len(input_ports):
+                    port_name = input_ports[port_index]
+                    seq.set_control_port(port_name)
+                else:
+                    print("Error: Invalid port index.")
+            except (ValueError, IndexError):
+                print("Error: Invalid input.")
+        else:
+            print("Usage: setcontrolport <port_index>")
+    elif command == "unsetcontrolport":
+        seq.unset_control_port()
+    elif command == "map":
+        if len(args) == 4:
+            try:
+                channel = int(args[0]) - 1 # to 0-indexed
+                control = int(args[1])
+                track_index = int(args[2])
+                action = args[3].lower()
+
+                if not 0 <= channel <= 15:
+                    print("Error: Channel must be between 1 and 16.")
+                    return True
+                if not 0 <= control <= 127:
+                    print("Error: CC number must be between 0 and 127.")
+                    return True
+                if not 0 <= track_index < len(seq.song.tracks):
+                    print("Error: Invalid track index.")
+                    return True
+
+                valid_actions = ['volume', 'pan', 'program']
+                if action not in valid_actions:
+                    print(f"Error: Invalid action. Must be one of {valid_actions}.")
+                    return True
+
+                from sequencer.models import MidiMapping
+                mapping = MidiMapping(channel=channel, control=control, track_index=track_index, action=action)
+
+                # Remove any existing mapping for this channel/cc
+                seq.song.midi_mappings = [m for m in seq.song.midi_mappings if not (m.channel == channel and m.control == control)]
+                seq.song.midi_mappings.append(mapping)
+                print(f"Mapped Ch:{channel+1} CC:{control} to {action} on track {track_index}.")
+                seq.is_dirty = True
+
+            except ValueError:
+                print("Error: Invalid number for channel, CC, or track index.")
+        else:
+            print("Usage: map <channel> <cc> <track_index> <action>")
+    elif command == "unmap":
+        if len(args) == 2:
+            try:
+                channel = int(args[0]) - 1 # to 0-indexed
+                control = int(args[1])
+
+                initial_len = len(seq.song.midi_mappings)
+                seq.song.midi_mappings = [m for m in seq.song.midi_mappings if not (m.channel == channel and m.control == control)]
+                if len(seq.song.midi_mappings) < initial_len:
+                    print(f"Unmapped Ch:{channel+1} CC:{control}.")
+                    seq.is_dirty = True
+                else:
+                    print("Mapping not found.")
+
+            except ValueError:
+                print("Error: Invalid number for channel or CC.")
+        else:
+            print("Usage: unmap <channel> <cc>")
+    elif command == "listmaps":
+        if not seq.song.midi_mappings:
+            print("No MIDI mappings defined.")
+            return True
+
+        print("Active MIDI Mappings:")
+        for m in seq.song.midi_mappings:
+            print(f"  Ch:{m.channel+1} CC:{m.control} -> Track {m.track_index} {m.action.capitalize()}")
+
     else:
         print(f"Unknown command: '{command}'. Type 'help' for a list of commands.")
     return True
@@ -575,6 +661,8 @@ def main():
 
     # Clean up before exiting
     print("\nExiting sequencer. Goodbye!")
+    if seq.midi_listener_thread and seq.midi_listener_thread.is_alive():
+        seq.unset_control_port()
     seq.close_virtual_ports()
 
 if __name__ == "__main__":

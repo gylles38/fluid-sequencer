@@ -121,6 +121,14 @@ class AutomationTrack(BaseTrack):
 AnyTrack = Union[MidiTrack, AudioTrack, AutomationTrack]
 
 @dataclass
+class MidiMapping:
+    """Represents a mapping from a MIDI CC message to a sequencer action."""
+    channel: int
+    control: int
+    action: str
+    track_index: int
+
+@dataclass
 class Song:
     """Represents a song, containing multiple tracks and global settings."""
     name: str
@@ -129,6 +137,7 @@ class Song:
     time_signature_denominator: int = 4
     ticks_per_beat: int = 480
     tracks: List[AnyTrack] = field(default_factory=list)
+    midi_mappings: List[MidiMapping] = field(default_factory=list)
     metronome_enabled: bool = False
     metronome_port_name: Optional[str] = None
 

@@ -1,6 +1,6 @@
 import unittest
 from src.sequencer.sequencer import Sequencer
-from src.sequencer.models import Song, MidiTrack, AutomationTrack, AutomationPoint
+from src.sequencer.models import Song, MidiTrack, AutomationTrack, AutomationPoint, Event, Note
 
 class TestAutomation(unittest.TestCase):
 
@@ -145,6 +145,41 @@ class TestAutomation(unittest.TestCase):
         self.assertAlmostEqual(events[8]['value'], 0.5)
 
         self.assertAlmostEqual(events[16]['value'], 1.0)
+
+
+    def test_automation_priority(self):
+        """Test that automation events are processed before note events at the same tick."""
+        # Add a note at time 1.0
+        self.sequencer.song.tracks[0].add_event(Event(start_time=1.0, notes=[Note(pitch=60, velocity=100)]))
+
+        # Add a volume automation to 0 at the same time
+        auto_track = AutomationTrack(name="Vol Zero", target_track_index=0)
+        auto_track.add_point(AutomationPoint(start_time=1.0, parameter="vol", value=0.0, curve="none"))
+        self.sequencer.song.add_track(auto_track)
+
+        # Prepare the events for playback from beat 1 to 2
+        events = self.sequencer._prepare_playback_events(start_beat=1.0, end_beat=2.0)
+
+        # The list should contain the initial state, the automation, and the note_on.
+        # We want to check that the automation event comes before the note_on event.
+
+        # Find the automation and note_on events for tick 0 (which corresponds to beat 1.0)
+        tick_0_events = [e for e in events if e['tick'] == 0]
+
+        automation_event_index = -1
+        note_on_event_index = -1
+
+        for i, event in enumerate(tick_0_events):
+            if event['type'] == 'automation':
+                automation_event_index = i
+            elif event['type'] == 'midi' and event['message'].type == 'note_on':
+                note_on_event_index = i
+
+        self.assertNotEqual(automation_event_index, -1, "Automation event not found")
+        self.assertNotEqual(note_on_event_index, -1, "Note on event not found")
+
+        # Assert that the automation event comes before the note_on event
+        self.assertLess(automation_event_index, note_on_event_index)
 
 
 if __name__ == '__main__':

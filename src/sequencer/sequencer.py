@@ -1750,68 +1750,65 @@ class Sequencer:
         current_beat = start_beat + (current_ticks / ticks_per_beat)
         return current_beat
 
+    def _prepare_playback_events(self, start_beat: float, end_beat: Optional[float]) -> List[dict]:
+        master_event_list = []
+        ticks_per_beat = self.song.ticks_per_beat
+
+        # 1. Build master list of MIDI events
+        for track_idx, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack):
+                for event in track.events:
+                    start_tick = int(event.start_time * ticks_per_beat)
+                    for note in event.notes:
+                        end_tick = start_tick + int(note.duration * ticks_per_beat)
+                        master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)})
+                        master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
+                    for cc in event.cc_messages:
+                        master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
+
+        # 2. Generate and add automation events
+        for track_idx, track in enumerate(self.song.tracks):
+            if isinstance(track, AutomationTrack):
+                automation_events = self._generate_automation_events(track)
+                for auto_event in automation_events:
+                    master_event_list.append({
+                        'type': 'automation',
+                        'tick': int(auto_event['time'] * ticks_per_beat),
+                        'track_idx': track_idx,
+                        'payload': auto_event
+                    })
+
+        # 3. Filter and normalize events based on playback range
+        start_tick = int(start_beat * ticks_per_beat)
+        end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
+
+        ranged_event_list = []
+        for e in master_event_list:
+            if start_tick <= e['tick'] < end_tick:
+                new_event = e.copy()
+                new_event['tick'] -= start_tick
+                ranged_event_list.append(new_event)
+
+        # Add initial state for all tracks at the beginning of the playback range
+        for track_idx, track in enumerate(self.song.tracks):
+             if isinstance(track, MidiTrack):
+                ranged_event_list.append({'type': 'initial_state', 'tick': 0, 'track_idx': track_idx})
+
+        if not ranged_event_list:
+            if not any(isinstance(t, AudioTrack) and not t.is_muted for t in self.song.tracks):
+                 print("No events to play in the selected range.")
+        else:
+            event_type_priority = {'initial_state': 0, 'automation': 1, 'midi': 2}
+            ranged_event_list.sort(key=lambda e: (e['tick'], event_type_priority.get(e['type'], 99)))
+
+        return ranged_event_list
+
     def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
         try:
-            master_event_list = []
+            ranged_event_list = self._prepare_playback_events(start_beat, end_beat)
             ticks_per_beat = self.song.ticks_per_beat
 
-            # 1. Build master list of MIDI events
-            for track_idx, track in enumerate(self.song.tracks):
-                if isinstance(track, MidiTrack):
-                    # Initial state messages will be handled by automation or sent at time 0
-                    # This ensures automation at beat 0 overrides the track's base setting.
-                    for event in track.events:
-                        start_tick = int(event.start_time * ticks_per_beat)
-
-                        # Process notes
-                        for note in event.notes:
-                            end_tick = start_tick + int(note.duration * ticks_per_beat)
-                            # Velocity is handled live via automation, so we don't pre-scale here.
-                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)})
-                            master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
-
-                        # Process manually-entered CC messages
-                        for cc in event.cc_messages:
-                            master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
-
-
-            # 2. Generate and add automation events
-            for track_idx, track in enumerate(self.song.tracks):
-                if isinstance(track, AutomationTrack):
-                    automation_events = self._generate_automation_events(track)
-                    for auto_event in automation_events:
-                        master_event_list.append({
-                            'type': 'automation',
-                            'tick': int(auto_event['time'] * ticks_per_beat),
-                            'track_idx': track_idx, # This is the automation track's index
-                            'payload': auto_event # Contains target_track_index, param_config, value
-                        })
-
-
-            # 3. Filter and normalize events based on playback range
-            start_tick = int(start_beat * ticks_per_beat)
-            end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
-
-            ranged_event_list = []
-            for e in master_event_list:
-                # Use 'tick' which is common to both event types
-                if start_tick <= e['tick'] < end_tick:
-                    new_event = e.copy()
-                    new_event['tick'] -= start_tick
-                    ranged_event_list.append(new_event)
-
-            # Add initial state for all tracks at the beginning of the playback range
-            for track_idx, track in enumerate(self.song.tracks):
-                 if isinstance(track, MidiTrack):
-                    ranged_event_list.append({'type': 'initial_state', 'tick': 0, 'track_idx': track_idx})
-
-            if not ranged_event_list:
-                if not any(isinstance(t, AudioTrack) and not t.is_muted for t in self.song.tracks):
-                     print("No events to play in the selected range.")
-            else:
-                ranged_event_list.sort(key=lambda e: e['tick'])
-
-            # 4. Main playback loop
+            # Main playback loop
             song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
             if end_beat is not None:
                 song_length_beats = min(song_length_beats, end_beat)

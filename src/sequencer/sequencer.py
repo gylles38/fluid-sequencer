@@ -1118,6 +1118,7 @@ class Sequencer:
                 "song": self.song,
                 "virtual_ports": [vp.name for vp in self.virtual_ports],
                 "audio_player_command": self.audio_player_command,
+                "control_in_port_name": self.control_in_port_name,
             }
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
@@ -1150,6 +1151,11 @@ class Sequencer:
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
+
+            # Restore control port
+            control_port = project_data.get("control_in_port_name")
+            if control_port:
+                self.set_control_port(control_port)
 
             self.is_dirty = False
             self.last_project_basename = basename

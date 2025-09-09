@@ -108,6 +108,41 @@ class TestMidiMapping(unittest.TestCase):
             self.assertAlmostEqual(mock_set_volume.call_args[0][1], 100 / 127.0)
             self.assertEqual(mock_set_volume.call_args[0][0], 0)
 
+    @patch('json.dump')
+    @patch('mido.open_input')
+    def test_save_load_control_port(self, mock_open_input, mock_json_dump):
+        """Test that the control port is saved and loaded with the project."""
+        import json
+        from src.sequencer.sequencer import CustomSongEncoder
+
+        # Mock the listener thread so it doesn't actually start
+        with patch('threading.Thread'):
+            self.seq.set_control_port("my_control_port")
+
+        with patch('builtins.open', new_callable=unittest.mock.mock_open):
+            self.seq.save_project("test_project_with_control_port")
+
+        # Check that json.dump was called with the correct data
+        saved_data = mock_json_dump.call_args[0][0]
+        self.assertEqual(saved_data['control_in_port_name'], "my_control_port")
+
+        # Now test loading
+        new_seq = Sequencer()
+        # We need a custom decoder for the song object, so we can't just dump and load the whole thing easily.
+        # We will manually create the project data for loading.
+        project_data = {
+            "song": new_seq.song, # just use a default song
+            "virtual_ports": [],
+            "audio_player_command": "",
+            "control_in_port_name": "my_control_port"
+        }
+
+        with patch('builtins.open', unittest.mock.mock_open(read_data=json.dumps(project_data, cls=CustomSongEncoder))):
+             with patch('json.load', return_value=project_data):
+                with patch.object(new_seq, 'set_control_port') as mock_set_control_port:
+                    new_seq.load_project("test_project_with_control_port")
+                    mock_set_control_port.assert_called_once_with("my_control_port")
+
 
 if __name__ == '__main__':
     unittest.main()

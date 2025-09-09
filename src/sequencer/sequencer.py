@@ -1614,9 +1614,14 @@ class Sequencer:
 
             beats_per_second = self.song.tempo / 60.0
 
+            # Calculate a 2-beat delay to compensate for startup latency
+            # This helps sync the audio start with the visual beat counter
+            two_beat_delay = 2.0 * (60.0 / self.song.tempo)
+
             command = shlex.split(self.audio_player_command)
             command.append(f"--input-ipc-server={socket_path}")
             command.append(f"--volume={track.volume * 100}")
+            command.append(f"--audio-wait-open={two_beat_delay}")
 
             if track.start_time >= start_beat:
                 delay_beats = track.start_time - start_beat
@@ -1652,7 +1657,7 @@ class Sequencer:
             with self.process_lock:
                 self.active_audio_processes.append(active_process_info)
 
-            process.wait()
+            # process.wait() # This was blocking the thread! The process is managed by _shutdown_audio_processes now.
 
         except Exception as e:
             if not self._stop_event.is_set():
@@ -1985,6 +1990,7 @@ class Sequencer:
                 display_measure = int(current_beat_float / beats_per_measure) + 1
                 display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
                 print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
+                sys.stdout.flush()
 
                 if first_loop:
                     self._playback_started_event.set()

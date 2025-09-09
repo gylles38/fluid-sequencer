@@ -213,21 +213,22 @@ class Sequencer:
         self.song.add_track(track)
         self.is_dirty = True
 
-    def add_automation_track(self, name: str, target_track_index: int):
+    def add_automation_track(self, name: str, target_track_index: int) -> Optional[AutomationTrack]:
         """Adds a new automation track to the song."""
         if not 0 <= target_track_index < len(self.song.tracks):
             print("Error: Invalid target track index.")
-            return
+            return None
 
         target_track = self.song.tracks[target_track_index]
         if isinstance(target_track, AutomationTrack):
             print("Error: Automation tracks cannot target other automation tracks.")
-            return
+            return None
 
         track = AutomationTrack(name=name, target_track_index=target_track_index)
         self.song.add_track(track)
         self.is_dirty = True
         print(f"Automation track '{name}' added, targeting track {target_track_index} ('{target_track.name}').")
+        return track
 
     def add_automation_point(self, track_index: int, position_str: str, parameter: str, value: float, curve: str):
         """Adds an automation point to a specific automation track."""
@@ -251,6 +252,20 @@ class Sequencer:
             print(f"Added '{parameter}' automation point to track '{track.name}' at position {position_str}.")
         except ValueError as e:
             print(f"Error: {e}")
+
+    def _get_or_create_automation_track(self, target_track_index: int) -> Optional[AutomationTrack]:
+        """Finds an existing automation track for a target or creates a new one."""
+        # Check if an automation track for this target already exists
+        for track in self.song.tracks:
+            if isinstance(track, AutomationTrack) and track.target_track_index == target_track_index:
+                return track
+
+        # If not found, create one
+        target_track = self.song.tracks[target_track_index]
+        if target_track:
+            auto_track_name = f"Automation for {target_track.name}"
+            return self.add_automation_track(name=auto_track_name, target_track_index=target_track_index)
+        return None
 
     def delete_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -1345,6 +1360,32 @@ class Sequencer:
                                 event = Event(notes=[note], start_time=start_time_beats)
                                 target_track.add_event(event)
                                 self.is_dirty = True
+                        elif msg.type == 'control_change':
+                            for mapping in self.song.midi_mappings:
+                                if mapping.channel == msg.channel and mapping.control == msg.control:
+                                    automation_track = self._get_or_create_automation_track(mapping.track_index)
+                                    if automation_track:
+                                        now = time.time()
+                                        beats_per_second = self.song.tempo / 60.0
+                                        current_time_beats = first_note_time_beats + (now - recording_start_time_sec) * beats_per_second
+
+                                        value = 0
+                                        if mapping.action == 'volume':
+                                            value = msg.value / 127.0
+                                        elif mapping.action == 'pan':
+                                            value = (msg.value / 127.0) * 2.0 - 1.0
+                                        elif mapping.action == 'program':
+                                            value = msg.value
+
+                                        param = mapping.action
+                                        if mapping.action == 'volume':
+                                            param = 'vol'
+                                        elif mapping.action == 'program':
+                                            param = 'prog'
+
+                                        point = AutomationPoint(start_time=current_time_beats, parameter=param, value=value)
+                                        automation_track.add_point(point)
+                                        self.is_dirty = True
 
                     if num_beats_to_record is not None:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)

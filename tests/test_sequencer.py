@@ -114,7 +114,7 @@ class TestSequencer(unittest.TestCase):
         self.assertEqual(cc.value, 100)
         mock_print.assert_called_with("Added new CC event at position 1:2 on track 'MIDI'.")
 
-    @patch('mido.open_output')
+    @patch('src.sequencer.sequencer.open_output')
     def test_assign_port(self, mock_open_output):
         """Test assigning a port to a track."""
         self.sequencer.add_track(name="MIDI", track_type='midi')
@@ -185,28 +185,36 @@ class TestSequencer(unittest.TestCase):
         self.sequencer.add_automation_point(track_index=0, position_str="1:1", parameter="vol", value=0.5, curve="step")
         mock_print.assert_called_with("Error: Automation points can only be added to automation tracks.")
 
+    @patch('src.sequencer.sequencer.time')
     @patch('src.sequencer.sequencer.open_output')
-    def test_playback_with_automation(self, mock_open_output):
+    def test_playback_with_automation(self, mock_open_output, mock_time_module):
         """Test that automation events are correctly handled during playback."""
+        # --- Mocks ---
         mock_port = MagicMock()
         mock_open_output.return_value = mock_port
 
+        # Mock time to make test deterministic
+        time_progression = [100.0 + i * 0.01 for i in range(1000)] # Simulate 10 seconds of fine-grained time
+        mock_time_module.time.side_effect = time_progression
+        mock_time_module.sleep.return_value = None # Don't actually sleep
+
+        # --- Setup ---
         self.sequencer.add_track(name="MIDI 1", track_type='midi')
         self.sequencer.song.tracks[0].output_port_name = 'test_port'
         self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
 
         self.sequencer.add_automation_point(track_index=1, position_str="1:1", parameter="vol", value=0.5, curve="linear")
-        self.sequencer.add_automation_point(track_index=1, position_str="1:2", parameter="vol", value=1.0, curve="step")
+        self.sequencer.add_automation_point(track_index=1, position_str="1:2", parameter="vol", value=1.0, curve="none")
 
         note = Note(pitch=60, velocity=127, duration=4.0)
         event = Event(start_time=0.0, notes=[note])
         self.sequencer.song.tracks[0].add_event(event)
 
-        # Let the playback run for a short time
+        # --- Action ---
+        # Let the playback run. The thread will stop when it runs out of mocked time.
         self.sequencer.play(start_beat=0.0, end_beat=2.0)
-        import time
-        time.sleep(0.5)
-        self.sequencer.stop()
+        # Wait for the playback thread to finish
+        self.sequencer.playback_thread.join()
 
         # This is tricky because of threading, but we can check the messages that were sent.
         sent_messages = [call[0][0] for call in mock_port.send.call_args_list if isinstance(call[0][0], mido.Message)]
@@ -222,7 +230,8 @@ class TestSequencer(unittest.TestCase):
         # and automation should take precedence. We check that the ramp starts correctly.
         cc_values = [m.value for m in cc7_messages]
         self.assertIn(int(0.5 * 127), cc_values) # First automation point should be present
-        self.assertTrue(cc_values[-1] > int(0.5*127)) # Ramp should be going up
+        # Use assertGreater to get a better error message if it fails
+        self.assertGreater(cc_values[-1], int(0.5*127), "The final CC value should be low.")
 
     @patch('builtins.print')
     def test_set_track_pan(self, mock_print):

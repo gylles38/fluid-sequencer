@@ -315,6 +315,19 @@ class TestSequencer(unittest.TestCase):
             self.assertIsNone(self.sequencer.last_project_basename)
             mock_close_vp.assert_called_once()
 
+    @patch('src.sequencer.sequencer.threading.Thread')
+    def test_overdub_does_not_mute(self, mock_thread):
+        """Test that overdubbing does not mute the track."""
+        self.sequencer.add_track(name="Test Track", track_type='midi')
+        track = self.sequencer.song.tracks[0]
+        track.is_muted = False
+
+        # Call the internal method directly to test the logic
+        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=False)
+
+        # Check that the track is not muted
+        self.assertFalse(track.is_muted)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1439,7 +1439,8 @@ class Sequencer:
 
         outport_name = target_track.output_port_name
         original_mute_state = target_track.is_muted
-        target_track.is_muted = True
+        if replace_notes:
+            target_track.is_muted = True
 
         self.is_recording = True
         self.recording_thread = threading.Thread(

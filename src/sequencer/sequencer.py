@@ -1,6 +1,6 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
-from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, ProgramChangeMessage, CCMessage, Event, MidiTrack, Note, Song
+from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
@@ -30,7 +30,7 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, (Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, ProgramChangeMessage, AutomationPoint)):
+        if isinstance(o, (Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint)):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
             return d
@@ -55,8 +55,6 @@ def song_decoder(d):
             return Note(**d)
         elif type_name == 'CCMessage':
             return CCMessage(**d)
-        elif type_name == 'ProgramChangeMessage':
-            return ProgramChangeMessage(**d)
         elif type_name == 'AutomationPoint':
             return AutomationPoint(**d)
     return d
@@ -279,54 +277,6 @@ class Sequencer:
             print(f"Added new CC event at position {position_str} on track '{track.name}'.")
         self.is_dirty = True
 
-    def add_program_change_event(
-        self, track_index: int, position_str: str, program: int
-    ):
-        """Adds a program change event to a specific track at a given position."""
-        if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
-
-        track = self.song.tracks[track_index]
-        if not isinstance(track, MidiTrack):
-            print("Error: Program change events can only be added to MIDI tracks.")
-            return
-
-        start_beat = self.parse_position_to_beats(position_str)
-        if start_beat is None:
-            return  # Error is printed by parse_position_to_beats
-
-        try:
-            # Create the program change message, which will validate its own values
-            new_prog_change = ProgramChangeMessage(program=program)
-        except ValueError as e:
-            print(f"Error: Invalid program change value. {e}")
-            return
-
-        # Check if an event already exists at this exact start time
-        existing_event = None
-        for event in track.events:
-            if math.isclose(event.start_time, start_beat):
-                existing_event = event
-                break
-
-        if existing_event:
-            # Add the program change message to the existing event
-            existing_event.program_change_messages.append(new_prog_change)
-            print(
-                f"Added program change to existing event at position {position_str} on track '{track.name}'."
-            )
-        else:
-            # Create a new event with this program change message and add it to the track
-            new_event = Event(
-                start_time=start_beat, program_change_messages=[new_prog_change]
-            )
-            track.add_event(new_event)  # add_event handles sorting
-            print(
-                f"Added new program change event at position {position_str} on track '{track.name}'."
-            )
-        self.is_dirty = True
-
     def erase_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             print("Error: Invalid track index.")
@@ -363,11 +313,10 @@ class Sequencer:
                 "a": "all",
                 "n": "notes",
                 "c": "cc",
-                "p": "program",
             }
             while True:
                 choice_str = input(
-                    "What do you want to erase? (a)ll, (n)otes, (c)c, (p)rogram changes: "
+                    "What do you want to erase? (a)ll, (n)otes, (c)c: "
                 ).lower()
                 if choice_str in erase_options:
                     erase_choice = erase_options[choice_str]
@@ -402,16 +351,12 @@ class Sequencer:
                         if event.cc_messages:
                             event.cc_messages.clear()
                             event_modified = True
-                    if erase_choice == "all" or erase_choice == "program":
-                        if event.program_change_messages:
-                            event.program_change_messages.clear()
-                            event_modified = True
 
                     if event_modified:
                         modified_count += 1
 
                     # If the event is now empty, don't keep it.
-                    is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
+                    is_empty = not event.notes and not event.cc_messages
                     if not is_empty:
                         final_events.append(event)
                     else:
@@ -1408,7 +1353,7 @@ class Sequencer:
 
                     # If the event is now empty, we don't add it to the keep list.
                     # Otherwise, we keep the event with its other messages intact.
-                    is_empty = not event.notes and not event.cc_messages and not event.program_change_messages
+                    is_empty = not event.notes and not event.cc_messages
                     if not is_empty:
                         events_to_keep.append(event)
                 else:
@@ -1707,7 +1652,6 @@ class Sequencer:
             "vol": {"type": "midi_cc", "control": 7},
             "pan": {"type": "midi_cc", "control": 10},
             "vel": {"type": "velocity_multiplier"},
-            "prog": {"type": "program_change"},
             # Generic CCs like "cc1", "cc11", etc.
             **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}
         }
@@ -1718,7 +1662,7 @@ class Sequencer:
             if not param_config:
                 continue # Skip unknown parameters
 
-            # Always add the first point of any curve
+            # Always add the start point of any curve
             generated_events.append({
                 "time": start_point.start_time,
                 "target_track_index": target_track_index,
@@ -1726,39 +1670,61 @@ class Sequencer:
                 "value": start_point.value
             })
 
-            # For linear curves, generate intermediate points
-            if start_point.curve == "linear" and i + 1 < len(points):
-                end_point = points[i+1]
+            # If there's no next point or the curve is 'none', we're done with this point.
+            if i + 1 >= len(points) or start_point.curve == "none":
+                continue
 
-                # Ensure the linear curve is for the same parameter
-                if start_point.parameter != end_point.parameter:
-                    continue
+            end_point = points[i+1]
 
-                start_time = start_point.start_time
-                end_time = end_point.start_time
-                start_val = start_point.value
-                end_val = end_point.value
+            # A curve can only be formed between points of the same parameter
+            if start_point.parameter != end_point.parameter:
+                continue
 
-                time_diff = end_time - start_time
-                if time_diff <= 0:
-                    continue
+            start_time = start_point.start_time
+            end_time = end_point.start_time
+            start_val = start_point.value
+            end_val = end_point.value
 
-                # Granularity: 1/16th of a beat
-                granularity = 1.0 / 16.0
-                num_steps = int(time_diff / granularity)
+            time_diff = end_time - start_time
+            if time_diff <= 0:
+                continue
 
-                if num_steps > 1:
-                    time_steps = np.linspace(start_time, end_time, num_steps, endpoint=False)
-                    value_steps = np.linspace(start_val, end_val, num_steps, endpoint=False)
+            # Granularity: 1/16th of a beat
+            granularity = 1.0 / 16.0
+            num_steps = int(time_diff / granularity)
+            if num_steps <= 1:
+                continue
 
-                    # Start from the second step since the first point is already added
-                    for step_time, step_value in zip(time_steps[1:], value_steps[1:]):
-                        generated_events.append({
-                            "time": step_time,
-                            "target_track_index": target_track_index,
-                            "param_config": param_config,
-                            "value": step_value
-                        })
+            # Generate normalized time steps (from 0 to 1), excluding the first step (t=0)
+            # because the start_point is already added.
+            t = np.linspace(0, 1, num_steps, endpoint=False)[1:]
+            time_steps = start_time + t * time_diff
+            value_range = end_val - start_val
+            value_steps = None
+
+            if start_point.curve == "linear":
+                value_steps = start_val + t * value_range
+            elif start_point.curve == "ease-in":
+                # y = x^2
+                value_steps = start_val + (t**2) * value_range
+            elif start_point.curve == "ease-out":
+                # y = 1 - (1-x)^2
+                value_steps = start_val + (1 - (1 - t)**2) * value_range
+            elif start_point.curve in ["ease-in-out", "sine"]:
+                # y = 0.5 * (1 - cos(pi * x))
+                value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
+            else:
+                # Unknown curve type, do nothing more for this segment
+                continue
+
+            # Append the generated intermediate points
+            for step_time, step_value in zip(time_steps, value_steps):
+                generated_events.append({
+                    "time": step_time,
+                    "target_track_index": target_track_index,
+                    "param_config": param_config,
+                    "value": step_value
+                })
 
         return generated_events
 
@@ -1807,10 +1773,6 @@ class Sequencer:
                         # Process manually-entered CC messages
                         for cc in event.cc_messages:
                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
-
-                        # Process manually-entered Program Change messages
-                        for pc in event.program_change_messages:
-                             master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('program_change', channel=track.channel, program=pc.program)})
 
 
             # 2. Generate and add automation events
@@ -1941,13 +1903,6 @@ class Sequencer:
                             if param_config['type'] == 'velocity_multiplier':
                                 if isinstance(target_track, MidiTrack):
                                     target_track.velocity = value
-
-                            elif param_config['type'] == 'program_change':
-                                if isinstance(target_track, MidiTrack) and target_track.output_port_name:
-                                    port = self.open_ports.get(target_track.output_port_name)
-                                    if port:
-                                        program = max(0, min(127, int(value)))
-                                        port.send(mido.Message('program_change', channel=target_track.channel, program=program))
 
                             elif param_config['type'] == 'midi_cc':
                                 control = param_config['control']

@@ -29,21 +29,11 @@ class CCMessage:
             raise ValueError("Value must be between 0 and 127.")
 
 @dataclass
-class ProgramChangeMessage:
-    """Represents a single MIDI Program Change message."""
-    program: int  # Program number (0-127)
-
-    def __post_init__(self):
-        if not 0 <= self.program <= 127:
-            raise ValueError("Program number must be between 0 and 127.")
-
-@dataclass
 class Event:
     """Represents a musical event, which can contain multiple notes (e.g., a chord) and CC messages."""
     start_time: float  # Start time in beats from the beginning of the track
     notes: List[Note] = field(default_factory=list)
     cc_messages: List[CCMessage] = field(default_factory=list)
-    program_change_messages: List[ProgramChangeMessage] = field(default_factory=list)
 
     def __post_init__(self):
         if self.start_time < 0:
@@ -91,13 +81,15 @@ class AutomationPoint:
     start_time: float  # Start time in beats
     parameter: str  # e.g., "volume", "pan", "cc_10"
     value: float  # The value of the parameter at this point
-    curve: str = "step"  # "step" or "linear"
+    curve: str = "none"  # "none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"
 
     def __post_init__(self):
         if self.start_time < 0:
             raise ValueError("Start time cannot be negative.")
-        if self.curve not in ["step", "linear"]:
-            raise ValueError("Curve type must be 'step' or 'linear'.")
+
+        valid_curves = ["none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"]
+        if self.curve not in valid_curves:
+            raise ValueError(f"Curve type must be one of {valid_curves}.")
 
         # Validate parameter format
         param_lower = self.parameter.lower()
@@ -108,7 +100,7 @@ class AutomationPoint:
                     raise ValueError("CC number must be between 0 and 127.")
             except (ValueError, IndexError):
                  raise ValueError(f"Invalid CC parameter format: {self.parameter}")
-        elif param_lower not in ["vol", "pan", "vel", "prog"]:
+        elif param_lower not in ["vol", "pan", "vel"]:
              raise ValueError(f"Invalid parameter name: {self.parameter}")
 
 @dataclass

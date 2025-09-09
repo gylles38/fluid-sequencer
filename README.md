@@ -42,6 +42,8 @@ Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
   addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
+  addauto <name> <target_idx> - Adds an automation track targeting another track.
+  addap <track> <pos> <p> <val> [curve] - Adds an automation point. Curves: none, linear, ease-in, ease-out, ease-in-out, sine.
   addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
@@ -57,6 +59,7 @@ Sequencer CLI Commands:
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
   volume <track_index>    - Sets the volume for an audio or MIDI track (0.0 to 1.0).
+  pan <track_index>       - Sets the pan for an audio or MIDI track (-1.0 to 1.0).
   velocity <track_index>  - Sets the velocity multiplier for a MIDI track (e.g., 1.0).
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
@@ -214,16 +217,27 @@ L'automation permet de faire évoluer un paramètre (comme le volume, le pan, et
     [1] Piano Volume (Automation) (Target: 0 'piano', 0 points)
     ```
 
-3.  **Créez les points d'automation :**
+3.  **Créez les points d'automation (Exemple : fondu linéaire) :**
     *   Nous allons créer un fondu qui commence à la mesure 1 et se termine à la mesure 3.
     *   **Point de départ :** volume à 0 au début de la mesure 1. On utilise une courbe `linear` pour indiquer que la valeur doit progresser vers le point suivant.
         *   `> addap 1 1:1 vol 0.0 linear`
-    *   **Point d'arrivée :** volume à 1 (maximum) au début de la mesure 3. La courbe `step` est utilisée ici car c'est la fin de notre rampe.
-        *   `> addap 1 3:1 vol 1.0 step`
+    *   **Point d'arrivée :** volume à 1 (maximum) au début de la mesure 3. La courbe `none` est utilisée ici car c'est la fin de notre rampe (la valeur restera à 1.0 après ce point).
+        *   `> addap 1 3:1 vol 1.0 none`
 
-4.  **Jouez la piste :**
+4.  **Explorez d'autres courbes :**
+    *   Pour un fondu qui commence lentement et accélère (`ease-in`):
+        *   `> addap 1 1:1 vol 0.0 ease-in`
+        *   `> addap 1 3:1 vol 1.0 none`
+    *   Pour un fondu qui commence vite et ralentit (`ease-out`):
+        *   `> addap 1 1:1 vol 0.0 ease-out`
+        *   `> addap 1 3:1 vol 1.0 none`
+    *   Pour un fondu en forme de S (`ease-in-out` ou `sine`):
+        *   `> addap 1 1:1 vol 0.0 ease-in-out`
+        *   `> addap 1 3:1 vol 1.0 none`
+
+5.  **Jouez la piste :**
     *   `> play`
-    *   Si vous avez des notes sur la piste "piano" entre les mesures 1 et 3, vous entendrez le volume augmenter progressivement. Le séquenceur calcule automatiquement toutes les étapes intermédiaires (via des messages MIDI CC) pour créer une rampe fluide.
+    *   Si vous avez des notes sur la piste "piano" entre les mesures 1 et 3, vous entendrez le volume augmenter progressivement. Le séquenceur calcule automatiquement toutes les étapes intermédiaires (via des messages MIDI CC) pour créer une rampe fluide selon la courbe choisie.
 
 ---
 

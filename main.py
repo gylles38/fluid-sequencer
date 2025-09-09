@@ -30,8 +30,7 @@ Sequencer CLI Commands:
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
   addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
   addauto <name> <target_idx> - Adds an automation track targeting another track.
-  addap <track> <pos> <p> <val> [curve] - Adds an automation point (p: vol,pan,vel,prog,ccX).
-  addprog <track> <pos> <prog> - Adds a Program Change event to a track at a 'measure:beat' position.
+  addap <track> <pos> <p> <val> [curve] - Adds an automation point. Curves: none, linear, ease-in, ease-out, ease-in-out, sine.
   addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
@@ -149,7 +148,7 @@ def process_command(user_input, seq):
                 position_str = args[1]
                 param = args[2]
                 value = float(args[3])
-                curve = args[4] if len(args) > 4 else "step"
+                curve = args[4] if len(args) > 4 else "none"
                 seq.add_automation_point(track_index, position_str, param, value, curve)
             except ValueError:
                 print("Error: Invalid number for track index or value.")
@@ -157,20 +156,6 @@ def process_command(user_input, seq):
                 print(f"Error: {e}")
         else:
             print("Usage: addap <track_index> <position> <param> <value> [curve]")
-    elif command == "addprog":
-        if len(args) == 3:
-            try:
-                track_index = int(args[0])
-                position_str = args[1]
-                program = int(args[2])
-                if not 1 <= program <= 128:
-                    print("Error: Program number must be between 1 and 128.")
-                else:
-                    seq.add_program_change_event(track_index, position_str, program - 1)
-            except ValueError:
-                print("Error: Invalid number for track index or program.")
-        else:
-            print("Usage: addprog <track_index> <position> <program>")
     elif command == "addcc":
         if len(args) == 4:
             try:

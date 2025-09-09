@@ -1387,6 +1387,14 @@ class Sequencer:
                                         automation_track.add_point(point)
                                         self.is_dirty = True
 
+                                        # Apply the action in real-time
+                                        if mapping.action == 'volume':
+                                            self.set_track_volume(mapping.track_index, value)
+                                        elif mapping.action == 'pan':
+                                            self.set_track_pan(mapping.track_index, value)
+                                        elif mapping.action == 'program':
+                                            self.set_program(mapping.track_index, int(value))
+
                     if num_beats_to_record is not None:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
                         if elapsed_recording_beats >= num_beats_to_record:

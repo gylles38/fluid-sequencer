@@ -177,7 +177,9 @@ class TestMidiMapping(unittest.TestCase):
 
         # Mock the playback thread that starts during recording
         with patch('threading.Thread'):
-            self.seq._recording_thread_main(self.seq.song.tracks[0], 0.0, "mock_port", None, 2.0, False)
+            with patch.object(self.seq, 'set_track_volume') as mock_set_volume:
+                self.seq._recording_thread_main(self.seq.song.tracks[0], 0.0, "mock_port", None, 2.0, False)
+                mock_set_volume.assert_called_once()
 
         # Check that an automation track was created
         self.assertEqual(len(self.seq.song.tracks), 2)

@@ -1903,6 +1903,7 @@ class Sequencer:
                                     target_track.velocity = value
 
                             elif param_config['type'] == 'program_change':
+
                                 if isinstance(target_track, MidiTrack):
                                     program = max(0, min(127, int(value)))
                                     target_track.instrument = program

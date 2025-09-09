@@ -295,6 +295,26 @@ class TestSequencer(unittest.TestCase):
 
         self.assertEqual(len(auto_track.points), 0)
 
+    def test_new_project(self):
+        """Test creating a new project."""
+        # Modify the current project
+        self.sequencer.add_track(name="Piano", track_type='midi')
+        self.sequencer.set_tempo(150)
+        self.sequencer.last_project_basename = "old_project"
+        self.sequencer.is_dirty = True
+
+        # Create a new project
+        with patch.object(self.sequencer, 'close_virtual_ports') as mock_close_vp:
+            self.sequencer.new_project()
+
+            # Check that the state is reset
+            self.assertEqual(self.sequencer.song.name, "New Song")
+            self.assertEqual(self.sequencer.song.tempo, 120)
+            self.assertEqual(len(self.sequencer.song.tracks), 0)
+            self.assertFalse(self.sequencer.is_dirty)
+            self.assertIsNone(self.sequencer.last_project_basename)
+            mock_close_vp.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

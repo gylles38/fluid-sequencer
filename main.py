@@ -2,6 +2,7 @@ import mido
 from sequencer.sequencer import Sequencer
 import sys
 import time
+import os
 
 # Platform-specific getch
 try:
@@ -34,6 +35,7 @@ Sequencer CLI Commands:
   addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
+  newproject <name>       - Creates a new, empty project.
   list                    - Shows all tracks in the current song.
   ports                   - Lists available MIDI input and output ports.
   vport <name>            - Creates a virtual MIDI output port.
@@ -186,6 +188,23 @@ def process_command(user_input, seq):
                 print("Load cancelled.")
         else:
             print("Usage: loadproject <basename>")
+    elif command == "newproject":
+        if len(args) == 1:
+            project_name = args[0]
+            project_filepath = f"{project_name}.proj.json"
+            if os.path.exists(project_filepath):
+                print(f"Error: Project '{project_name}' already exists.")
+                return True
+
+            confirm = input("Creating a new project will discard the current session. Are you sure? [y/N] ").lower()
+            if confirm == 'y':
+                seq.new_project()
+                seq.last_project_basename = project_name
+                seq.is_dirty = True
+            else:
+                print("New project cancelled.")
+        else:
+            print("Usage: newproject <name>")
     elif command == "list":
         print(seq.list_tracks())
     elif command == "vport":

@@ -94,6 +94,21 @@ class Sequencer:
         self.is_dirty = False
         self.last_project_basename = None
 
+    def new_project(self):
+        """
+        Resets the sequencer to a new, empty project state.
+        """
+        if self.playback_state != "stopped":
+            self.stop()
+
+        self.song = Song(name="New Song", tempo=120)
+        self.close_virtual_ports()
+        self.virtual_ports = []
+        self.audio_player_command = self.DEFAULT_AUDIO_PLAYER_COMMAND
+        self.is_dirty = False
+        self.last_project_basename = None
+        print("New project created.")
+
     def _all_notes_off(self):
         for port in self.open_ports.values():
             if port and not port.closed:

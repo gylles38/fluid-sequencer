@@ -203,41 +203,43 @@ Une fois que vous avez enregistré des notes, vous pouvez les manipuler avec pr�
 
 ---
 
-### How-To : Créer une courbe d'automation de volume
+### How-To : Utiliser les Pistes d'Automation
 
-L'automation permet de faire évoluer un paramètre (comme le volume, le pan, etc.) au fil du temps. Voici comment créer un fondu de volume (fade-in) sur une piste.
+L'automation permet de faire évoluer un paramètre au fil du temps. Les paramètres supportés sont : `vol`, `pan`, `vel`, `prog`, et les CC génériques (`cc0` à `cc127`).
 
 1.  **Créez vos pistes :**
     *   `> add piano` (crée la piste MIDI 0)
-    *   `> addauto "Piano Volume" 0` (crée une piste d'automation qui cible la piste 0)
+    *   `> addauto "Piano Automation" 0` (crée une piste d'automation qui cible la piste 0)
 
 2.  **Affichez la liste des pistes** pour vérifier : `list`
     ```
     [0] piano (MIDI) ...
-    [1] Piano Volume (Automation) (Target: 0 'piano', 0 points)
+    [1] Piano Automation (Automation) (Target: 0 'piano', 0 points)
     ```
 
-3.  **Créez les points d'automation (Exemple : fondu linéaire) :**
-    *   Nous allons créer un fondu qui commence à la mesure 1 et se termine à la mesure 3.
-    *   **Point de départ :** volume à 0 au début de la mesure 1. On utilise une courbe `linear` pour indiquer que la valeur doit progresser vers le point suivant.
-        *   `> addap 1 1:1 vol 0.0 linear`
-    *   **Point d'arrivée :** volume à 1 (maximum) au début de la mesure 3. La courbe `none` est utilisée ici car c'est la fin de notre rampe (la valeur restera à 1.0 après ce point).
-        *   `> addap 1 3:1 vol 1.0 none`
+3.  **Créez des points d'automation :**
+    *   Chaque point est défini par une position, un paramètre, une valeur et une courbe (`none`, `linear`, `ease-in`, `ease-out`, `ease-in-out`, `sine`).
+    *   La courbe définit la transition *vers le point suivant*. Le dernier point d'une séquence doit utiliser `none`.
 
-4.  **Explorez d'autres courbes :**
-    *   Pour un fondu qui commence lentement et accélère (`ease-in`):
-        *   `> addap 1 1:1 vol 0.0 ease-in`
-        *   `> addap 1 3:1 vol 1.0 none`
-    *   Pour un fondu qui commence vite et ralentit (`ease-out`):
-        *   `> addap 1 1:1 vol 0.0 ease-out`
-        *   `> addap 1 3:1 vol 1.0 none`
-    *   Pour un fondu en forme de S (`ease-in-out` ou `sine`):
-        *   `> addap 1 1:1 vol 0.0 ease-in-out`
-        *   `> addap 1 3:1 vol 1.0 none`
+    *   **Exemple 1 : Fondu de volume (vol) avec une courbe `ease-in`**
+        *   `> addap 1 1:1 vol 0.0 ease-in`  (Démarre à 0, commence lentement)
+        *   `> addap 1 3:1 vol 1.0 none`      (Atteint 1.0 à la mesure 3)
 
-5.  **Jouez la piste :**
+    *   **Exemple 2 : Panoramique (pan) de gauche à droite**
+        *   `> addap 1 3:1 pan -1.0 linear` (Commence à gauche à la mesure 3)
+        *   `> addap 1 5:1 pan 1.0 none`    (Atteint la droite à la mesure 5)
+
+    *   **Exemple 3 : Changement de programme (prog) au milieu d'une mesure**
+        *   `> addap 1 5:3 prog 24 none` (Passe au programme 25 à 5:3)
+        *   *Note : la valeur du programme est 0-127, donc 24 correspond au programme 25.*
+
+    *   **Exemple 4 : Automation de la molette de modulation (cc1)**
+        *   `> addap 1 6:1 cc1 0 ease-in-out` (Module à 0 à la mesure 6)
+        *   `> addap 1 7:1 cc1 127 none`        (Atteint 127 à la mesure 7)
+
+4.  **Jouez la piste :**
     *   `> play`
-    *   Si vous avez des notes sur la piste "piano" entre les mesures 1 et 3, vous entendrez le volume augmenter progressivement. Le séquenceur calcule automatiquement toutes les étapes intermédiaires (via des messages MIDI CC) pour créer une rampe fluide selon la courbe choisie.
+    *   Le séquenceur calcule automatiquement toutes les étapes intermédiaires pour créer des transitions fluides selon les courbes choisies.
 
 ---
 

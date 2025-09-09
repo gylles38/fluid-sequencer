@@ -76,6 +76,7 @@ class Sequencer:
         self._stop_event = threading.Event()
         self._run_event = threading.Event()
         self._run_event.set()
+        self._playback_started_event = threading.Event()
         self.audio_threads: List[threading.Thread] = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
@@ -1595,6 +1596,12 @@ class Sequencer:
 
     def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float):
         """Plays a single audio track in a separate mpv process."""
+        # Wait for the main playback thread to signal that it's ready.
+        # This ensures the measure counter is displayed before audio starts.
+        self._playback_started_event.wait(timeout=1.0)
+        if self._stop_event.is_set():
+            return # Abort if stop was called during the wait
+
         import shlex
         process = None
         socket_path = ""
@@ -1934,6 +1941,7 @@ class Sequencer:
 
             start_time_sec = time.time()
             next_event_index = 0
+            first_loop = True
 
             while not self._stop_event.is_set():
                 self._run_event.wait()
@@ -1972,6 +1980,10 @@ class Sequencer:
                 display_measure = int(current_beat_float / beats_per_measure) + 1
                 display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
                 print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
+
+                if first_loop:
+                    self._playback_started_event.set()
+                    first_loop = False
 
                 # Dispatch events that are due
                 while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
@@ -2252,6 +2264,7 @@ class Sequencer:
                     return
 
         # --- Start Playback Threads ---
+        self._playback_started_event.clear()
         self._stop_event.clear()
         self._run_event.set()
         self.playback_state = "playing"

@@ -1903,11 +1903,14 @@ class Sequencer:
                                     target_track.velocity = value
 
                             elif param_config['type'] == 'program_change':
-                                if isinstance(target_track, MidiTrack) and target_track.output_port_name:
-                                    port = self.open_ports.get(target_track.output_port_name)
-                                    if port:
-                                        program = max(0, min(127, int(value)))
-                                        port.send(mido.Message('program_change', channel=target_track.channel, program=program))
+
+                                if isinstance(target_track, MidiTrack):
+                                    program = max(0, min(127, int(value)))
+                                    target_track.instrument = program
+                                    if target_track.output_port_name:
+                                        port = self.open_ports.get(target_track.output_port_name)
+                                        if port:
+                                            port.send(mido.Message('program_change', channel=target_track.channel, program=program))
 
                             elif param_config['type'] == 'midi_cc':
                                 control = param_config['control']

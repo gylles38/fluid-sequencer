@@ -1199,6 +1199,7 @@ class Sequencer:
             project_data = {
                 "song": self.song,
                 "virtual_ports": [vp.name for vp in self.virtual_ports],
+                "control_port_name": self.control_port_name,
                 "audio_player_command": self.audio_player_command,
             }
             with open(project_filepath, 'w') as f:
@@ -1233,6 +1234,12 @@ class Sequencer:
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
 
+            # Restore control port
+            self.unset_control_port()
+            control_port_name = project_data.get("control_port_name")
+            if control_port_name:
+                self.set_control_port(control_port_name)
+
             self.is_dirty = False
             self.last_project_basename = basename
             print(f"Successfully loaded project from '{project_filepath}'")
@@ -1240,6 +1247,21 @@ class Sequencer:
             print(f"Error: Project file not found at '{project_filepath}'")
         except Exception as e:
             print(f"Error loading project file: {e}")
+
+    def new_project(self):
+        """Resets the sequencer to a new, empty project."""
+        if self.playback_state != "stopped":
+            self.stop()
+            if self.playback_thread and self.playback_thread.is_alive():
+                self.playback_thread.join()
+
+        self.song = Song(name="New Song", tempo=120)
+        self.close_virtual_ports()
+        self.virtual_ports = []
+        self.unset_control_port()
+        self.last_project_basename = None
+        self.is_dirty = False
+        print("New project created.")
 
     def list_tracks(self) -> str:
         if not self.song.tracks:
@@ -1482,7 +1504,11 @@ class Sequencer:
 
         outport_name = target_track.output_port_name
         original_mute_state = target_track.is_muted
-        target_track.is_muted = True
+        if replace_notes:
+            target_track.is_muted = True
+        # When overdubbing (not replacing), we don't mute the track so the user can hear existing notes.
+        # The playback engine uses a snapshot of events from before recording started,
+        # and new notes are passed through via the recording thread's MIDI thru.
 
         self.is_recording = True
         self.recording_thread = threading.Thread(

@@ -47,6 +47,7 @@ Sequencer CLI Commands:
   addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
   load <filepath>         - Loads a song from a MIDI file.
   loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
+  newproject <name>       - Creates a new, empty project.
   list                    - Shows all tracks in the current song.
   ports                   - Lists available MIDI input and output ports.
   vport <name>            - Creates a virtual MIDI output port.
@@ -84,6 +85,13 @@ Sequencer CLI Commands:
   restart                 - Stops and restarts playback from the beginning.
   metronome <on|off>      - Enables or disables the metronome.
   quit                    - Exits the sequencer.
+
+MIDI Mapping:
+  setcontrolport <port>   - Sets the MIDI input port for control messages.
+  unsetcontrolport        - Unsets the MIDI control port.
+  map <chan> <cc> <track> <action> - Maps a MIDI CC to an action (volume, pan, program).
+  unmap <chan> <cc>       - Removes a MIDI CC mapping.
+  listmaps                - Lists all active MIDI CC mappings.
 ```
 
 ---
@@ -94,13 +102,14 @@ Pour éviter de reconfigurer vos ports virtuels et vos assignations de pistes à
 
 -   **`saveproject <nom>`** : Cette commande sauvegarde deux fichiers :
     1.  `<nom>.mid` : Le fichier MIDI standard contenant toutes vos notes.
-    2.  `<nom>.proj.json` : Un fichier de configuration qui mémorise les ports virtuels que vous avez créés, les assignations de pistes, le chemin des pistes audio et d'autres réglages.
+    2.  `<nom>.proj.json` : Un fichier de configuration qui mémorise les ports virtuels que vous avez créés, les assignations de pistes, le chemin des pistes audio, le port de contrôle, les mappings MIDI et d'autres réglages.
 
 -   **`loadproject <nom>`** : Cette commande charge un projet complet. Elle va :
     1.  Lire le fichier `<nom>.proj.json`.
     2.  Charger le fichier MIDI associé.
     3.  Recréer automatiquement les ports virtuels.
     4.  Réassigner les pistes aux bons ports.
+    5.  Restaurer le port de contrôle et les mappings MIDI.
 
 ---
 
@@ -142,7 +151,7 @@ Voici un exemple de workflow complet pour une piste MIDI.
     *   Activer le métronome : `> metronome on`
     *   Lancer l'enregistrement : `> record 0`
     *   Choisir votre clavier physique comme port d'entrée.
-    *   Activer le "MIDI Thru" (`y`) et choisir `mon-synth` comme port de sortie.
+    *   Le MIDI Thru est activé par défaut pour l'overdubbing, vous devriez entendre votre synthé en jouant.
     *   Jouez ! Vous entendrez le son du synthé de Carla pendant l'enregistrement.
 
 7.  **Sauvegarder le projet :**
@@ -166,7 +175,7 @@ Le séquenceur peut également gérer des pistes audio, lues par un lecteur exte
     *   `> addaudio drums /chemin/vers/ma/boucle.wav`
 
 3.  **Ajuster le volume :**
-    *   Le volume des pistes audio peut être contrôlé (si le lecteur externe le supporte via son volume système).
+    *   Le volume des pistes audio peut être contrôlé.
     *   `> volume 1` (entrez 0.7 pour baisser le volume)
 
 4.  **Jouer le projet :**
@@ -250,11 +259,10 @@ Le MIDI Mapping vous permet d'utiliser un contrôleur externe (comme un clavier 
 1.  **Lister les ports d'entrée MIDI :**
     *   D'abord, identifiez le port de votre contrôleur.
     *   `> ports`
-    *   Repérez l'index de votre appareil dans la section "Available MIDI Input Ports".
 
 2.  **Définir le port de contrôle :**
     *   Indiquez au séquenceur d'écouter sur ce port pour les messages de contrôle.
-    *   `> setcontrolport <index_du_port>`
+    *   `> setcontrolport <port_index>`
     *   Exemple : `> setcontrolport 1`
 
 3.  **Mapper un contrôle CC à une action :**

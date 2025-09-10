@@ -1553,7 +1553,7 @@ class Sequencer:
                 if self.audio_setup_barrier:
                     try:
                         self.audio_setup_barrier.wait(timeout=5.0)
-                    except (threading.BrokenBarrierError, threading.TimeoutError):
+                except threading.BrokenBarrierError:
                         return # Another thread failed or timed out.
             else:
                 # This is a live unmute. Unpause immediately.
@@ -2113,7 +2113,7 @@ class Sequencer:
                 print("Pre-buffering audio tracks...")
                 # Wait for all audio threads to launch their processes and be ready
                 self.audio_setup_barrier.wait(timeout=10.0)
-            except (threading.BrokenBarrierError, threading.TimeoutError):
+            except threading.BrokenBarrierError:
                 print("\nError: Could not initialize audio processes in time. Aborting playback.")
                 self.stop() # This will kill any processes that did manage to start
                 return
@@ -2248,6 +2248,10 @@ class Sequencer:
 
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=2.0)
+
+        for t in self.audio_threads:
+            if t.is_alive():
+                t.join(timeout=1.0)
 
         # Reset all state
         self.playback_state = "stopped"

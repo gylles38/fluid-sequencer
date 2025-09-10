@@ -93,6 +93,9 @@ class AutomationPoint:
 
         # Validate parameter format
         param_lower = self.parameter.lower()
+        if param_lower == "volume": param_lower = "vol"
+        if param_lower == "program": param_lower = "prog"
+                
         if param_lower.startswith("cc"):
             try:
                 cc_num = int(param_lower[2:])
@@ -102,6 +105,7 @@ class AutomationPoint:
                  raise ValueError(f"Invalid CC parameter format: {self.parameter}")
         elif param_lower not in ["vol", "pan", "vel", "prog"]:
              raise ValueError(f"Invalid parameter name: {self.parameter}")
+        self.parameter = param_lower
 
 @dataclass
 class AutomationTrack(BaseTrack):

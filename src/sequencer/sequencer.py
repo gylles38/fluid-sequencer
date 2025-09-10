@@ -1553,7 +1553,7 @@ class Sequencer:
                 if self.audio_setup_barrier:
                     try:
                         self.audio_setup_barrier.wait(timeout=5.0)
-                except threading.BrokenBarrierError:
+                    except threading.BrokenBarrierError:
                         return # Another thread failed or timed out.
             else:
                 # This is a live unmute. Unpause immediately.

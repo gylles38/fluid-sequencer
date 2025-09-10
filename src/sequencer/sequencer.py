@@ -1,6 +1,7 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
 from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
+from .terminal_input import cancellable_input, UserInputCancelled
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
@@ -295,11 +296,11 @@ class Sequencer:
             return
 
         try:
-            start_pos_str = input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_pos_str = cancellable_input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if start_beat is None: return
 
-            end_pos_str = input(f"Erase up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
+            end_pos_str = cancellable_input(f"Erase up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
             if end_pos_str == "":
                 end_beat = float('inf')
             else:
@@ -312,6 +313,9 @@ class Sequencer:
         except ValueError:
             print("Error: Invalid number format.")
             return
+        except UserInputCancelled:
+            print("\nErase cancelled.")
+            return
 
         if isinstance(track, MidiTrack):
             # --- Get what to erase ---
@@ -322,7 +326,7 @@ class Sequencer:
                 "c": "cc",
             }
             while True:
-                choice_str = input(
+                choice_str = cancellable_input(
                     "What do you want to erase? (a)ll, (n)otes, (c)c: "
                 ).lower()
                 if choice_str in erase_options:
@@ -336,7 +340,7 @@ class Sequencer:
                 f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
             )
             confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
-            if input(confirm_message).lower() != "y":
+            if cancellable_input(confirm_message).lower() != "y":
                 print("Erase cancelled.")
                 return
 
@@ -377,7 +381,7 @@ class Sequencer:
             # --- Handle shifting ---
             shift_confirmed = False
             if events_to_shift:
-                shift_choice = input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
+                shift_choice = cancellable_input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
                 if shift_choice == 'y':
                     shift_offset = end_beat - start_beat
                     for event in events_to_shift:
@@ -413,7 +417,7 @@ class Sequencer:
 
             erase_choice = "all"
             while True:
-                choice_str = input(prompt).lower()
+                choice_str = cancellable_input(prompt).lower()
                 if choice_str == "all" or choice_str in params_in_range:
                     erase_choice = choice_str
                     break
@@ -423,7 +427,7 @@ class Sequencer:
             # --- Confirmation ---
             end_str_display = (f"up to {end_pos_str}" if end_pos_str else "to the end of the track")
             confirm_message = f"Erase {erase_choice} points from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
-            if input(confirm_message).lower() != "y":
+            if cancellable_input(confirm_message).lower() != "y":
                 print("Erase cancelled.")
                 return
 
@@ -467,11 +471,11 @@ class Sequencer:
 
         try:
             # Get source range
-            start_pos_str = input(f"Move from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_pos_str = cancellable_input(f"Move from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
             source_start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if source_start_beat is None: return
 
-            end_pos_str = input(f"Move up to position on track '{source_track.name}' (measure:beat): ").strip()
+            end_pos_str = cancellable_input(f"Move up to position on track '{source_track.name}' (measure:beat): ").strip()
             source_end_beat = self.parse_position_to_beats(end_pos_str)
             if source_end_beat is None: return
 
@@ -480,7 +484,7 @@ class Sequencer:
                 return
 
             # Get destination
-            dest_track_idx_str = input(f"Move to destination track index (default: {track_index}, '{source_track.name}'): ").strip()
+            dest_track_idx_str = cancellable_input(f"Move to destination track index (default: {track_index}, '{source_track.name}'): ").strip()
             dest_track_idx = track_index if dest_track_idx_str == "" else int(dest_track_idx_str)
 
             if not 0 <= dest_track_idx < len(self.song.tracks):
@@ -492,12 +496,12 @@ class Sequencer:
                 print("Error: Destination track must be a MIDI track.")
                 return
 
-            dest_pos_str = input(f"Move to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            dest_pos_str = cancellable_input(f"Move to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
             destination_start_beat = self.parse_position_to_beats(dest_pos_str, default="1:1")
             if destination_start_beat is None: return
 
-        except ValueError:
-            print("Error: Invalid number in track index.")
+        except (ValueError, UserInputCancelled):
+            print("\nMove cancelled.")
             return
 
         # --- Calculations ---
@@ -510,7 +514,7 @@ class Sequencer:
             f"Move events from {start_pos_str} to {end_pos_str} on track '{source_track.name}' "
             f"to start at {dest_pos_str} on track '{dest_track.name}'. Are you sure? [y/N] "
         )
-        if input(confirm_message).lower() != 'y':
+        if cancellable_input(confirm_message).lower() != 'y':
             print("Move cancelled.")
             return
 
@@ -525,7 +529,7 @@ class Sequencer:
         if events_at_destination:
             print("There are existing notes at the destination.")
             while True:
-                choice = input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                choice = cancellable_input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
                 if choice in ['r', 'replace', 'a', 'add']:
                     overwrite_mode = choice[0]
                     break
@@ -607,7 +611,7 @@ class Sequencer:
 
         try:
             # Get source track
-            source_track_idx = int(input("Copy from track index: ").strip())
+            source_track_idx = int(cancellable_input("Copy from track index: ").strip())
             if not 0 <= source_track_idx < len(self.song.tracks):
                 print("Error: Invalid source track index.")
                 return
@@ -617,11 +621,11 @@ class Sequencer:
                 return
 
             # Get source range
-            start_pos_str = input(f"Copy from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_pos_str = cancellable_input(f"Copy from position on track '{source_track.name}' (measure:beat) [default: 1:1]: ").strip()
             source_start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if source_start_beat is None: return
 
-            end_pos_str = input(f"Copy up to position on track '{source_track.name}' (measure:beat): ").strip()
+            end_pos_str = cancellable_input(f"Copy up to position on track '{source_track.name}' (measure:beat): ").strip()
             source_end_beat = self.parse_position_to_beats(end_pos_str)
             if source_end_beat is None: return
 
@@ -630,7 +634,7 @@ class Sequencer:
                 return
 
             # Get destination
-            dest_track_idx = int(input(f"Copy to destination track index (default: {source_track_idx}): ").strip() or str(source_track_idx))
+            dest_track_idx = int(cancellable_input(f"Copy to destination track index (default: {source_track_idx}): ").strip() or str(source_track_idx))
             if not 0 <= dest_track_idx < len(self.song.tracks):
                 print("Error: Invalid destination track index.")
                 return
@@ -639,12 +643,12 @@ class Sequencer:
                 print("Error: Destination track must be a MIDI track.")
                 return
 
-            dest_pos_str = input(f"Copy to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            dest_pos_str = cancellable_input(f"Copy to destination position on track '{dest_track.name}' (measure:beat) [default: 1:1]: ").strip()
             destination_start_beat = self.parse_position_to_beats(dest_pos_str, default="1:1")
             if destination_start_beat is None: return
 
-        except ValueError:
-            print("Error: Invalid number.")
+        except (ValueError, UserInputCancelled):
+            print("\nCopy cancelled.")
             return
 
         # --- Calculations ---
@@ -657,7 +661,7 @@ class Sequencer:
             f"Copy events from {start_pos_str} to {end_pos_str} on track '{source_track.name}' "
             f"to start at {dest_pos_str} on track '{dest_track.name}'. Are you sure? [y/N] "
         )
-        if input(confirm_message).lower() != 'y':
+        if cancellable_input(confirm_message).lower() != 'y':
             print("Copy cancelled.")
             return
 
@@ -671,7 +675,7 @@ class Sequencer:
         if events_at_destination:
             print("There are existing notes at the destination.")
             while True:
-                choice = input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                choice = cancellable_input("Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
                 if choice in ['r', 'replace']:
                     overwrite_mode = "replace"
                     break
@@ -731,7 +735,7 @@ class Sequencer:
             return
 
         try:
-            track_idx = int(input("Transpose track index: ").strip())
+            track_idx = int(cancellable_input("Transpose track index: ").strip())
             if not 0 <= track_idx < len(self.song.tracks):
                 print("Error: Invalid track index.")
                 return
@@ -740,11 +744,11 @@ class Sequencer:
                 print("Error: Transposing is only supported for MIDI tracks.")
                 return
 
-            start_pos_str = input(f"Transpose from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_pos_str = cancellable_input(f"Transpose from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if start_beat is None: return
 
-            end_pos_str = input(f"Transpose up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
+            end_pos_str = cancellable_input(f"Transpose up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
             if end_pos_str == "":
                 end_beat = float('inf')
             else:
@@ -755,13 +759,13 @@ class Sequencer:
                 print("Error: End position must be after the start position.")
                 return
 
-            transpose_value = int(input("Transpose by how many semitones (e.g., 12 for up, -12 for down): ").strip())
+            transpose_value = int(cancellable_input("Transpose by how many semitones (e.g., 12 for up, -12 for down): ").strip())
             if not -127 <= transpose_value <= 127:
                 print("Error: Transposition value must be between -127 and 127.")
                 return
 
-        except ValueError:
-            print("Error: Invalid number.")
+        except (ValueError, UserInputCancelled):
+            print("\nTranspose cancelled.")
             return
 
         # --- Find events to transpose ---
@@ -779,7 +783,7 @@ class Sequencer:
             f"Transpose {len(events_to_transpose)} event(s) on track '{track.name}' by {transpose_value} semitones. "
             f"Are you sure? [y/N] "
         )
-        if input(confirm_message).lower() != 'y':
+        if cancellable_input(confirm_message).lower() != 'y':
             print("Transpose cancelled.")
             return
 
@@ -1533,11 +1537,11 @@ class Sequencer:
 
         try:
             # --- Gather Parameters ---
-            start_pos_str = input(f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: ").strip()
+            start_pos_str = cancellable_input(f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
             if start_beat is None: return
 
-            measures_input = input("Record for how long (measures:beats)? (Press Enter for unlimited) ").strip()
+            measures_input = cancellable_input("Record for how long (measures:beats)? (Press Enter for unlimited) ").strip()
             num_beats_to_record = None
             if measures_input:
                 parts = measures_input.split(':')
@@ -1548,7 +1552,7 @@ class Sequencer:
             replace_notes = False
             existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
             if existing_notes_in_range:
-                choice = input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                choice = cancellable_input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
                 if choice.startswith('r'):
                     replace_notes = True
 
@@ -1558,14 +1562,14 @@ class Sequencer:
                 return
             print("Available MIDI input ports:")
             for i, port in enumerate(input_ports): print(f"  [{i}] {port}")
-            inport_idx = int(input("Choose a port to record from: "))
+            inport_idx = int(cancellable_input("Choose a port to record from: "))
             if not 0 <= inport_idx < len(input_ports):
                 print("Error: Invalid port index.")
                 return
             inport_name = input_ports[inport_idx]
 
-        except (ValueError, IndexError):
-            print("Error: Invalid number format or selection."); return
+        except (ValueError, IndexError, UserInputCancelled):
+            print("\nRecord cancelled."); return
 
         # --- Store settings and start recording ---
         self.last_record_settings = {

@@ -97,29 +97,6 @@ class Sequencer:
         self.is_dirty = False
         self.last_project_basename = None
 
-        # MIDI Mapping
-        self.control_in_port_name: Optional[str] = None
-        self.midi_listener_thread: Optional[threading.Thread] = None
-        self._stop_midi_listener_event = threading.Event()
-
-    def new_project(self):
-        """
-        Resets the sequencer to a new, empty project state.
-        """
-        if self.playback_state != "stopped":
-            self.stop()
-
-        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
-            self.unset_control_port()
-
-        self.song = Song(name="New Song", tempo=120)
-        self.close_virtual_ports()
-        self.virtual_ports = []
-        self.audio_player_command = self.DEFAULT_AUDIO_PLAYER_COMMAND
-        self.is_dirty = False
-        self.last_project_basename = None
-        print("New project created.")
-
     def _all_notes_off(self):
         for port in self.open_ports.values():
             if port and not port.closed:
@@ -214,22 +191,21 @@ class Sequencer:
         self.song.add_track(track)
         self.is_dirty = True
 
-    def add_automation_track(self, name: str, target_track_index: int) -> Optional[AutomationTrack]:
+    def add_automation_track(self, name: str, target_track_index: int):
         """Adds a new automation track to the song."""
         if not 0 <= target_track_index < len(self.song.tracks):
             print("Error: Invalid target track index.")
-            return None
+            return
 
         target_track = self.song.tracks[target_track_index]
         if isinstance(target_track, AutomationTrack):
             print("Error: Automation tracks cannot target other automation tracks.")
-            return None
+            return
 
         track = AutomationTrack(name=name, target_track_index=target_track_index)
         self.song.add_track(track)
         self.is_dirty = True
         print(f"Automation track '{name}' added, targeting track {target_track_index} ('{target_track.name}').")
-        return track
 
     def add_automation_point(self, track_index: int, position_str: str, parameter: str, value: float, curve: str):
         """Adds an automation point to a specific automation track."""
@@ -253,20 +229,6 @@ class Sequencer:
             print(f"Added '{parameter}' automation point to track '{track.name}' at position {position_str}.")
         except ValueError as e:
             print(f"Error: {e}")
-
-    def _get_or_create_automation_track(self, target_track_index: int) -> Optional[AutomationTrack]:
-        """Finds an existing automation track for a target or creates a new one."""
-        # Check if an automation track for this target already exists
-        for track in self.song.tracks:
-            if isinstance(track, AutomationTrack) and track.target_track_index == target_track_index:
-                return track
-
-        # If not found, create one
-        target_track = self.song.tracks[target_track_index]
-        if target_track:
-            auto_track_name = f"Automation for {target_track.name}"
-            return self.add_automation_track(name=auto_track_name, target_track_index=target_track_index)
-        return None
 
     def delete_track(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -1134,7 +1096,6 @@ class Sequencer:
                 "song": self.song,
                 "virtual_ports": [vp.name for vp in self.virtual_ports],
                 "audio_player_command": self.audio_player_command,
-                "control_in_port_name": self.control_in_port_name,
             }
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
@@ -1167,11 +1128,6 @@ class Sequencer:
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
-
-            # Restore control port
-            control_port = project_data.get("control_in_port_name")
-            if control_port:
-                self.set_control_port(control_port)
 
             self.is_dirty = False
             self.last_project_basename = basename
@@ -1278,11 +1234,14 @@ class Sequencer:
         else:
             print(f"Error: Virtual port '{name}' not found.")
 
-    def _recording_thread_main(self, target_track: MidiTrack, start_beat: float, inport_name: str, outport_name: Optional[str], num_beats_to_record: Optional[float], original_mute_state: bool, count_in_measures: int = 0):
+    def _recording_thread_main(self, target_track: MidiTrack, start_beat: float, inport_name: str, outport_name: Optional[str], num_beats_to_record: Optional[float], original_mute_state: bool):
         """
-        The main loop for the MIDI recording thread.
-        If a count-in is used, it plays metronome clicks and then starts recording automatically.
-        If no count-in is used, it enters a waiting phase for the first MIDI note to start recording.
+        The main loop for the MIDI recording thread. This is a two-phase process.
+        1. Waiting Phase: A blocking call waits for the first valid note_on message.
+        During this time, no other tracks are playing.
+        2. Recording Phase: Once the first note is received, playback of other tracks
+        is started, and this thread switches to a non-blocking poll to record
+        all subsequent notes in sync with the playback.
         """
         open_notes = {}
         outport = None
@@ -1307,104 +1266,57 @@ class Sequencer:
                         outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
                     outport.send(mido.Message('program_change', channel=target_track.channel, program=target_track.instrument))
 
+                # --- 1. Waiting Phase ---
+                print("Waiting for first note to start recording...")
                 first_msg = None
-                if count_in_measures > 0:
-                    # --- Count-in Logic ---
-                    if self.song.metronome_port_name:
-                        metro_port = None
-                        is_temp_metro_port = False
-                        try:
-                            vp = next((p for p in self.virtual_ports if p.name == self.song.metronome_port_name), None)
-                            if vp: metro_port = vp
-                            else:
-                                metro_port = open_output(self.song.metronome_port_name); is_temp_metro_port = True
+                while not self._stop_event.is_set():
+                    for _ in inport.iter_pending(): pass
+                    msg = inport.receive()
+                    if outport:
+                        if hasattr(msg, 'channel'):
+                            thru_msg = msg.copy(channel=target_track.channel)
+                            outport.send(thru_msg)
+                        else:
+                            outport.send(msg)
+                    if msg.type == 'note_on' and msg.velocity > 0:
+                        first_msg = msg
+                        break
 
-                            if metro_port:
-                                print(f"Count-in: {count_in_measures} measure(s)...")
-                                beats_per_measure = self.song.time_signature_numerator
-                                total_beats = count_in_measures * beats_per_measure
-                                beat_duration_sec = 60.0 / self.song.tempo
-                                next_tick_time = time.time()
+                if self._stop_event.is_set(): return
 
-                                for i in range(total_beats):
-                                    if self._stop_event.is_set(): return
-                                    is_downbeat = (i % beats_per_measure) == 0
-                                    pitch = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
-                                    measure = (i // beats_per_measure) + 1; beat_in_measure = (i % beats_per_measure) + 1
-                                    print(f"\rGet ready: {measure}:{beat_in_measure}...", end="")
-                                    note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch, velocity=100)
-                                    note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch, velocity=0)
-                                    metro_port.send(note_on); time.sleep(0.05); metro_port.send(note_off)
-                                    next_tick_time += beat_duration_sec
-                                    sleep_duration = next_tick_time - time.time()
-                                    if sleep_duration > 0: time.sleep(sleep_duration)
-                                print("\n")
-                        except Exception as e:
-                            print(f"\nWarning: Could not open metronome port for count-in: {e}")
-                        finally:
-                            if is_temp_metro_port and metro_port and not metro_port.closed: metro_port.close()
-                    # --- End Count-in ---
-                else:
-                    # --- Waiting Phase (no count-in) ---
-                    print("Waiting for first note to start recording...")
-                    while not self._stop_event.is_set():
-                        for _ in inport.iter_pending(): pass
-                        msg = inport.receive()
-                        if outport:
-                            if hasattr(msg, 'channel'): outport.send(msg.copy(channel=target_track.channel))
-                            else: outport.send(msg)
-                        if msg.type == 'note_on' and msg.velocity > 0:
-                            first_msg = msg
-                            break
-                    if self._stop_event.is_set(): return
-
-                # --- Unified Recording Phase ---
+                # --- 2. Recording Phase ---
+                first_note_time_beats = start_beat
                 recording_start_time_sec = time.time()
-                self.play(start_beat=start_beat)
-                print(f"Recording started at beat {self._format_beats_to_position(start_beat)}. Type 'stop' to finish.")
+                self.play(start_beat=first_note_time_beats)
+                print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
 
-                if first_msg:
+                if first_msg is not None:
                     open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
 
                 while not self._stop_event.is_set():
                     for msg in inport.iter_pending():
                         if outport:
-                            if hasattr(msg, 'channel'): outport.send(msg.copy(channel=target_track.channel))
-                            else: outport.send(msg)
+                            if hasattr(msg, 'channel'):
+                                thru_msg = msg.copy(channel=target_track.channel)
+                                outport.send(thru_msg)
+                            else:
+                                outport.send(msg)
 
                         now = time.time()
                         if msg.type == 'note_on' and msg.velocity > 0:
-                            if msg.note not in open_notes: open_notes[msg.note] = (now, msg.velocity)
+                            if msg.note not in open_notes:
+                                open_notes[msg.note] = (now, msg.velocity)
                         elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                             if msg.note in open_notes:
                                 note_start_time_sec, velocity = open_notes.pop(msg.note)
                                 duration_sec = now - note_start_time_sec
                                 beats_per_second = self.song.tempo / 60.0
-                                start_time_beats = start_beat + (note_start_time_sec - recording_start_time_sec) * beats_per_second
+                                start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
                                 duration_beats = duration_sec * beats_per_second
                                 note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                                 event = Event(notes=[note], start_time=start_time_beats)
                                 target_track.add_event(event)
                                 self.is_dirty = True
-                        elif msg.type == 'control_change':
-                            for mapping in self.song.midi_mappings:
-                                if mapping.channel == msg.channel and mapping.control == msg.control:
-                                    automation_track = self._get_or_create_automation_track(mapping.track_index)
-                                    if automation_track:
-                                        current_time_beats = start_beat + (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
-                                        value = 0
-                                        if mapping.action == 'volume': value = msg.value / 127.0
-                                        elif mapping.action == 'pan': value = (msg.value / 127.0) * 2.0 - 1.0
-                                        elif mapping.action == 'program': value = msg.value
-                                        param = mapping.action
-                                        if mapping.action == 'volume': param = 'vol'
-                                        elif mapping.action == 'program': param = 'prog'
-                                        point = AutomationPoint(start_time=current_time_beats, parameter=param, value=value)
-                                        automation_track.add_point(point)
-                                        self.is_dirty = True
-                                        if mapping.action == 'volume': self.set_track_volume(mapping.track_index, value)
-                                        elif mapping.action == 'pan': self.set_track_pan(mapping.track_index, value)
-                                        elif mapping.action == 'program': self.set_program(mapping.track_index, int(value))
 
                     if num_beats_to_record is not None:
                         elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
@@ -1414,8 +1326,6 @@ class Sequencer:
                     time.sleep(0.001)
         except Exception as e:
             print(f"\nAn error occurred during recording: {e}")
-            import traceback
-            traceback.print_exc()
         finally:
             if outport and not is_virtual_port:
                 outport.close()
@@ -1423,7 +1333,7 @@ class Sequencer:
             self.is_recording = False
             print("\nRecording thread finished.")
         
-    def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, count_in_measures: int = 0):
+    def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool):
         target_track = self.song.tracks[track_index]
         if not isinstance(target_track, MidiTrack):
             # This check is a safeguard, should be checked before calling
@@ -1460,13 +1370,12 @@ class Sequencer:
 
         outport_name = target_track.output_port_name
         original_mute_state = target_track.is_muted
-        if replace_notes:
-            target_track.is_muted = True
+        target_track.is_muted = True
 
         self.is_recording = True
         self.recording_thread = threading.Thread(
             target=self._recording_thread_main,
-            args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state, count_in_measures)
+            args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state)
         )
         self.recording_thread.daemon = True
         self.recording_thread.start()
@@ -1517,25 +1426,6 @@ class Sequencer:
                 return
             inport_name = input_ports[inport_idx]
 
-            # --- Count-in ---
-            count_in_measures = 0
-            if self.song.metronome_enabled and self.song.metronome_port_name:
-                enable_count_in_choice = input("Enable count-in before recording starts? [y/N] ").lower()
-                if enable_count_in_choice.startswith('y'):
-                    while True:
-                        try:
-                            measures_str = input("How many measures for count-in? [default: 1] ").strip()
-                            if not measures_str:
-                                count_in_measures = 1
-                                break
-                            count_in_measures = int(measures_str)
-                            if count_in_measures > 0:
-                                break
-                            else:
-                                print("Please enter a positive number of measures.")
-                        except ValueError:
-                            print("Invalid number. Please try again.")
-
         except (ValueError, IndexError):
             print("Error: Invalid number format or selection."); return
 
@@ -1546,7 +1436,6 @@ class Sequencer:
             "num_beats_to_record": num_beats_to_record,
             "inport_name": inport_name,
             "replace_notes": replace_notes,
-            "count_in_measures": count_in_measures,
         }
 
         self._start_recording_internal(
@@ -1554,8 +1443,7 @@ class Sequencer:
             start_beat=start_beat,
             num_beats_to_record=num_beats_to_record,
             inport_name=inport_name,
-            replace_notes=replace_notes,
-            count_in_measures=count_in_measures
+            replace_notes=replace_notes
         )
 
     def record_bis(self):
@@ -1569,12 +1457,8 @@ class Sequencer:
             return
 
         print("Re-recording with last used settings...")
-        # Ensure count_in_measures exists for projects saved before this feature
-        settings = self.last_record_settings.copy()
-        settings.setdefault('count_in_measures', 0)
-
         # Unpack the stored settings and call the internal recording function
-        self._start_recording_internal(**settings)
+        self._start_recording_internal(**self.last_record_settings)
 
     def _send_ipc_command(self, socket_path: str, command: dict):
         """Sends a JSON command to the mpv IPC socket."""
@@ -1614,14 +1498,10 @@ class Sequencer:
 
             beats_per_second = self.song.tempo / 60.0
 
-            # Calculate a 2-beat delay to compensate for startup latency
-            # This helps sync the audio start with the visual beat counter
-            two_beat_delay = 2.0 * (60.0 / self.song.tempo)
-
             command = shlex.split(self.audio_player_command)
             command.append(f"--input-ipc-server={socket_path}")
             command.append(f"--volume={track.volume * 100}")
-            command.append(f"--audio-wait-open={two_beat_delay}")
+            command.append("--pause")
 
             if track.start_time >= start_beat:
                 delay_beats = track.start_time - start_beat
@@ -1657,7 +1537,12 @@ class Sequencer:
             with self.process_lock:
                 self.active_audio_processes.append(active_process_info)
 
-            # process.wait() # This was blocking the thread! The process is managed by _shutdown_audio_processes now.
+            # Now that the process is started and registered, unpause it.
+            # This happens after the _playback_started_event is set by the main playback thread,
+            # ensuring all audio tracks unpause in sync with the beat counter.
+            self._send_ipc_command(socket_path, {"command": ["set_property", "pause", False]})
+
+            # The process is managed by _shutdown_audio_processes now.
 
         except Exception as e:
             if not self._stop_event.is_set():
@@ -1963,11 +1848,6 @@ class Sequencer:
                         for t in self.audio_threads:
                             if t.is_alive(): t.join(timeout=0.5)
                         self.audio_threads = []
-
-                        # Reset the synchronization event for the next loop pass
-                        self._playback_started_event.clear()
-                        first_loop = True
-
                         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                         for i, track in enumerate(self.song.tracks):
                             if isinstance(track, AudioTrack):
@@ -1993,6 +1873,8 @@ class Sequencer:
                 sys.stdout.flush()
 
                 if first_loop:
+                    # The first time we print the counter, we signal that playback has "officially" started.
+                    # Audio threads are waiting on this event to launch their players in sync.
                     self._playback_started_event.set()
                     first_loop = False
 
@@ -2117,61 +1999,6 @@ class Sequencer:
                 if self.is_recording:
                     self.stop()
 
-    def _midi_listener_thread_main(self):
-        """
-        The main loop for the MIDI listener thread.
-        This thread listens for incoming MIDI messages for real-time control.
-        """
-        try:
-            with mido.open_input(self.control_in_port_name) as inport:
-                print(f"Listening for MIDI control messages on '{self.control_in_port_name}'...")
-                while not self._stop_midi_listener_event.is_set():
-                    for msg in inport.iter_pending():
-                        if msg.type == 'control_change':
-                            for mapping in self.song.midi_mappings:
-                                if mapping.channel == msg.channel and mapping.control == msg.control:
-                                    if mapping.action == 'volume':
-                                        # Scale 0-127 to 0.0-1.0
-                                        volume = msg.value / 127.0
-                                        self.set_track_volume(mapping.track_index, volume)
-                                    elif mapping.action == 'pan':
-                                        # Scale 0-127 to -1.0-1.0
-                                        pan = (msg.value / 127.0) * 2.0 - 1.0
-                                        self.set_track_pan(mapping.track_index, pan)
-                                    elif mapping.action == 'program':
-                                        self.set_program(mapping.track_index, msg.value)
-                    time.sleep(0.01)
-        except Exception as e:
-            print(f"\nAn error occurred in the MIDI listener thread: {e}")
-        finally:
-            print("MIDI listener thread stopped.")
-
-    def set_control_port(self, port_name: str):
-        """Sets the MIDI input port for control messages and starts the listener."""
-        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
-            print("A control port is already set. Please unset it first.")
-            return
-
-        self.control_in_port_name = port_name
-        self._stop_midi_listener_event.clear()
-        self.midi_listener_thread = threading.Thread(target=self._midi_listener_thread_main)
-        self.midi_listener_thread.daemon = True
-        self.midi_listener_thread.start()
-        self.is_dirty = True
-
-    def unset_control_port(self):
-        """Stops the MIDI listener thread and unsets the control port."""
-        if not self.midi_listener_thread or not self.midi_listener_thread.is_alive():
-            print("No control port is set.")
-            return
-
-        self._stop_midi_listener_event.set()
-        self.midi_listener_thread.join(timeout=2.0)
-        self.control_in_port_name = None
-        self.midi_listener_thread = None
-        print("MIDI control port unset.")
-        self.is_dirty = True
-
     def start_metronome(self):
         """
         Starts the metronome thread if it's enabled and a port is assigned.
@@ -2275,9 +2102,9 @@ class Sequencer:
                     return
 
         # --- Start Playback Threads ---
-        self._playback_started_event.clear()
         self._stop_event.clear()
         self._run_event.set()
+        self._playback_started_event.clear()
         self.playback_state = "playing"
         self.playback_start_time = time.time()
 
@@ -2378,9 +2205,6 @@ class Sequencer:
         if self.metronome_thread and self.metronome_thread.is_alive():
             self.metronome_thread.join(timeout=2.0)
 
-        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
-            self._stop_midi_listener_event.set()
-            self.midi_listener_thread.join(timeout=2.0)
 
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=2.0)

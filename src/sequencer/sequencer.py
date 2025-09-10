@@ -1747,7 +1747,7 @@ class Sequencer:
             expected_time = last_tick_time + beat_duration_sec
             if now >= expected_time:
                 # C'est l'heure d'un clic
-                last_tick_time = now # Réinitialiser le temps pour le prochain beat
+                last_tick_time = expected_time # Use the expected time for the next calculation to avoid drift
                 
                 # On détermine le type de clic (downbeat ou beat)
                 pitch_to_send = self.metronome_pitch_downbeat if (beat_count % beats_per_measure) == 0 else self.metronome_pitch_beat
@@ -2133,7 +2133,23 @@ class Sequencer:
 
                     next_event_index += 1
 
-                time.sleep(0.001)
+                # If there are more events, calculate sleep time
+                if next_event_index < len(ranged_event_list):
+                    next_event_tick = ranged_event_list[next_event_index]['tick']
+                    delta_ticks = next_event_tick - current_ticks
+
+                    if delta_ticks > 0:
+                        sleep_duration = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
+                        # Sleep for a max of 10ms to keep UI responsive, but no less than 1ms
+                        # to avoid busy-waiting.
+                        time.sleep(max(0.001, min(sleep_duration, 0.01)))
+                    else:
+                        # Next event is already due, so just yield for a moment.
+                        time.sleep(0.001)
+                else:
+                    # No more MIDI events. Playback might still be running for audio tracks or looping.
+                    # A slightly longer sleep is fine here.
+                    time.sleep(0.01)
 
             # After the loop is finished...
             for t in self.audio_threads:

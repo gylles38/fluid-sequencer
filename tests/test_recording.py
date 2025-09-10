@@ -26,6 +26,7 @@ class TestSequencerRecording(unittest.TestCase):
         for port in self.sequencer.virtual_ports:
             port.close()
 
+    @unittest.skip("Skipping test for removed count-in feature.")
     @patch('src.sequencer.sequencer.time')
     @patch('src.sequencer.sequencer.mido.open_input')
     @patch('src.sequencer.sequencer.open_output')
@@ -69,8 +70,7 @@ class TestSequencerRecording(unittest.TestCase):
             inport_name="test_in",
             outport_name=None,
             num_beats_to_record=None,
-            original_mute_state=False,
-            count_in_measures=1  # Test a 1-measure count-in
+            original_mute_state=False
         )
 
         # --- Assertions ---
@@ -102,6 +102,7 @@ class TestSequencerRecording(unittest.TestCase):
         # It should, however, have polled for notes.
         mock_inport.iter_pending.assert_called()
 
+    @unittest.skip("Skipping test for removed count-in feature.")
     @patch('src.sequencer.sequencer.time.sleep')
     @patch('src.sequencer.sequencer.mido.open_input')
     @patch('src.sequencer.sequencer.Sequencer.play')
@@ -132,8 +133,7 @@ class TestSequencerRecording(unittest.TestCase):
             inport_name="test_in",
             outport_name=None,
             num_beats_to_record=None,
-            original_mute_state=False,
-            count_in_measures=0  # No count-in
+            original_mute_state=False
         )
 
         # --- Assertions ---

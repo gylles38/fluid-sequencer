@@ -29,10 +29,9 @@ class TestSequencerRecording(unittest.TestCase):
     @patch('src.sequencer.sequencer.time.sleep')
     @patch('src.sequencer.sequencer.mido.open_input')
     @patch('src.sequencer.sequencer.Sequencer.play')
-    def test_record_without_count_in_waits_for_note(self, mock_play, mock_open_input, mock_sleep):
+    def test_record_waits_for_note(self, mock_play, mock_open_input, mock_sleep):
         """
-        Verify that when count-in is disabled, the system waits for a
-        blocking MIDI note before starting the recording.
+        Verify that recording waits for a blocking MIDI note before starting.
         """
         # --- Setup Mocks ---
         mock_inport = MagicMock()

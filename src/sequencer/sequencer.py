@@ -1559,7 +1559,9 @@ class Sequencer:
                 # This is a live unmute. Unpause immediately.
                 self._send_ipc_command(socket_path, {"command": ["set_property", "pause", False]})
 
-            # The thread's job is done. The process is managed by _shutdown_audio_processes.
+            # The thread must now wait for the playback to stop.
+            # This keeps the thread alive and prevents premature cleanup of the IPC socket.
+            self._stop_event.wait()
 
         except Exception as e:
             if not self._stop_event.is_set():
@@ -1567,13 +1569,8 @@ class Sequencer:
             if initial_setup and self.audio_setup_barrier and not self.audio_setup_barrier.broken:
                 self.audio_setup_barrier.abort()
         finally:
-            # Cleanup for the socket file is handled by _shutdown_audio_processes
-            # when the main playback stops.
-            if socket_path and os.path.exists(socket_path):
-                 try:
-                     os.remove(socket_path)
-                 except OSError:
-                     pass
+            # The socket file is cleaned up reliably by _shutdown_audio_processes.
+            pass
 
     def _metronome_thread_main(self):
         """

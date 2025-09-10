@@ -70,6 +70,7 @@ class Sequencer:
         self.playback_state = "stopped"
         self.playback_thread = None
         self.metronome_thread = None # New thread for the metronome
+        self.midi_listener_thread = None
         self.open_ports = {}
         self.virtual_ports = []
         self.temporary_ports = []

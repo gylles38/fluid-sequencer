@@ -337,6 +337,31 @@ class TestSequencer(unittest.TestCase):
         # Check that the track is not muted
         self.assertFalse(track.is_muted)
 
+    @patch('src.sequencer.sequencer.Sequencer.set_control_port')
+    def test_save_and_load_control_port(self, mock_set_control_port):
+        """Test that the control port is saved and loaded with the project."""
+        # Set a control port name
+        self.sequencer.control_port_name = "MyTestControlPort"
+
+        # Mock the writing of the project file
+        m_write = mock_open()
+        with patch('builtins.open', m_write):
+            self.sequencer.save_project("test_control_port_project")
+
+        # Get the content that was written to the mock file
+        handle = m_write()
+        written_content = "".join(call_args[0][0] for call_args in handle.write.call_args_list)
+
+        # Mock the reading of the project file
+        m_read = mock_open(read_data=written_content)
+        with patch('builtins.open', m_read):
+            new_sequencer = Sequencer()
+            # We patch set_control_port on the class, so it applies to the new instance
+            new_sequencer.load_project("test_control_port_project")
+
+        # Assert that set_control_port was called with the correct name
+        mock_set_control_port.assert_called_with("MyTestControlPort")
+
 
 if __name__ == '__main__':
     unittest.main()

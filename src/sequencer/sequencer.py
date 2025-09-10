@@ -1602,23 +1602,58 @@ class Sequencer:
         # Unpack the stored settings and call the internal recording function
         self._start_recording_internal(**self.last_record_settings)
 
-    def _send_ipc_command(self, socket_path: str, command: dict):
-        """Sends a JSON command to the mpv IPC socket."""
+    def _send_ipc_command(self, socket_path: str, command: dict, wait_for_response: bool = False) -> Optional[dict]:
+        """Sends a JSON command to the mpv IPC socket, optionally waiting for a response."""
         if not os.path.exists(socket_path):
-            return  # Socket not ready yet
+            return None
+
+        request_id = 1  # A simple, fixed request ID for our use case.
+        if wait_for_response:
+            command['request_id'] = request_id
+
         try:
-            # This only supports UNIX sockets for now.
-            if sys.platform != "win32":
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                    sock.settimeout(0.1)  # Don't block for too long
-                    sock.connect(socket_path)
-                    sock.sendall(json.dumps(command).encode('utf-8') + b'\n')
+            if sys.platform == "win32":
+                return None
+
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.2)
+                sock.connect(socket_path)
+                sock.sendall(json.dumps(command).encode('utf-8') + b'\n')
+
+                if not wait_for_response:
+                    return None
+
+                # Read responses until we find the one matching our request_id
+                buffer = b""
+                while True:
+                    try:
+                        chunk = sock.recv(4096)
+                        if not chunk: break
+                        buffer += chunk
+
+                        # Process all complete JSON objects in the buffer
+                        while b'\n' in buffer:
+                            response_str, buffer = buffer.split(b'\n', 1)
+                            if not response_str: continue
+                            try:
+                                response_json = json.loads(response_str)
+                                if response_json.get("request_id") == request_id:
+                                    if response_json.get("error") == "success":
+                                        return response_json
+                                    else:
+                                        return None # The command failed
+                            except (json.JSONDecodeError, AttributeError):
+                                # Ignore non-JSON lines or events without a request_id
+                                continue
+                    except socket.timeout:
+                        break # No more data
+                return None # No matching response found
+
         except (socket.timeout, ConnectionRefusedError, FileNotFoundError):
-            # These errors are expected if the socket is not ready, so we can ignore them.
-            pass
+            return None
         except Exception as e:
-            # Log other, unexpected errors.
-            print(f"\nError sending IPC command: {e}")
+            print(f"\nError in IPC command: {e}")
+            return None
 
     def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float, initial_setup: bool):
         """
@@ -1989,9 +2024,43 @@ class Sequencer:
             next_event_index = 0
             first_loop = True
 
+            # --- Clock Sync Setup ---
+            last_sync_time = time.time()
+            sync_interval_sec = 5.0  # Sync every 5 seconds
+            master_audio_process = None
+            with self.process_lock:
+                # Find the first playing audio track to use as the master clock
+                if self.active_audio_processes:
+                    master_audio_process = self.active_audio_processes[0]
+
+
             while not self._stop_event.is_set():
                 self._run_event.wait()
                 if self._stop_event.is_set(): break
+
+                # --- Clock Sync Logic ---
+                now = time.time()
+                if master_audio_process and (now - last_sync_time) > sync_interval_sec:
+                    last_sync_time = now
+                    response = self._send_ipc_command(
+                        master_audio_process.socket_path,
+                        {"command": ["get_property", "time-pos"]},
+                        wait_for_response=True
+                    )
+                    if response and isinstance(response.get("data"), (int, float)):
+                        audio_time_sec = response["data"]
+                        current_elapsed_sec = (now - self.playback_start_time) - self.total_paused_time
+                        drift = current_elapsed_sec - audio_time_sec
+
+                        # Correct the clock by adjusting the start time.
+                        # If drift > 0, the MIDI clock is ahead of the audio clock.
+                        # This means `current_elapsed_sec` is too large.
+                        # To reduce `elapsed_sec` on the next loop, `playback_start_time`
+                        # must be increased. Therefore, we add the positive drift.
+                        # If drift < 0, the MIDI clock is behind, and we subtract from
+                        # `playback_start_time` to increase `elapsed_sec`.
+                        if abs(drift) > 0.01:  # 10ms threshold
+                            self.playback_start_time += drift
 
                 elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
                 mido_tempo = mido.bpm2tempo(self.song.tempo)

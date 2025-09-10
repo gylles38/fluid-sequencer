@@ -143,57 +143,48 @@ class TestMidiMapping(unittest.TestCase):
                     new_seq.load_project("test_project_with_control_port")
                     mock_set_control_port.assert_called_once_with("my_control_port")
 
-    @unittest.skip("Skipping flawed test that calls the wrong function.")
+    @patch('src.sequencer.sequencer.Sequencer._record_automation_from_mapping')
+    @patch('src.sequencer.sequencer.Sequencer._apply_midi_mapping_action')
     @patch('mido.open_input')
-    def test_record_automation(self, mock_open_input):
-        """Test that CC messages are recorded as automation points."""
+    def test_record_automation(self, mock_open_input, mock_apply_action, mock_record_automation):
+        """Test that CC messages are recorded as automation points when recording."""
         # Mock the mido input port
         mock_port = MagicMock()
-        mock_open_input.return_value = mock_port
+        mock_open_input.return_value.__enter__.return_value = mock_port
 
-        # Mock messages
-        note_on = MagicMock()
-        note_on.type = 'note_on'
-        note_on.note = 60
-        note_on.velocity = 100
-
+        # Create a mock CC message
         cc_msg = MagicMock()
         cc_msg.type = 'control_change'
         cc_msg.channel = 0
         cc_msg.control = 7
         cc_msg.value = 100
 
-        note_off = MagicMock()
-        note_off.type = 'note_off'
-        note_off.note = 60
-        note_off.velocity = 0
+        # Simulate receiving the message, then stop the loop
+        self.seq._midi_listener_stop_event.clear()
+        def stop_loop(*args, **kwargs):
+            # The side effect should yield the message first, then stop
+            yield [cc_msg]
+            self.seq._midi_listener_stop_event.set()
+            yield [] # Subsequent calls yield nothing
+        mock_port.iter_pending.side_effect = stop_loop()
 
-        mock_port.__enter__.return_value.iter_pending.side_effect = [[note_on], [cc_msg], [note_off], []]
-        mock_port.__enter__.return_value.receive.return_value = note_on
 
         # Add a track and a mapping
         self.seq.add_track(name="Test Track", track_type='midi')
         mapping = MidiMapping(channel=0, control=7, track_index=0, action='volume')
         self.seq.song.midi_mappings.append(mapping)
 
-        # Mock the playback thread that starts during recording
-        with patch('threading.Thread'):
-            with patch.object(self.seq, 'set_track_volume') as mock_set_volume:
-                self.seq._recording_thread_main(self.seq.song.tracks[0], 0.0, "mock_port", None, 2.0, False)
-                mock_set_volume.assert_called_once()
+        # Set the sequencer to recording mode
+        self.seq.is_recording = True
 
-        # Check that an automation track was created
-        self.assertEqual(len(self.seq.song.tracks), 2)
-        auto_track = self.seq.song.tracks[1]
-        from src.sequencer.models import AutomationTrack
-        self.assertIsInstance(auto_track, AutomationTrack)
-        self.assertEqual(auto_track.target_track_index, 0)
+        # Call the listener loop directly
+        self.seq._midi_listener_loop("mock_port")
 
-        # Check that an automation point was created
-        self.assertEqual(len(auto_track.points), 1)
-        point = auto_track.points[0]
-        self.assertEqual(point.parameter, 'vol')
-        self.assertAlmostEqual(point.value, 100 / 127.0)
+        # Assert that the live action was still called
+        mock_apply_action.assert_called_once()
+
+        # Assert that the automation recording function was called
+        mock_record_automation.assert_called_once_with(mapping, 100)
 
 
 if __name__ == '__main__':

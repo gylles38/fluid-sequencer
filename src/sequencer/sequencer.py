@@ -78,6 +78,7 @@ class Sequencer:
         self._run_event = threading.Event()
         self._run_event.set()
         self._playback_started_event = threading.Event()
+        self.audio_setup_barrier: Optional[threading.Barrier] = None
         self.audio_threads: List[threading.Thread] = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
@@ -1011,7 +1012,7 @@ class Sequencer:
 
                     audio_thread = threading.Thread(
                         target=self._play_audio_track,
-                        args=(track, track_index, current_beat)
+                        args=(track, track_index, current_beat, False) # initial_setup=False
                     )
                     audio_thread.daemon = True
                     self.audio_threads.append(audio_thread)
@@ -1479,11 +1480,19 @@ class Sequencer:
             # Log other, unexpected errors.
             print(f"\nError sending IPC command: {e}")
 
-    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float):
-        """Plays a single audio track in a separate mpv process."""
-        # Wait for the main playback thread to signal that it's ready.
-        # This ensures the measure counter is displayed before audio starts.
-        self._playback_started_event.wait(timeout=1.0)
+    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float, initial_setup: bool):
+        """
+        Plays a single audio track in a separate mpv process.
+        This method has two modes based on the `initial_setup` flag:
+        1. `initial_setup=True`: For pre-buffering at the start of playback.
+           It launches the process paused and waits on a barrier. It does not unpause.
+        2. `initial_setup=False`: For live un-muting of a track.
+           It waits for the main playback event, then launches and unpauses the process immediately.
+        """
+        if not initial_setup:
+            # This is a live unmute, so wait for main playback to have started.
+            self._playback_started_event.wait(timeout=1.0)
+
         if self._stop_event.is_set():
             return # Abort if stop was called during the wait
 
@@ -1538,16 +1547,25 @@ class Sequencer:
             with self.process_lock:
                 self.active_audio_processes.append(active_process_info)
 
-            # Now that the process is started and registered, unpause it.
-            # This happens after the _playback_started_event is set by the main playback thread,
-            # ensuring all audio tracks unpause in sync with the beat counter.
-            self._send_ipc_command(socket_path, {"command": ["set_property", "pause", False]})
+            if initial_setup:
+                # Part of the initial pre-buffering. Wait on the barrier.
+                # Unpausing is handled by the main playback thread.
+                if self.audio_setup_barrier:
+                    try:
+                        self.audio_setup_barrier.wait(timeout=5.0)
+                    except (threading.BrokenBarrierError, threading.TimeoutError):
+                        return # Another thread failed or timed out.
+            else:
+                # This is a live unmute. Unpause immediately.
+                self._send_ipc_command(socket_path, {"command": ["set_property", "pause", False]})
 
-            # The process is managed by _shutdown_audio_processes now.
+            # The thread's job is done. The process is managed by _shutdown_audio_processes.
 
         except Exception as e:
             if not self._stop_event.is_set():
                 print(f"\n[ERROR] in audio playback thread for track '{track.name}': {e}")
+            if initial_setup and self.audio_setup_barrier and not self.audio_setup_barrier.broken:
+                self.audio_setup_barrier.abort()
         finally:
             # Cleanup for the socket file is handled by _shutdown_audio_processes
             # when the main playback stops.
@@ -1874,8 +1892,14 @@ class Sequencer:
                 sys.stdout.flush()
 
                 if first_loop:
-                    # The first time we print the counter, we signal that playback has "officially" started.
-                    # Audio threads are waiting on this event to launch their players in sync.
+                    # The first time we print the counter, unpause all pre-launched audio
+                    # processes so they start in sync with the MIDI and the counter.
+                    with self.process_lock:
+                        for ap in self.active_audio_processes:
+                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
+
+                    # Signal that the main playback has started. This is used by
+                    # toggle_mute to sync newly un-muted tracks.
                     self._playback_started_event.set()
                     first_loop = False
 
@@ -2062,22 +2086,42 @@ class Sequencer:
         self.open_ports.clear()
         self.temporary_ports = []
         self.audio_threads = [] # Clear the list for new audio threads
+        self.audio_setup_barrier = None
 
-        # --- Audio Playback ---
+
+        # --- Audio Playback Setup: Pre-launch all audio processes in a paused state ---
         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
         has_audio_to_play = False
         for i, track in enumerate(self.song.tracks):
             if isinstance(track, AudioTrack):
                 should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                # Check if the track is within the playback range at all
                 if should_play and track.start_time < (end_beat if end_beat is not None else float('inf')):
                     audio_thread = threading.Thread(
                         target=self._play_audio_track,
-                        args=(track, i, start_beat)
+                        args=(track, i, start_beat, True) # initial_setup=True
                     )
                     audio_thread.daemon = True
                     self.audio_threads.append(audio_thread)
                     has_audio_to_play = True
+
+        # If there are audio tracks, create and wait on a barrier for them to be ready.
+        if self.audio_threads:
+            num_audio_threads = len(self.audio_threads)
+            self.audio_setup_barrier = threading.Barrier(num_audio_threads + 1)
+
+            for t in self.audio_threads:
+                t.start()
+
+            try:
+                print("Pre-buffering audio tracks...")
+                # Wait for all audio threads to launch their processes and be ready
+                self.audio_setup_barrier.wait(timeout=10.0)
+            except (threading.BrokenBarrierError, threading.TimeoutError):
+                print("\nError: Could not initialize audio processes in time. Aborting playback.")
+                self.stop() # This will kill any processes that did manage to start
+                return
+            print("Audio ready.")
+
 
         # --- MIDI Port Setup ---
         required_ports = {track.output_port_name for track in self.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
@@ -2102,7 +2146,7 @@ class Sequencer:
                     for p in self.temporary_ports: p.close()
                     return
 
-        # --- Start Playback Threads ---
+        # --- Start Main Playback Thread ---
         self._stop_event.clear()
         self._run_event.set()
         self._playback_started_event.clear()
@@ -2118,9 +2162,7 @@ class Sequencer:
         self.playback_thread.daemon = True
         self.playback_thread.start()
 
-        # Start all audio threads
-        for t in self.audio_threads:
-            t.start()
+        # Audio threads are already started and waiting. No need to start them again.
 
     def pause(self):
         if self.playback_state == "stopped":

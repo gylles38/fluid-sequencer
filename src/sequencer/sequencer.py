@@ -1869,7 +1869,7 @@ class Sequencer:
                             if isinstance(track, AudioTrack):
                                 should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                                 if should_play:
-                                    audio_thread = threading.Thread(target=self._play_audio_track, args=(track, i, start_beat))
+                                    audio_thread = threading.Thread(target=self._play_audio_track, args=(track, i, start_beat, False)) # initial_setup=False
                                     audio_thread.daemon = True
                                     self.audio_threads.append(audio_thread)
                                     audio_thread.start()

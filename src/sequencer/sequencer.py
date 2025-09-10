@@ -2074,6 +2074,9 @@ class Sequencer:
         # Remember this start position for future resume/restart
         self.last_start_beat = start_beat
 
+        # It's crucial to clear the stop event at the beginning of a new playback session.
+        self._stop_event.clear()
+
         if end_beat is not None and end_beat <= start_beat:
             print("Error: End position must be after the start position.")
             return
@@ -2144,7 +2147,6 @@ class Sequencer:
                     return
 
         # --- Start Main Playback Thread ---
-        self._stop_event.clear()
         self._run_event.set()
         self._playback_started_event.clear()
         self.playback_state = "playing"

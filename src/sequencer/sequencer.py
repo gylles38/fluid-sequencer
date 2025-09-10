@@ -71,6 +71,8 @@ class Sequencer:
         self.playback_thread = None
         self.metronome_thread = None # New thread for the metronome
         self.midi_listener_thread = None
+        self._midi_listener_stop_event = threading.Event()
+        self.control_port_name: Optional[str] = None
         self.open_ports = {}
         self.virtual_ports = []
         self.temporary_ports = []
@@ -1073,6 +1075,71 @@ class Sequencer:
             finally:
                 if is_temp_port and port:
                     port.close()
+
+    def set_control_port(self, port_name: str):
+        """Sets the MIDI input port for control messages and starts listening."""
+        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
+            print("A control port is already active. Please unset it first.")
+            return
+
+        self.control_port_name = port_name
+        self._midi_listener_stop_event.clear()
+        self.midi_listener_thread = threading.Thread(
+            target=self._midi_listener_loop,
+            args=(port_name,)
+        )
+        self.midi_listener_thread.daemon = True
+        self.midi_listener_thread.start()
+        print(f"Listening for control messages on '{port_name}'.")
+
+    def unset_control_port(self):
+        """Stops listening for control messages and closes the port."""
+        if not self.midi_listener_thread or not self.midi_listener_thread.is_alive():
+            print("No active control port to unset.")
+            return
+
+        self._midi_listener_stop_event.set()
+        if self.midi_listener_thread:
+            self.midi_listener_thread.join(timeout=1.0)
+        self.control_port_name = None
+        print("Stopped listening for control messages.")
+
+    def _midi_listener_loop(self, port_name: str):
+        """The main loop for the MIDI control message listener thread."""
+        try:
+            with mido.open_input(port_name) as inport:
+                while not self._midi_listener_stop_event.is_set():
+                    for msg in inport.iter_pending():
+                        if msg.type == 'control_change':
+                            # Find a mapping for this CC message
+                            for mapping in self.song.midi_mappings:
+                                if mapping.channel == msg.channel and mapping.control == msg.control:
+                                    # Found a match, now apply the action
+                                    if not 0 <= mapping.track_index < len(self.song.tracks):
+                                        continue
+
+                                    # Normalize value from 0-127 to the target range
+                                    normalized_value = msg.value / 127.0
+
+                                    if mapping.action == 'volume':
+                                        # This action is now handled by the live automation system
+                                        self.set_track_volume(mapping.track_index, normalized_value)
+                                    elif mapping.action == 'pan':
+                                        # Pan is -1.0 to 1.0, so map 0-127 to -1.0 to 1.0
+                                        pan_value = (normalized_value * 2.0) - 1.0
+                                        self.set_track_pan(mapping.track_index, pan_value)
+                                    elif mapping.action == 'program':
+                                        # Program is 0-127, so just use the direct value
+                                        self.set_program(mapping.track_index, msg.value)
+
+                                    # Print feedback to the user, ensuring not to disrupt the measure counter
+                                    print(f"\rCC -> Track {mapping.track_index} {mapping.action.capitalize()}: {msg.value}   ", end="")
+                                    sys.stdout.flush()
+
+
+                    time.sleep(0.01) # Small sleep to prevent busy-waiting
+        except Exception as e:
+            print(f"\nError in MIDI listener thread for port '{port_name}': {e}")
         print("Priming complete.")
 
     def load_song(self, filepath: str):

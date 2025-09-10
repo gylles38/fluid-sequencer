@@ -104,7 +104,7 @@ class TestModels(unittest.TestCase):
     def test_automation_point_validation(self):
         """Tests validation for the AutomationPoint dataclass."""
         # Valid points
-        AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="step")
+        AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="none")
         AutomationPoint(start_time=1.0, parameter="pan", value=-0.5, curve="linear")
 
         # Invalid start_time
@@ -117,7 +117,7 @@ class TestModels(unittest.TestCase):
 
         # Invalid curve
         with self.assertRaises(ValueError):
-            AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="invalid_curve")
+            AutomationPoint(start_time=0, parameter="vol", value=0.5, curve="invalid-curve")
 
     def test_automation_track_add_point(self):
         """Tests that AutomationTrack.add_point keeps the points list sorted."""

@@ -243,6 +243,58 @@ L'automation permet de faire évoluer un paramètre au fil du temps. Les paramè
 
 ---
 
+### How-To : Utiliser le MIDI Mapping
+
+Le MIDI Mapping vous permet d'utiliser un contrôleur externe (comme un clavier avec des faders ou des potentiomètres) pour contrôler en temps réel les paramètres du séquenceur, comme le volume, le panoramique ou le programme d'une piste.
+
+1.  **Lister les ports d'entrée MIDI :**
+    *   D'abord, identifiez le port de votre contrôleur.
+    *   `> ports`
+    *   Repérez l'index de votre appareil dans la section "Available MIDI Input Ports".
+
+2.  **Définir le port de contrôle :**
+    *   Indiquez au séquenceur d'écouter sur ce port pour les messages de contrôle.
+    *   `> setcontrolport <index_du_port>`
+    *   Exemple : `> setcontrolport 1`
+
+3.  **Mapper un contrôle CC à une action :**
+    *   La commande `map` lie un numéro de CC (Control Change) sur un canal MIDI spécifique à une action sur une piste.
+    *   Format : `map <canal> <cc> <piste> <action>`
+    *   Actions valides : `volume`, `pan`, `program`.
+
+    *   **Exemple 1 : Mapper le CC#7 (volume) du canal 1 au volume de la piste 0**
+        *   `> map 1 7 0 volume`
+        *   Maintenant, bouger le fader ou le potentiomètre qui envoie le CC#7 sur le canal 1 changera le volume de la piste 0 en temps réel.
+
+    *   **Exemple 2 : Mapper le CC#10 (panoramique) du canal 1 au panoramique de la piste 0**
+        *   `> map 1 10 0 pan`
+
+    *   **Exemple 3 : Mapper le CC#20 du canal 1 à un changement de programme sur la piste 1**
+        *   `> map 1 20 1 program`
+        *   La valeur du CC (0-127) changera directement le programme de la piste 1.
+
+4.  **Lister les mappings actifs :**
+    *   Pour voir tous les mappings que vous avez créés :
+    *   `> listmaps`
+    *   Exemple de sortie :
+        ```
+        Active MIDI Mappings:
+          Ch:1 CC:7 -> Track 0 Volume
+          Ch:1 CC:10 -> Track 0 Pan
+          Ch:1 CC:20 -> Track 1 Program
+        ```
+
+5.  **Supprimer un mapping :**
+    *   Si vous voulez supprimer un mapping :
+    *   `> unmap <canal> <cc>`
+    *   Exemple : `> unmap 1 10`
+
+6.  **Arrêter l'écoute :**
+    *   Pour que le séquenceur arrête d'écouter les messages de contrôle :
+    *   `> unsetcontrolport`
+
+---
+
 ### Utilisation programmatique (API)
 
 Il est également possible d'utiliser les modules du séquenceur directement dans votre propre code Python.

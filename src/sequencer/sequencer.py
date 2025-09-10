@@ -1105,42 +1105,77 @@ class Sequencer:
         print("Stopped listening for control messages.")
 
     def _midi_listener_loop(self, port_name: str):
-        """The main loop for the MIDI control message listener thread."""
+        """
+        The main loop for the MIDI control message listener thread.
+        This loop handles live parameter changes and, if recording is active,
+        triggers the recording of automation points.
+        """
         try:
             with mido.open_input(port_name) as inport:
                 while not self._midi_listener_stop_event.is_set():
                     for msg in inport.iter_pending():
                         if msg.type == 'control_change':
-                            # Find a mapping for this CC message
                             for mapping in self.song.midi_mappings:
                                 if mapping.channel == msg.channel and mapping.control == msg.control:
-                                    # Found a match, now apply the action
-                                    if not 0 <= mapping.track_index < len(self.song.tracks):
-                                        continue
-
-                                    # Normalize value from 0-127 to the target range
-                                    normalized_value = msg.value / 127.0
-
-                                    if mapping.action == 'volume':
-                                        # This action is now handled by the live automation system
-                                        self.set_track_volume(mapping.track_index, normalized_value)
-                                    elif mapping.action == 'pan':
-                                        # Pan is -1.0 to 1.0, so map 0-127 to -1.0 to 1.0
-                                        pan_value = (normalized_value * 2.0) - 1.0
-                                        self.set_track_pan(mapping.track_index, pan_value)
-                                    elif mapping.action == 'program':
-                                        # Program is 0-127, so just use the direct value
-                                        self.set_program(mapping.track_index, msg.value)
-
-                                    # Print feedback to the user, ensuring not to disrupt the measure counter
-                                    print(f"\rCC -> Track {mapping.track_index} {mapping.action.capitalize()}: {msg.value}   ", end="")
-                                    sys.stdout.flush()
-
-
-                    time.sleep(0.01) # Small sleep to prevent busy-waiting
+                                    # Always apply the action live for real-time feedback
+                                    self._apply_midi_mapping_action(mapping, msg.value)
+                                    # If recording, also save it as an automation point
+                                    if self.is_recording:
+                                        self._record_automation_from_mapping(mapping, msg.value)
+                    time.sleep(0.01)
         except Exception as e:
             print(f"\nError in MIDI listener thread for port '{port_name}': {e}")
-        print("Priming complete.")
+
+    def _get_parameter_value_from_cc(self, action: str, cc_value: int) -> float:
+        """Converts a MIDI CC value (0-127) to a normalized parameter value."""
+        if action == 'volume':
+            return cc_value / 127.0
+        elif action == 'pan':
+            # Convert 0-127 to -1.0 to 1.0
+            return (cc_value / 127.0) * 2.0 - 1.0
+        # For program changes or other direct value mappings, return the value as-is.
+        return float(cc_value)
+
+    def _apply_midi_mapping_action(self, mapping: 'MidiMapping', value: int):
+        """Applies the action defined in a MidiMapping."""
+        if not 0 <= mapping.track_index < len(self.song.tracks):
+            return
+
+        param_value = self._get_parameter_value_from_cc(mapping.action, value)
+
+        if mapping.action == 'volume':
+            self.set_track_volume(mapping.track_index, param_value)
+        elif mapping.action == 'pan':
+            self.set_track_pan(mapping.track_index, param_value)
+        elif mapping.action == 'program':
+            # Program change expects an integer
+            self.set_program(mapping.track_index, int(param_value))
+
+        print(f"\rCC -> Track {mapping.track_index} {mapping.action.capitalize()}: {value}   ", end="")
+        sys.stdout.flush()
+
+    def _record_automation_from_mapping(self, mapping: 'MidiMapping', value: int):
+        """Records a received CC value as an automation point."""
+        auto_track_idx = self._find_or_create_automation_track(mapping.track_index, mapping.action)
+        if auto_track_idx is None:
+            return
+
+        auto_track = self.song.tracks[auto_track_idx]
+        if not isinstance(auto_track, AutomationTrack):
+            return # Should not happen
+
+        current_beat = self._get_current_beat()
+        point_value = self._get_parameter_value_from_cc(mapping.action, value)
+
+        # Create and add the automation point
+        new_point = AutomationPoint(
+            start_time=current_beat,
+            parameter=mapping.action,
+            value=point_value,
+            curve='linear' # Linear is a sensible default for recorded automation
+        )
+        auto_track.add_point(new_point)
+        self.is_dirty = True
 
     def load_song(self, filepath: str):
         try:
@@ -1303,15 +1338,37 @@ class Sequencer:
         else:
             print(f"Error: Virtual port '{name}' not found.")
 
+    def _find_or_create_automation_track(self, target_track_index: int, parameter_name: str) -> Optional[int]:
+        """
+        Finds an existing automation track for a given target track and parameter,
+        or creates one if it doesn't exist.
+        Returns the index of the automation track, or None if the target is invalid.
+        """
+        if not 0 <= target_track_index < len(self.song.tracks):
+            return None
+
+        target_track = self.song.tracks[target_track_index]
+        # A more specific name for the automation track
+        new_track_name = f"{target_track.name} {parameter_name.capitalize()} Automation"
+
+        # Search for an existing track with the exact same name and target
+        for i, track in enumerate(self.song.tracks):
+            if (isinstance(track, AutomationTrack) and
+                track.target_track_index == target_track_index and
+                track.name == new_track_name):
+                return i
+
+        # If no track is found, create a new one
+        print(f"\nCreating new automation track: '{new_track_name}'")
+        new_track = AutomationTrack(name=new_track_name, target_track_index=target_track_index)
+        self.song.add_track(new_track)
+        self.is_dirty = True
+
+        # Return the index of the newly created track
+        return len(self.song.tracks) - 1
+
     def _recording_thread_main(self, target_track: MidiTrack, start_beat: float, inport_name: str, outport_name: Optional[str], num_beats_to_record: Optional[float], original_mute_state: bool):
-        """
-        The main loop for the MIDI recording thread. This is a two-phase process.
-        1. Waiting Phase: A blocking call waits for the first valid note_on message.
-        During this time, no other tracks are playing.
-        2. Recording Phase: Once the first note is received, playback of other tracks
-        is started, and this thread switches to a non-blocking poll to record
-        all subsequent notes in sync with the playback.
-        """
+        """The main loop for the MIDI recording thread."""
         open_notes = {}
         outport = None
         is_virtual_port = False
@@ -1322,54 +1379,40 @@ class Sequencer:
             with mido.open_input(inport_name) as inport:
                 if outport_name:
                     vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
-                    if vp:
-                        outport = vp
-                        is_virtual_port = True
-                    else:
-                        outport = open_output(outport_name)
-
-                    print(f"Setting MIDI Thru instrument for track '{target_track.name}' on port '{outport_name}' to Ch:{target_track.channel + 1}, Prog:{target_track.instrument + 1}")
-                    if target_track.bank_msb is not None:
-                        outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
-                    if target_track.bank_lsb is not None:
-                        outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
+                    if vp: outport = vp; is_virtual_port = True
+                    else: outport = open_output(outport_name)
+                    if target_track.bank_msb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
+                    if target_track.bank_lsb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
                     outport.send(mido.Message('program_change', channel=target_track.channel, program=target_track.instrument))
 
-                # --- 1. Waiting Phase ---
                 print("Waiting for first note to start recording...")
                 first_msg = None
                 while not self._stop_event.is_set():
-                    for _ in inport.iter_pending(): pass
+                    # This blocks until a message is received
                     msg = inport.receive()
-                    if outport:
-                        if hasattr(msg, 'channel'):
-                            thru_msg = msg.copy(channel=target_track.channel)
-                            outport.send(thru_msg)
-                        else:
-                            outport.send(msg)
+                    # Pass all messages through, but on the correct channel
+                    if outport and hasattr(msg, 'channel'):
+                        outport.send(msg.copy(channel=target_track.channel))
+
                     if msg.type == 'note_on' and msg.velocity > 0:
                         first_msg = msg
                         break
 
-                if self._stop_event.is_set(): return
+                if self._stop_event.is_set():
+                    return
 
-                # --- 2. Recording Phase ---
                 first_note_time_beats = start_beat
                 recording_start_time_sec = time.time()
                 self.play(start_beat=first_note_time_beats)
                 print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
 
-                if first_msg is not None:
+                if first_msg:
                     open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
 
                 while not self._stop_event.is_set():
                     for msg in inport.iter_pending():
-                        if outport:
-                            if hasattr(msg, 'channel'):
-                                thru_msg = msg.copy(channel=target_track.channel)
-                                outport.send(thru_msg)
-                            else:
-                                outport.send(msg)
+                        if outport and hasattr(msg, 'channel'):
+                            outport.send(msg.copy(channel=target_track.channel))
 
                         now = time.time()
                         if msg.type == 'note_on' and msg.velocity > 0:
@@ -1379,20 +1422,20 @@ class Sequencer:
                             if msg.note in open_notes:
                                 note_start_time_sec, velocity = open_notes.pop(msg.note)
                                 duration_sec = now - note_start_time_sec
+
                                 beats_per_second = self.song.tempo / 60.0
                                 start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
                                 duration_beats = duration_sec * beats_per_second
+
                                 note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                event = Event(notes=[note], start_time=start_time_beats)
-                                target_track.add_event(event)
+                                target_track.add_event(Event(notes=[note], start_time=start_time_beats))
                                 self.is_dirty = True
 
-                    if num_beats_to_record is not None:
-                        elapsed_recording_beats = (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0)
-                        if elapsed_recording_beats >= num_beats_to_record:
-                            print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
-                            break
+                    if num_beats_to_record and (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0) >= num_beats_to_record:
+                        print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
+                        break
                     time.sleep(0.001)
+
         except Exception as e:
             print(f"\nAn error occurred during recording: {e}")
         finally:

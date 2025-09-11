@@ -1599,8 +1599,32 @@ class Sequencer:
             return
 
         print("Re-recording with last used settings...")
-        # Unpack the stored settings and call the internal recording function
-        self._start_recording_internal(**self.last_record_settings)
+
+        # Make a copy of the settings to modify for this run
+        settings = self.last_record_settings.copy()
+
+        # Explicitly ask about replacing notes for the 'bis' call
+        track_index = settings['track_index']
+        start_beat = settings['start_beat']
+        target_track = self.song.tracks[track_index]
+
+        replace_notes = False
+        # Check for existing notes in the recording range
+        existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
+        if existing_notes_in_range:
+            try:
+                choice = cancellable_input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
+                if choice.startswith('r'):
+                    replace_notes = True
+            except UserInputCancelled:
+                print("\nRecord cancelled.")
+                return
+
+        # Update the 'replace_notes' for this specific call
+        settings['replace_notes'] = replace_notes
+
+        # Unpack the potentially modified settings and call the internal recording function
+        self._start_recording_internal(**settings)
 
     def _send_ipc_command(self, socket_path: str, command: dict, wait_for_response: bool = False) -> Optional[dict]:
         """Sends a JSON command to the mpv IPC socket, optionally waiting for a response."""

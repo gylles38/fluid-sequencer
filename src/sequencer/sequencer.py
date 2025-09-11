@@ -2050,7 +2050,7 @@ class Sequencer:
 
             # --- Clock Sync Setup ---
             last_sync_time = time.time()
-            sync_interval_sec = 1.0  # Sync every 1 second for higher precision
+            sync_interval_sec = self.song.sync_offset_sec
             master_audio_process = None
             with self.process_lock:
                 # Find the first playing audio track to use as the master clock

@@ -140,6 +140,7 @@ class Song:
     time_signature_numerator: int = 4
     time_signature_denominator: int = 4
     ticks_per_beat: int = 480
+    sync_offset_sec: float = 1.0 # Time in seconds for MIDI/audio sync correction
     tracks: List[AnyTrack] = field(default_factory=list)
     midi_mappings: List[MidiMapping] = field(default_factory=list)
     metronome_enabled: bool = False

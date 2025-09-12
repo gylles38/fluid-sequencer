@@ -44,6 +44,7 @@ Sequencer CLI Commands:
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
   setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
+  setoffset <seconds>     - Sets the audio sync offset in seconds (default: 1.0).
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
@@ -307,6 +308,20 @@ def process_command(user_input, seq):
         else:
             print("Usage: setaudiocmd <command...>")
             print(f"Current command: {seq.audio_player_command}")
+    elif command == "setoffset":
+        if len(args) == 1:
+            try:
+                offset = float(args[0])
+                if offset > 0:
+                    seq.song.sync_offset_sec = offset
+                    seq.is_dirty = True
+                    print(f"Audio sync offset set to {offset} seconds.")
+                else:
+                    print("Error: Offset must be a positive number.")
+            except ValueError:
+                print("Error: Invalid number for offset.")
+        else:
+            print("Usage: setoffset <seconds>")
     elif command == "setbank":
         if len(args) == 2:
             seq.set_bank(track_index=int(args[0]), msb=int(args[1]))

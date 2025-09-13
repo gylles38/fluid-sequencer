@@ -2032,9 +2032,10 @@ class Sequencer:
             ticks_per_beat = self.song.ticks_per_beat
 
             # Main playback loop
-            song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
             if end_beat is not None:
-                song_length_beats = min(song_length_beats, end_beat)
+                song_length_beats = end_beat
+            else:
+                song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
 
             start_time_sec = time.time()
             next_event_index = 0
@@ -2092,8 +2093,7 @@ class Sequencer:
                         last_beat_sent_to_metro = current_beat_int
                 # === FIN DE LA MODIFICATION ===
 
-                #if current_beat_float >= song_length_beats:
-                if song_length_beats > 0 and current_beat_float >= song_length_beats:                
+                if current_beat_float >= song_length_beats:
                     if loop and not self.is_recording:
                         self._shutdown_audio_processes()
                         for t in self.audio_threads:
@@ -2250,10 +2250,11 @@ class Sequencer:
                     # A slightly longer sleep is fine here.
                     time.sleep(0.01)
 
-            # After the loop is finished...
+            # After the loop is finished, signal all dependent threads to stop.
+            self._stop_event.set()
             for t in self.audio_threads:
-                while t.is_alive() and not self._stop_event.is_set():
-                    t.join(timeout=0.1)
+                if t.is_alive():
+                    t.join()
 
         except Exception as e:
             if not self._stop_event.is_set():

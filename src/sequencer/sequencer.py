@@ -2057,7 +2057,7 @@ class Sequencer:
 
                 # --- Clock Sync Logic ---
                 now = time.time()
-                if master_audio_process and (now - last_sync_time) > sync_interval_sec:
+                if master_audio_process and sync_interval_sec > 0 and (now - last_sync_time) > sync_interval_sec:
                     last_sync_time = now
                     response = self._send_ipc_command(
                         master_audio_process.socket_path,

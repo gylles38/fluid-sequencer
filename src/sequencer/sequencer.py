@@ -2073,7 +2073,7 @@ class Sequencer:
             else:
                 song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
 
-            start_time_sec = time.time()
+            # start_time_sec is set in play() as self.playback_start_time
             next_event_index = 0
             first_loop = True
             last_beat_sent_to_metro = -1 # Garder en mémoire le dernier temps envoyé
@@ -2116,7 +2116,7 @@ class Sequencer:
                         if abs(drift) > 0.01:  # 10ms threshold
                             self.playback_start_time += drift
 
-                elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
+                elapsed_sec = (time.time() - self.playback_start_time) - self.total_paused_time
                 mido_tempo = mido.bpm2tempo(self.song.tempo)
                 current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
                 current_beat_float = start_beat + (current_ticks / ticks_per_beat)
@@ -2144,7 +2144,7 @@ class Sequencer:
                                     audio_thread.daemon = True
                                     self.audio_threads.append(audio_thread)
                                     audio_thread.start()
-                        start_time_sec = time.time()
+                        self.playback_start_time = time.time()
                         next_event_index = 0
                         self.total_paused_time = 0.0
                         self._all_notes_off()

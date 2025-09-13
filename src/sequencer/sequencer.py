@@ -1047,6 +1047,42 @@ class Sequencer:
         self.is_dirty = True
         print(f"Track '{target_track.name}' is now {status}.")
 
+        # If playback is active, apply the solo state changes immediately.
+        if self.playback_state != "stopped":
+            is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+
+            for i, track in enumerate(self.song.tracks):
+                # Determine if the track should be audible
+                should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+
+                if isinstance(track, AudioTrack):
+                    with self.process_lock:
+                        active_process = next((p for p in self.active_audio_processes if p.track_index == i), None)
+                        if active_process:
+                            # Mute if it shouldn't be audible, unmute if it should
+                            self._send_ipc_command(
+                                active_process.socket_path,
+                                {"command": ["set_property", "mute", not should_be_audible]}
+                            )
+                        elif should_be_audible:
+                            # If the track should be playing but isn't, start it.
+                            print(f"Starting playback for newly audible track '{track.name}'...")
+                            current_beat = self._get_current_beat()
+                            audio_thread = threading.Thread(
+                                target=self._play_audio_track,
+                                args=(track, i, current_beat, False) # initial_setup=False
+                            )
+                            audio_thread.daemon = True
+                            self.audio_threads.append(audio_thread)
+                            audio_thread.start()
+
+                elif isinstance(track, MidiTrack):
+                    if not should_be_audible and track.output_port_name:
+                        port = self.open_ports.get(track.output_port_name)
+                        if port:
+                            # Send all notes off for this track's channel
+                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
     def prime_all_tracks(self):
         """Sends the current program/bank state for all assigned MIDI tracks."""
         print("Priming all assigned MIDI tracks...")

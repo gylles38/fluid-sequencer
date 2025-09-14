@@ -2067,34 +2067,46 @@ class Sequencer:
             ranged_event_list = self._prepare_playback_events(start_beat, end_beat)
             ticks_per_beat = self.song.ticks_per_beat
 
-            # Main playback loop
             if end_beat is not None:
                 song_length_beats = end_beat
             else:
                 song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
 
-            start_time_sec = time.time()
             next_event_index = 0
             first_loop = True
-            last_beat_sent_to_metro = -1 # Garder en mémoire le dernier temps envoyé
+            last_beat_sent_to_metro = -1
 
-            # --- Clock Sync Setup ---
             last_sync_time = time.time()
             sync_interval_sec = self.song.sync_offset_sec
             master_audio_process = None
             with self.process_lock:
-                # Find the first playing audio track to use as the master clock
                 if self.active_audio_processes:
                     master_audio_process = self.active_audio_processes[0]
-
 
             while not self._stop_event.is_set():
                 self._run_event.wait()
                 if self._stop_event.is_set(): break
 
-                # --- Clock Sync Logic ---
+                # MODIFICATION : La synchronisation active se passe ici, au premier passage.
+                if first_loop:
+                    # 1. Calculer le temps perdu pendant le pré-chargement
+                    buffering_delay_sec = time.time() - self.playback_start_time
+
+                    with self.process_lock:
+                        for ap in self.active_audio_processes:
+                            # 2. Envoyer une commande "seek" à chaque piste audio pour compenser ce retard
+                            if buffering_delay_sec > 0.01: # On ne le fait que si le délai est significatif
+                                self._send_ipc_command(ap.socket_path, {"command": ["seek", buffering_delay_sec, "relative"]})
+                            
+                            # 3. Lancer la lecture audio
+                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
+
+                    self._playback_started_event.set()
+                    first_loop = False
+
                 now = time.time()
                 if master_audio_process and sync_interval_sec > 0 and (now - last_sync_time) > sync_interval_sec:
+                    # ... (logique de synchronisation en temps réel, inchangée)
                     last_sync_time = now
                     response = self._send_ipc_command(
                         master_audio_process.socket_path,
@@ -2105,31 +2117,23 @@ class Sequencer:
                         audio_time_sec = response["data"]
                         current_elapsed_sec = (now - self.playback_start_time) - self.total_paused_time
                         drift = current_elapsed_sec - audio_time_sec
-
-                        # Correct the clock by adjusting the start time.
-                        # If drift > 0, the MIDI clock is ahead of the audio clock.
-                        # This means `current_elapsed_sec` is too large.
-                        # To reduce `elapsed_sec` on the next loop, `playback_start_time`
-                        # must be increased. Therefore, we add the positive drift.
-                        # If drift < 0, the MIDI clock is behind, and we subtract from
-                        # `playback_start_time` to increase `elapsed_sec`.
-                        if abs(drift) > 0.01:  # 10ms threshold
+                        if abs(drift) > 0.01:
                             self.playback_start_time += drift
-
-                elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
+                
+                # L'horloge MIDI prend maintenant correctement en compte le délai de chargement
+                elapsed_sec = (time.time() - self.playback_start_time) - self.total_paused_time
                 mido_tempo = mido.bpm2tempo(self.song.tempo)
                 current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
                 current_beat_float = start_beat + (current_ticks / ticks_per_beat)
 
-                # === DÉBUT DE LA MODIFICATION POUR LE MÉTRONOME ===
                 if self.song.metronome_enabled:
                     current_beat_int = math.floor(current_beat_float)
                     if current_beat_int > last_beat_sent_to_metro:
                         self.metronome_queue.put(current_beat_int)
                         last_beat_sent_to_metro = current_beat_int
-                # === FIN DE LA MODIFICATION ===
-
-                if current_beat_float >= song_length_beats:
+                
+                if song_length_beats > 0 and current_beat_float >= song_length_beats:
+                    # ... (logique de boucle, inchangée)
                     if loop and not self.is_recording:
                         self._shutdown_audio_processes()
                         for t in self.audio_threads:
@@ -2140,18 +2144,20 @@ class Sequencer:
                             if isinstance(track, AudioTrack):
                                 should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                                 if should_play:
-                                    audio_thread = threading.Thread(target=self._play_audio_track, args=(track, i, start_beat, False)) # initial_setup=False
+                                    audio_thread = threading.Thread(target=self._play_audio_track, args=(track, i, start_beat, False))
                                     audio_thread.daemon = True
                                     self.audio_threads.append(audio_thread)
                                     audio_thread.start()
-                        start_time_sec = time.time()
+                        
+                        self.playback_start_time = time.time()
                         next_event_index = 0
                         self.total_paused_time = 0.0
                         self._all_notes_off()
-                        
-                        # Réinitialise le compteur du métronome pour la prochaine passe de la boucle
                         last_beat_sent_to_metro = math.floor(start_beat) - 1
-                                                
+                        
+                        # MODIFICATION : Il faut réinitialiser `first_loop` pour la nouvelle passe
+                        first_loop = True 
+                        
                         continue
                     else:
                         break
@@ -2163,26 +2169,14 @@ class Sequencer:
                 print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
                 sys.stdout.flush()
 
-                if first_loop:
-                    # The first time we print the counter, unpause all pre-launched audio
-                    # processes so they start in sync with the MIDI and the counter.
-                    with self.process_lock:
-                        for ap in self.active_audio_processes:
-                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
+                # Le bloc `if first_loop:` a été déplacé au début de la boucle while.
 
-                    # Signal that the main playback has started. This is used by
-                    # toggle_mute to sync newly un-muted tracks.
-                    self._playback_started_event.set()
-                    first_loop = False
-
-                # Dispatch events that are due
+                # ... (distribution des événements, inchangée) ...
                 while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
                     event = ranged_event_list[next_event_index]
                     track = self.song.tracks[event['track_idx']]
-
                     is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                     should_play_track = (hasattr(track, 'is_solo') and track.is_solo or not is_any_track_soloed) and (hasattr(track, 'is_muted') and not track.is_muted)
-
                     if event['type'] == 'initial_state':
                         if isinstance(track, MidiTrack) and track.output_port_name:
                              port = self.open_ports.get(track.output_port_name)
@@ -2192,38 +2186,30 @@ class Sequencer:
                                 port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
                                 port.send(mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127)))
                                 port.send(mido.Message('control_change', channel=track.channel, control=10, value=int((track.pan + 1.0) / 2.0 * 127)))
-
                     elif event['type'] == 'midi':
                         if isinstance(track, MidiTrack) and should_play_track and track.output_port_name:
                             port = self.open_ports.get(track.output_port_name)
                             if port:
                                 msg = event['message']
                                 if msg.type == 'note_on':
-                                    # Apply live velocity multiplier
                                     scaled_velocity = int(msg.velocity * track.velocity)
                                     clamped_velocity = max(0, min(127, scaled_velocity))
                                     port.send(msg.copy(velocity=clamped_velocity))
                                 else:
                                     port.send(msg)
-
                     elif event['type'] == 'automation':
                         payload = event['payload']
                         target_idx = payload['target_track_index']
                         target_track = self.song.tracks[target_idx]
-
                         is_any_soloed = any(t.is_solo for t in self.song.tracks)
                         should_apply_automation = (target_track.is_solo or not is_any_soloed) and not target_track.is_muted
-
                         if should_apply_automation:
                             param_config = payload['param_config']
                             value = payload['value']
-
                             if param_config['type'] == 'velocity_multiplier':
                                 if isinstance(target_track, MidiTrack):
                                     target_track.velocity = value
-
                             elif param_config['type'] == 'program_change':
-
                                 if isinstance(target_track, MidiTrack):
                                     program = max(0, min(127, int(value)))
                                     target_track.instrument = program
@@ -2231,10 +2217,8 @@ class Sequencer:
                                         port = self.open_ports.get(target_track.output_port_name)
                                         if port:
                                             port.send(mido.Message('program_change', channel=target_track.channel, program=program))
-
                             elif param_config['type'] == 'midi_cc':
                                 control = param_config['control']
-                                # Handle volume and pan for both MIDI and Audio tracks
                                 if control == 7: # Volume
                                     if isinstance(target_track, (MidiTrack, AudioTrack)):
                                         target_track.volume = max(0.0, min(1.0, value))
@@ -2265,42 +2249,27 @@ class Sequencer:
                                         if port:
                                             cc_val = max(0, min(127, int(value)))
                                             port.send(mido.Message('control_change', channel=target_track.channel, control=control, value=cc_val))
-
                     next_event_index += 1
-
-                # If there are more events, calculate sleep time
                 if next_event_index < len(ranged_event_list):
                     next_event_tick = ranged_event_list[next_event_index]['tick']
                     delta_ticks = next_event_tick - current_ticks
-
                     if delta_ticks > 0:
                         sleep_duration = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
-                        # Sleep for a max of 10ms to keep UI responsive, but no less than 1ms
-                        # to avoid busy-waiting.
                         time.sleep(max(0.001, min(sleep_duration, 0.01)))
                     else:
-                        # Next event is already due, so just yield for a moment.
                         time.sleep(0.001)
                 else:
-                    # No more MIDI events. Playback might still be running for audio tracks or looping.
-                    # A slightly longer sleep is fine here.
                     time.sleep(0.01)
-
-            # After the loop is finished...
-            # Signal dependent threads (like audio playback) to terminate.
             self._stop_event.set()
             for t in self.audio_threads:
                 if t.is_alive():
-                    t.join() # Wait for audio threads to finish
-
+                    t.join()
         except Exception as e:
             if not self._stop_event.is_set():
-                # Use repr(e) to get more details, especially for exceptions that might not have a clean string representation
                 print(f"\nError during playback: {type(e).__name__} - {repr(e)}")
                 import traceback
                 traceback.print_exc()
         finally:
-            # Cleanup
             self._shutdown_audio_processes()
             self._all_notes_off()
             for port in self.temporary_ports:
@@ -2345,17 +2314,14 @@ class Sequencer:
                 self.metronome_thread = threading.Thread(target=self._metronome_thread_main)
                 self.metronome_thread.daemon = True
                 self.metronome_thread.start()
-                
+
     def play(self, start_beat: Optional[float] = None, end_beat: Optional[float] = None, loop: bool = False):
-        # Case 1: play() is called with no args, which means "resume" or "play from last position"
         if start_beat is None:
             if self.playback_state == "paused":
-                self.pause()  # This will resume playback
+                self.pause()
                 return
-            # If stopped, play from the last starting position
             start_beat = self.last_start_beat
 
-        # Case 2: A new start position is given. Stop any current playback.
         if self.playback_state != "stopped":
             self.stop()
             if self.playback_thread and self.playback_thread.is_alive():
@@ -2364,31 +2330,30 @@ class Sequencer:
                 if t.is_alive():
                     t.join(timeout=1.0)
 
-        # Remember this start position for future resume/restart
         self.last_start_beat = start_beat
-
-        # It's crucial to clear the stop event at the beginning of a new playback session.
         self._stop_event.clear()
 
         if end_beat is not None and end_beat <= start_beat:
             print("Error: End position must be after the start position.")
             return
 
-        # --- Reset state for new playback ---
+        # --- Reset state ---
         self.total_paused_time = 0.0
         self.open_ports.clear()
         self.temporary_ports = []
-        self.audio_threads = [] # Clear the list for new audio threads
+        self.audio_threads = []
         self.audio_setup_barrier = None
 
-        # Vider la file d'attente du métronome
         while not self.metronome_queue.empty():
             try:
                 self.metronome_queue.get_nowait()
             except queue.Empty:
                 break
+        
+        # MODIFICATION : Le "vrai" top départ est enregistré AVANT toute opération longue.
+        self.playback_start_time = time.time()
 
-        # --- Audio Playback Setup: Pre-launch all audio processes in a paused state ---
+        # --- Audio Playback Setup ---
         is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
         has_audio_to_play = False
         for i, track in enumerate(self.song.tracks):
@@ -2397,13 +2362,12 @@ class Sequencer:
                 if should_play and track.start_time < (end_beat if end_beat is not None else float('inf')):
                     audio_thread = threading.Thread(
                         target=self._play_audio_track,
-                        args=(track, i, start_beat, True) # initial_setup=True
+                        args=(track, i, start_beat, True)
                     )
                     audio_thread.daemon = True
                     self.audio_threads.append(audio_thread)
                     has_audio_to_play = True
 
-        # If there are audio tracks, create and wait on a barrier for them to be ready.
         if self.audio_threads:
             num_audio_threads = len(self.audio_threads)
             self.audio_setup_barrier = threading.Barrier(num_audio_threads + 1)
@@ -2413,14 +2377,12 @@ class Sequencer:
 
             try:
                 print("Pre-buffering audio tracks...")
-                # Wait for all audio threads to launch their processes and be ready
                 self.audio_setup_barrier.wait(timeout=10.0)
             except threading.BrokenBarrierError:
                 print("\nError: Could not initialize audio processes in time. Aborting playback.")
-                self.stop() # This will kill any processes that did manage to start
+                self.stop()
                 return
             print("Audio ready.")
-
 
         # --- MIDI Port Setup ---
         required_ports = {track.output_port_name for track in self.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
@@ -2431,11 +2393,9 @@ class Sequencer:
             print("Nothing to play: No MIDI ports assigned, no audio tracks, and metronome is off.")
             return
 
-        # Open all required MIDI ports
         for name in required_ports:
             vp = next((p for p in self.virtual_ports if p.name == name), None)
-            if vp:
-                self.open_ports[name] = vp
+            if vp: self.open_ports[name] = vp
             else:
                 try:
                     self.open_ports[name] = open_output(name)
@@ -2449,18 +2409,14 @@ class Sequencer:
         self._run_event.set()
         self._playback_started_event.clear()
         self.playback_state = "playing"
-        self.playback_start_time = time.time()
-
+        
         self.start_metronome()
-
         self.playback_thread = threading.Thread(
             target=self._play_thread,
             kwargs={'start_beat': start_beat, 'end_beat': end_beat, 'loop': loop}
         )
         self.playback_thread.daemon = True
         self.playback_thread.start()
-
-        # Audio threads are already started and waiting. No need to start them again.
 
     def pause(self):
         if self.playback_state == "stopped":

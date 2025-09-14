@@ -2092,12 +2092,13 @@ class Sequencer:
                     # 1. Calculer le temps perdu pendant le pré-chargement
                     buffering_delay_sec = time.time() - self.playback_start_time
 
+                    # FIX: On ajuste le temps de départ pour que l'horloge MIDI soit synchronisée
+                    self.playback_start_time += buffering_delay_sec
+
                     with self.process_lock:
                         for ap in self.active_audio_processes:
-                            # 2. Envoyer une commande "seek" à chaque piste audio pour compenser ce retard
-                            if buffering_delay_sec > 0.01: # On ne le fait que si le délai est significatif
-                                self._send_ipc_command(ap.socket_path, {"command": ["seek", buffering_delay_sec, "relative"]})
-                            
+                            # 2. Le seek relatif n'est plus nécessaire car l'horloge principale est ajustée.
+                            # On a juste besoin de lancer la lecture.
                             # 3. Lancer la lecture audio
                             self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
 
@@ -2116,7 +2117,13 @@ class Sequencer:
                     if response and isinstance(response.get("data"), (int, float)):
                         audio_time_sec = response["data"]
                         current_elapsed_sec = (now - self.playback_start_time) - self.total_paused_time
-                        drift = current_elapsed_sec - audio_time_sec
+
+                        # Correctly calculate what the MIDI time should be in absolute seconds
+                        beats_per_second = self.song.tempo / 60.0
+                        start_beat_sec = start_beat / beats_per_second if beats_per_second > 0 else 0
+                        midi_absolute_time_sec = start_beat_sec + current_elapsed_sec
+
+                        drift = midi_absolute_time_sec - audio_time_sec
                         if abs(drift) > 0.01:
                             self.playback_start_time += drift
                 

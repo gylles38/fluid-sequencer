@@ -265,7 +265,7 @@ class JackManager:
 
     def _mpv_sync_loop(self):
         """A loop in a separate thread to keep mpv instances synced with JACK transport."""
-        time.sleep(0.5)  # Give mpv processes time to start and create their sockets
+        time.sleep(1.0)  # Give mpv processes more time to start and create their sockets
 
         was_rolling = False
         while not self._sync_stop_event.is_set():

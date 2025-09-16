@@ -483,14 +483,39 @@ def process_command(user_input, seq):
 
     elif command == "play":
         if len(args) == 0:
+            # play
+            seq.play_range_enabled = False
             seq.play()
         elif len(args) == 1:
+            # play <start>
             start_beat = seq.parse_position_to_beats(args[0])
             if start_beat is not None:
+                seq.play_range_enabled = False
                 seq.play(start_beat=start_beat)
+        elif len(args) == 2:
+            # play <start> <end>
+            start_beat = seq.parse_position_to_beats(args[0])
+            end_beat = seq.parse_position_to_beats(args[1])
+            if start_beat is None or end_beat is None:
+                return True
+
+            if end_beat <= start_beat:
+                print("Error: End position must be after the start position.")
+                return True
+
+            # Set the play range and disable looping to avoid conflict
+            seq.play_range_start_beat = start_beat
+            seq.play_range_end_beat = end_beat
+            seq.play_range_enabled = True
+            if seq.loop_enabled:
+                seq.loop_enabled = False
+                print("Looping disabled to allow play range.")
+
+            print(f"Set to stop at {args[1]}.")
+            seq.play(start_beat=start_beat)
         else:
-            print("Usage: play [start_position]")
-            print("Example: play 10:1")
+            print("Usage: play [start_position] [end_position]")
+            print("Example: play 10:1 15:1")
     elif command == "pause":
         seq.pause()
     elif command == "loop":

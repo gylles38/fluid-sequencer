@@ -548,6 +548,12 @@ class JackManager:
                 else: # event in the past
                     self.next_automation_event_index += 1
 
+            # --- Play Range Stop Handling ---
+            if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
+                if start_beat_of_block < self.sequencer.play_range_end_beat:
+                    self.jack_client.transport_stop()
+                    self.sequencer.play_range_enabled = False # Disable after triggering
+
             # --- Loop Handling ---
             if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:
                 # Check if the start of the block was before the end point, to avoid re-triggering on every block after the end.
@@ -642,6 +648,11 @@ class Sequencer:
         self.loop_enabled = False
         self.loop_start_beat = 0.0
         self.loop_end_beat = 0.0
+
+        # Play range settings
+        self.play_range_enabled = False
+        self.play_range_start_beat = 0.0
+        self.play_range_end_beat = 0.0
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -1857,6 +1868,13 @@ class Sequencer:
             end_pos = self._format_beats_to_position(self.loop_end_beat)
             loop_status = f"ON ({start_pos} -> {end_pos})"
         lines.append(f"Loop: {loop_status}")
+
+        play_range_status = "OFF"
+        if self.play_range_enabled:
+            start_pos = self._format_beats_to_position(self.play_range_start_beat)
+            end_pos = self._format_beats_to_position(self.play_range_end_beat)
+            play_range_status = f"ON ({start_pos} -> {end_pos})"
+        lines.append(f"Play Range: {play_range_status}")
 
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):

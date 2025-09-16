@@ -588,7 +588,7 @@ class JackManager:
                             pos.frame = target_frame
                             # Rely on default behavior for frame-only seek
 
-                        self.jack_client.transport_reposition(pos)
+                        self.jack_client.transport_reposition_struct(pos)
 
             # --- Metronome Click Generation ---
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
@@ -2394,7 +2394,7 @@ class Sequencer:
                     # likely defaults to using the frame if no valid mask is set.
                     # We will rely on this default behavior and not set pos.valid.
 
-                    self.jack_manager.jack_client.transport_reposition(pos)
+                    self.jack_manager.jack_client.transport_reposition_struct(pos)
                     print(f"Seeking JACK transport to {self._format_beats_to_position(start_beat)}.")
                     # After repositioning, we need to manually sync our internal state
                     # because the _time_callback might not fire immediately.

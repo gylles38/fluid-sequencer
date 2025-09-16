@@ -1,4 +1,5 @@
 import mido
+import jack
 from sequencer.sequencer import Sequencer
 import sys
 import time

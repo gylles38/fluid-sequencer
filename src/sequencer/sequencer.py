@@ -2408,6 +2408,10 @@ class Sequencer:
                     # because the _time_callback might not fire immediately.
                     self.jack_manager._sync_playhead_to_beat(start_beat)
                     self.jack_manager.seek_audio_to_beat(start_beat)
+                    # HACK: Add a small delay to give mpv time to process the seek command
+                    # before the transport starts and the 'unpause' command is sent.
+                    # This is a diagnostic step to confirm the race condition.
+                    time.sleep(0.2)
 
             except jack.JackError as e:
                 print(f"Error seeking JACK transport: {e}")

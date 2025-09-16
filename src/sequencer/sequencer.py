@@ -287,29 +287,29 @@ class JackManager:
                                 all_sent = False
                     if all_sent:
                         was_rolling = is_rolling
+                        # Only seek when playback starts
+                        if is_rolling:
+                            _, pos_struct = self.jack_client.transport_query_struct()
+                            pos = jack.position2dict(pos_struct)
 
-                if is_rolling:
-                    _, pos_struct = self.jack_client.transport_query_struct()
-                    pos = jack.position2dict(pos_struct)
+                            frame = pos.get('frame', 0)
+                            samplerate = self.jack_client.samplerate
+                            beats_per_second = self.sequencer.song.tempo / 60.0
+                            current_beat = 0.0
+                            if samplerate > 0 and beats_per_second > 0:
+                                current_beat = (frame / samplerate) * beats_per_second
 
-                    frame = pos.get('frame', 0)
-                    samplerate = self.jack_client.samplerate
-                    beats_per_second = self.sequencer.song.tempo / 60.0
-                    current_beat = 0.0
-                    if samplerate > 0 and beats_per_second > 0:
-                        current_beat = (frame / samplerate) * beats_per_second
+                            with self.process_lock:
+                                for ap in self.active_audio_processes:
+                                    track = self.sequencer.song.tracks[ap.track_index]
+                                    if isinstance(track, AudioTrack):
+                                        beats_per_second = self.sequencer.song.tempo / 60.0
+                                        if beats_per_second > 0:
+                                            mpv_time = (current_beat - track.start_time) / beats_per_second
 
-                    with self.process_lock:
-                        for ap in self.active_audio_processes:
-                            track = self.sequencer.song.tracks[ap.track_index]
-                            if isinstance(track, AudioTrack):
-                                beats_per_second = self.sequencer.song.tempo / 60.0
-                                if beats_per_second > 0:
-                                    mpv_time = (current_beat - track.start_time) / beats_per_second
-
-                                    if mpv_time >= 0:
-                                        command = {"command": ["set_property", "time-pos", mpv_time]}
-                                        self._send_ipc_command(ap.socket_path, command)
+                                            if mpv_time >= 0:
+                                                command = {"command": ["set_property", "time-pos", mpv_time]}
+                                                self._send_ipc_command(ap.socket_path, command)
             except jack.JackError as e:
                 # This can happen if the client is shut down while we're in the loop
                 print(f"Error in mpv sync loop: {e}", file=sys.stderr)

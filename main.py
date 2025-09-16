@@ -522,6 +522,9 @@ def process_command(user_input, seq):
         if len(args) == 0:
             seq.loop_enabled = not seq.loop_enabled
             status = "enabled" if seq.loop_enabled else "disabled"
+            if seq.loop_enabled and seq.play_range_enabled:
+                print("Disabling play range to enable looping.")
+                seq.play_range_enabled = False
             print(f"Looping is now {status}.")
             if not seq.loop_enabled:
                 print("Note: Loop points are still saved. Use 'loop <start> <end>' to set new points.")
@@ -541,6 +544,9 @@ def process_command(user_input, seq):
             seq.loop_start_beat = start_beat
             seq.loop_end_beat = end_beat
             seq.loop_enabled = True
+            if seq.play_range_enabled:
+                print("Disabling play range to enable looping.")
+                seq.play_range_enabled = False
             print(f"Loop enabled from {args[0]} to {args[1]}.")
         else:
             print("Usage: loop [start_position] [end_position]")

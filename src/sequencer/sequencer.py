@@ -287,29 +287,7 @@ class JackManager:
                                 all_sent = False
                     if all_sent:
                         was_rolling = is_rolling
-                        # Only seek when playback starts
-                        if is_rolling:
-                            _, pos_struct = self.jack_client.transport_query_struct()
-                            pos = jack.position2dict(pos_struct)
-
-                            frame = pos.get('frame', 0)
-                            samplerate = self.jack_client.samplerate
-                            beats_per_second = self.sequencer.song.tempo / 60.0
-                            current_beat = 0.0
-                            if samplerate > 0 and beats_per_second > 0:
-                                current_beat = (frame / samplerate) * beats_per_second
-
-                            with self.process_lock:
-                                for ap in self.active_audio_processes:
-                                    track = self.sequencer.song.tracks[ap.track_index]
-                                    if isinstance(track, AudioTrack):
-                                        beats_per_second = self.sequencer.song.tempo / 60.0
-                                        if beats_per_second > 0:
-                                            mpv_time = (current_beat - track.start_time) / beats_per_second
-
-                                            if mpv_time >= 0:
-                                                command = {"command": ["set_property", "time-pos", mpv_time]}
-                                                self._send_ipc_command(ap.socket_path, command)
+                        # Seeking is now handled by play() and _time_callback
             except jack.JackError as e:
                 # This can happen if the client is shut down while we're in the loop
                 print(f"Error in mpv sync loop: {e}", file=sys.stderr)
@@ -381,6 +359,23 @@ class JackManager:
                     print(f"Error removing socket file {ap.socket_path}: {e}", file=sys.stderr)
             self.active_audio_processes.clear()
 
+    def seek_audio_to_beat(self, beat_pos: float):
+        """Seeks all active audio tracks to a specific beat position."""
+        beats_per_second = self.sequencer.song.tempo / 60.0
+        if beats_per_second <= 0:
+            return
+
+        with self.process_lock:
+            for ap in self.active_audio_processes:
+                track = self.sequencer.song.tracks[ap.track_index]
+                if isinstance(track, AudioTrack):
+                    mpv_time = (beat_pos - track.start_time) / beats_per_second
+                    if mpv_time < 0:
+                        mpv_time = 0.0
+
+                    command = {"command": ["set_property", "time-pos", mpv_time]}
+                    self._send_ipc_command(ap.socket_path, command)
+
     def _sync_playhead_to_beat(self, beat_pos: float):
         """Sets the internal playhead to a specific beat and updates event indices."""
         self.last_beat = beat_pos
@@ -420,8 +415,10 @@ class JackManager:
             if samplerate > 0 and beats_per_second > 0:
                 current_beat = (frame / samplerate) * beats_per_second
                 self._sync_playhead_to_beat(current_beat)
+                self.seek_audio_to_beat(current_beat)
             else:
                 self._sync_playhead_to_beat(0.0)
+                self.seek_audio_to_beat(0.0)
 
 
     def _process_callback(self, frames: int):
@@ -2400,6 +2397,7 @@ class Sequencer:
                     # After repositioning, we need to manually sync our internal state
                     # because the _time_callback might not fire immediately.
                     self.jack_manager._sync_playhead_to_beat(start_beat)
+                    self.jack_manager.seek_audio_to_beat(start_beat)
 
             except jack.JackError as e:
                 print(f"Error seeking JACK transport: {e}")

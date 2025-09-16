@@ -240,7 +240,7 @@ class JackManager:
         self.open_ports.clear()
         print("JACK client stopped.")
 
-    def _send_ipc_command(self, socket_path, command_data):
+    def _send_ipc_command(self, socket_path, command_data) -> bool:
         try:
             if sys.platform == "win32":
                 # On Windows, use named pipes. The path needs to be formatted specially.
@@ -256,12 +256,14 @@ class JackManager:
                     s.settimeout(0.1)  # Don't block for too long
                     s.connect(socket_path)
                     s.sendall(json.dumps(command_data).encode('utf-8') + b'\n')
+            return True
         except (socket.timeout, ConnectionRefusedError, FileNotFoundError, BrokenPipeError):
             # These errors are expected if mpv is not ready or has been closed.
-            pass
+            return False
         except Exception as e:
             # Log other, unexpected errors.
             print(f"Error sending IPC command to {socket_path}: {e}", file=sys.stderr)
+            return False
 
     def _mpv_sync_loop(self):
         """A loop in a separate thread to keep mpv instances synced with JACK transport."""
@@ -277,11 +279,14 @@ class JackManager:
                 is_rolling = self.jack_client.transport_state == jack.ROLLING
 
                 if is_rolling != was_rolling:
+                    all_sent = True
                     with self.process_lock:
                         for ap in self.active_audio_processes:
                             command = {"command": ["set", "pause", not is_rolling]}
-                            self._send_ipc_command(ap.socket_path, command)
-                    was_rolling = is_rolling
+                            if not self._send_ipc_command(ap.socket_path, command):
+                                all_sent = False
+                    if all_sent:
+                        was_rolling = is_rolling
 
                 if is_rolling:
                     _, pos_struct = self.jack_client.transport_query_struct()

@@ -267,11 +267,9 @@ class JackManager:
 
     def _mpv_sync_loop(self):
         """A loop in a separate thread to keep mpv instances synced with JACK transport."""
-        print("[SYNC_LOOP] Thread started.")
         time.sleep(1.0)  # Give mpv processes more time to start and create their sockets
 
         was_rolling = None
-        loop_counter = 0
         while not self._sync_stop_event.is_set():
             if not self.jack_client:
                 time.sleep(0.1)
@@ -279,60 +277,48 @@ class JackManager:
 
             try:
                 is_rolling = self.jack_client.transport_state == jack.ROLLING
-                if loop_counter % 50 == 0: # Print status every 5 seconds
-                    print(f"[SYNC_LOOP] Status: is_rolling={is_rolling}, was_rolling={was_rolling}")
 
                 if is_rolling != was_rolling:
-                    print(f"[SYNC_LOOP] State change detected: is_rolling={is_rolling}, was_rolling={was_rolling}")
                     all_sent = True
                     with self.process_lock:
                         for ap in self.active_audio_processes:
-                            command = {"command": ["set", "pause", not is_rolling]}
-                            print(f"[SYNC_LOOP] Sending command: {command} to {ap.socket_path}")
-                            sent_ok = self._send_ipc_command(ap.socket_path, command)
-                            if not sent_ok:
-                                print(f"[SYNC_LOOP] FAILED to send command to {ap.socket_path}")
+                            command = {"command": ["set_property", "pause", not is_rolling]}
+                            if not self._send_ipc_command(ap.socket_path, command):
                                 all_sent = False
-
-                    print(f"[SYNC_LOOP] All commands sent status: {all_sent}")
                     if all_sent:
-                        print(f"[SYNC_LOOP] Updating was_rolling from {was_rolling} to {is_rolling}")
                         was_rolling = is_rolling
-                    else:
-                        print("[SYNC_LOOP] Not updating was_rolling because not all commands were sent.")
 
+                if is_rolling:
+                    _, pos_struct = self.jack_client.transport_query_struct()
+                    pos = jack.position2dict(pos_struct)
 
-                # if is_rolling:
-                #     _, pos_struct = self.jack_client.transport_query_struct()
-                #     pos = jack.position2dict(pos_struct)
+                    bar = pos.get('bar', 1)
+                    beat = pos.get('beat', 1)
+                    tick = pos.get('tick', 0)
+                    ticks_per_beat = pos.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
+                    beats_per_bar = pos.get('beats_per_bar', self.sequencer.song.time_signature_numerator)
 
-                #     bar = pos.get('bar', 1)
-                #     beat = pos.get('beat', 1)
-                #     tick = pos.get('tick', 0)
-                #     ticks_per_beat = pos.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
-                #     beats_per_bar = pos.get('beats_per_bar', self.sequencer.song.time_signature_numerator)
+                    current_beat = (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
 
-                #     current_beat = (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+                    with self.process_lock:
+                        for ap in self.active_audio_processes:
+                            track = self.sequencer.song.tracks[ap.track_index]
+                            if isinstance(track, AudioTrack):
+                                beats_per_second = self.sequencer.song.tempo / 60.0
+                                if beats_per_second > 0:
+                                    mpv_time = (current_beat - track.start_time) / beats_per_second
 
-                #     with self.process_lock:
-                #         for ap in self.active_audio_processes:
-                #             track = self.sequencer.song.tracks[ap.track_index]
-                #             if isinstance(track, AudioTrack):
-                #                 beats_per_second = self.sequencer.song.tempo / 60.0
-                #                 if beats_per_second > 0:
-                #                     mpv_time = (current_beat - track.start_time) / beats_per_second
-
-                #                     if mpv_time >= 0:
-                #                         command = {"command": ["set", "time-pos", mpv_time]}
-                #                         self._send_ipc_command(ap.socket_path, command)
+                                    if mpv_time >= 0:
+                                        command = {"command": ["set_property", "time-pos", mpv_time]}
+                                        self._send_ipc_command(ap.socket_path, command)
             except jack.JackError as e:
-                print(f"[SYNC_LOOP] Caught JackError, exiting loop: {e}", file=sys.stderr)
+                # This can happen if the client is shut down while we're in the loop
+                print(f"Error in mpv sync loop: {e}", file=sys.stderr)
                 break
             except Exception as e:
-                print(f"[SYNC_LOOP] Error in mpv sync loop: {e}", file=sys.stderr)
+                print(f"Error in mpv sync loop: {e}", file=sys.stderr)
 
             time.sleep(0.1)  # Sync every 100ms
-            loop_counter += 1
 
     def _launch_audio_track_player(self, track: AudioTrack, track_index: int):
         import shlex

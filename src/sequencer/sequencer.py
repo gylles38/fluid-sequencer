@@ -79,8 +79,43 @@ class JackManager:
         self.process_lock = threading.Lock()
         self._sync_thread = None
         self._sync_stop_event = threading.Event()
+        self._display_thread = None
+        self._display_stop_event = threading.Event()
         self.automation_events = []
         self.next_automation_event_index = 0
+
+    def _display_loop(self):
+        """A loop in a separate thread to display the current transport position."""
+        last_pos_str = ""
+        while not self._display_stop_event.is_set():
+            try:
+                if self.jack_client and self.jack_client.transport_state == jack.ROLLING:
+                    _, pos_struct = self.jack_client.transport_query_struct()
+                    pos = jack.position2dict(pos_struct)
+
+                    bar = pos.get('bar', 1)
+                    beat = pos.get('beat', 1)
+                    tick = pos.get('tick', 0)
+
+                    pos_str = f"  {bar}:{beat}:{int(tick)}"
+
+                    if pos_str != last_pos_str:
+                        sys.stdout.write(f"\r{pos_str}  ")
+                        sys.stdout.flush()
+                        last_pos_str = pos_str
+                else:
+                    if last_pos_str != "":
+                        sys.stdout.write("\r" + " " * (len(last_pos_str) + 2) + "\r")
+                        sys.stdout.flush()
+                        last_pos_str = ""
+
+            except jack.JackError:
+                break
+            except Exception as e:
+                print(f"\nError in display loop: {e}", file=sys.stderr)
+                break
+
+            time.sleep(0.05)
 
     def _prepare_automation_events(self):
         """Generates and sorts all automation events for the song."""
@@ -169,6 +204,12 @@ class JackManager:
             self._sync_thread.daemon = True
             self._sync_thread.start()
 
+            # Start display thread
+            self._display_stop_event.clear()
+            self._display_thread = threading.Thread(target=self._display_loop)
+            self._display_thread.daemon = True
+            self._display_thread.start()
+
             print("JACK client started and activated.")
         except jack.JackError as e:
             print(f"Error starting JACK client: {e}")
@@ -184,6 +225,11 @@ class JackManager:
         if self._sync_thread:
             self._sync_thread.join(timeout=1.0)
         self._sync_thread = None
+
+        self._display_stop_event.set()
+        if self._display_thread:
+            self._display_thread.join(timeout=1.0)
+        self._display_thread = None
 
         self._shutdown_audio_processes()
         self.jack_client.deactivate()

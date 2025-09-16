@@ -266,7 +266,14 @@ class JackManager:
             return False
 
     def _mpv_sync_loop(self):
-        """A loop in a separate thread to keep mpv instances synced with JACK transport."""
+        """
+        A loop in a separate thread to keep mpv instances' pause state synced with JACK transport.
+        NOTE: This loop is intentionally only for pause/unpause. Continuous time-based seeking
+        (e.g. sending 'time-pos' every 100ms) was previously done here, but it was the source
+        of significant bugs, including race conditions and 'micro-loops' when the JACK transport
+        value was static. The current architecture relies on event-based seeking (in play() and
+        _time_callback) and assumes mpv's internal clock is stable enough during playback.
+        """
         time.sleep(1.0)  # Give mpv processes more time to start and create their sockets
 
         was_rolling = None
@@ -374,7 +381,9 @@ class JackManager:
                     if mpv_time < 0:
                         mpv_time = 0.0
 
-                    command = {"command": ["set_property", "time-pos", mpv_time]}
+                    # Use the 'seek' command which is more robust for this purpose than setting time-pos directly.
+                    # This helps avoid race conditions where the player might unpause before seeking is complete.
+                    command = {"command": ["seek", mpv_time, "absolute"]}
                     self._send_ipc_command(ap.socket_path, command)
 
     def _sync_playhead_to_beat(self, beat_pos: float):

@@ -2438,6 +2438,17 @@ class Sequencer:
             self.recording_thread.join(timeout=1.0)
             self.is_recording = False
 
+        # Stop the master transport before shutting down our client
+        if self.jack_manager.is_running and self.jack_manager.jack_client:
+            try:
+                if self.jack_manager.jack_client.transport_state == jack.ROLLING:
+                    self.jack_manager.jack_client.transport_stop()
+                    print("JACK transport stopped.")
+                    # Give the master a moment to process before we disconnect
+                    time.sleep(0.1)
+            except jack.JackError as e:
+                print(f"Error stopping JACK transport: {e}")
+
         print("Stopping JACK client...")
         self.jack_manager.stop()
         self.playback_state = "stopped"

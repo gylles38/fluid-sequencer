@@ -575,17 +575,18 @@ class JackManager:
                             rem_frames_for_tick = rem_frames % frames_per_beat
                             target_tick = int(rem_frames_for_tick / frames_per_tick)
 
-                            pos = jack.Position()
+                            _ , pos = self.jack_client.transport_query_struct()
+
                             pos.frame = target_frame
                             pos.bar = target_bar + 1
                             pos.beat = target_beat + 1
                             pos.tick = target_tick
-                            pos.valid = jack.Position.FRAME | jack.Position.BAR_BEAT_TICK
+                            pos.valid = jack.PositionFrame | jack.PositionBarBeatTick
                         else:
                             # Fallback to frame-only reposition
-                            pos = jack.Position()
+                            _ , pos = self.jack_client.transport_query_struct()
                             pos.frame = target_frame
-                            pos.valid = jack.Position.FRAME
+                            pos.valid = jack.PositionFrame
 
                         self.jack_client.transport_reposition(pos)
 
@@ -2385,11 +2386,12 @@ class Sequencer:
                 if beats_per_second > 0 and samplerate > 0:
                     target_frame = int((start_beat / beats_per_second) * samplerate)
 
-                    # For simplicity and robustness, we only need to send the frame.
-                    # The master is responsible for updating its own bar/beat/tick from that.
-                    pos = jack.Position()
+                    # Query the current position to get a valid Position object to modify.
+                    _ , pos = self.jack_manager.jack_client.transport_query_struct()
+
                     pos.frame = target_frame
-                    pos.valid = jack.Position.FRAME
+                    # Use the correct top-level constant for the valid mask
+                    pos.valid = jack.PositionFrame
 
                     self.jack_manager.jack_client.transport_reposition(pos)
                     print(f"Seeking JACK transport to {self._format_beats_to_position(start_beat)}.")

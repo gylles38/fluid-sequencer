@@ -83,33 +83,25 @@ class JackManager:
         self._display_stop_event = threading.Event()
         self.automation_events = []
         self.next_automation_event_index = 0
-        self.last_known_position = {}
-        self.position_lock = threading.Lock()
 
     def _display_loop(self):
         """A loop in a separate thread to display the current transport position."""
         last_pos_str = ""
         while not self._display_stop_event.is_set():
             try:
-                # The transport_state check is still useful to know if we should be displaying anything
                 if self.jack_client and self.jack_client.transport_state == jack.ROLLING:
-                    with self.position_lock:
-                        pos = self.last_known_position
+                    # Display the sequencer's internal beat counter, which drives the notes.
+                    current_beat = self.last_beat
+                    pos_str = self.sequencer._format_beats_to_position(current_beat)
 
-                    if pos:
-                        bar = pos.get('bar', 1)
-                        beat = pos.get('beat', 1)
-                        tick = pos.get('tick', 0)
-
-                        pos_str = f"  {bar}:{beat}:{int(tick)}"
-
-                        sys.stdout.write(f"\r{pos_str}  ")
+                    if pos_str != last_pos_str:
+                        sys.stdout.write(f"\r  {pos_str}  ")
                         sys.stdout.flush()
                         last_pos_str = pos_str
                 else:
                     if last_pos_str != "":
                         # Clear the line when transport stops
-                        sys.stdout.write("\r" + " " * (len(last_pos_str) + 2) + "\r")
+                        sys.stdout.write("\r" + " " * (len(last_pos_str) + 4) + "\r")
                         sys.stdout.flush()
                         last_pos_str = ""
 
@@ -450,8 +442,6 @@ class JackManager:
 
             state, pos_struct = self.jack_client.transport_query_struct()
             pos = jack.position2dict(pos_struct)
-            with self.position_lock:
-                self.last_known_position = pos
 
             samplerate = self.jack_client.samplerate
             tempo = self.sequencer.song.tempo

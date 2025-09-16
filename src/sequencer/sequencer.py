@@ -604,7 +604,7 @@ class JackManager:
 
 
 class Sequencer:
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
 
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)

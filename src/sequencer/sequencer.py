@@ -99,12 +99,14 @@ class JackManager:
 
                     pos_str = f"  {bar}:{beat}:{int(tick)}"
 
-                    if pos_str != last_pos_str:
-                        sys.stdout.write(f"\r{pos_str}  ")
-                        sys.stdout.flush()
-                        last_pos_str = pos_str
+                    # Always write the position string. The previous optimization to only write on
+                    # change was likely causing the display to get stuck.
+                    sys.stdout.write(f"\r{pos_str}  ")
+                    sys.stdout.flush()
+                    last_pos_str = pos_str
                 else:
                     if last_pos_str != "":
+                        # Clear the line when transport stops
                         sys.stdout.write("\r" + " " * (len(last_pos_str) + 2) + "\r")
                         sys.stdout.flush()
                         last_pos_str = ""

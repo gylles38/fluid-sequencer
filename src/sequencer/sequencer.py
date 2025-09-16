@@ -2276,8 +2276,20 @@ class Sequencer:
             print("Sequencer is now slaved to JACK transport. Use your JACK master to play, stop, and seek.")
 
     def pause(self):
-        print("When slaved to JACK, playback must be controlled by the JACK transport master.")
-        print("Pause, seek, and stop operations should be done in your master application (e.g. Ardour, qjackctl).")
+        """Toggles the JACK transport state between rolling and stopped."""
+        if not self.jack_manager.is_running or not self.jack_manager.jack_client:
+            print("JACK client not running. Please start playback first.")
+            return
+
+        try:
+            if self.jack_manager.jack_client.transport_state == jack.ROLLING:
+                self.jack_manager.jack_client.transport_stop()
+                print("JACK transport stopped.")
+            else:
+                self.jack_manager.jack_client.transport_start()
+                print("JACK transport started.")
+        except jack.JackError as e:
+            print(f"Error controlling JACK transport: {e}")
 
     def stop(self):
         if not self.is_recording and self.playback_state == "stopped":

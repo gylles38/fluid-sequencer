@@ -67,6 +67,7 @@ Sequencer CLI Commands:
   prime                   - Sends current program/bank state to all assigned ports.
   cc                      - Sends a single MIDI CC message to a port.
   play                    - Starts the sequencer and slaves it to the JACK transport.
+  pause                   - Toggles play/pause on the JACK transport (spacebar shortcut).
   stop                    - Stops the sequencer and disconnects from JACK.
   metronome <on|off>      - Enables or disables the metronome.
   quit                    - Exits the sequencer.
@@ -480,6 +481,8 @@ def process_command(user_input, seq):
 
     elif command == "play":
         seq.play()
+    elif command == "pause":
+        seq.pause()
     elif command == "stop":
         seq.stop()
     elif command == "metronome":

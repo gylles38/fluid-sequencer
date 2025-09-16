@@ -490,6 +490,9 @@ def process_command(user_input, seq):
             # play <start>
             start_beat = seq.parse_position_to_beats(args[0])
             if start_beat is not None:
+                if seq.loop_enabled:
+                    print("Looping disabled.")
+                    seq.loop_enabled = False
                 seq.play_range_enabled = False
                 seq.play(start_beat=start_beat)
         elif len(args) == 2:

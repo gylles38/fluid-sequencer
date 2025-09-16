@@ -292,13 +292,12 @@ class JackManager:
                     _, pos_struct = self.jack_client.transport_query_struct()
                     pos = jack.position2dict(pos_struct)
 
-                    bar = pos.get('bar', 1)
-                    beat = pos.get('beat', 1)
-                    tick = pos.get('tick', 0)
-                    ticks_per_beat = pos.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
-                    beats_per_bar = pos.get('beats_per_bar', self.sequencer.song.time_signature_numerator)
-
-                    current_beat = (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+                    frame = pos.get('frame', 0)
+                    samplerate = self.jack_client.samplerate
+                    beats_per_second = self.sequencer.song.tempo / 60.0
+                    current_beat = 0.0
+                    if samplerate > 0 and beats_per_second > 0:
+                        current_beat = (frame / samplerate) * beats_per_second
 
                     with self.process_lock:
                         for ap in self.active_audio_processes:

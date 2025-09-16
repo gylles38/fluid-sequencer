@@ -68,6 +68,7 @@ Sequencer CLI Commands:
   cc                      - Sends a single MIDI CC message to a port.
   play                    - Starts the sequencer and slaves it to the JACK transport.
   pause                   - Toggles play/pause on the JACK transport (spacebar shortcut).
+  loop [start] [end]      - Sets a playback loop ('measure:beat') or toggles if no args.
   stop                    - Stops the sequencer and disconnects from JACK.
   metronome <on|off>      - Enables or disables the metronome.
   quit                    - Exits the sequencer.
@@ -483,6 +484,33 @@ def process_command(user_input, seq):
         seq.play()
     elif command == "pause":
         seq.pause()
+    elif command == "loop":
+        if len(args) == 0:
+            seq.loop_enabled = not seq.loop_enabled
+            status = "enabled" if seq.loop_enabled else "disabled"
+            print(f"Looping is now {status}.")
+            if not seq.loop_enabled:
+                print("Note: Loop points are still saved. Use 'loop <start> <end>' to set new points.")
+            elif seq.loop_end_beat <= seq.loop_start_beat:
+                print("Warning: Loop end is not after loop start. The loop will not function correctly.")
+        elif len(args) == 2:
+            start_beat = seq.parse_position_to_beats(args[0])
+            end_beat = seq.parse_position_to_beats(args[1])
+            if start_beat is None or end_beat is None:
+                # Error is printed by parse_position_to_beats
+                return True
+
+            if end_beat <= start_beat:
+                print("Error: Loop end position must be after the start position.")
+                return True
+
+            seq.loop_start_beat = start_beat
+            seq.loop_end_beat = end_beat
+            seq.loop_enabled = True
+            print(f"Loop enabled from {args[0]} to {args[1]}.")
+        else:
+            print("Usage: loop [start_position] [end_position]")
+            print("Example: loop 1:1 5:1")
     elif command == "stop":
         seq.stop()
     elif command == "metronome":

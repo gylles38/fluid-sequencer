@@ -548,6 +548,22 @@ class JackManager:
                 else: # event in the past
                     self.next_automation_event_index += 1
 
+            # --- Loop Handling ---
+            if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:
+                # Check if the start of the block was before the end point, to avoid re-triggering on every block after the end.
+                if start_beat_of_block < self.sequencer.loop_end_beat:
+                    beats_per_second = self.sequencer.song.tempo / 60.0
+                    samplerate = self.jack_client.samplerate
+
+                    if beats_per_second > 0 and samplerate > 0:
+                        target_frame = int((self.sequencer.loop_start_beat / beats_per_second) * samplerate)
+
+                        pos = jack.Position()
+                        pos.frame = target_frame
+                        pos.valid = jack.Position.FRAME
+
+                        self.jack_client.transport_reposition(pos)
+
             # --- Metronome Click Generation ---
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
@@ -595,6 +611,11 @@ class Sequencer:
         self.recording_thread = None
         self.is_recording = False
         self._stop_event = threading.Event()
+
+        # Loop settings
+        self.loop_enabled = False
+        self.loop_start_beat = 0.0
+        self.loop_end_beat = 0.0
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -1803,6 +1824,13 @@ class Sequencer:
             port_info = f" -> Port: {self.song.metronome_port_name}" if self.song.metronome_port_name else " (No port assigned)"
             metro_status = f"ON{port_info}"
         lines.append(f"Metronome: {metro_status}")
+
+        loop_status = "OFF"
+        if self.loop_enabled:
+            start_pos = self._format_beats_to_position(self.loop_start_beat)
+            end_pos = self._format_beats_to_position(self.loop_end_beat)
+            loop_status = f"ON ({start_pos} -> {end_pos})"
+        lines.append(f"Loop: {loop_status}")
 
         lines.append("=" * 20)
         for i, track in enumerate(self.song.tracks):

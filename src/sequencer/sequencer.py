@@ -148,6 +148,20 @@ class JackManager:
             self.jack_client.activate()
             self.is_running = True
 
+            # --- Initial Transport Sync ---
+            state, pos_struct = self.jack_client.transport_query_struct()
+            pos_dict = jack.position2dict(pos_struct)
+            self.sequencer.song.tempo = pos_dict.get('beats_per_minute', self.sequencer.song.tempo)
+
+            bar = pos_dict.get('bar', 1)
+            beat = pos_dict.get('beat', 1)
+            tick = pos_dict.get('tick', 0)
+            ticks_per_beat = pos_dict.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
+            beats_per_bar = self.sequencer.song.time_signature_numerator
+
+            initial_beat = (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+            self._sync_playhead_to_beat(initial_beat)
+
             # Start sync thread
             self._sync_stop_event.clear()
             self._sync_thread = threading.Thread(target=self._mpv_sync_loop)
@@ -320,6 +334,33 @@ class JackManager:
                     print(f"Error removing socket file {ap.socket_path}: {e}", file=sys.stderr)
             self.active_audio_processes.clear()
 
+    def _sync_playhead_to_beat(self, beat_pos: float):
+        """Sets the internal playhead to a specific beat and updates event indices."""
+        self.last_beat = beat_pos
+
+        # Reset and find the correct starting index for MIDI events
+        num_tracks = len(self.sequencer.song.tracks)
+        self.next_event_indices = [0] * num_tracks
+        self._active_notes.clear() # Clear any lingering notes from previous state
+
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if isinstance(track, MidiTrack):
+                for j, event in enumerate(track.events):
+                    if event.start_time >= self.last_beat:
+                        self.next_event_indices[i] = j
+                        break
+                else:
+                    self.next_event_indices[i] = len(track.events)
+
+        # Reset and find the correct starting index for automation events
+        self.next_automation_event_index = 0
+        for i, event in enumerate(self.automation_events):
+            if event['time'] >= self.last_beat:
+                self.next_automation_event_index = i
+                break
+        else: # All events are in the past
+            self.next_automation_event_index = len(self.automation_events)
+
     def _time_callback(self, state, blocksize, pos, new_pos):
         if new_pos:
             pos_dict = jack.position2dict(pos)
@@ -330,36 +371,8 @@ class JackManager:
             tick = pos_dict.get('tick', 0)
             ticks_per_beat = pos_dict.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
 
-            # This gives us the precise beat at the start of the current block
             current_beat_at_block_start = (bar - 1) * self.sequencer.song.time_signature_numerator + (beat - 1) + (tick / ticks_per_beat)
-            self.last_beat = current_beat_at_block_start
-
-            # Reset the playhead for all tracks
-            num_tracks = len(self.sequencer.song.tracks)
-            self.next_event_indices = [0] * num_tracks
-            self._active_notes.clear()
-
-            # Find the correct starting index for MIDI events
-            for i, track in enumerate(self.sequencer.song.tracks):
-                if isinstance(track, MidiTrack):
-                    # Find the first event that is at or after the new position
-                    for j, event in enumerate(track.events):
-                        if event.start_time >= self.last_beat:
-                            self.next_event_indices[i] = j
-                            break
-                    else:
-                        # All events are in the past
-                        self.next_event_indices[i] = len(track.events)
-
-            # Reset automation playhead
-            self.next_automation_event_index = 0
-            # Find the correct starting index for automation events
-            for i, event in enumerate(self.automation_events):
-                if event['time'] >= self.last_beat:
-                    self.next_automation_event_index = i
-                    break
-            else: # All events are in the past
-                self.next_automation_event_index = len(self.automation_events)
+            self._sync_playhead_to_beat(current_beat_at_block_start)
 
 
     def _process_callback(self, frames: int):

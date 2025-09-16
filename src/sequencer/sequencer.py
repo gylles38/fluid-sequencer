@@ -2360,15 +2360,57 @@ class Sequencer:
         return generated_events
 
 
-    def play(self):
-        """Starts the JACK client to follow the transport."""
-        if self.playback_state != "stopped":
-            print("Sequencer is already playing. Use 'stop' first.")
+    def play(self, start_beat: Optional[float] = None):
+        """
+        Starts or seeks the JACK transport.
+        If start_beat is provided, it seeks the transport to that position.
+        It then ensures the transport is rolling.
+        """
+        # 1. Ensure client is running.
+        if not self.jack_manager.is_running:
+            print("JACK client not active. Starting...")
+            self.jack_manager.start()
+            # Give a moment for the client to be fully active before commanding it
+            time.sleep(0.1)
+
+        if not self.jack_manager.is_running or not self.jack_manager.jack_client:
+            print("Error: Could not start JACK client.")
             return
-        self.jack_manager.start()
-        if self.jack_manager.is_running:
-            self.playback_state = "playing" # This state is now just for the UI
-            print("Sequencer is now slaved to JACK transport. Use your JACK master to play, stop, and seek.")
+
+        # 2. If a start beat is given, reposition the transport.
+        if start_beat is not None:
+            try:
+                beats_per_second = self.song.tempo / 60.0
+                samplerate = self.jack_manager.jack_client.samplerate
+                if beats_per_second > 0 and samplerate > 0:
+                    target_frame = int((start_beat / beats_per_second) * samplerate)
+
+                    # For simplicity and robustness, we only need to send the frame.
+                    # The master is responsible for updating its own bar/beat/tick from that.
+                    pos = jack.Position()
+                    pos.frame = target_frame
+                    pos.valid = jack.Position.FRAME
+
+                    self.jack_manager.jack_client.transport_reposition(pos)
+                    print(f"Seeking JACK transport to {self._format_beats_to_position(start_beat)}.")
+                    # After repositioning, we need to manually sync our internal state
+                    # because the _time_callback might not fire immediately.
+                    self.jack_manager._sync_playhead_to_beat(start_beat)
+
+            except jack.JackError as e:
+                print(f"Error seeking JACK transport: {e}")
+                return # Don't try to start if seek failed
+
+        # 3. Start the transport rolling if it's not already.
+        try:
+            if self.jack_manager.jack_client.transport_state != jack.ROLLING:
+                self.jack_manager.jack_client.transport_start()
+                # The "transport started" message is now handled by the pause command for clarity
+        except jack.JackError as e:
+            print(f"Error starting JACK transport: {e}")
+
+        # Finally, update our internal state to "playing"
+        self.playback_state = "playing"
 
     def pause(self):
         """Toggles the JACK transport state between rolling and stopped."""

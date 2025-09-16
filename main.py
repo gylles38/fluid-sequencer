@@ -66,7 +66,7 @@ Sequencer CLI Commands:
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
   cc                      - Sends a single MIDI CC message to a port.
-  play                    - Starts the sequencer and slaves it to the JACK transport.
+  play [pos]              - Seeks to 'measure:beat' position and plays, or just plays.
   pause                   - Toggles play/pause on the JACK transport (spacebar shortcut).
   loop [start] [end]      - Sets a playback loop ('measure:beat') or toggles if no args.
   stop                    - Stops the sequencer and disconnects from JACK.
@@ -481,7 +481,15 @@ def process_command(user_input, seq):
             print("Error: Invalid input.")
 
     elif command == "play":
-        seq.play()
+        if len(args) == 0:
+            seq.play()
+        elif len(args) == 1:
+            start_beat = seq.parse_position_to_beats(args[0])
+            if start_beat is not None:
+                seq.play(start_beat=start_beat)
+        else:
+            print("Usage: play [start_position]")
+            print("Example: play 10:1")
     elif command == "pause":
         seq.pause()
     elif command == "loop":

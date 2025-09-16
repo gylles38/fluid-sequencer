@@ -548,6 +548,8 @@ def process_command(user_input, seq):
                 print("Disabling play range to enable looping.")
                 seq.play_range_enabled = False
             print(f"Loop enabled from {args[0]} to {args[1]}.")
+            # Also start playback from the beginning of the loop
+            seq.play(start_beat=start_beat)
         else:
             print("Usage: loop [start_position] [end_position]")
             print("Example: loop 1:1 5:1")

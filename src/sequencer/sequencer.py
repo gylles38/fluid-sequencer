@@ -581,12 +581,12 @@ class JackManager:
                             pos.bar = target_bar + 1
                             pos.beat = target_beat + 1
                             pos.tick = target_tick
-                            pos.valid = jack.PositionFrame | jack.PositionBarBeatTick
+                            pos.valid = type(pos).FRAME | type(pos).BAR_BEAT_TICK
                         else:
                             # Fallback to frame-only reposition
                             _ , pos = self.jack_client.transport_query_struct()
                             pos.frame = target_frame
-                            pos.valid = jack.PositionFrame
+                            pos.valid = type(pos).FRAME
 
                         self.jack_client.transport_reposition(pos)
 
@@ -2390,8 +2390,8 @@ class Sequencer:
                     _ , pos = self.jack_manager.jack_client.transport_query_struct()
 
                     pos.frame = target_frame
-                    # Use the correct top-level constant for the valid mask
-                    pos.valid = jack.PositionFrame
+                    # Access the constant dynamically from the object's type.
+                    pos.valid = type(pos).FRAME
 
                     self.jack_manager.jack_client.transport_reposition(pos)
                     print(f"Seeking JACK transport to {self._format_beats_to_position(start_beat)}.")

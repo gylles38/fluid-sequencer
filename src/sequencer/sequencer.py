@@ -77,8 +77,6 @@ class JackManager:
         self._metronome_notes_to_turn_off = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
-        self._sync_thread = None
-        self._sync_stop_event = threading.Event()
         self._display_thread = None
         self._display_stop_event = threading.Event()
         self.automation_events = []
@@ -225,12 +223,6 @@ class JackManager:
             else:
                 self._sync_playhead_to_beat(0.0)
 
-            # Start sync thread
-            self._sync_stop_event.clear()
-            self._sync_thread = threading.Thread(target=self._mpv_sync_loop)
-            self._sync_thread.daemon = True
-            self._sync_thread.start()
-
             # Start display thread
             self._display_stop_event.clear()
             self._display_thread = threading.Thread(target=self._display_loop)
@@ -247,11 +239,6 @@ class JackManager:
     def stop(self):
         if not self.is_running or not self.jack_client:
             return
-
-        self._sync_stop_event.set()
-        if self._sync_thread:
-            self._sync_thread.join(timeout=1.0)
-        self._sync_thread = None
 
         self._display_stop_event.set()
         if self._display_thread:
@@ -312,44 +299,12 @@ class JackManager:
             # print(f"[DEBUG] Socket not connectable: {socket_path}")
             return False
 
-    def _mpv_sync_loop(self):
-        """
-        A loop in a separate thread to keep mpv instances' pause state synced with JACK transport.
-        NOTE: This loop is intentionally only for pause/unpause. Continuous time-based seeking
-        (e.g. sending 'time-pos' every 100ms) was previously done here, but it was the source
-        of significant bugs, including race conditions and 'micro-loops' when the JACK transport
-        value was static. The current architecture relies on event-based seeking (in play() and
-        _time_callback) and assumes mpv's internal clock is stable enough during playback.
-        """
-        time.sleep(1.0)  # Give mpv processes more time to start and create their sockets
-
-        was_rolling = None
-        while not self._sync_stop_event.is_set():
-            if not self.jack_client:
-                time.sleep(0.1)
-                continue
-
-            try:
-                is_rolling = self.jack_client.transport_state == jack.ROLLING
-
-                if is_rolling != was_rolling:
-                    all_sent = True
-                    with self.process_lock:
-                        for ap in self.active_audio_processes:
-                            command = {"command": ["set_property", "pause", not is_rolling]}
-                            if not self._send_ipc_command(ap.socket_path, command):
-                                all_sent = False
-                    if all_sent:
-                        was_rolling = is_rolling
-                        # Seeking is now handled by play() and _time_callback
-            except jack.JackError as e:
-                # This can happen if the client is shut down while we're in the loop
-                print(f"Error in mpv sync loop: {e}", file=sys.stderr)
-                break
-            except Exception as e:
-                print(f"Error in mpv sync loop: {e}", file=sys.stderr)
-
-            time.sleep(0.1)  # Sync every 100ms
+    def set_all_audio_pause_state(self, is_paused: bool):
+        """Sends a pause/unpause command to all active mpv instances."""
+        with self.process_lock:
+            for ap in self.active_audio_processes:
+                command = {"command": ["set_property", "pause", is_paused]}
+                self._send_ipc_command(ap.socket_path, command)
 
     def _launch_audio_track_player(self, track: AudioTrack, track_index: int):
         import shlex
@@ -2472,9 +2427,12 @@ class Sequencer:
         try:
             if self.jack_manager.jack_client.transport_state != jack.ROLLING:
                 self.jack_manager.jack_client.transport_start()
-                # The "transport started" message is now handled by the pause command for clarity
         except jack.JackError as e:
             print(f"Error starting JACK transport: {e}")
+            return # Don't proceed if transport fails to start
+
+        # 4. Unpause all audio tracks
+        self.jack_manager.set_all_audio_pause_state(False)
 
         # Finally, update our internal state to "playing"
         self.playback_state = "playing"
@@ -2488,9 +2446,11 @@ class Sequencer:
         try:
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                 self.jack_manager.jack_client.transport_stop()
+                self.jack_manager.set_all_audio_pause_state(True)
                 print("JACK transport stopped.")
             else:
                 self.jack_manager.jack_client.transport_start()
+                self.jack_manager.set_all_audio_pause_state(False)
                 print("JACK transport started.")
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
@@ -2511,8 +2471,10 @@ class Sequencer:
                 if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                     self.jack_manager.jack_client.transport_stop()
                     print("JACK transport stopped.")
-                    # Give the master a moment to process before we disconnect
-                    time.sleep(0.1)
+                # Always ensure audio is paused when stopping the session.
+                self.jack_manager.set_all_audio_pause_state(True)
+                # Give the master a moment to process before we disconnect
+                time.sleep(0.1)
             except jack.JackError as e:
                 print(f"Error stopping JACK transport: {e}")
 

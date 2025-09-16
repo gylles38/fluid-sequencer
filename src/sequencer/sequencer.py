@@ -556,11 +556,36 @@ class JackManager:
                     samplerate = self.jack_client.samplerate
 
                     if beats_per_second > 0 and samplerate > 0:
+                        # Convert loop start beat to target frame
                         target_frame = int((self.sequencer.loop_start_beat / beats_per_second) * samplerate)
 
-                        pos = jack.Position()
-                        pos.frame = target_frame
-                        pos.valid = jack.Position.FRAME
+                        # Also calculate bar/beat/tick for a more robust reposition command
+                        beats_per_bar = self.sequencer.song.time_signature_numerator
+                        ticks_per_beat = self.sequencer.song.ticks_per_beat
+
+                        # Avoid division by zero if song data is weird
+                        if beats_per_bar > 0 and ticks_per_beat > 0:
+                            frames_per_beat = samplerate * 60.0 / self.sequencer.song.tempo
+                            frames_per_bar = frames_per_beat * beats_per_bar
+                            frames_per_tick = frames_per_beat / ticks_per_beat
+
+                            target_bar = int(target_frame / frames_per_bar)
+                            rem_frames = target_frame % frames_per_bar
+                            target_beat = int(rem_frames / frames_per_beat)
+                            rem_frames_for_tick = rem_frames % frames_per_beat
+                            target_tick = int(rem_frames_for_tick / frames_per_tick)
+
+                            pos = jack.Position()
+                            pos.frame = target_frame
+                            pos.bar = target_bar + 1
+                            pos.beat = target_beat + 1
+                            pos.tick = target_tick
+                            pos.valid = jack.Position.FRAME | jack.Position.BAR_BEAT_TICK
+                        else:
+                            # Fallback to frame-only reposition
+                            pos = jack.Position()
+                            pos.frame = target_frame
+                            pos.valid = jack.Position.FRAME
 
                         self.jack_client.transport_reposition(pos)
 

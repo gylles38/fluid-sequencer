@@ -83,6 +83,7 @@ class JackManager:
         self._display_stop_event = threading.Event()
         self.automation_events = []
         self.next_automation_event_index = 0
+        self.is_just_activated = False
 
     def _display_loop(self):
         """A loop in a separate thread to display the current transport position."""
@@ -175,7 +176,6 @@ class JackManager:
             self._prepare_automation_events()
 
             # --- Wait for audio players to be ready ---
-            print("[DEBUG] Waiting for audio players to initialize...")
             max_wait_time = 5.0 # 5 seconds timeout
             start_time = time.time()
             all_sockets_ready = False
@@ -187,30 +187,26 @@ class JackManager:
                     # On Windows, we can't check for socket files this way, so we'll rely on a small fixed delay.
                     if sys.platform != "win32":
                         expected_sockets.append(ap.socket_path)
-            print(f"[DEBUG] Expecting sockets: {expected_sockets}")
 
             if sys.platform != "win32":
                 while (time.time() - start_time) < max_wait_time:
                     # Check if all expected sockets are connectable, not just existing.
-                    are_we_ready = [self._is_socket_connectable(s) for s in expected_sockets]
-                    print(f"[DEBUG] Socket readiness: {are_we_ready}")
-                    if all(are_we_ready):
+                    if all(self._is_socket_connectable(s) for s in expected_sockets):
                         all_sockets_ready = True
                         break
-                    time.sleep(0.2) # Increased sleep time for clarity in logs
+                    time.sleep(0.1)
             else:
                 # Fallback for Windows: just wait a fixed amount of time
                 time.sleep(1.5)
                 all_sockets_ready = True
 
             if not all_sockets_ready:
-                print("[DEBUG] Warning: Timed out waiting for all audio players to create their IPC sockets.", file=sys.stderr)
-            else:
-                print("[DEBUG] All audio players ready.")
+                print("Warning: Timed out waiting for all audio players to create their IPC sockets.", file=sys.stderr)
 
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
+            self.is_just_activated = True
             self.jack_client.activate()
             self.is_running = True
 
@@ -276,7 +272,6 @@ class JackManager:
         print("JACK client stopped.")
 
     def _send_ipc_command(self, socket_path, command_data) -> bool:
-        print(f"[DEBUG] Sending IPC command to {socket_path}: {command_data}")
         try:
             if sys.platform == "win32":
                 # On Windows, use named pipes. The path needs to be formatted specially.
@@ -298,7 +293,7 @@ class JackManager:
             return False
         except Exception as e:
             # Log other, unexpected errors.
-            print(f"[DEBUG] Error sending IPC command to {socket_path}: {e}", file=sys.stderr)
+            print(f"Error sending IPC command to {socket_path}: {e}", file=sys.stderr)
             return False
 
     def _is_socket_connectable(self, socket_path: str) -> bool:
@@ -338,7 +333,6 @@ class JackManager:
                 is_rolling = self.jack_client.transport_state == jack.ROLLING
 
                 if is_rolling != was_rolling:
-                    print(f"[DEBUG] _mpv_sync_loop: transport state changed from {was_rolling} to {is_rolling}")
                     all_sent = True
                     with self.process_lock:
                         for ap in self.active_audio_processes:
@@ -422,7 +416,6 @@ class JackManager:
 
     def seek_audio_to_beat(self, beat_pos: float):
         """Seeks all active audio tracks to a specific beat position."""
-        print(f"[DEBUG] seek_audio_to_beat called with beat_pos: {beat_pos}")
         beats_per_second = self.sequencer.song.tempo / 60.0
         if beats_per_second <= 0:
             return
@@ -476,13 +469,21 @@ class JackManager:
             samplerate = self.jack_client.samplerate
             beats_per_second = self.sequencer.song.tempo / 60.0
 
+            current_beat = 0.0
             if samplerate > 0 and beats_per_second > 0:
                 current_beat = (frame / samplerate) * beats_per_second
-                self._sync_playhead_to_beat(current_beat)
-                self.seek_audio_to_beat(current_beat)
+
+            # Always sync the MIDI playhead
+            self._sync_playhead_to_beat(current_beat)
+
+            if self.is_just_activated:
+                # This is the initial, automatic callback upon client activation.
+                # We only want to sync the MIDI playhead, not seek the audio,
+                # as a seek command will be issued by play() shortly.
+                self.is_just_activated = False
             else:
-                self._sync_playhead_to_beat(0.0)
-                self.seek_audio_to_beat(0.0)
+                # This is a genuine reposition or loop event, so we must seek audio.
+                self.seek_audio_to_beat(current_beat)
 
 
     def _process_callback(self, frames: int):
@@ -2431,7 +2432,7 @@ class Sequencer:
         """
         # 1. Ensure client is running.
         if not self.jack_manager.is_running:
-            print("[DEBUG] play: JACK client not active. Starting...")
+            print("JACK client not active. Starting...")
             self.jack_manager.start()
             # Give a moment for the client to be fully active before commanding it
             time.sleep(0.1)
@@ -2442,7 +2443,6 @@ class Sequencer:
 
         # 2. If a start beat is given, reposition the transport.
         if start_beat is not None:
-            print(f"[DEBUG] play: start_beat is {start_beat}, seeking transport.")
             try:
                 beats_per_second = self.song.tempo / 60.0
                 samplerate = self.jack_manager.jack_client.samplerate

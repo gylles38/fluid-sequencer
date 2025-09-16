@@ -565,34 +565,13 @@ class JackManager:
                         # Convert loop start beat to target frame
                         target_frame = int((self.sequencer.loop_start_beat / beats_per_second) * samplerate)
 
-                        # Also calculate bar/beat/tick for a more robust reposition command
-                        beats_per_bar = self.sequencer.song.time_signature_numerator
-                        ticks_per_beat = self.sequencer.song.ticks_per_beat
+                        # Convert loop start beat to target frame
+                        target_frame = int((self.sequencer.loop_start_beat / beats_per_second) * samplerate)
 
-                        # Avoid division by zero if song data is weird
-                        if beats_per_bar > 0 and ticks_per_beat > 0:
-                            frames_per_beat = samplerate * 60.0 / self.sequencer.song.tempo
-                            frames_per_bar = frames_per_beat * beats_per_bar
-                            frames_per_tick = frames_per_beat / ticks_per_beat
-
-                            target_bar = int(target_frame / frames_per_bar)
-                            rem_frames = target_frame % frames_per_bar
-                            target_beat = int(rem_frames / frames_per_beat)
-                            rem_frames_for_tick = rem_frames % frames_per_beat
-                            target_tick = int(rem_frames_for_tick / frames_per_tick)
-
-                            _ , pos = self.jack_client.transport_query_struct()
-
-                            pos.frame = target_frame
-                            pos.bar = target_bar + 1
-                            pos.beat = target_beat + 1
-                            pos.tick = target_tick
-                            pos.valid = jack.POSITION_BBT
-                        else:
-                            # Fallback to frame-only reposition
-                            _ , pos = self.jack_client.transport_query_struct()
-                            pos.frame = target_frame
-                            # Rely on default behavior for frame-only seek
+                        # Query for a valid position object and set only the frame.
+                        # This is simpler and more robust than calculating bar/beat/tick.
+                        _ , pos = self.jack_client.transport_query_struct()
+                        pos.frame = target_frame
 
                         self.jack_client.transport_reposition_struct(pos)
 

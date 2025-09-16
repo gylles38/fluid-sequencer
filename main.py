@@ -44,7 +44,6 @@ Sequencer CLI Commands:
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
   setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
-  setoffset <seconds>     - Sets the audio sync offset. Set to 0 to disable.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
@@ -67,11 +66,8 @@ Sequencer CLI Commands:
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
   cc                      - Sends a single MIDI CC message to a port.
-  play [start] [end]      - Plays the song. Start/end positions are in 'measure:beat'.
-  loop [start] [end]      - Loops a section of the song. Start/end positions are in 'measure:beat'.
-  pause                   - Pauses or resumes playback.
-  stop                    - Stops playback.
-  restart                 - Stops and restarts playback from the beginning.
+  play                    - Starts the sequencer and slaves it to the JACK transport.
+  stop                    - Stops the sequencer and disconnects from JACK.
   metronome <on|off>      - Enables or disables the metronome.
   quit                    - Exits the sequencer.
 
@@ -308,22 +304,6 @@ def process_command(user_input, seq):
         else:
             print("Usage: setaudiocmd <command...>")
             print(f"Current command: {seq.audio_player_command}")
-    elif command == "setoffset":
-        if len(args) == 1:
-            try:
-                offset = float(args[0])
-                if offset > 0:
-                    seq.song.sync_offset_sec = offset
-                    seq.is_dirty = True
-                    print(f"Audio sync offset set to {offset} seconds.")
-                else:
-                    seq.song.sync_offset_sec = 0
-                    seq.is_dirty = True
-                    print("Audio sync offset disabled.")
-            except ValueError:
-                print("Error: Invalid number for offset.")
-        else:
-            print("Usage: setoffset <seconds>")
     elif command == "setbank":
         if len(args) == 2:
             seq.set_bank(track_index=int(args[0]), msb=int(args[1]))
@@ -498,33 +478,10 @@ def process_command(user_input, seq):
         except (ValueError, IndexError):
             print("Error: Invalid input.")
 
-    elif command == "play" or command == "loop":
-        try:
-            if len(args) > 2:
-                print(f"Usage: {command} [start_position] [end_position]")
-                return True
-
-            start_beat_str = args[0] if len(args) >= 1 else None
-            start_beat = seq.parse_position_to_beats(start_beat_str) if start_beat_str else None
-            if start_beat_str and start_beat is None: # Handle parsing error
-                return True
-
-            end_beat_str = args[1] if len(args) >= 2 else None
-            end_beat = seq.parse_position_to_beats(end_beat_str, default="") if end_beat_str else None
-            if end_beat_str and end_beat is None: # Handle parsing error
-                return True
-
-            is_looping = command == "loop"
-            seq.play(start_beat=start_beat, end_beat=end_beat, loop=is_looping)
-
-        except Exception as e:
-            print(f"Error during command execution: {e}")
-    elif command == "pause":
-        seq.pause()
+    elif command == "play":
+        seq.play()
     elif command == "stop":
         seq.stop()
-    elif command == "restart":
-        seq.restart()
     elif command == "metronome":
         if len(args) == 1 and args[0].lower() in ["on", "off"]:
             is_enabled = args[0].lower() == "on"

@@ -7,6 +7,7 @@ from dataclasses import dataclass, asdict, is_dataclass, fields
 import json
 import math
 import mido
+import jack
 from mido import get_input_names, get_output_names, open_output # type: ignore
 import numpy as np
 from pydub import AudioSegment
@@ -64,36 +65,478 @@ def song_decoder(d):
     return d
 
 
+class JackManager:
+    def __init__(self, sequencer: 'Sequencer'):
+        self.sequencer = sequencer
+        self.jack_client = None
+        self.is_running = False
+        self.last_beat = 0.0
+        self.open_ports = {}
+        self.next_event_indices = []
+        self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
+        self._metronome_notes_to_turn_off = []
+        self.active_audio_processes: List[ActiveAudioProcess] = []
+        self.process_lock = threading.Lock()
+        self._sync_thread = None
+        self._sync_stop_event = threading.Event()
+        self.automation_events = []
+        self.next_automation_event_index = 0
+
+    def _prepare_automation_events(self):
+        """Generates and sorts all automation events for the song."""
+        self.automation_events.clear()
+        for track in self.sequencer.song.tracks:
+            if isinstance(track, AutomationTrack):
+                # Only process automation for tracks that should be audible
+                target_track_index = track.target_track_index
+                if 0 <= target_track_index < len(self.sequencer.song.tracks):
+                    target_track = self.sequencer.song.tracks[target_track_index]
+                    is_any_track_soloed = any(t.is_solo for t in self.sequencer.song.tracks if hasattr(t, 'is_solo'))
+
+                    # An automation track itself can be muted/soloed
+                    auto_track_should_play = (not hasattr(track, 'is_solo') or track.is_solo or not is_any_track_soloed) and \
+                                             (not hasattr(track, 'is_muted') or not track.is_muted)
+
+                    # The target track can also be muted/soloed
+                    target_track_should_play = (not hasattr(target_track, 'is_solo') or target_track.is_solo or not is_any_track_soloed) and \
+                                               (not hasattr(target_track, 'is_muted') or not target_track.is_muted)
+
+                    if auto_track_should_play and target_track_should_play:
+                        generated = self.sequencer._generate_automation_events(track)
+                        self.automation_events.extend(generated)
+
+        self.automation_events.sort(key=lambda e: e['time'])
+        # print(f"Prepared {len(self.automation_events)} automation events.")
+
+
+    def start(self):
+        if self.is_running:
+            print("JACK client is already running.")
+            return
+
+        try:
+            self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
+
+            # --- MIDI Port Setup ---
+            self.open_ports.clear()
+            required_ports = {track.output_port_name for track in self.sequencer.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
+            if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name:
+                required_ports.add(self.sequencer.song.metronome_port_name)
+
+            for name in required_ports:
+                vp = next((p for p in self.sequencer.virtual_ports if p.name == name), None)
+                if vp:
+                    self.open_ports[name] = vp
+                else:
+                    try:
+                        self.open_ports[name] = mido.open_output(name)
+                    except Exception as e:
+                        print(f"Could not open MIDI port '{name}': {e}")
+
+            # --- Audio Track Setup ---
+            with self.process_lock:
+                self.active_audio_processes.clear()
+                for i, track in enumerate(self.sequencer.song.tracks):
+                    if isinstance(track, AudioTrack):
+                        self._launch_audio_track_player(track, i)
+
+            # --- Automation Setup ---
+            self._prepare_automation_events()
+
+            self.jack_client.set_process_callback(self._process_callback)
+            self.jack_client.set_timebase_callback(self._time_callback)
+            self.jack_client.activate()
+            self.is_running = True
+
+            # Start sync thread
+            self._sync_stop_event.clear()
+            self._sync_thread = threading.Thread(target=self._mpv_sync_loop)
+            self._sync_thread.daemon = True
+            self._sync_thread.start()
+
+            print("JACK client started and activated.")
+        except jack.JackError as e:
+            print(f"Error starting JACK client: {e}")
+            if self.jack_client:
+                self.jack_client.close()
+            self.jack_client = None
+
+    def stop(self):
+        if not self.is_running or not self.jack_client:
+            return
+
+        self._sync_stop_event.set()
+        if self._sync_thread:
+            self._sync_thread.join(timeout=1.0)
+        self._sync_thread = None
+
+        self._shutdown_audio_processes()
+        self.jack_client.deactivate()
+        self.jack_client.close()
+        self.jack_client = None
+        self.is_running = False
+
+        for port in self.open_ports.values():
+            is_virtual = any(vp.name == port.name for vp in self.sequencer.virtual_ports)
+            if not is_virtual and not port.closed:
+                port.close()
+        self.open_ports.clear()
+        print("JACK client stopped.")
+
+    def _send_ipc_command(self, socket_path, command_data):
+        try:
+            if sys.platform == "win32":
+                # On Windows, use named pipes. The path needs to be formatted specially.
+                pipe_name = r'\\.\pipe\\' + os.path.basename(socket_path)
+                # This is a simplified implementation; robust named pipe communication
+                # might require more complex handling (e.g., using pywin32).
+                # For now, we attempt a simple write.
+                with open(pipe_name, 'w') as pipe:
+                    pipe.write(json.dumps(command_data) + '\n')
+            else:
+                # On Unix-like systems, use Unix domain sockets.
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.1)  # Don't block for too long
+                    s.connect(socket_path)
+                    s.sendall(json.dumps(command_data).encode('utf-8') + b'\n')
+        except (socket.timeout, ConnectionRefusedError, FileNotFoundError, BrokenPipeError):
+            # These errors are expected if mpv is not ready or has been closed.
+            pass
+        except Exception as e:
+            # Log other, unexpected errors.
+            print(f"Error sending IPC command to {socket_path}: {e}", file=sys.stderr)
+
+    def _mpv_sync_loop(self):
+        """A loop in a separate thread to keep mpv instances synced with JACK transport."""
+        time.sleep(0.5)  # Give mpv processes time to start and create their sockets
+
+        was_rolling = False
+        while not self._sync_stop_event.is_set():
+            if not self.jack_client:
+                time.sleep(0.1)
+                continue
+
+            try:
+                is_rolling = self.jack_client.transport_state == jack.ROLLING
+
+                if is_rolling != was_rolling:
+                    with self.process_lock:
+                        for ap in self.active_audio_processes:
+                            command = {"command": ["set", "pause", not is_rolling]}
+                            self._send_ipc_command(ap.socket_path, command)
+                    was_rolling = is_rolling
+
+                if is_rolling:
+                    _, pos_struct = self.jack_client.transport_query_struct()
+                    pos = jack.position2dict(pos_struct)
+
+                    bar = pos.get('bar', 1)
+                    beat = pos.get('beat', 1)
+                    tick = pos.get('tick', 0)
+                    ticks_per_beat = pos.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
+                    beats_per_bar = pos.get('beats_per_bar', self.sequencer.song.time_signature_numerator)
+
+                    current_beat = (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+
+                    with self.process_lock:
+                        for ap in self.active_audio_processes:
+                            track = self.sequencer.song.tracks[ap.track_index]
+                            if isinstance(track, AudioTrack):
+                                beats_per_second = self.sequencer.song.tempo / 60.0
+                                if beats_per_second > 0:
+                                    mpv_time = (current_beat - track.start_time) / beats_per_second
+
+                                    if mpv_time >= 0:
+                                        command = {"command": ["set", "time-pos", mpv_time]}
+                                        self._send_ipc_command(ap.socket_path, command)
+            except jack.JackError:
+                # This can happen if the client is shut down while we're in the loop
+                break
+            except Exception as e:
+                print(f"Error in mpv sync loop: {e}", file=sys.stderr)
+
+            time.sleep(0.1)  # Sync every 100ms
+
+    def _launch_audio_track_player(self, track: AudioTrack, track_index: int):
+        import shlex
+
+        # Create a unique socket path for IPC
+        socket_dir = tempfile.gettempdir()
+        # Use a consistent naming scheme for sockets
+        socket_filename = f"mpv-socket-{os.getpid()}-{track_index}"
+        socket_path = os.path.join(socket_dir, socket_filename)
+
+        # Clean up old socket if it exists
+        if sys.platform != "win32" and os.path.exists(socket_path):
+            os.unlink(socket_path)
+
+        command = shlex.split(self.sequencer.audio_player_command)
+        command.extend([
+            f"--input-ipc-server={socket_path}",
+            "--pause",  # Start paused, sync loop will control playback
+            track.filepath
+        ])
+
+        kwargs = {
+            'stdin': subprocess.DEVNULL,
+            'stdout': subprocess.DEVNULL,
+            'stderr': subprocess.DEVNULL
+        }
+        if sys.platform != "win32":
+            kwargs['preexec_fn'] = os.setsid
+
+        try:
+            process = subprocess.Popen(command, **kwargs)
+
+            active_process_info = ActiveAudioProcess(
+                process=process,
+                socket_path=socket_path,
+                track_index=track_index
+            )
+            self.active_audio_processes.append(active_process_info)
+            print(f"Launched mpv for track {track_index} with IPC socket: {socket_path}")
+        except Exception as e:
+            print(f"Error launching mpv for track {track_index}: {e}")
+            # Clean up the socket file if process fails to start
+            if sys.platform != "win32" and os.path.exists(socket_path):
+                os.unlink(socket_path)
+
+    def _shutdown_audio_processes(self):
+        """Stops all active audio subprocesses."""
+        with self.process_lock:
+            for ap in self.active_audio_processes:
+                try:
+                    if ap.process.poll() is None:
+                        ap.process.terminate()
+                        ap.process.wait(timeout=1.0)
+                except (subprocess.TimeoutExpired, Exception):
+                    if ap.process.poll() is None:
+                        ap.process.kill()
+                # Clean up socket file
+                try:
+                    if sys.platform != "win32" and ap.socket_path and os.path.exists(ap.socket_path):
+                        os.unlink(ap.socket_path)
+                except Exception as e:
+                    print(f"Error removing socket file {ap.socket_path}: {e}", file=sys.stderr)
+            self.active_audio_processes.clear()
+
+    def _time_callback(self, state, blocksize, pos, new_pos):
+        if new_pos:
+            pos_dict = jack.position2dict(pos)
+            self.sequencer.song.tempo = pos_dict.get('beats_per_minute', self.sequencer.song.tempo)
+
+            bar = pos_dict.get('bar', 1)
+            beat = pos_dict.get('beat', 1)
+            tick = pos_dict.get('tick', 0)
+            ticks_per_beat = pos_dict.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
+
+            # This gives us the precise beat at the start of the current block
+            current_beat_at_block_start = (bar - 1) * self.sequencer.song.time_signature_numerator + (beat - 1) + (tick / ticks_per_beat)
+            self.last_beat = current_beat_at_block_start
+
+            # Reset the playhead for all tracks
+            num_tracks = len(self.sequencer.song.tracks)
+            self.next_event_indices = [0] * num_tracks
+            self._active_notes.clear()
+
+            # Find the correct starting index for MIDI events
+            for i, track in enumerate(self.sequencer.song.tracks):
+                if isinstance(track, MidiTrack):
+                    # Find the first event that is at or after the new position
+                    for j, event in enumerate(track.events):
+                        if event.start_time >= self.last_beat:
+                            self.next_event_indices[i] = j
+                            break
+                    else:
+                        # All events are in the past
+                        self.next_event_indices[i] = len(track.events)
+
+            # Reset automation playhead
+            self.next_automation_event_index = 0
+            # Find the correct starting index for automation events
+            for i, event in enumerate(self.automation_events):
+                if event['time'] >= self.last_beat:
+                    self.next_automation_event_index = i
+                    break
+            else: # All events are in the past
+                self.next_automation_event_index = len(self.automation_events)
+
+
+    def _process_callback(self, frames: int):
+        try:
+            # --- Turn off metronome notes from previous block ---
+            if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
+                port = self.open_ports[self.sequencer.song.metronome_port_name]
+                for note_off_msg in self._metronome_notes_to_turn_off:
+                    port.send(note_off_msg)
+                self._metronome_notes_to_turn_off.clear()
+
+            if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
+                # When transport is stopped, send note-offs for any lingering notes
+                if self._active_notes:
+                    for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                        track = self.sequencer.song.tracks[track_idx]
+                        if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                            port = self.open_ports[track.output_port_name]
+                            port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                    self._active_notes.clear()
+                return
+
+            state, pos_struct = self.jack_client.transport_query_struct()
+            pos = jack.position2dict(pos_struct)
+
+            samplerate = self.jack_client.samplerate
+            tempo = self.sequencer.song.tempo
+            beats_per_second = tempo / 60.0
+
+            # Beat at the start of the current processing block
+            start_beat_of_block = self.last_beat
+            # Beat at the end of the current processing block
+            end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
+
+            # --- Send Note Offs for notes that ended in this block ---
+            for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                if start_beat_of_block <= end_beat < end_beat_of_block:
+                    track = self.sequencer.song.tracks[track_idx]
+                    if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                        port = self.open_ports[track.output_port_name]
+                        port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                    del self._active_notes[(track_idx, pitch)]
+
+            # --- Send Note Ons for notes starting in this block ---
+            for i, track in enumerate(self.sequencer.song.tracks):
+                if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
+                    continue
+
+                port = self.open_ports[track.output_port_name]
+
+                # Ensure next_event_indices is initialized
+                if i >= len(self.next_event_indices):
+                    self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
+
+                # Iterate through events for this track
+                while self.next_event_indices[i] < len(track.events):
+                    event = track.events[self.next_event_indices[i]]
+
+                    if start_beat_of_block <= event.start_time < end_beat_of_block:
+                        # This event starts in the current block
+                        for note in event.notes:
+                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
+                            port.send(note_on_msg)
+
+                            note_end_beat = event.start_time + note.duration
+                            self._active_notes[(i, note.pitch)] = note_end_beat
+
+                        for cc in event.cc_messages:
+                            cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
+                            port.send(cc_msg)
+
+                        self.next_event_indices[i] += 1
+                    elif event.start_time >= end_beat_of_block:
+                        # This event is in the future, so we can stop checking for this track
+                        break
+                    else:
+                        # This event was in the past, so we skip it (should have been caught by a seek)
+                        self.next_event_indices[i] += 1
+
+            # --- Process Automation Events ---
+            while self.next_automation_event_index < len(self.automation_events):
+                event = self.automation_events[self.next_automation_event_index]
+                event_time = event['time']
+
+                if start_beat_of_block <= event_time < end_beat_of_block:
+                    target_track_index = event['target_track_index']
+                    if not 0 <= target_track_index < len(self.sequencer.song.tracks):
+                        self.next_automation_event_index += 1
+                        continue
+
+                    target_track = self.sequencer.song.tracks[target_track_index]
+                    param_config = event['param_config']
+                    value = event['value']
+                    param_name = event['parameter'].lower()
+
+                    if param_config['type'] == 'midi_cc':
+                        if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
+                            port = self.open_ports[target_track.output_port_name]
+
+                            midi_value = 0
+                            if param_name == 'vol': # volume
+                                midi_value = int(value * 127)
+                            elif param_name == 'pan': # pan
+                                midi_value = int((value + 1.0) / 2.0 * 127)
+                            else: # other CCs are assumed to be 0-127
+                                midi_value = int(value)
+
+                            # Ensure value is within MIDI range
+                            midi_value = max(0, min(127, midi_value))
+
+                            msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
+                            port.send(msg)
+
+                    elif param_config['type'] == 'program_change':
+                        if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
+                            port = self.open_ports[target_track.output_port_name]
+                            program_value = max(0, min(127, int(value)))
+                            msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
+                            port.send(msg)
+
+                    elif param_config['type'] == 'velocity_multiplier':
+                        if isinstance(target_track, MidiTrack):
+                            target_track.velocity = value
+
+                    self.next_automation_event_index += 1
+                elif event_time >= end_beat_of_block:
+                    break
+                else: # event in the past
+                    self.next_automation_event_index += 1
+
+            # --- Metronome Click Generation ---
+            if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
+                port = self.open_ports[self.sequencer.song.metronome_port_name]
+
+                # Find the next integer beat to check
+                beat_to_check = math.floor(start_beat_of_block) + 1
+
+                while beat_to_check < end_beat_of_block:
+                    beats_per_measure = self.sequencer.song.time_signature_numerator
+                    # 0-indexed beat for modulo operation
+                    is_downbeat = ((beat_to_check - 1) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 1
+
+                    pitch = self.sequencer.metronome_pitch_downbeat if is_downbeat else self.sequencer.metronome_pitch_beat
+
+                    note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=100)
+                    note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)
+
+                    port.send(note_on)
+                    self._metronome_notes_to_turn_off.append(note_off)
+
+                    beat_to_check += 1
+
+            self.last_beat = end_beat_of_block
+        except Exception as e:
+            # It's critical not to let exceptions escape the callback
+            print(f"\nError in JACK process callback: {e}")
+
+
 class Sequencer:
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle"
 
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
         self.playback_state = "stopped"
-        self.playback_thread = None
-        self.metronome_thread = None # New thread for the metronome
-        self.metronome_queue = queue.Queue() # AJOUTER CETTE LIGNE        
+        self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
         self.control_port_name: Optional[str] = None
         self.open_ports = {}
         self.virtual_ports = []
         self.temporary_ports = []
-        self._stop_event = threading.Event()
-        self._run_event = threading.Event()
-        self._run_event.set()
-        self._playback_started_event = threading.Event()
-        self.audio_setup_barrier: Optional[threading.Barrier] = None
-        self.audio_threads: List[threading.Thread] = []
-        self.active_audio_processes: List[ActiveAudioProcess] = []
-        self.process_lock = threading.Lock()
         self.audio_player_command: str = self.DEFAULT_AUDIO_PLAYER_COMMAND
 
-        self.total_paused_time = 0.0
-        self.pause_start_time = 0.0
         self.last_start_beat = 0.0
         self.recording_thread = None
         self.is_recording = False
+        self._stop_event = threading.Event()
 
         # Metronome settings
         self.metronome_channel = 9  # Channel 10 (0-indexed)
@@ -1016,15 +1459,9 @@ class Sequencer:
                 elif not track.is_muted:
                     # No process exists, and we are UNMUTING. Start a new one.
                     print(f"Starting playback for newly unmuted track '{track.name}'...")
-                    current_beat = self._get_current_beat()
-
-                    audio_thread = threading.Thread(
-                        target=self._play_audio_track,
-                        args=(track, track_index, current_beat, False) # initial_setup=False
-                    )
-                    audio_thread.daemon = True
-                    self.audio_threads.append(audio_thread)
-                    audio_thread.start()
+                    # Starting a new process mid-stream is complex and handled by the user restarting playback.
+                    # For now, we just print a message.
+                    print(f"Track '{track.name}' will start on next playback.")
 
     def toggle_solo(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -1067,14 +1504,9 @@ class Sequencer:
                         elif should_be_audible:
                             # If the track should be playing but isn't, start it.
                             print(f"Starting playback for newly audible track '{track.name}'...")
-                            current_beat = self._get_current_beat()
-                            audio_thread = threading.Thread(
-                                target=self._play_audio_track,
-                                args=(track, i, current_beat, False) # initial_setup=False
-                            )
-                            audio_thread.daemon = True
-                            self.audio_threads.append(audio_thread)
-                            audio_thread.start()
+                            # Starting a new process mid-stream is complex and handled by the user restarting playback.
+                            # For now, we just print a message.
+                            print(f"Track '{track.name}' will start on next playback.")
 
                 elif isinstance(track, MidiTrack):
                     if not should_be_audible and track.output_port_name:
@@ -1294,8 +1726,6 @@ class Sequencer:
         """Resets the sequencer to a new, empty project."""
         if self.playback_state != "stopped":
             self.stop()
-            if self.playback_thread and self.playback_thread.is_alive():
-                self.playback_thread.join()
 
         self.song = Song(name="New Song", tempo=120)
         self.close_virtual_ports()
@@ -1431,84 +1861,98 @@ class Sequencer:
         # Return the index of the newly created track
         return len(self.song.tracks) - 1
 
+    def _get_current_beat(self) -> float:
+        """Gets the current beat from the JACK transport if active."""
+        if self.jack_manager and self.jack_manager.is_running and self.jack_manager.jack_client:
+            try:
+                _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
+                pos = jack.position2dict(pos_struct)
+                bar = pos.get('bar', 1)
+                beat = pos.get('beat', 1)
+                tick = pos.get('tick', 0)
+                ticks_per_beat = pos.get('ticks_per_beat', self.song.ticks_per_beat)
+                beats_per_bar = pos.get('beats_per_bar', self.song.time_signature_numerator)
+                return (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+            except (jack.JackError, AttributeError):
+                 # This can happen if the client is not active or during shutdown
+                return 0.0
+        return 0.0
+
     def _recording_thread_main(self, target_track: MidiTrack, start_beat: float, inport_name: str, outport_name: Optional[str], num_beats_to_record: Optional[float], original_mute_state: bool):
-        """The main loop for the MIDI recording thread."""
-        open_notes = {}
+        """The main loop for the MIDI recording thread, now driven by JACK."""
+        open_notes = {}  # key: note_pitch, value: (start_beat, velocity)
         outport = None
         is_virtual_port = False
-        if self._stop_event.is_set():
-            self._stop_event.clear()
+        recording_started_beat = None
 
         try:
             with mido.open_input(inport_name) as inport:
                 if outport_name:
                     vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
-                    if vp: outport = vp; is_virtual_port = True
-                    else: outport = open_output(outport_name)
+                    if vp:
+                        outport = vp
+                        is_virtual_port = True
+                    else:
+                        outport = open_output(outport_name)
+                    # Send initial program/bank change for MIDI thru
                     if target_track.bank_msb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
                     if target_track.bank_lsb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
                     outport.send(mido.Message('program_change', channel=target_track.channel, program=target_track.instrument))
 
-                print("Waiting for first note to start recording...")
-                first_msg = None
-                while not self._stop_event.is_set():
-                    # This blocks until a message is received
-                    msg = inport.receive()
-                    # Pass all messages through, but on the correct channel
-                    if outport and hasattr(msg, 'channel'):
-                        outport.send(msg.copy(channel=target_track.channel))
-
-                    if msg.type == 'note_on' and msg.velocity > 0:
-                        first_msg = msg
-                        break
-
-                if self._stop_event.is_set():
-                    return
-
-                first_note_time_beats = start_beat
-                recording_start_time_sec = time.time()
-                self.play(start_beat=first_note_time_beats)
-                print(f"Recording started at beat {self._format_beats_to_position(first_note_time_beats)}. Type 'stop' to finish.")
-
-                if first_msg:
-                    open_notes[first_msg.note] = (recording_start_time_sec, first_msg.velocity)
+                print(f"Armed for recording on track '{target_track.name}'. Waiting for JACK transport to roll past {self._format_beats_to_position(start_beat)}.")
 
                 while not self._stop_event.is_set():
+                    current_beat = self._get_current_beat()
+
+                    # Wait until we are at the punch-in point and transport is rolling
+                    is_rolling = self.jack_manager.jack_client and self.jack_manager.jack_client.transport_state == jack.ROLLING
+                    if not is_rolling or current_beat < start_beat:
+                        time.sleep(0.01)
+                        continue
+
+                    if recording_started_beat is None:
+                        recording_started_beat = current_beat
+                        print(f"Recording started at beat {self._format_beats_to_position(current_beat)}. Type 'stop' to finish.")
+
                     for msg in inport.iter_pending():
                         if outport and hasattr(msg, 'channel'):
                             outport.send(msg.copy(channel=target_track.channel))
 
-                        now = time.time()
+                        current_beat_for_msg = current_beat # Use the beat from the start of the loop
+
                         if msg.type == 'note_on' and msg.velocity > 0:
                             if msg.note not in open_notes:
-                                open_notes[msg.note] = (now, msg.velocity)
+                                open_notes[msg.note] = (current_beat_for_msg, msg.velocity)
                         elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                             if msg.note in open_notes:
-                                note_start_time_sec, velocity = open_notes.pop(msg.note)
-                                duration_sec = now - note_start_time_sec
+                                note_on_beat, velocity = open_notes.pop(msg.note)
+                                duration_beats = current_beat_for_msg - note_on_beat
 
-                                beats_per_second = self.song.tempo / 60.0
-                                start_time_beats = first_note_time_beats + (note_start_time_sec - recording_start_time_sec) * beats_per_second
-                                duration_beats = duration_sec * beats_per_second
+                                if duration_beats <= 0: duration_beats = 0.01
 
                                 note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                target_track.add_event(Event(notes=[note], start_time=start_time_beats))
+                                target_track.add_event(Event(notes=[note], start_time=note_on_beat))
                                 self.is_dirty = True
 
-                    if num_beats_to_record and (time.time() - recording_start_time_sec) * (self.song.tempo / 60.0) >= num_beats_to_record:
+                    if num_beats_to_record and recording_started_beat is not None and (current_beat - recording_started_beat) >= num_beats_to_record:
                         print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
-                        break
+                        self._stop_event.set() # Signal to stop the recording loop
+
                     time.sleep(0.001)
 
         except Exception as e:
             print(f"\nAn error occurred during recording: {e}")
         finally:
-            if outport and not is_virtual_port:
-                outport.close()
+            if outport:
+                for note_pitch in open_notes:
+                    outport.send(mido.Message('note_off', channel=target_track.channel, note=note_pitch, velocity=0))
+                if not is_virtual_port and outport and not outport.closed:
+                    outport.close()
+
             target_track.is_muted = original_mute_state
             self.is_recording = False
+            # The main CLI loop should handle stopping the JACK client now
             print("\nRecording thread finished.")
-        
     def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool):
         target_track = self.song.tracks[track_index]
         if not isinstance(target_track, MidiTrack):
@@ -1609,6 +2053,8 @@ class Sequencer:
         except (ValueError, IndexError, UserInputCancelled):
             print("\nRecord cancelled."); return
 
+        self._stop_event.clear()
+
         # --- Store settings and start recording ---
         self.last_record_settings = {
             "track_index": track_index,
@@ -1663,193 +2109,6 @@ class Sequencer:
 
         # Unpack the potentially modified settings and call the internal recording function
         self._start_recording_internal(**settings)
-
-    def _send_ipc_command(self, socket_path: str, command: dict, wait_for_response: bool = False) -> Optional[dict]:
-        """Sends a JSON command to the mpv IPC socket, optionally waiting for a response."""
-        if not os.path.exists(socket_path):
-            return None
-
-        request_id = 1  # A simple, fixed request ID for our use case.
-        if wait_for_response:
-            command['request_id'] = request_id
-
-        try:
-            if sys.platform == "win32":
-                return None
-
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.settimeout(0.2)
-                sock.connect(socket_path)
-                sock.sendall(json.dumps(command).encode('utf-8') + b'\n')
-
-                if not wait_for_response:
-                    return None
-
-                # Read responses until we find the one matching our request_id
-                buffer = b""
-                while True:
-                    try:
-                        chunk = sock.recv(4096)
-                        if not chunk: break
-                        buffer += chunk
-
-                        # Process all complete JSON objects in the buffer
-                        while b'\n' in buffer:
-                            response_str, buffer = buffer.split(b'\n', 1)
-                            if not response_str: continue
-                            try:
-                                response_json = json.loads(response_str)
-                                if response_json.get("request_id") == request_id:
-                                    if response_json.get("error") == "success":
-                                        return response_json
-                                    else:
-                                        return None # The command failed
-                            except (json.JSONDecodeError, AttributeError):
-                                # Ignore non-JSON lines or events without a request_id
-                                continue
-                    except socket.timeout:
-                        break # No more data
-                return None # No matching response found
-
-        except (socket.timeout, ConnectionRefusedError, FileNotFoundError):
-            return None
-        except Exception as e:
-            print(f"\nError in IPC command: {e}")
-            return None
-
-    def _play_audio_track(self, track: AudioTrack, track_index: int, start_beat: float, initial_setup: bool):
-        """
-        Plays a single audio track in a separate mpv process.
-        This method has two modes based on the `initial_setup` flag:
-        1. `initial_setup=True`: For pre-buffering at the start of playback.
-           It launches the process paused and waits on a barrier. It does not unpause.
-        2. `initial_setup=False`: For live un-muting of a track.
-           It waits for the main playback event, then launches and unpauses the process immediately.
-        """
-        if not initial_setup:
-            # This is a live unmute, so wait for main playback to have started.
-            self._playback_started_event.wait(timeout=1.0)
-
-        if self._stop_event.is_set():
-            return # Abort if stop was called during the wait
-
-        import shlex
-        process = None
-        socket_path = ""
-        tmp_sock = None
-        try:
-            # Create a persistent temporary file for the socket
-            tmp_sock = tempfile.NamedTemporaryFile(prefix="mpv-socket-", delete=False)
-            socket_path = tmp_sock.name
-            tmp_sock.close()
-
-            beats_per_second = self.song.tempo / 60.0
-
-            command = shlex.split(self.audio_player_command)
-            command.append(f"--input-ipc-server={socket_path}")
-            command.append(f"--volume={track.volume * 100}")
-            command.append("--pause")
-
-            if track.start_time >= start_beat:
-                delay_beats = track.start_time - start_beat
-                if delay_beats > 0:
-                    delay_seconds = delay_beats / beats_per_second
-                    command.append(f"--audio-delay={delay_seconds}")
-            else:  # Track starts before the playback start point
-                seek_beats = start_beat - track.start_time
-                seek_seconds = seek_beats / beats_per_second
-                command.append(f"--start={seek_seconds}")
-
-            command.append(track.filepath)
-
-            kwargs = {
-                'stdin': subprocess.DEVNULL,
-                'stdout': subprocess.DEVNULL,
-                'stderr': subprocess.DEVNULL
-            }
-
-            if sys.platform == "win32":
-                kwargs['creationflags'] = subprocess.DETACHED_PROCESS
-            else:
-                kwargs['preexec_fn'] = os.setsid
-
-            process = subprocess.Popen(command, **kwargs)
-            time.sleep(0.1)
-
-            active_process_info = ActiveAudioProcess(
-                process=process,
-                socket_path=socket_path,
-                track_index=track_index
-            )
-            with self.process_lock:
-                self.active_audio_processes.append(active_process_info)
-
-            if initial_setup:
-                # Part of the initial pre-buffering. Wait on the barrier.
-                # Unpausing is handled by the main playback thread.
-                if self.audio_setup_barrier:
-                    try:
-                        self.audio_setup_barrier.wait(timeout=5.0)
-                    except threading.BrokenBarrierError:
-                        return # Another thread failed or timed out.
-            else:
-                # This is a live unmute. Unpause immediately.
-                self._send_ipc_command(socket_path, {"command": ["set_property", "pause", False]})
-
-            # The thread must now wait for the playback to stop.
-            # This keeps the thread alive and prevents premature cleanup of the IPC socket.
-            self._stop_event.wait()
-
-        except Exception as e:
-            if not self._stop_event.is_set():
-                print(f"\n[ERROR] in audio playback thread for track '{track.name}': {e}")
-            if initial_setup and self.audio_setup_barrier and not self.audio_setup_barrier.broken:
-                self.audio_setup_barrier.abort()
-        finally:
-            # The socket file is cleaned up reliably by _shutdown_audio_processes.
-            pass
-
-    def _metronome_thread_main(self):
-        """
-        Thread dédié au métronome. Attend les numéros de temps depuis la queue
-        et joue les clics correspondants.
-        """
-        beats_per_measure = self.song.time_signature_numerator
-        if beats_per_measure <= 0:
-            return
-
-        metro_port = self.open_ports.get(self.song.metronome_port_name)
-        if not metro_port:
-            return
-
-        while not self._stop_event.is_set():
-            try:
-                # Attend (avec un timeout) qu'un numéro de temps arrive dans la queue
-                beat_to_play = self.metronome_queue.get(timeout=0.1)
-
-                # Une valeur None est un signal pour arrêter le thread proprement
-                if beat_to_play is None:
-                    break
-
-                # Jouer le clic comme avant
-                is_downbeat = (beat_to_play % beats_per_measure) == 0
-                pitch_to_send = self.metronome_pitch_downbeat if is_downbeat else self.metronome_pitch_beat
-
-                note_on = mido.Message('note_on', channel=self.metronome_channel, note=pitch_to_send, velocity=100)
-                note_off = mido.Message('note_off', channel=self.metronome_channel, note=pitch_to_send, velocity=0)
-
-                if metro_port and not metro_port.closed:
-                    metro_port.send(note_on)
-                    time.sleep(0.05)
-                    metro_port.send(note_off)
-
-            except queue.Empty:
-                # Le timeout de 0.1s s'est écoulé sans recevoir de temps,
-                # on continue la boucle pour pouvoir vérifier _stop_event.
-                continue
-            except Exception as e:
-                print(f"\nErreur dans le thread métronome: {e}")
-                break
 
     def _get_song_length_in_beats(self) -> float:
         """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""
@@ -1925,6 +2184,7 @@ class Sequencer:
             generated_events.append({
                 "time": start_point.start_time,
                 "target_track_index": target_track_index,
+                "parameter": start_point.parameter,
                 "param_config": param_config,
                 "value": start_point.value
             })
@@ -1981,553 +2241,48 @@ class Sequencer:
                 generated_events.append({
                     "time": step_time,
                     "target_track_index": target_track_index,
+                    "parameter": start_point.parameter,
                     "param_config": param_config,
                     "value": step_value
                 })
 
         return generated_events
 
-    def _get_current_beat(self) -> float:
-        """Calculates the current playback position in beats."""
-        if self.playback_state == "stopped":
-            return 0.0
 
-        # This needs to be available from the play() call
-        start_time_sec = getattr(self, 'playback_start_time', 0)
-        start_beat = getattr(self, 'last_start_beat', 0)
-
-        if self.playback_state == "paused":
-            # If paused, the current time is frozen at the moment of pausing.
-            pause_start_time = getattr(self, 'pause_start_time', start_time_sec)
-            elapsed_sec = (pause_start_time - start_time_sec) - self.total_paused_time
-        else: # playing
-            elapsed_sec = (time.time() - start_time_sec) - self.total_paused_time
-
-        mido_tempo = mido.bpm2tempo(self.song.tempo)
-        ticks_per_beat = self.song.ticks_per_beat
-        current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
-        current_beat = start_beat + (current_ticks / ticks_per_beat)
-        return current_beat
-
-    def _prepare_playback_events(self, start_beat: float, end_beat: Optional[float]) -> List[dict]:
-        master_event_list = []
-        ticks_per_beat = self.song.ticks_per_beat
-
-        # 1. Build master list of MIDI events
-        for track_idx, track in enumerate(self.song.tracks):
-            if isinstance(track, MidiTrack):
-                for event in track.events:
-                    start_tick = int(event.start_time * ticks_per_beat)
-                    for note in event.notes:
-                        end_tick = start_tick + int(note.duration * ticks_per_beat)
-                        master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=note.velocity)})
-                        master_event_list.append({'type': 'midi', 'tick': end_tick, 'track_idx': track_idx, 'message': mido.Message('note_off', channel=track.channel, note=note.pitch, velocity=0)})
-                    for cc in event.cc_messages:
-                        master_event_list.append({'type': 'midi', 'tick': start_tick, 'track_idx': track_idx, 'message': mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)})
-
-        # 2. Generate and add automation events
-        for track_idx, track in enumerate(self.song.tracks):
-            if isinstance(track, AutomationTrack):
-                automation_events = self._generate_automation_events(track)
-                for auto_event in automation_events:
-                    master_event_list.append({
-                        'type': 'automation',
-                        'tick': int(auto_event['time'] * ticks_per_beat),
-                        'track_idx': track_idx,
-                        'payload': auto_event
-                    })
-
-        # 3. Filter and normalize events based on playback range
-        start_tick = int(start_beat * ticks_per_beat)
-        end_tick = float('inf') if end_beat is None else int(end_beat * ticks_per_beat)
-
-        ranged_event_list = []
-        for e in master_event_list:
-            if start_tick <= e['tick'] < end_tick:
-                new_event = e.copy()
-                new_event['tick'] -= start_tick
-                ranged_event_list.append(new_event)
-
-        # Add initial state for all tracks at the beginning of the playback range
-        for track_idx, track in enumerate(self.song.tracks):
-             if isinstance(track, MidiTrack):
-                ranged_event_list.append({'type': 'initial_state', 'tick': 0, 'track_idx': track_idx})
-
-        if not ranged_event_list:
-            if not any(isinstance(t, AudioTrack) and not t.is_muted for t in self.song.tracks):
-                 print("No events to play in the selected range.")
-        else:
-            event_type_priority = {'initial_state': 0, 'automation': 1, 'midi': 2}
-            ranged_event_list.sort(key=lambda e: (e['tick'], event_type_priority.get(e['type'], 99)))
-
-        return ranged_event_list
-
-    def _play_thread(self, start_beat: float = 0.0, end_beat: Optional[float] = None, loop: bool = False):
-        try:
-            ranged_event_list = self._prepare_playback_events(start_beat, end_beat)
-            ticks_per_beat = self.song.ticks_per_beat
-
-            if end_beat is not None:
-                song_length_beats = end_beat
-            else:
-                song_length_beats = float('inf') if self.is_recording else self._get_song_length_in_beats()
-
-            next_event_index = 0
-            first_loop = True
-            last_beat_sent_to_metro = -1
-
-            last_sync_time = time.time()
-            sync_interval_sec = self.song.sync_offset_sec
-            master_audio_process = None
-            with self.process_lock:
-                if self.active_audio_processes:
-                    master_audio_process = self.active_audio_processes[0]
-
-            while not self._stop_event.is_set():
-                self._run_event.wait()
-                if self._stop_event.is_set(): break
-
-                # MODIFICATION : La synchronisation active se passe ici, au premier passage.
-                if first_loop:
-                    # 1. Calculer le temps perdu pendant le pré-chargement
-                    buffering_delay_sec = time.time() - self.playback_start_time
-
-                    # FIX: On ajuste le temps de départ pour que l'horloge MIDI soit synchronisée
-                    self.playback_start_time += buffering_delay_sec
-
-                    with self.process_lock:
-                        for ap in self.active_audio_processes:
-                            # 2. Le seek relatif n'est plus nécessaire car l'horloge principale est ajustée.
-                            # On a juste besoin de lancer la lecture.
-                            # 3. Lancer la lecture audio
-                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
-
-                    self._playback_started_event.set()
-                    first_loop = False
-
-                now = time.time()
-                if master_audio_process and sync_interval_sec > 0 and (now - last_sync_time) > sync_interval_sec:
-                    # ... (logique de synchronisation en temps réel, inchangée)
-                    last_sync_time = now
-                    response = self._send_ipc_command(
-                        master_audio_process.socket_path,
-                        {"command": ["get_property", "time-pos"]},
-                        wait_for_response=True
-                    )
-                    if response and isinstance(response.get("data"), (int, float)):
-                        audio_time_sec = response["data"]
-                        current_elapsed_sec = (now - self.playback_start_time) - self.total_paused_time
-
-                        # Correctly calculate what the MIDI time should be in absolute seconds
-                        beats_per_second = self.song.tempo / 60.0
-                        start_beat_sec = start_beat / beats_per_second if beats_per_second > 0 else 0
-                        midi_absolute_time_sec = start_beat_sec + current_elapsed_sec
-
-                        drift = midi_absolute_time_sec - audio_time_sec
-                        if abs(drift) > 0.01:
-                            self.playback_start_time += drift
-                
-                # L'horloge MIDI prend maintenant correctement en compte le délai de chargement
-                elapsed_sec = (time.time() - self.playback_start_time) - self.total_paused_time
-                mido_tempo = mido.bpm2tempo(self.song.tempo)
-                current_ticks = mido.second2tick(elapsed_sec, ticks_per_beat, mido_tempo)
-                current_beat_float = start_beat + (current_ticks / ticks_per_beat)
-
-                if self.song.metronome_enabled:
-                    current_beat_int = math.floor(current_beat_float)
-                    if current_beat_int > last_beat_sent_to_metro:
-                        self.metronome_queue.put(current_beat_int)
-                        last_beat_sent_to_metro = current_beat_int
-                
-                if song_length_beats > 0 and current_beat_float >= song_length_beats:
-                    # ... (logique de boucle, inchangée)
-                    if loop and not self.is_recording:
-                        self._shutdown_audio_processes()
-                        for t in self.audio_threads:
-                            if t.is_alive(): t.join(timeout=0.5)
-                        self.audio_threads = []
-                        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                        for i, track in enumerate(self.song.tracks):
-                            if isinstance(track, AudioTrack):
-                                should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                                if should_play:
-                                    audio_thread = threading.Thread(target=self._play_audio_track, args=(track, i, start_beat, False))
-                                    audio_thread.daemon = True
-                                    self.audio_threads.append(audio_thread)
-                                    audio_thread.start()
-                        
-                        self.playback_start_time = time.time()
-                        next_event_index = 0
-                        self.total_paused_time = 0.0
-                        self._all_notes_off()
-                        last_beat_sent_to_metro = math.floor(start_beat) - 1
-                        
-                        # MODIFICATION : Il faut réinitialiser `first_loop` pour la nouvelle passe
-                        first_loop = True 
-                        
-                        continue
-                    else:
-                        break
-
-                mode = "Recording" if self.is_recording else "Playing"
-                beats_per_measure = self.song.time_signature_numerator if self.song.time_signature_numerator > 0 else 4
-                display_measure = int(current_beat_float / beats_per_measure) + 1
-                display_beat_in_measure = int(current_beat_float % beats_per_measure) + 1
-                print(f"\r{mode}: Measure {display_measure}, Beat {display_beat_in_measure} ", end="")
-                sys.stdout.flush()
-
-                # Le bloc `if first_loop:` a été déplacé au début de la boucle while.
-
-                # ... (distribution des événements, inchangée) ...
-                while next_event_index < len(ranged_event_list) and ranged_event_list[next_event_index]['tick'] <= current_ticks:
-                    event = ranged_event_list[next_event_index]
-                    track = self.song.tracks[event['track_idx']]
-                    is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-                    should_play_track = (hasattr(track, 'is_solo') and track.is_solo or not is_any_track_soloed) and (hasattr(track, 'is_muted') and not track.is_muted)
-                    if event['type'] == 'initial_state':
-                        if isinstance(track, MidiTrack) and track.output_port_name:
-                             port = self.open_ports.get(track.output_port_name)
-                             if port:
-                                if track.bank_msb is not None: port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                                if track.bank_lsb is not None: port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                                port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-                                port.send(mido.Message('control_change', channel=track.channel, control=7, value=int(track.volume * 127)))
-                                port.send(mido.Message('control_change', channel=track.channel, control=10, value=int((track.pan + 1.0) / 2.0 * 127)))
-                    elif event['type'] == 'midi':
-                        if isinstance(track, MidiTrack) and should_play_track and track.output_port_name:
-                            port = self.open_ports.get(track.output_port_name)
-                            if port:
-                                msg = event['message']
-                                if msg.type == 'note_on':
-                                    scaled_velocity = int(msg.velocity * track.velocity)
-                                    clamped_velocity = max(0, min(127, scaled_velocity))
-                                    port.send(msg.copy(velocity=clamped_velocity))
-                                else:
-                                    port.send(msg)
-                    elif event['type'] == 'automation':
-                        payload = event['payload']
-                        target_idx = payload['target_track_index']
-                        target_track = self.song.tracks[target_idx]
-                        is_any_soloed = any(t.is_solo for t in self.song.tracks)
-                        should_apply_automation = (target_track.is_solo or not is_any_soloed) and not target_track.is_muted
-                        if should_apply_automation:
-                            param_config = payload['param_config']
-                            value = payload['value']
-                            if param_config['type'] == 'velocity_multiplier':
-                                if isinstance(target_track, MidiTrack):
-                                    target_track.velocity = value
-                            elif param_config['type'] == 'program_change':
-                                if isinstance(target_track, MidiTrack):
-                                    program = max(0, min(127, int(value)))
-                                    target_track.instrument = program
-                                    if target_track.output_port_name:
-                                        port = self.open_ports.get(target_track.output_port_name)
-                                        if port:
-                                            port.send(mido.Message('program_change', channel=target_track.channel, program=program))
-                            elif param_config['type'] == 'midi_cc':
-                                control = param_config['control']
-                                if control == 7: # Volume
-                                    if isinstance(target_track, (MidiTrack, AudioTrack)):
-                                        target_track.volume = max(0.0, min(1.0, value))
-                                        if isinstance(target_track, MidiTrack) and target_track.output_port_name:
-                                            port = self.open_ports.get(target_track.output_port_name)
-                                            if port: port.send(mido.Message('control_change', channel=target_track.channel, control=7, value=int(target_track.volume * 127)))
-                                        elif isinstance(target_track, AudioTrack):
-                                            with self.process_lock:
-                                                for ap in self.active_audio_processes:
-                                                    if ap.track_index == target_idx:
-                                                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", target_track.volume * 100]})
-                                                        break
-                                elif control == 10: # Pan
-                                    if isinstance(target_track, (MidiTrack, AudioTrack)):
-                                        target_track.pan = max(-1.0, min(1.0, value))
-                                        if isinstance(target_track, MidiTrack) and target_track.output_port_name:
-                                            port = self.open_ports.get(target_track.output_port_name)
-                                            if port: port.send(mido.Message('control_change', channel=target_track.channel, control=10, value=int((target_track.pan + 1.0) / 2.0 * 127)))
-                                        elif isinstance(target_track, AudioTrack):
-                                            with self.process_lock:
-                                                for ap in self.active_audio_processes:
-                                                    if ap.track_index == target_idx:
-                                                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pan", target_track.pan]})
-                                                        break
-                                else: # Other CCs
-                                    if isinstance(target_track, MidiTrack) and target_track.output_port_name:
-                                        port = self.open_ports.get(target_track.output_port_name)
-                                        if port:
-                                            cc_val = max(0, min(127, int(value)))
-                                            port.send(mido.Message('control_change', channel=target_track.channel, control=control, value=cc_val))
-                    next_event_index += 1
-                if next_event_index < len(ranged_event_list):
-                    next_event_tick = ranged_event_list[next_event_index]['tick']
-                    delta_ticks = next_event_tick - current_ticks
-                    if delta_ticks > 0:
-                        sleep_duration = mido.tick2second(delta_ticks, ticks_per_beat, mido_tempo)
-                        time.sleep(max(0.001, min(sleep_duration, 0.01)))
-                    else:
-                        time.sleep(0.001)
-                else:
-                    time.sleep(0.01)
-            self._stop_event.set()
-            for t in self.audio_threads:
-                if t.is_alive():
-                    t.join()
-        except Exception as e:
-            if not self._stop_event.is_set():
-                print(f"\nError during playback: {type(e).__name__} - {repr(e)}")
-                import traceback
-                traceback.print_exc()
-        finally:
-            self._shutdown_audio_processes()
-            self._all_notes_off()
-            for port in self.temporary_ports:
-                if not port.closed:
-                    port.close()
-            self.temporary_ports = []
-            self.open_ports.clear()
-            self.playback_state = "stopped"
-            if not self._stop_event.is_set():
-                print("\nPlayback finished. Press Enter to continue...")
-                if self.is_recording:
-                    self.stop()
-
-    def start_metronome(self):
-        """
-        Starts the metronome thread if it's enabled and a port is assigned.
-        This method is safe to call even if playback is already active.
-        """
-        if self.song.metronome_enabled and self.song.metronome_port_name:
-            if not self.metronome_thread or not self.metronome_thread.is_alive():
-                port_name = self.song.metronome_port_name
-
-                # Check if the port is already open (from the main play() call)
-                if port_name not in self.open_ports:
-                    port = None
-                    # Check if it's a known virtual port
-                    vp = next((p for p in self.virtual_ports if p.name == port_name), None)
-                    if vp:
-                        port = vp
-                        self.open_ports[port_name] = port
-                    else:
-                        # Otherwise, try to open it as a new hardware port
-                        try:
-                            port = open_output(port_name)
-                            self.open_ports[port_name] = port
-                            self.temporary_ports.append(port) # Mark for cleanup
-                        except Exception as e:
-                            print(f"Error opening metronome port '{port_name}': {e}")
-                            return
-
-                # Now that the port is guaranteed to be in self.open_ports, start the thread.
-                self.metronome_thread = threading.Thread(target=self._metronome_thread_main)
-                self.metronome_thread.daemon = True
-                self.metronome_thread.start()
-
-    def play(self, start_beat: Optional[float] = None, end_beat: Optional[float] = None, loop: bool = False):
-        if start_beat is None:
-            if self.playback_state == "paused":
-                self.pause()
-                return
-            start_beat = self.last_start_beat
-
+    def play(self):
+        """Starts the JACK client to follow the transport."""
         if self.playback_state != "stopped":
-            self.stop()
-            if self.playback_thread and self.playback_thread.is_alive():
-                self.playback_thread.join(timeout=1.0)
-            for t in self.audio_threads:
-                if t.is_alive():
-                    t.join(timeout=1.0)
-
-        self.last_start_beat = start_beat
-        self._stop_event.clear()
-
-        if end_beat is not None and end_beat <= start_beat:
-            print("Error: End position must be after the start position.")
+            print("Sequencer is already playing. Use 'stop' first.")
             return
-
-        # --- Reset state ---
-        self.total_paused_time = 0.0
-        self.open_ports.clear()
-        self.temporary_ports = []
-        self.audio_threads = []
-        self.audio_setup_barrier = None
-
-        while not self.metronome_queue.empty():
-            try:
-                self.metronome_queue.get_nowait()
-            except queue.Empty:
-                break
-        
-        # MODIFICATION : Le "vrai" top départ est enregistré AVANT toute opération longue.
-        self.playback_start_time = time.time()
-
-        # --- Audio Playback Setup ---
-        is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-        has_audio_to_play = False
-        for i, track in enumerate(self.song.tracks):
-            if isinstance(track, AudioTrack):
-                should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                if should_play and track.start_time < (end_beat if end_beat is not None else float('inf')):
-                    audio_thread = threading.Thread(
-                        target=self._play_audio_track,
-                        args=(track, i, start_beat, True)
-                    )
-                    audio_thread.daemon = True
-                    self.audio_threads.append(audio_thread)
-                    has_audio_to_play = True
-
-        if self.audio_threads:
-            num_audio_threads = len(self.audio_threads)
-            self.audio_setup_barrier = threading.Barrier(num_audio_threads + 1)
-
-            for t in self.audio_threads:
-                t.start()
-
-            try:
-                print("Pre-buffering audio tracks...")
-                self.audio_setup_barrier.wait(timeout=10.0)
-            except threading.BrokenBarrierError:
-                print("\nError: Could not initialize audio processes in time. Aborting playback.")
-                self.stop()
-                return
-            print("Audio ready.")
-
-        # --- MIDI Port Setup ---
-        required_ports = {track.output_port_name for track in self.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
-        if self.song.metronome_enabled and self.song.metronome_port_name:
-            required_ports.add(self.song.metronome_port_name)
-
-        if not required_ports and not has_audio_to_play:
-            print("Nothing to play: No MIDI ports assigned, no audio tracks, and metronome is off.")
-            return
-
-        for name in required_ports:
-            vp = next((p for p in self.virtual_ports if p.name == name), None)
-            if vp: self.open_ports[name] = vp
-            else:
-                try:
-                    self.open_ports[name] = open_output(name)
-                    self.temporary_ports.append(self.open_ports[name])
-                except Exception as e:
-                    print(f"Error opening port '{name}': {e}. Aborting playback.")
-                    for p in self.temporary_ports: p.close()
-                    return
-
-        # --- Start Main Playback Thread ---
-        self._run_event.set()
-        self._playback_started_event.clear()
-        self.playback_state = "playing"
-        
-        self.start_metronome()
-        self.playback_thread = threading.Thread(
-            target=self._play_thread,
-            kwargs={'start_beat': start_beat, 'end_beat': end_beat, 'loop': loop}
-        )
-        self.playback_thread.daemon = True
-        self.playback_thread.start()
+        self.jack_manager.start()
+        if self.jack_manager.is_running:
+            self.playback_state = "playing" # This state is now just for the UI
+            print("Sequencer is now slaved to JACK transport. Use your JACK master to play, stop, and seek.")
 
     def pause(self):
-        if self.playback_state == "stopped":
-            print("Nothing to pause.")
-            return
-
-        if self.playback_state == "playing":
-            # Pause MIDI playback
-            self._run_event.clear()
-            self.pause_start_time = time.time()
-            self._all_notes_off()
-
-            # Pause all active audio processes by sending IPC commands
-            with self.process_lock:
-                for ap in self.active_audio_processes:
-                    # Per user request: pause, then mute.
-                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
-                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", True]})
-
-            self.playback_state = "paused"
-            print("Playback paused.")
-
-        elif self.playback_state == "paused":
-            # Resume MIDI playback
-            self.total_paused_time += time.time() - self.pause_start_time
-            self._run_event.set()
-
-            # Resume all active audio processes by sending IPC commands
-            with self.process_lock:
-                for ap in self.active_audio_processes:
-                    # Per user request: unmute, then unpause.
-                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", False]})
-                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
-
-            self.playback_state = "playing"
-            print("Resuming playback...")
-
-    def _shutdown_audio_processes(self):
-        """Stops all active audio subprocesses and cleans up their temp files."""
-        import os
-        with self.process_lock:
-            for ap in list(self.active_audio_processes):
-                try:
-                    # Use the quit command via IPC if possible
-                    if ap.socket_path and os.path.exists(ap.socket_path):
-                         self._send_ipc_command(ap.socket_path, {"command": ["quit"]})
-                         time.sleep(0.1) # Give it a moment to quit
-
-                    if ap.process.poll() is None:
-                        ap.process.terminate()
-                        ap.process.wait(timeout=1.0)
-                except (subprocess.TimeoutExpired, Exception):
-                    if ap.process.poll() is None:
-                        ap.process.kill()
-
-                if ap.temp_filepath and os.path.exists(ap.temp_filepath):
-                    try:
-                        os.remove(ap.temp_filepath)
-                    except OSError:
-                        pass
-                if ap.socket_path and os.path.exists(ap.socket_path):
-                    try:
-                        os.remove(ap.socket_path)
-                    except OSError:
-                        pass
-            self.active_audio_processes.clear()
+        print("When slaved to JACK, playback must be controlled by the JACK transport master.")
+        print("Pause, seek, and stop operations should be done in your master application (e.g. Ardour, qjackctl).")
 
     def stop(self):
         if not self.is_recording and self.playback_state == "stopped":
             print("Already stopped.")
             return
 
-        print("Stopping session...")
-        self._stop_event.set()
+        if self.is_recording and self.recording_thread:
+            self._stop_event.set()
+            self.recording_thread.join(timeout=1.0)
+            self.is_recording = False
 
-        # Débloquer le métronome au cas où il attendrait dans la queue
-        self.metronome_queue.put(None)
-
-        if self.playback_state == "paused":
-            self._run_event.set()
-
-        if self.playback_thread and self.playback_thread.is_alive() and threading.current_thread() != self.playback_thread:
-            self.playback_thread.join(timeout=2.0)
-        
-        # Assurez-vous d'arrêter aussi le thread du métronome
-        if self.metronome_thread and self.metronome_thread.is_alive():
-            self.metronome_thread.join(timeout=2.0)
-
-        for t in self.audio_threads:
-            if t.is_alive():
-                t.join(timeout=1.0)
-
-        # Reset all state
+        print("Stopping JACK client...")
+        self.jack_manager.stop()
         self.playback_state = "stopped"
-        self.recording_thread = None
-        self.is_recording = False
+        self._all_notes_off()
         print("Session stopped.")
 
     def restart(self):
         """Restarts playback from the beginning."""
-        if self.playback_state != "stopped":
-            self.stop()
-        # Explicitly play from the beginning (beat 0)
-        self.play(start_beat=0.0)
+        print("When slaved to JACK, playback must be controlled by the JACK transport master.")
+        print("Use your master application to return to the start of the song.")
 
     def send_cc_message(self, port_name: str, channel: int, control: int, value: int):
         """Sends a single CC message to a specified port."""

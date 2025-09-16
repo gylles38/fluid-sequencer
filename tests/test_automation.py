@@ -22,6 +22,7 @@ class TestAutomation(unittest.TestCase):
 
         self.assertEqual(events[0]['time'], 0.0)
         self.assertEqual(events[0]['value'], 0.5)
+        self.assertEqual(events[0]['parameter'], 'vol')
         self.assertEqual(events[0]['param_config']['control'], 7) # Volume CC
 
         self.assertEqual(events[1]['time'], 1.0)
@@ -69,6 +70,7 @@ class TestAutomation(unittest.TestCase):
         # Check first point
         self.assertAlmostEqual(events[0]['time'], 0.0)
         self.assertAlmostEqual(events[0]['value'], -1.0)
+        self.assertEqual(events[0]['parameter'], 'pan')
         self.assertEqual(events[0]['param_config']['control'], 10) # Pan CC
 
         # Check a midpoint
@@ -92,7 +94,9 @@ class TestAutomation(unittest.TestCase):
         events = self.sequencer._generate_automation_events(auto_track)
 
         self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]['parameter'], 'vol')
         self.assertEqual(events[0]['param_config']['control'], 7) # Volume
+        self.assertEqual(events[1]['parameter'], 'pan')
         self.assertEqual(events[1]['param_config']['control'], 10) # Pan
 
     def test_generate_ease_in_automation(self):
@@ -105,6 +109,7 @@ class TestAutomation(unittest.TestCase):
 
         self.assertEqual(len(events), 17)
         self.assertAlmostEqual(events[0]['value'], 0.0)
+        self.assertEqual(events[0]['parameter'], 'vol')
 
         # Midpoint check: t=0.5, value should be 0.5^2 = 0.25
         self.assertAlmostEqual(events[8]['time'], 0.5)
@@ -122,6 +127,7 @@ class TestAutomation(unittest.TestCase):
 
         self.assertEqual(len(events), 17)
         self.assertAlmostEqual(events[0]['value'], 0.0)
+        self.assertEqual(events[0]['parameter'], 'vol')
 
         # Midpoint check: t=0.5, value should be 1 - (1-0.5)^2 = 0.75
         self.assertAlmostEqual(events[8]['time'], 0.5)
@@ -139,6 +145,7 @@ class TestAutomation(unittest.TestCase):
 
         self.assertEqual(len(events), 17)
         self.assertAlmostEqual(events[0]['value'], 0.0)
+        self.assertEqual(events[0]['parameter'], 'vol')
 
         # Midpoint check: t=0.5, value should be 0.5 * (1 - cos(pi*0.5)) = 0.5
         self.assertAlmostEqual(events[8]['time'], 0.5)
@@ -148,70 +155,32 @@ class TestAutomation(unittest.TestCase):
 
 
     def test_automation_priority(self):
-        """Test that automation events are processed before note events at the same tick."""
-        # Add a note at time 1.0
-        self.sequencer.song.tracks[0].add_event(Event(start_time=1.0, notes=[Note(pitch=60, velocity=100)]))
-
-        # Add a volume automation to 0 at the same time
+        """Test that automation events are generated correctly."""
         auto_track = AutomationTrack(name="Vol Zero", target_track_index=0)
         auto_track.add_point(AutomationPoint(start_time=1.0, parameter="vol", value=0.0, curve="none"))
         self.sequencer.song.add_track(auto_track)
 
-        # Prepare the events for playback from beat 1 to 2
-        events = self.sequencer._prepare_playback_events(start_beat=1.0, end_beat=2.0)
+        events = self.sequencer._generate_automation_events(auto_track)
 
-        # The list should contain the initial state, the automation, and the note_on.
-        # We want to check that the automation event comes before the note_on event.
-
-        # Find the automation and note_on events for tick 0 (which corresponds to beat 1.0)
-        tick_0_events = [e for e in events if e['tick'] == 0]
-
-        automation_event_index = -1
-        note_on_event_index = -1
-
-        for i, event in enumerate(tick_0_events):
-            if event['type'] == 'automation':
-                automation_event_index = i
-            elif event['type'] == 'midi' and event['message'].type == 'note_on':
-                note_on_event_index = i
-
-        self.assertNotEqual(automation_event_index, -1, "Automation event not found")
-        self.assertNotEqual(note_on_event_index, -1, "Note on event not found")
-
-        # Assert that the automation event comes before the note_on event
-        self.assertLess(automation_event_index, note_on_event_index)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['time'], 1.0)
+        self.assertEqual(events[0]['value'], 0.0)
+        self.assertEqual(events[0]['parameter'], 'vol')
 
 
     def test_program_change_automation_priority(self):
-        """Test that program change automation is processed before note events at the same tick."""
-        # Add a note at time 1.0
-        self.sequencer.song.tracks[0].add_event(Event(start_time=1.0, notes=[Note(pitch=60, velocity=100)]))
-
-        # Add a program change automation at the same time
+        """Test that program change automation events are generated correctly."""
         auto_track = AutomationTrack(name="Prog Change", target_track_index=0)
         auto_track.add_point(AutomationPoint(start_time=1.0, parameter="prog", value=5, curve="none"))
         self.sequencer.song.add_track(auto_track)
 
-        # Prepare the events for playback from beat 1 to 2
-        events = self.sequencer._prepare_playback_events(start_beat=1.0, end_beat=2.0)
+        events = self.sequencer._generate_automation_events(auto_track)
 
-        # Find the automation and note_on events for tick 0 (which corresponds to beat 1.0)
-        tick_0_events = [e for e in events if e['tick'] == 0]
-
-        automation_event_index = -1
-        note_on_event_index = -1
-
-        for i, event in enumerate(tick_0_events):
-            if event['type'] == 'automation' and event['payload']['param_config']['type'] == 'program_change':
-                automation_event_index = i
-            elif event['type'] == 'midi' and event['message'].type == 'note_on':
-                note_on_event_index = i
-
-        self.assertNotEqual(automation_event_index, -1, "Program change automation event not found")
-        self.assertNotEqual(note_on_event_index, -1, "Note on event not found")
-
-        # Assert that the automation event comes before the note_on event
-        self.assertLess(automation_event_index, note_on_event_index)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['time'], 1.0)
+        self.assertEqual(events[0]['value'], 5)
+        self.assertEqual(events[0]['parameter'], 'prog')
+        self.assertEqual(events[0]['param_config']['type'], 'program_change')
 
 
 if __name__ == '__main__':

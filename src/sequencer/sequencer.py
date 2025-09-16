@@ -190,8 +190,8 @@ class JackManager:
 
             if sys.platform != "win32":
                 while (time.time() - start_time) < max_wait_time:
-                    # Check if all expected socket files exist
-                    if all(os.path.exists(s) for s in expected_sockets):
+                    # Check if all expected sockets are connectable, not just existing.
+                    if all(self._is_socket_connectable(s) for s in expected_sockets):
                         all_sockets_ready = True
                         break
                     time.sleep(0.1)
@@ -295,6 +295,20 @@ class JackManager:
         except Exception as e:
             # Log other, unexpected errors.
             print(f"Error sending IPC command to {socket_path}: {e}", file=sys.stderr)
+            return False
+
+    def _is_socket_connectable(self, socket_path: str) -> bool:
+        """Checks if a UNIX domain socket is available and accepting connections."""
+        if sys.platform == "win32":
+            # This check is not easily feasible on Windows without more complex pipe handling.
+            # The fixed delay in start() is the fallback.
+            return True
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(0.1)
+                s.connect(socket_path)
+            return True
+        except (socket.timeout, ConnectionRefusedError, FileNotFoundError):
             return False
 
     def _mpv_sync_loop(self):

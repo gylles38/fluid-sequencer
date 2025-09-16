@@ -174,6 +174,38 @@ class JackManager:
             # --- Automation Setup ---
             self._prepare_automation_events()
 
+            # --- Wait for audio players to be ready ---
+            print("Waiting for audio players to initialize...")
+            max_wait_time = 5.0 # 5 seconds timeout
+            start_time = time.time()
+            all_sockets_ready = False
+
+            # Get a list of socket paths we expect to see
+            expected_sockets = []
+            with self.process_lock:
+                for ap in self.active_audio_processes:
+                    # On Windows, we can't check for socket files this way, so we'll rely on a small fixed delay.
+                    if sys.platform != "win32":
+                        expected_sockets.append(ap.socket_path)
+
+            if sys.platform != "win32":
+                while (time.time() - start_time) < max_wait_time:
+                    # Check if all expected socket files exist
+                    if all(os.path.exists(s) for s in expected_sockets):
+                        all_sockets_ready = True
+                        break
+                    time.sleep(0.1)
+            else:
+                # Fallback for Windows: just wait a fixed amount of time
+                time.sleep(1.5)
+                all_sockets_ready = True
+
+            if not all_sockets_ready:
+                print("Warning: Timed out waiting for all audio players to create their IPC sockets.", file=sys.stderr)
+            else:
+                print("All audio players ready.")
+
+
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
             self.jack_client.activate()
@@ -2408,10 +2440,6 @@ class Sequencer:
                     # because the _time_callback might not fire immediately.
                     self.jack_manager._sync_playhead_to_beat(start_beat)
                     self.jack_manager.seek_audio_to_beat(start_beat)
-                    # HACK: Add a small delay to give mpv time to process the seek command
-                    # before the transport starts and the 'unpause' command is sent.
-                    # This is a diagnostic step to confirm the race condition.
-                    time.sleep(0.2)
 
             except jack.JackError as e:
                 print(f"Error seeking JACK transport: {e}")

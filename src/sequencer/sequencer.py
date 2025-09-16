@@ -153,14 +153,15 @@ class JackManager:
             pos_dict = jack.position2dict(pos_struct)
             self.sequencer.song.tempo = pos_dict.get('beats_per_minute', self.sequencer.song.tempo)
 
-            bar = pos_dict.get('bar', 1)
-            beat = pos_dict.get('beat', 1)
-            tick = pos_dict.get('tick', 0)
-            ticks_per_beat = pos_dict.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
-            beats_per_bar = self.sequencer.song.time_signature_numerator
+            frame = pos_dict.get('frame', 0)
+            samplerate = self.jack_client.samplerate
+            beats_per_second = self.sequencer.song.tempo / 60.0
 
-            initial_beat = (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
-            self._sync_playhead_to_beat(initial_beat)
+            if samplerate > 0 and beats_per_second > 0:
+                initial_beat = (frame / samplerate) * beats_per_second
+                self._sync_playhead_to_beat(initial_beat)
+            else:
+                self._sync_playhead_to_beat(0.0)
 
             # Start sync thread
             self._sync_stop_event.clear()
@@ -366,13 +367,15 @@ class JackManager:
             pos_dict = jack.position2dict(pos)
             self.sequencer.song.tempo = pos_dict.get('beats_per_minute', self.sequencer.song.tempo)
 
-            bar = pos_dict.get('bar', 1)
-            beat = pos_dict.get('beat', 1)
-            tick = pos_dict.get('tick', 0)
-            ticks_per_beat = pos_dict.get('ticks_per_beat', self.sequencer.song.ticks_per_beat)
+            frame = pos_dict.get('frame', 0)
+            samplerate = self.jack_client.samplerate
+            beats_per_second = self.sequencer.song.tempo / 60.0
 
-            current_beat_at_block_start = (bar - 1) * self.sequencer.song.time_signature_numerator + (beat - 1) + (tick / ticks_per_beat)
-            self._sync_playhead_to_beat(current_beat_at_block_start)
+            if samplerate > 0 and beats_per_second > 0:
+                current_beat = (frame / samplerate) * beats_per_second
+                self._sync_playhead_to_beat(current_beat)
+            else:
+                self._sync_playhead_to_beat(0.0)
 
 
     def _process_callback(self, frames: int):

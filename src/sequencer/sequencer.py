@@ -313,6 +313,7 @@ class JackManager:
         command = shlex.split(self.sequencer.audio_player_command)
         command.extend([
             f"--input-ipc-server={socket_path}",
+            "--pause",  # Start paused, sync loop will control playback
             track.filepath
         ])
 

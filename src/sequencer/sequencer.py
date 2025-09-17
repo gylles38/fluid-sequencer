@@ -203,7 +203,13 @@ class JackManager:
                     if isinstance(track, AudioTrack):
                         print(f"  - Priming Audio track '{track.name}'")
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
-                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+
+                        # Use the 'pan' audio filter instead of the 'balance' property.
+                        p_norm = (track.pan + 1.0) / 2.0
+                        gain_left = 1.0 - p_norm
+                        gain_right = p_norm
+                        filter_str = f"pan=2:{gain_left:.2f}:{gain_right:.2f}"
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "af", filter_str]})
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
@@ -1221,7 +1227,14 @@ class Sequencer:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
+                            # Use the 'pan' audio filter instead of the 'balance' property,
+                            # as 'balance' seems to be ignored by the jack audio output.
+                            # This assumes a mono source.
+                            p_norm = (pan + 1.0) / 2.0
+                            gain_left = 1.0 - p_norm
+                            gain_right = p_norm
+                            filter_str = f"pan=2:{gain_left:.2f}:{gain_right:.2f}"
+                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "af", filter_str]})
                             break
         elif isinstance(track, MidiTrack):
             # If JACK is running, send the command immediately

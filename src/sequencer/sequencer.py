@@ -1903,6 +1903,7 @@ class Sequencer:
             print("JACK client not active. Starting...")
             self.jack_manager.start()
             time.sleep(0.1) # Give it a moment to stabilize
+            self._update_all_tracks_audibility()
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return

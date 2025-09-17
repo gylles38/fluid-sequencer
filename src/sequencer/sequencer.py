@@ -203,16 +203,7 @@ class JackManager:
                     if isinstance(track, AudioTrack):
                         print(f"  - Priming Audio track '{track.name}'")
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
-                        # Use a constant-power panning formula for priming
-                        pan_rad = (track.pan + 1) * math.pi / 4
-                        gain_left = math.cos(pan_rad)
-                        gain_right = math.sin(pan_rad)
-                        if track.channels == 1:
-                            pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"'
-                        else: # Default to stereo for 2 or more channels
-                            pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"'
-                        command = {"command": ["af", "set", f"@audiopan{ap.track_index}:{pan_filter}"]}
-                        self._send_ipc_command(ap.socket_path, command)
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
@@ -423,14 +414,7 @@ class JackManager:
             samplerate = self.jack_client.samplerate
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0
-
-            # Re-calculate start_beat_of_block from JACK's frame position to prevent drift
-            frame = pos.get('frame', 0)
-            if samplerate > 0 and beats_per_second > 0:
-                start_beat_of_block = (frame / samplerate) * beats_per_second
-            else:
-                start_beat_of_block = self.last_beat # Fallback if transport info is not valid
-
+            start_beat_of_block = self.last_beat
             end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
@@ -528,13 +512,10 @@ class JackManager:
 
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
-                # Use ceil to get the next integer beat, and subtract a small epsilon
-                # to handle floating point inaccuracies, preventing skipped beats.
-                beat_to_check = int(math.ceil(start_beat_of_block - 1e-9))
+                beat_to_check = math.floor(start_beat_of_block) + 1
                 while beat_to_check < end_beat_of_block:
                     beats_per_measure = self.sequencer.song.time_signature_numerator
-                    # Correctly check for downbeat using 0-indexed beat number
-                    is_downbeat = (beat_to_check % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 0
+                    is_downbeat = ((beat_to_check - 1) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 1
                     pitch = self.sequencer.metronome_pitch_downbeat if is_downbeat else self.sequencer.metronome_pitch_beat
                     note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=100)
                     note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)
@@ -547,7 +528,7 @@ class JackManager:
 
 
 class Sequencer:
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --no-video --idle --audio-device=jack"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
 
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
@@ -645,15 +626,15 @@ class Sequencer:
                 print("Error: Filepath is required for audio tracks.")
                 return
             try:
-                segment = AudioSegment.from_file(filepath)
+                AudioSegment.from_file(filepath)
             except FileNotFoundError:
                 print(f"Error: Audio file not found at '{filepath}'")
                 return
             except Exception as e:
                 print(f"Error opening audio file: {e}")
                 return
-            track = AudioTrack(name=name, filepath=filepath, channels=segment.channels)
-            print(f"Audio track '{name}' added with file '{filepath}' ({segment.channels} channels).")
+            track = AudioTrack(name=name, filepath=filepath)
+            print(f"Audio track '{name}' added with file '{filepath}'.")
         else:
             print(f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'.")
             return
@@ -1240,19 +1221,7 @@ class Sequencer:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            # Use a constant-power panning formula
-                            pan_rad = (pan + 1) * math.pi / 4
-                            gain_left = math.cos(pan_rad)
-                            gain_right = math.sin(pan_rad)
-
-                            if track.channels == 1:
-                                pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"'
-                            else: # Default to stereo for 2 or more channels
-                                pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"'
-
-                            # Use a label to easily replace the filter
-                            command = {"command": ["af", "set", f"@audiopan{track_index}:{pan_filter}"]}
-                            self.jack_manager._send_ipc_command(ap.socket_path, command)
+                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
                             break
         elif isinstance(track, MidiTrack):
             # If JACK is running, send the command immediately
@@ -1489,18 +1458,6 @@ class Sequencer:
             self.is_dirty = False
             self.last_project_basename = basename
             print(f"Successfully loaded project from '{project_filepath}'")
-
-            # --- Retroactively add channel info to older projects ---
-            for track in self.song.tracks:
-                if isinstance(track, AudioTrack) and track.channels == 0:
-                    try:
-                        segment = AudioSegment.from_file(track.filepath)
-                        track.channels = segment.channels
-                        self.is_dirty = True # Mark as dirty to encourage saving
-                        print(f"Updated channel count for track '{track.name}' to {track.channels}.")
-                    except Exception as e:
-                        print(f"Warning: Could not determine channels for '{track.filepath}': {e}")
-                        track.channels = 2 # Default to stereo on failure
         except FileNotFoundError:
             print(f"Error: Project file not found at '{project_filepath}'")
         except Exception as e:

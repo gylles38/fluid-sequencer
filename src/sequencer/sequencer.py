@@ -207,7 +207,10 @@ class JackManager:
                         pan_rad = (track.pan + 1) * math.pi / 4
                         gain_left = math.cos(pan_rad)
                         gain_right = math.sin(pan_rad)
-                        pan_filter = f"pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
+                        if track.channels == 1:
+                            pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"
+                        else: # Default to stereo for 2 or more channels
+                            pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
                         command = {"command": ["af", "set", f"@audiopan{ap.track_index}:{pan_filter}"]}
                         self._send_ipc_command(ap.socket_path, command)
 
@@ -642,15 +645,15 @@ class Sequencer:
                 print("Error: Filepath is required for audio tracks.")
                 return
             try:
-                AudioSegment.from_file(filepath)
+                segment = AudioSegment.from_file(filepath)
             except FileNotFoundError:
                 print(f"Error: Audio file not found at '{filepath}'")
                 return
             except Exception as e:
                 print(f"Error opening audio file: {e}")
                 return
-            track = AudioTrack(name=name, filepath=filepath)
-            print(f"Audio track '{name}' added with file '{filepath}'.")
+            track = AudioTrack(name=name, filepath=filepath, channels=segment.channels)
+            print(f"Audio track '{name}' added with file '{filepath}' ({segment.channels} channels).")
         else:
             print(f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'.")
             return
@@ -1242,9 +1245,10 @@ class Sequencer:
                             gain_left = math.cos(pan_rad)
                             gain_right = math.sin(pan_rad)
 
-                            # For now, this assumes a stereo layout.
-                            # A more robust solution would query the track's channel layout.
-                            pan_filter = f"pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
+                            if track.channels == 1:
+                                pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"
+                            else: # Default to stereo for 2 or more channels
+                                pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
 
                             # Use a label to easily replace the filter
                             command = {"command": ["af", "set", f"@audiopan{track_index}:{pan_filter}"]}
@@ -1485,6 +1489,18 @@ class Sequencer:
             self.is_dirty = False
             self.last_project_basename = basename
             print(f"Successfully loaded project from '{project_filepath}'")
+
+            # --- Retroactively add channel info to older projects ---
+            for track in self.song.tracks:
+                if isinstance(track, AudioTrack) and track.channels == 0:
+                    try:
+                        segment = AudioSegment.from_file(track.filepath)
+                        track.channels = segment.channels
+                        self.is_dirty = True # Mark as dirty to encourage saving
+                        print(f"Updated channel count for track '{track.name}' to {track.channels}.")
+                    except Exception as e:
+                        print(f"Warning: Could not determine channels for '{track.filepath}': {e}")
+                        track.channels = 2 # Default to stereo on failure
         except FileNotFoundError:
             print(f"Error: Project file not found at '{project_filepath}'")
         except Exception as e:

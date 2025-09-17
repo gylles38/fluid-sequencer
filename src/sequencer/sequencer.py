@@ -414,7 +414,14 @@ class JackManager:
             samplerate = self.jack_client.samplerate
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0
-            start_beat_of_block = self.last_beat
+
+            # Re-calculate start_beat_of_block from JACK's frame position to prevent drift
+            frame = pos.get('frame', 0)
+            if samplerate > 0 and beats_per_second > 0:
+                start_beat_of_block = (frame / samplerate) * beats_per_second
+            else:
+                start_beat_of_block = self.last_beat # Fallback if transport info is not valid
+
             end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
@@ -512,10 +519,13 @@ class JackManager:
 
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
-                beat_to_check = math.floor(start_beat_of_block) + 1
+                # Use ceil to get the next integer beat, and subtract a small epsilon
+                # to handle floating point inaccuracies, preventing skipped beats.
+                beat_to_check = int(math.ceil(start_beat_of_block - 1e-9))
                 while beat_to_check < end_beat_of_block:
                     beats_per_measure = self.sequencer.song.time_signature_numerator
-                    is_downbeat = ((beat_to_check - 1) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 1
+                    # Correctly check for downbeat using 0-indexed beat number
+                    is_downbeat = (beat_to_check % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 0
                     pitch = self.sequencer.metronome_pitch_downbeat if is_downbeat else self.sequencer.metronome_pitch_beat
                     note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=100)
                     note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)

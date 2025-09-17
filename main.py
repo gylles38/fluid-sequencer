@@ -10,16 +10,36 @@ try:
     # Windows
     import msvcrt
     def get_char():
-        return msvcrt.getch().decode('utf-8')
+        ch_b = msvcrt.getch()
+        if ch_b in (b'\x00', b'\xe0'):  # Special key
+            next_ch_b = msvcrt.getch()
+            if ch_b == b'\xe0':
+                if next_ch_b == b'K': return 'ARROW_LEFT'
+                if next_ch_b == b'M': return 'ARROW_RIGHT'
+            return '' # Ignore other special keys for now
+        return ch_b.decode('utf-8', 'ignore')
 except ImportError:
     # POSIX (Linux, macOS)
     import tty, termios
     def get_char():
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
+        ch = ''
         try:
             tty.setraw(sys.stdin.fileno())
             ch = sys.stdin.read(1)
+            if ch == '\x1b':
+                # This is a bit of a hack. We assume that if we get an escape character,
+                # it's an arrow key sequence and we read the next two characters.
+                # This will block if the user just presses Esc.
+                # A more robust solution would use select() for non-blocking reads.
+                next1 = sys.stdin.read(1)
+                next2 = sys.stdin.read(1)
+                if next1 == '[':
+                    if next2 == 'D': return 'ARROW_LEFT'
+                    if next2 == 'C': return 'ARROW_RIGHT'
+                # If it's not a recognized arrow key, we effectively ignore the sequence.
+                return ''
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
@@ -558,6 +578,11 @@ def process_command(user_input, seq):
             print("Example: loop 1:1 5:1")
     elif command == "stop":
         seq.stop()
+    elif command == "seek":
+        if len(args) == 1:
+            seq.seek(args[0])
+        else:
+            print("Usage: seek <amount> (e.g., +1m, -4b)")
     elif command == "metronome":
         if len(args) == 1 and args[0].lower() in ["on", "off"]:
             is_enabled = args[0].lower() == "on"
@@ -663,6 +688,19 @@ def main():
     while True:
         try:
             char = get_char()
+
+            if char == 'ARROW_LEFT':
+                print() # Move to a new line to not mess up the current command line
+                process_command("seek -1m", seq)
+                command_buffer = "" # Clear buffer after action
+                print(f"> ", end="", flush=True)
+                continue
+            elif char == 'ARROW_RIGHT':
+                print() # Move to a new line to not mess up the current command line
+                process_command("seek +1m", seq)
+                command_buffer = "" # Clear buffer after action
+                print(f"> ", end="", flush=True)
+                continue
 
             # Handle Ctrl+C or Ctrl+D for exit
             if char in ('\x03', '\x04'):

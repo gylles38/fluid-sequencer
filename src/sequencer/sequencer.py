@@ -207,7 +207,15 @@ class JackManager:
                     if isinstance(track, AudioTrack):
                         print(f"  - Priming Audio track '{track.name}'")
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
-                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+
+                        # Use the 'pan' audio filter for stereo files.
+                        if track.pan < 0:
+                            # Pan left: full left channel, attenuated right channel.
+                            filter_str = f"pan=2:1:0:0:{1.0 + track.pan:.2f}"
+                        else:
+                            # Pan right: attenuated left channel, full right channel.
+                            filter_str = f"pan=2:{1.0 - track.pan:.2f}:0:0:1"
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "af", filter_str]})
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
@@ -1226,7 +1234,14 @@ class Sequencer:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
+                            # Use the 'pan' audio filter for stereo files.
+                            if pan < 0:
+                                # Pan left: full left channel, attenuated right channel.
+                                filter_str = f"pan=2:1:0:0:{1.0 + pan:.2f}"
+                            else:
+                                # Pan right: attenuated left channel, full right channel.
+                                filter_str = f"pan=2:{1.0 - pan:.2f}:0:0:1"
+                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "af", filter_str]})
                             break
         elif isinstance(track, MidiTrack):
             # If JACK is running, send the command immediately

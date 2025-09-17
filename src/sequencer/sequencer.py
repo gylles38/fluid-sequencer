@@ -1627,12 +1627,13 @@ class Sequencer:
         outport = None
         is_virtual_port = False
         recording_started_beat = None
+
         try:
             with mido.open_input(inport_name) as inport:
-                # Clear any stale messages from the input buffer before we start
-                for _ in inport.iter_pending():
-                    pass
+                # Clear any stale messages from the input buffer
+                for _ in inport.iter_pending(): pass
 
+                # Setup MIDI thru port if needed
                 if outport_name and enable_thru:
                     vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
                     if vp:
@@ -1640,17 +1641,45 @@ class Sequencer:
                         is_virtual_port = True
                     else:
                         outport = open_output(outport_name)
+                    # Prime the synth for MIDI thru
                     if target_track.bank_msb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
                     if target_track.bank_lsb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
                     outport.send(mido.Message('program_change', channel=target_track.channel, program=target_track.instrument))
 
-                has_punched_in = False
-                print(f"Playback started. Waiting for first note to trigger recording...")
+                # --- Phase 1: Wait for the first note ---
+                print(f"Armed for recording on track '{target_track.name}'. Play a note to start recording and playback from {self._format_beats_to_position(start_beat)}.")
+                first_msg = None
+                while not self._stop_event.is_set():
+                    for msg in inport.iter_pending():
+                        if outport and hasattr(msg, 'channel'):
+                            outport.send(msg.copy(channel=target_track.channel))
+                        if msg.type == 'note_on' and msg.velocity > 0:
+                            first_msg = msg
+                            break
+                    if first_msg:
+                        break
+                    time.sleep(0.001)
 
+                if self._stop_event.is_set() or not first_msg:
+                    raise UserInputCancelled("Recording cancelled by user.")
+
+                # --- Phase 2: Start playback and record first note ---
+                print(f"\nNote received. Starting playback and recording...")
+                self.play(start_beat=start_beat)
+                time.sleep(0.05) # Give JACK a moment to start and stabilize transport
+
+                # Manually record the first note that triggered everything
+                # Its timestamp is the exact start_beat we requested
+                note = Note(pitch=first_msg.note, velocity=first_msg.velocity, duration=0.1) # Default duration
+                target_track.add_event(Event(notes=[note], start_time=start_beat))
+                open_notes[first_msg.note] = (start_beat, first_msg.velocity)
+                self.is_dirty = True
+                recording_started_beat = start_beat
+
+                # --- Phase 3: Main recording loop for subsequent notes ---
                 while not self._stop_event.is_set():
                     current_beat = self._get_current_beat()
                     is_rolling = self.jack_manager.jack_client and self.jack_manager.jack_client.transport_state == jack.ROLLING
-
                     if not is_rolling:
                         time.sleep(0.01)
                         continue
@@ -1659,31 +1688,27 @@ class Sequencer:
                         if outport and hasattr(msg, 'channel'):
                             outport.send(msg.copy(channel=target_track.channel))
 
-                        if not has_punched_in:
-                            if msg.type == 'note_on' and msg.velocity > 0:
-                                has_punched_in = True
-                                recording_started_beat = current_beat
-                                print(f"\nRecording triggered by note at {self._format_beats_to_position(current_beat)}. Type 'stop' to finish.")
+                        current_beat_for_msg = current_beat
+                        if msg.type == 'note_on' and msg.velocity > 0:
+                            if msg.note not in open_notes:
+                                open_notes[msg.note] = (current_beat_for_msg, msg.velocity)
+                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                            if msg.note in open_notes:
+                                note_on_beat, velocity = open_notes.pop(msg.note)
+                                duration_beats = current_beat_for_msg - note_on_beat
+                                if duration_beats <= 0: duration_beats = 0.01
+                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
+                                target_track.add_event(Event(notes=[note], start_time=note_on_beat))
+                                self.is_dirty = True
 
-                        if has_punched_in:
-                            current_beat_for_msg = current_beat
-                            if msg.type == 'note_on' and msg.velocity > 0:
-                                if msg.note not in open_notes:
-                                    open_notes[msg.note] = (current_beat_for_msg, msg.velocity)
-                            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                                if msg.note in open_notes:
-                                    note_on_beat, velocity = open_notes.pop(msg.note)
-                                    duration_beats = current_beat_for_msg - note_on_beat
-                                    if duration_beats <= 0: duration_beats = 0.01
-                                    note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                    target_track.add_event(Event(notes=[note], start_time=note_on_beat))
-                                    self.is_dirty = True
-
-                    if num_beats_to_record and recording_started_beat is not None and (current_beat - recording_started_beat) >= num_beats_to_record:
+                    if num_beats_to_record and (current_beat - recording_started_beat) >= num_beats_to_record:
                         print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
                         self._stop_event.set()
 
                     time.sleep(0.001)
+
+        except UserInputCancelled:
+            print("\nRecording cancelled.")
         except Exception as e:
             print(f"\nAn error occurred during recording: {e}")
         finally:
@@ -1776,7 +1801,6 @@ class Sequencer:
         self._stop_event.clear()
         self.last_record_settings = {"track_index": track_index, "start_beat": start_beat, "num_beats_to_record": num_beats_to_record, "inport_name": inport_name, "replace_notes": replace_notes, "enable_thru": enable_thru}
         self._start_recording_internal(track_index=track_index, start_beat=start_beat, num_beats_to_record=num_beats_to_record, inport_name=inport_name, replace_notes=replace_notes, enable_thru=enable_thru)
-        self.play(start_beat=start_beat)
 
     def record_bis(self):
         """Re-records using the last saved parameters."""
@@ -1805,7 +1829,6 @@ class Sequencer:
         if 'enable_thru' not in settings:
             settings['enable_thru'] = True
         self._start_recording_internal(**settings)
-        self.play(start_beat=settings['start_beat'])
 
     def _get_song_length_in_beats(self) -> float:
         """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""

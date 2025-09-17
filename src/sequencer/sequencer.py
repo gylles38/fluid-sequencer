@@ -203,7 +203,13 @@ class JackManager:
                     if isinstance(track, AudioTrack):
                         print(f"  - Priming Audio track '{track.name}'")
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
-                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+                        # Use a constant-power panning formula for priming
+                        pan_rad = (track.pan + 1) * math.pi / 4
+                        gain_left = math.cos(pan_rad)
+                        gain_right = math.sin(pan_rad)
+                        pan_filter = f"pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
+                        command = {"command": ["af", "set", f"@audiopan{ap.track_index}:{pan_filter}"]}
+                        self._send_ipc_command(ap.socket_path, command)
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
@@ -1231,7 +1237,18 @@ class Sequencer:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
+                            # Use a constant-power panning formula
+                            pan_rad = (pan + 1) * math.pi / 4
+                            gain_left = math.cos(pan_rad)
+                            gain_right = math.sin(pan_rad)
+
+                            # For now, this assumes a stereo layout.
+                            # A more robust solution would query the track's channel layout.
+                            pan_filter = f"pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
+
+                            # Use a label to easily replace the filter
+                            command = {"command": ["af", "set", f"@audiopan{track_index}:{pan_filter}"]}
+                            self.jack_manager._send_ipc_command(ap.socket_path, command)
                             break
         elif isinstance(track, MidiTrack):
             # If JACK is running, send the command immediately

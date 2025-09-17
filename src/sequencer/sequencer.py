@@ -1596,14 +1596,28 @@ class Sequencer:
     def _get_current_beat(self) -> float:
         if self.jack_manager and self.jack_manager.is_running and self.jack_manager.jack_client:
             try:
-                _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
+                _ , pos_struct = self.jack_manager.jack_client.transport_query_struct()
                 pos = jack.position2dict(pos_struct)
+
+                # Frame-based calculation is more reliable than bar/beat from transport
+                frame = pos.get('frame', 0)
+                samplerate = self.jack_manager.jack_client.samplerate
+                beats_per_second = self.song.tempo / 60.0
+
+                if samplerate > 0 and beats_per_second > 0:
+                    return (frame / samplerate) * beats_per_second
+
+                # Fallback for safety, but the primary method is now frame-based
+                beats_per_bar = pos.get('beats_per_bar', self.song.time_signature_numerator)
                 bar = pos.get('bar', 1)
                 beat = pos.get('beat', 1)
                 tick = pos.get('tick', 0)
                 ticks_per_beat = pos.get('ticks_per_beat', self.song.ticks_per_beat)
-                beats_per_bar = pos.get('beats_per_bar', self.song.time_signature_numerator)
-                return (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+                if ticks_per_beat > 0:
+                    return (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+                else:
+                    return (bar - 1) * beats_per_bar + (beat - 1)
+
             except (jack.JackError, AttributeError):
                 return 0.0
         return 0.0

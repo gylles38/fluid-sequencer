@@ -208,9 +208,9 @@ class JackManager:
                         gain_left = math.cos(pan_rad)
                         gain_right = math.sin(pan_rad)
                         if track.channels == 1:
-                            pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"
+                            pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"'
                         else: # Default to stereo for 2 or more channels
-                            pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
+                            pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"'
                         command = {"command": ["af", "set", f"@audiopan{ap.track_index}:{pan_filter}"]}
                         self._send_ipc_command(ap.socket_path, command)
 
@@ -547,7 +547,7 @@ class JackManager:
 
 
 class Sequencer:
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --no-video --idle --audio-device=jack --log-file=/tmp/mpv-pan-debug.log --msg-level=all=trace"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --no-video --idle --audio-device=jack"
 
     def __init__(self, tempo: int = 120):
         self.song = Song(name="New Song", tempo=tempo)
@@ -1246,9 +1246,9 @@ class Sequencer:
                             gain_right = math.sin(pan_rad)
 
                             if track.channels == 1:
-                                pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"
+                                pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c0"'
                             else: # Default to stereo for 2 or more channels
-                                pan_filter = f"lavfi-pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"
+                                pan_filter = f'lavfi="pan=stereo|c0={gain_left:.4f}*c0|c1={gain_right:.4f}*c1"'
 
                             # Use a label to easily replace the filter
                             command = {"command": ["af", "set", f"@audiopan{track_index}:{pan_filter}"]}

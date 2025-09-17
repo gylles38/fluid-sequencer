@@ -81,7 +81,6 @@ class JackManager:
         self._display_stop_event = threading.Event()
         self.automation_events = []
         self.next_automation_event_index = 0
-        self.is_just_activated = False
 
     def _display_loop(self):
         """A loop in a separate thread to display the current transport position."""
@@ -195,19 +194,10 @@ class JackManager:
 
             if not all_sockets_ready:
                 print("Warning: Timed out waiting for all audio players to create their IPC sockets.", file=sys.stderr)
-            else:
-                # Prime audio tracks with initial state now that they are ready
-                with self.process_lock:
-                    for ap in self.active_audio_processes:
-                        track = self.sequencer.song.tracks[ap.track_index]
-                        if isinstance(track, AudioTrack):
-                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
-                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pan", track.pan]})
 
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
-            self.is_just_activated = True
             self.jack_client.activate()
             self.is_running = True
 
@@ -390,10 +380,7 @@ class JackManager:
             if samplerate > 0 and beats_per_second > 0:
                 current_beat = (frame / samplerate) * beats_per_second
             self._sync_playhead_to_beat(current_beat)
-            if self.is_just_activated:
-                self.is_just_activated = False
-            else:
-                self.seek_audio_to_beat(current_beat)
+            self.seek_audio_to_beat(current_beat)
 
     def _process_callback(self, frames: int):
         try:
@@ -1298,37 +1285,38 @@ class Sequencer:
                             port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
 
     def prime_all_tracks(self):
-        """Sends the current program/bank/volume/pan state for all assigned MIDI tracks to ports opened by the JackManager."""
+        """Sends the current state (program, volume, pan, etc.) for all assigned tracks."""
         if not self.jack_manager.is_running:
             print("Warning: prime_all_tracks called but JACK manager is not running. State will not be sent.")
             return
 
-        print("Priming all assigned MIDI tracks...")
-        for track in self.song.tracks:
-            if not isinstance(track, MidiTrack) or not track.output_port_name:
-                continue
-
-            port = self.jack_manager.open_ports.get(track.output_port_name)
-            if port:
-                try:
-                    print(f"  - Sending state for track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}")
-                    # Bank Select
-                    if track.bank_msb is not None:
-                        port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                    if track.bank_lsb is not None:
-                        port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                    # Program Change
-                    port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-                    # Volume
-                    midi_volume = int(track.volume * 127)
-                    port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-                    # Pan
-                    midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                    port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
-                except Exception as e:
-                    print(f"  - Could not send state to port '{track.output_port_name}': {e}")
-            else:
-                print(f"  - Skipping track '{track.name}', port '{track.output_port_name}' not open in JackManager.")
+        print("Priming all tracks with initial state...")
+        for i, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack) and track.output_port_name:
+                port = self.jack_manager.open_ports.get(track.output_port_name)
+                if port:
+                    try:
+                        print(f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}")
+                        if track.bank_msb is not None:
+                            port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                        if track.bank_lsb is not None:
+                            port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                        midi_volume = int(track.volume * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                    except Exception as e:
+                        print(f"  - Could not send state to port '{track.output_port_name}': {e}")
+                else:
+                    print(f"  - Skipping track '{track.name}', port '{track.output_port_name}' not open in JackManager.")
+            elif isinstance(track, AudioTrack):
+                with self.jack_manager.process_lock:
+                    active_process = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
+                    if active_process:
+                        print(f"  - Priming Audio track '{track.name}'")
+                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
+                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "pan", track.pan]})
 
     def set_control_port(self, port_name: str):
         """Sets the MIDI input port for control messages and starts listening."""
@@ -1855,37 +1843,58 @@ class Sequencer:
         If start_beat is provided, it seeks the transport to that position.
         It then ensures the transport is rolling.
         """
-        # 0. Prime tracks with their initial state (program, volume, pan, etc.)
-        self.prime_all_tracks()
         # 1. Ensure client is running.
         if not self.jack_manager.is_running:
             print("JACK client not active. Starting...")
             self.jack_manager.start()
-            time.sleep(0.1)
+            time.sleep(0.1) # Give it a moment to stabilize
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
-        # 2. If a start beat is given, reposition the transport.
-        if start_beat is not None:
-            try:
+
+        # 2. Prime tracks with their initial state (program, volume, pan, etc.)
+        self.prime_all_tracks()
+
+        # 3. Determine target beat and reposition transport if necessary
+        current_beat = 0.0
+        try:
+            _ , pos_struct = self.jack_manager.jack_client.transport_query_struct()
+            pos_dict = jack.position2dict(pos_struct)
+
+            if start_beat is None:
+                # If no start_beat, use current transport position
+                frame = pos_dict.get('frame', 0)
+                samplerate = self.jack_manager.jack_client.samplerate
+                beats_per_second = self.song.tempo / 60.0
+                if samplerate > 0 and beats_per_second > 0:
+                    current_beat = (frame / samplerate) * beats_per_second
+            else:
+                # If start_beat is given, use it and reposition transport
+                current_beat = start_beat
                 beats_per_second = self.song.tempo / 60.0
                 samplerate = self.jack_manager.jack_client.samplerate
                 if beats_per_second > 0 and samplerate > 0:
-                    target_frame = int((start_beat / beats_per_second) * samplerate)
-                    _ , pos = self.jack_manager.jack_client.transport_query_struct()
-                    pos.frame = target_frame
-                    self.jack_manager.jack_client.transport_reposition_struct(pos)
-                    print(f"Seeking JACK transport to {self._format_beats_to_position(start_beat)}.")
-                    self.jack_manager._sync_playhead_to_beat(start_beat)
-            except jack.JackError as e:
-                print(f"Error seeking JACK transport: {e}")
-                return
-        # 3. Start the transport rolling if it's not already.
+                    target_frame = int((current_beat / beats_per_second) * samplerate)
+                    pos_struct.frame = target_frame
+                    self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
+                    print(f"Seeking JACK transport to {self._format_beats_to_position(current_beat)}.")
+
+        except jack.JackError as e:
+            print(f"Error querying or seeking JACK transport: {e}")
+            return
+
+        # 4. Sync internal state and audio players to the determined beat
+        self.jack_manager._sync_playhead_to_beat(current_beat)
+        self.jack_manager.seek_audio_to_beat(current_beat)
+
+        # 5. Start the transport rolling and un-pause audio.
         try:
             if self.jack_manager.jack_client.transport_state != jack.ROLLING:
                 self.jack_manager.jack_client.transport_start()
+            self.jack_manager.set_all_audio_pause_state(False)
         except jack.JackError as e:
             print(f"Error starting JACK transport: {e}")
+
         # Finally, update our internal state to "playing"
         self.playback_state = "playing"
 
@@ -1897,10 +1906,14 @@ class Sequencer:
         try:
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                 self.jack_manager.jack_client.transport_stop()
+                self.jack_manager.set_all_audio_pause_state(True) # Pause audio
                 print("JACK transport stopped.")
+                self.playback_state = "paused"
             else:
                 self.jack_manager.jack_client.transport_start()
+                self.jack_manager.set_all_audio_pause_state(False) # Un-pause audio
                 print("JACK transport started.")
+                self.playback_state = "playing"
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
 

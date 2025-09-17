@@ -702,6 +702,26 @@ def main():
                     command_buffer = command_buffer[:-1]
                     print("\b \b", end="", flush=True) # Erase character on screen
 
+            elif char == '\x1b': # Escape character for arrow keys
+                # This is a potential start of an escape sequence for arrow keys
+                # Read the next two characters to complete the sequence
+                next_char1 = get_char()
+                if next_char1 == '[':
+                    next_char2 = get_char()
+                    should_redisplay_prompt = True
+                    if next_char2 == 'D': # Left Arrow
+                        print("\nSeeking -1m...")
+                        process_command("seek -1m", seq)
+                    elif next_char2 == 'C': # Right Arrow
+                        print("\nSeeking +1m...")
+                        process_command("seek +1m", seq)
+                    else:
+                        should_redisplay_prompt = False
+
+                    if should_redisplay_prompt:
+                        # Clear current line and show the prompt again
+                        print(f"\r> {command_buffer}", end="", flush=True)
+
             elif char.isprintable():
                 command_buffer += char
                 print(char, end="", flush=True)

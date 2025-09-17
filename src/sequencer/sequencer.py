@@ -416,9 +416,16 @@ class JackManager:
                         port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
                     del self._active_notes[(track_idx, pitch)]
 
+            is_any_track_soloed = any(t.is_solo for t in self.sequencer.song.tracks if hasattr(t, 'is_solo'))
+
             for i, track in enumerate(self.sequencer.song.tracks):
                 if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
                     continue
+
+                should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                if not should_be_audible:
+                    continue
+
                 port = self.open_ports[track.output_port_name]
                 if i >= len(self.next_event_indices):
                     self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
@@ -1240,14 +1247,7 @@ class Sequencer:
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
         print(f"Track '{track.name}' is now {status}.")
-        if isinstance(track, AudioTrack) and self.playback_state != "stopped":
-            with self.process_lock:
-                active_process = next((p for p in self.active_audio_processes if p.track_index == track_index), None)
-                if active_process:
-                    self._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", track.is_muted]})
-                elif not track.is_muted:
-                    print(f"Starting playback for newly unmuted track '{track.name}'...")
-                    print(f"Track '{track.name}' will start on next playback.")
+        self._update_all_tracks_audibility()
 
     def toggle_solo(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -1266,23 +1266,33 @@ class Sequencer:
         status = "Solo" if target_track.is_solo else "Un-soloed"
         self.is_dirty = True
         print(f"Track '{target_track.name}' is now {status}.")
-        if self.playback_state != "stopped":
-            is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-            for i, track in enumerate(self.song.tracks):
-                should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                if isinstance(track, AudioTrack):
-                    with self.process_lock:
-                        active_process = next((p for p in self.active_audio_processes if p.track_index == i), None)
-                        if active_process:
-                            self._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
-                        elif should_be_audible:
-                            print(f"Starting playback for newly audible track '{track.name}'...")
-                            print(f"Track '{track.name}' will start on next playback.")
-                elif isinstance(track, MidiTrack):
-                    if not should_be_audible and track.output_port_name:
-                        port = self.open_ports.get(track.output_port_name)
-                        if port:
-                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+        self._update_all_tracks_audibility()
+
+    def _update_all_tracks_audibility(self):
+        """
+        Checks all tracks and applies the correct mute/solo state.
+        This should be called whenever a mute or solo flag is changed.
+        """
+        if not self.jack_manager.is_running:
+            return
+
+        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
+
+        for i, track in enumerate(self.song.tracks):
+            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+
+            if isinstance(track, AudioTrack):
+                with self.jack_manager.process_lock:
+                    active_process = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
+                    if active_process:
+                        # We send 'mute' with the inverse of audibility
+                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
+            elif isinstance(track, MidiTrack):
+                if not should_be_audible and track.output_port_name in self.jack_manager.open_ports:
+                    port = self.jack_manager.open_ports.get(track.output_port_name)
+                    if port:
+                        # Send All-Notes-Off message to silence the track immediately
+                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
 
     def prime_all_tracks(self):
         """Sends the current state (program, volume, pan, etc.) for all assigned tracks."""

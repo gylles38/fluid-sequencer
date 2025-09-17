@@ -1957,6 +1957,60 @@ class Sequencer:
         print("When slaved to JACK, playback must be controlled by the JACK transport master.")
         print("Use your master application to return to the start of the song.")
 
+    def seek(self, amount_str: str):
+        """Seeks the JACK transport by a relative amount of measures or beats."""
+        if not self.jack_manager.is_running or not self.jack_manager.jack_client:
+            print("Error: JACK is not running. Cannot seek.")
+            return
+
+        try:
+            if not amount_str.startswith(('+', '-')):
+                amount_str = '+' + amount_str
+
+            sign = 1 if amount_str.startswith('+') else -1
+            unit = amount_str[-1].lower()
+            value = int(amount_str[1:-1])
+
+            if unit not in ['m', 'b']:
+                raise ValueError("Invalid unit. Use 'm' for measures or 'b' for beats.")
+
+            offset_beats = 0
+            if unit == 'm':
+                offset_beats = sign * value * self.song.time_signature_numerator
+            else: # unit == 'b'
+                offset_beats = sign * value
+
+            # Get current position
+            _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
+            pos_dict = jack.position2dict(pos_struct)
+            current_frame = pos_dict.get('frame', 0)
+
+            samplerate = self.jack_manager.jack_client.samplerate
+            beats_per_second = self.song.tempo / 60.0
+
+            if samplerate <= 0 or beats_per_second <= 0:
+                print("Error: Cannot determine current position (invalid transport state).")
+                return
+
+            current_beat = (current_frame / samplerate) * beats_per_second
+            new_beat = current_beat + offset_beats
+            if new_beat < 0:
+                new_beat = 0.0
+
+            # Reposition JACK transport
+            target_frame = int((new_beat / beats_per_second) * samplerate)
+            pos_struct.frame = target_frame
+            self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
+
+            # Manually sync sequencer and audio players
+            self.jack_manager._sync_playhead_to_beat(new_beat)
+            self.jack_manager.seek_audio_to_beat(new_beat)
+
+            print(f"Seeked to position {self._format_beats_to_position(new_beat)}.")
+
+        except (ValueError, IndexError):
+            print("Error: Invalid seek format. Use +/-<number><m|b> (e.g., '+1m', '-4b').")
+
     def send_cc_message(self, port_name: str, channel: int, control: int, value: int):
         """Sends a single CC message to a specified port."""
         port = self.open_ports.get(port_name)

@@ -69,6 +69,7 @@ Sequencer CLI Commands:
   cc                      - Sends a single MIDI CC message to a port.
   play [pos]              - Seeks to 'measure:beat' position and plays, or just plays.
   pause                   - Toggles play/pause on the JACK transport (spacebar shortcut).
+  seek +/-<N><m|b>        - Seeks forward/backward by N measures or beats (e.g. seek -1m).
   loop [start] [end]      - Sets a playback loop ('measure:beat') or toggles if no args.
   stop                    - Stops the sequencer and disconnects from JACK.
   metronome <on|off>      - Enables or disables the metronome.
@@ -521,6 +522,11 @@ def process_command(user_input, seq):
             print("Example: play 10:1 15:1")
     elif command == "pause":
         seq.pause()
+    elif command == "seek":
+        if len(args) == 1:
+            seq.seek(args[0])
+        else:
+            print("Usage: seek +/-<N><m|b> (e.g. seek -1m or seek +4b)")
     elif command == "loop":
         if len(args) == 0:
             seq.loop_enabled = not seq.loop_enabled

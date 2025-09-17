@@ -1,4 +1,5 @@
 import mido
+import jack
 from sequencer.sequencer import Sequencer
 import sys
 import time
@@ -44,7 +45,6 @@ Sequencer CLI Commands:
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
   setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
-  setoffset <seconds>     - Sets the audio sync offset. Set to 0 to disable.
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
@@ -67,11 +67,10 @@ Sequencer CLI Commands:
   saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
   prime                   - Sends current program/bank state to all assigned ports.
   cc                      - Sends a single MIDI CC message to a port.
-  play [start] [end]      - Plays the song. Start/end positions are in 'measure:beat'.
-  loop [start] [end]      - Loops a section of the song. Start/end positions are in 'measure:beat'.
-  pause                   - Pauses or resumes playback.
-  stop                    - Stops playback.
-  restart                 - Stops and restarts playback from the beginning.
+  play [pos]              - Seeks to 'measure:beat' position and plays, or just plays.
+  pause                   - Toggles play/pause on the JACK transport (spacebar shortcut).
+  loop [start] [end]      - Sets a playback loop ('measure:beat') or toggles if no args.
+  stop                    - Stops the sequencer and disconnects from JACK.
   metronome <on|off>      - Enables or disables the metronome.
   quit                    - Exits the sequencer.
 
@@ -308,22 +307,6 @@ def process_command(user_input, seq):
         else:
             print("Usage: setaudiocmd <command...>")
             print(f"Current command: {seq.audio_player_command}")
-    elif command == "setoffset":
-        if len(args) == 1:
-            try:
-                offset = float(args[0])
-                if offset > 0:
-                    seq.song.sync_offset_sec = offset
-                    seq.is_dirty = True
-                    print(f"Audio sync offset set to {offset} seconds.")
-                else:
-                    seq.song.sync_offset_sec = 0
-                    seq.is_dirty = True
-                    print("Audio sync offset disabled.")
-            except ValueError:
-                print("Error: Invalid number for offset.")
-        else:
-            print("Usage: setoffset <seconds>")
     elif command == "setbank":
         if len(args) == 2:
             seq.set_bank(track_index=int(args[0]), msb=int(args[1]))
@@ -498,33 +481,83 @@ def process_command(user_input, seq):
         except (ValueError, IndexError):
             print("Error: Invalid input.")
 
-    elif command == "play" or command == "loop":
-        try:
-            if len(args) > 2:
-                print(f"Usage: {command} [start_position] [end_position]")
+    elif command == "play":
+        if len(args) == 0:
+            # play
+            seq.play_range_enabled = False
+            seq.play()
+        elif len(args) == 1:
+            # play <start>
+            start_beat = seq.parse_position_to_beats(args[0])
+            if start_beat is not None:
+                if seq.loop_enabled:
+                    print("Looping disabled.")
+                    seq.loop_enabled = False
+                seq.play_range_enabled = False
+                seq.play(start_beat=start_beat)
+        elif len(args) == 2:
+            # play <start> <end>
+            start_beat = seq.parse_position_to_beats(args[0])
+            end_beat = seq.parse_position_to_beats(args[1])
+            if start_beat is None or end_beat is None:
                 return True
 
-            start_beat_str = args[0] if len(args) >= 1 else None
-            start_beat = seq.parse_position_to_beats(start_beat_str) if start_beat_str else None
-            if start_beat_str and start_beat is None: # Handle parsing error
+            if end_beat <= start_beat:
+                print("Error: End position must be after the start position.")
                 return True
 
-            end_beat_str = args[1] if len(args) >= 2 else None
-            end_beat = seq.parse_position_to_beats(end_beat_str, default="") if end_beat_str else None
-            if end_beat_str and end_beat is None: # Handle parsing error
-                return True
+            # Set the play range and disable looping to avoid conflict
+            seq.play_range_start_beat = start_beat
+            seq.play_range_end_beat = end_beat
+            seq.play_range_enabled = True
+            if seq.loop_enabled:
+                seq.loop_enabled = False
+                print("Looping disabled to allow play range.")
 
-            is_looping = command == "loop"
-            seq.play(start_beat=start_beat, end_beat=end_beat, loop=is_looping)
-
-        except Exception as e:
-            print(f"Error during command execution: {e}")
+            print(f"Set to stop at {args[1]}.")
+            seq.play(start_beat=start_beat)
+        else:
+            print("Usage: play [start_position] [end_position]")
+            print("Example: play 10:1 15:1")
     elif command == "pause":
         seq.pause()
+    elif command == "loop":
+        if len(args) == 0:
+            seq.loop_enabled = not seq.loop_enabled
+            status = "enabled" if seq.loop_enabled else "disabled"
+            if seq.loop_enabled and seq.play_range_enabled:
+                print("Disabling play range to enable looping.")
+                seq.play_range_enabled = False
+            print(f"Looping is now {status}.")
+            if not seq.loop_enabled:
+                print("Note: Loop points are still saved. Use 'loop <start> <end>' to set new points.")
+            elif seq.loop_end_beat <= seq.loop_start_beat:
+                print("Warning: Loop end is not after loop start. The loop will not function correctly.")
+        elif len(args) == 2:
+            start_beat = seq.parse_position_to_beats(args[0])
+            end_beat = seq.parse_position_to_beats(args[1])
+            if start_beat is None or end_beat is None:
+                # Error is printed by parse_position_to_beats
+                return True
+
+            if end_beat <= start_beat:
+                print("Error: Loop end position must be after the start position.")
+                return True
+
+            seq.loop_start_beat = start_beat
+            seq.loop_end_beat = end_beat
+            seq.loop_enabled = True
+            if seq.play_range_enabled:
+                print("Disabling play range to enable looping.")
+                seq.play_range_enabled = False
+            print(f"Loop enabled from {args[0]} to {args[1]}.")
+            # Also start playback from the beginning of the loop
+            seq.play(start_beat=start_beat)
+        else:
+            print("Usage: loop [start_position] [end_position]")
+            print("Example: loop 1:1 5:1")
     elif command == "stop":
         seq.stop()
-    elif command == "restart":
-        seq.restart()
     elif command == "metronome":
         if len(args) == 1 and args[0].lower() in ["on", "off"]:
             is_enabled = args[0].lower() == "on"

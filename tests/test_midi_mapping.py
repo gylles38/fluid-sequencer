@@ -145,7 +145,6 @@ class TestMidiMapping(unittest.TestCase):
                     mock_set_control_port.assert_called_once_with("my_control_port")
 
     @patch('src.sequencer.sequencer.Sequencer._get_current_beat', return_value=5.0)
-
     @patch('mido.open_input')
     def test_record_automation(self, mock_open_input, mock_get_current_beat):
         """Test that CC messages are recorded as automation points when recording."""

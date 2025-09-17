@@ -10,16 +10,36 @@ try:
     # Windows
     import msvcrt
     def get_char():
-        return msvcrt.getch().decode('utf-8')
+        ch_b = msvcrt.getch()
+        if ch_b in (b'\x00', b'\xe0'):  # Special key
+            next_ch_b = msvcrt.getch()
+            if ch_b == b'\xe0':
+                if next_ch_b == b'K': return 'ARROW_LEFT'
+                if next_ch_b == b'M': return 'ARROW_RIGHT'
+            return '' # Ignore other special keys for now
+        return ch_b.decode('utf-8', 'ignore')
 except ImportError:
     # POSIX (Linux, macOS)
     import tty, termios
     def get_char():
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
+        ch = ''
         try:
             tty.setraw(sys.stdin.fileno())
             ch = sys.stdin.read(1)
+            if ch == '\x1b':
+                # This is a bit of a hack. We assume that if we get an escape character,
+                # it's an arrow key sequence and we read the next two characters.
+                # This will block if the user just presses Esc.
+                # A more robust solution would use select() for non-blocking reads.
+                next1 = sys.stdin.read(1)
+                next2 = sys.stdin.read(1)
+                if next1 == '[':
+                    if next2 == 'D': return 'ARROW_LEFT'
+                    if next2 == 'C': return 'ARROW_RIGHT'
+                # If it's not a recognized arrow key, we effectively ignore the sequence.
+                return ''
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
@@ -69,7 +89,6 @@ Sequencer CLI Commands:
   cc                      - Sends a single MIDI CC message to a port.
   play [pos]              - Seeks to 'measure:beat' position and plays, or just plays.
   pause                   - Toggles play/pause on the JACK transport (spacebar shortcut).
-  seek +/-<N><m|b>        - Seeks forward/backward by N measures or beats (e.g. seek -1m).
   loop [start] [end]      - Sets a playback loop ('measure:beat') or toggles if no args.
   stop                    - Stops the sequencer and disconnects from JACK.
   metronome <on|off>      - Enables or disables the metronome.
@@ -522,11 +541,6 @@ def process_command(user_input, seq):
             print("Example: play 10:1 15:1")
     elif command == "pause":
         seq.pause()
-    elif command == "seek":
-        if len(args) == 1:
-            seq.seek(args[0])
-        else:
-            print("Usage: seek +/-<N><m|b> (e.g. seek -1m or seek +4b)")
     elif command == "loop":
         if len(args) == 0:
             seq.loop_enabled = not seq.loop_enabled
@@ -564,6 +578,11 @@ def process_command(user_input, seq):
             print("Example: loop 1:1 5:1")
     elif command == "stop":
         seq.stop()
+    elif command == "seek":
+        if len(args) == 1:
+            seq.seek(args[0])
+        else:
+            print("Usage: seek <amount> (e.g., +1m, -4b)")
     elif command == "metronome":
         if len(args) == 1 and args[0].lower() in ["on", "off"]:
             is_enabled = args[0].lower() == "on"
@@ -670,6 +689,19 @@ def main():
         try:
             char = get_char()
 
+            if char == 'ARROW_LEFT':
+                print() # Move to a new line to not mess up the current command line
+                process_command("seek -1m", seq)
+                command_buffer = "" # Clear buffer after action
+                print(f"> ", end="", flush=True)
+                continue
+            elif char == 'ARROW_RIGHT':
+                print() # Move to a new line to not mess up the current command line
+                process_command("seek +1m", seq)
+                command_buffer = "" # Clear buffer after action
+                print(f"> ", end="", flush=True)
+                continue
+
             # Handle Ctrl+C or Ctrl+D for exit
             if char in ('\x03', '\x04'):
                 if seq.playback_state != "stopped":
@@ -701,26 +733,6 @@ def main():
                 if len(command_buffer) > 0:
                     command_buffer = command_buffer[:-1]
                     print("\b \b", end="", flush=True) # Erase character on screen
-
-            elif char == '\x1b': # Escape character for arrow keys
-                # This is a potential start of an escape sequence for arrow keys
-                # Read the next two characters to complete the sequence
-                next_char1 = get_char()
-                if next_char1 == '[':
-                    next_char2 = get_char()
-                    should_redisplay_prompt = True
-                    if next_char2 == 'D': # Left Arrow
-                        print("\nSeeking -1m...")
-                        process_command("seek -1m", seq)
-                    elif next_char2 == 'C': # Right Arrow
-                        print("\nSeeking +1m...")
-                        process_command("seek +1m", seq)
-                    else:
-                        should_redisplay_prompt = False
-
-                    if should_redisplay_prompt:
-                        # Clear current line and show the prompt again
-                        print(f"\r> {command_buffer}", end="", flush=True)
 
             elif char.isprintable():
                 command_buffer += char

@@ -1860,7 +1860,6 @@ class Sequencer:
             print("JACK client not active. Starting...")
             self.jack_manager.start()
             time.sleep(0.1) # Give it a moment to stabilize
-            self._update_all_tracks_audibility()
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
@@ -2002,7 +2001,7 @@ class Sequencer:
             pos_struct.frame = target_frame
             self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
 
-            # Manually sync sequencer and audio players
+            # Manually sync sequencer and audio players because transport_reposition does not trigger the timebase callback
             self.jack_manager._sync_playhead_to_beat(new_beat)
             self.jack_manager.seek_audio_to_beat(new_beat)
 

@@ -1629,6 +1629,10 @@ class Sequencer:
         recording_started_beat = None
         try:
             with mido.open_input(inport_name) as inport:
+                # Clear any stale messages from the input buffer before we start
+                for _ in inport.iter_pending():
+                    pass
+
                 if outport_name and enable_thru:
                     vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
                     if vp:

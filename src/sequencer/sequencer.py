@@ -1596,26 +1596,40 @@ class Sequencer:
     def _get_current_beat(self) -> float:
         if self.jack_manager and self.jack_manager.is_running and self.jack_manager.jack_client:
             try:
-                _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
+                _ , pos_struct = self.jack_manager.jack_client.transport_query_struct()
                 pos = jack.position2dict(pos_struct)
+
+                # Frame-based calculation is more reliable than bar/beat from transport
+                frame = pos.get('frame', 0)
+                samplerate = self.jack_manager.jack_client.samplerate
+                beats_per_second = self.song.tempo / 60.0
+
+                if samplerate > 0 and beats_per_second > 0:
+                    return (frame / samplerate) * beats_per_second
+
+                # Fallback for safety, but the primary method is now frame-based
+                beats_per_bar = pos.get('beats_per_bar', self.song.time_signature_numerator)
                 bar = pos.get('bar', 1)
                 beat = pos.get('beat', 1)
                 tick = pos.get('tick', 0)
                 ticks_per_beat = pos.get('ticks_per_beat', self.song.ticks_per_beat)
-                beats_per_bar = pos.get('beats_per_bar', self.song.time_signature_numerator)
-                return (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+                if ticks_per_beat > 0:
+                    return (bar - 1) * beats_per_bar + (beat - 1) + (tick / ticks_per_beat)
+                else:
+                    return (bar - 1) * beats_per_bar + (beat - 1)
+
             except (jack.JackError, AttributeError):
                 return 0.0
         return 0.0
 
-    def _recording_thread_main(self, target_track: MidiTrack, start_beat: float, inport_name: str, outport_name: Optional[str], num_beats_to_record: Optional[float], original_mute_state: bool):
+    def _recording_thread_main(self, target_track: MidiTrack, start_beat: float, inport_name: str, outport_name: Optional[str], num_beats_to_record: Optional[float], original_mute_state: bool, enable_thru: bool):
         open_notes = {}
         outport = None
         is_virtual_port = False
         recording_started_beat = None
         try:
             with mido.open_input(inport_name) as inport:
-                if outport_name:
+                if outport_name and enable_thru:
                     vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
                     if vp:
                         outport = vp
@@ -1625,6 +1639,7 @@ class Sequencer:
                     if target_track.bank_msb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
                     if target_track.bank_lsb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
                     outport.send(mido.Message('program_change', channel=target_track.channel, program=target_track.instrument))
+
                 print(f"Armed for recording on track '{target_track.name}'. Waiting for JACK transport to roll past {self._format_beats_to_position(start_beat)}.")
                 while not self._stop_event.is_set():
                     current_beat = self._get_current_beat()
@@ -1660,13 +1675,15 @@ class Sequencer:
             if outport:
                 for note_pitch in open_notes:
                     outport.send(mido.Message('note_off', channel=target_track.channel, note=note_pitch, velocity=0))
+                outport.send(mido.Message('control_change', channel=target_track.channel, control=123, value=0))
+                time.sleep(0.01)
                 if not is_virtual_port and outport and not outport.closed:
                     outport.close()
             target_track.is_muted = original_mute_state
             self.is_recording = False
             print("\nRecording thread finished.")
 
-    def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool):
+    def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
         target_track = self.song.tracks[track_index]
         if not isinstance(target_track, MidiTrack):
             print("Error: Recording is only supported for MIDI tracks.")
@@ -1690,7 +1707,7 @@ class Sequencer:
         if replace_notes:
             target_track.is_muted = True
         self.is_recording = True
-        self.recording_thread = threading.Thread(target=self._recording_thread_main, args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state))
+        self.recording_thread = threading.Thread(target=self._recording_thread_main, args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state, enable_thru))
         self.recording_thread.daemon = True
         self.recording_thread.start()
 
@@ -1722,6 +1739,11 @@ class Sequencer:
                 choice = cancellable_input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
                 if choice.startswith('r'):
                     replace_notes = True
+            enable_thru = True
+            if target_track.output_port_name:
+                thru_choice = cancellable_input("Enable MIDI Thru (hear instrument while recording)? [Y/n] ").lower()
+                if thru_choice.startswith('n'):
+                    enable_thru = False
             input_ports = mido.get_input_names()
             if not input_ports:
                 print("Error: No MIDI input ports found.")
@@ -1737,8 +1759,8 @@ class Sequencer:
             print("\nRecord cancelled.")
             return
         self._stop_event.clear()
-        self.last_record_settings = {"track_index": track_index, "start_beat": start_beat, "num_beats_to_record": num_beats_to_record, "inport_name": inport_name, "replace_notes": replace_notes}
-        self._start_recording_internal(track_index=track_index, start_beat=start_beat, num_beats_to_record=num_beats_to_record, inport_name=inport_name, replace_notes=replace_notes)
+        self.last_record_settings = {"track_index": track_index, "start_beat": start_beat, "num_beats_to_record": num_beats_to_record, "inport_name": inport_name, "replace_notes": replace_notes, "enable_thru": enable_thru}
+        self._start_recording_internal(track_index=track_index, start_beat=start_beat, num_beats_to_record=num_beats_to_record, inport_name=inport_name, replace_notes=replace_notes, enable_thru=enable_thru)
 
     def record_bis(self):
         """Re-records using the last saved parameters."""
@@ -1764,6 +1786,8 @@ class Sequencer:
                 print("\nRecord cancelled.")
                 return
         settings['replace_notes'] = replace_notes
+        if 'enable_thru' not in settings:
+            settings['enable_thru'] = True
         self._start_recording_internal(**settings)
 
     def _get_song_length_in_beats(self) -> float:

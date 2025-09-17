@@ -195,6 +195,15 @@ class JackManager:
             if not all_sockets_ready:
                 print("Warning: Timed out waiting for all audio players to create their IPC sockets.", file=sys.stderr)
 
+            # --- Prime Audio Tracks Immediately After They Are Ready ---
+            print("Priming audio tracks with initial state...")
+            with self.process_lock:
+                for ap in self.active_audio_processes:
+                    track = self.sequencer.song.tracks[ap.track_index]
+                    if isinstance(track, AudioTrack):
+                        print(f"  - Priming Audio track '{track.name}'")
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
@@ -1212,7 +1221,7 @@ class Sequencer:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "pan", pan]})
+                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
                             break
         elif isinstance(track, MidiTrack):
             # If JACK is running, send the command immediately
@@ -1295,12 +1304,12 @@ class Sequencer:
                         port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
 
     def prime_all_tracks(self):
-        """Sends the current state (program, volume, pan, etc.) for all assigned tracks."""
+        """Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks."""
         if not self.jack_manager.is_running:
             print("Warning: prime_all_tracks called but JACK manager is not running. State will not be sent.")
             return
 
-        print("Priming all tracks with initial state...")
+        print("Priming all MIDI tracks with initial state...")
         for i, track in enumerate(self.song.tracks):
             if isinstance(track, MidiTrack) and track.output_port_name:
                 port = self.jack_manager.open_ports.get(track.output_port_name)
@@ -1320,13 +1329,6 @@ class Sequencer:
                         print(f"  - Could not send state to port '{track.output_port_name}': {e}")
                 else:
                     print(f"  - Skipping track '{track.name}', port '{track.output_port_name}' not open in JackManager.")
-            elif isinstance(track, AudioTrack):
-                with self.jack_manager.process_lock:
-                    active_process = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
-                    if active_process:
-                        print(f"  - Priming Audio track '{track.name}'")
-                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
-                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "pan", track.pan]})
 
     def set_control_port(self, port_name: str):
         """Sets the MIDI input port for control messages and starts listening."""

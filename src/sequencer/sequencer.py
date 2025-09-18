@@ -1663,18 +1663,19 @@ class Sequencer:
                 if self._stop_event.is_set() or not first_msg:
                     raise UserInputCancelled("Recording cancelled by user.")
 
-                # --- Phase 2: Start playback and record first note ---
+                # --- Phase 2: Record first note, THEN start playback ---
                 print(f"\nNote received. Starting playback and recording...")
-                self.play(start_beat=start_beat)
-                time.sleep(0.05) # Give JACK a moment to start and stabilize transport
 
-                # Manually record the first note that triggered everything
-                # Its timestamp is the exact start_beat we requested
+                # Manually record the first note that triggered everything BEFORE starting playback
                 note = Note(pitch=first_msg.note, velocity=first_msg.velocity, duration=0.1) # Default duration
                 target_track.add_event(Event(notes=[note], start_time=start_beat))
                 open_notes[first_msg.note] = (start_beat, first_msg.velocity)
                 self.is_dirty = True
                 recording_started_beat = start_beat
+
+                # NOW start playback. The sync process inside play() will see the new note.
+                self.play(start_beat=start_beat)
+                time.sleep(0.05) # Give JACK a moment to start and stabilize transport
 
                 # --- Phase 3: Main recording loop for subsequent notes ---
                 while not self._stop_event.is_set():

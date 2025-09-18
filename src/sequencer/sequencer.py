@@ -197,6 +197,7 @@ class JackManager:
 
             # --- Prime Audio Tracks Immediately After They Are Ready ---
             print("Priming audio tracks with initial state...")
+            is_any_track_soloed = any(t.is_solo for t in self.sequencer.song.tracks if hasattr(t, 'is_solo'))
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     track = self.sequencer.song.tracks[ap.track_index]
@@ -204,6 +205,8 @@ class JackManager:
                         print(f"  - Priming Audio track '{track.name}'")
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+                        should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)

@@ -74,9 +74,9 @@ Sequencer CLI Commands:
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
-  copy                    - Copies a section of a track using 'measure:beat' positions.
+  copy <track_index>      - Copies a section of a track using 'measure:beat' positions.
   move <track_index>      - Moves a section of a track using 'measure:beat' positions.
-  transpose               - Transposes a section of a track using 'measure:beat' positions.
+  transpose <track_index> - Transposes a section of a track using 'measure:beat' positions.
   record <track_index>    - Records MIDI to a track, with 'measure:beat' precision.
   bis                     - Re-records with the last used 'record' settings.
   delete <track_index>    - Deletes a track after confirmation.
@@ -394,8 +394,8 @@ def process_command(user_input, seq):
     elif command == "record":
         if len(args) == 1:
             try:
-                track_index = int(args[0])
-                seq.record_track(track_index)
+                track_idx = int(args[0])
+                seq.record_track(track_idx)
             except ValueError:
                 print("Error: Invalid track index.")
         else:
@@ -419,9 +419,9 @@ def process_command(user_input, seq):
     elif command == "erase":
         if len(args) == 1:
             try:
-                track_index = int(args[0])
+                track_idx = int(args[0])
                 # The sequencer method will now handle all prompting
-                seq.erase_track(track_index=track_index)
+                seq.erase_track(track_idx=track_idx)
             except ValueError:
                 print("Error: Invalid track index.")
         else:
@@ -434,16 +434,30 @@ def process_command(user_input, seq):
     elif command == "move":
         if len(args) == 1:
             try:
-                track_index = int(args[0])
-                seq.move_track_section(track_index)
+                source_track_idx = int(args[0])
+                seq.move_track_section(source_track_idx)
             except ValueError:
                 print("Error: Invalid track index.")
         else:
             print("Usage: move <track_index>")
     elif command == "copy":
-        seq.copy_track_section()
+        if len(args) == 1:
+            try:
+                source_track_idx = int(args[0])
+                seq.copy_track_section(source_track_idx)
+            except ValueError:
+                print("Error: Invalid track index.")
+        else:
+            print("Usage: copy <track_index>")
     elif command == "transpose":
-        seq.transpose_track_section()
+        if len(args) == 1:
+            try:
+                track_idx = int(args[0])
+                seq.transpose_track_section(track_idx)
+            except ValueError:
+                print("Error: Invalid track index.")
+        else:
+            print("Usage: transpose <track_index>")
     elif command == "tempo":
         if len(args) == 1:
             seq.set_tempo(tempo=int(args[0]))

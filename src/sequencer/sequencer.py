@@ -197,7 +197,11 @@ class JackManager:
 
             # --- Prime Audio Tracks Immediately After They Are Ready ---
             print("Priming audio tracks with initial state...")
-            is_any_track_soloed = any(t.is_solo for t in self.sequencer.song.tracks if hasattr(t, 'is_solo'))
+            is_any_track_soloed = False
+            for t in self.sequencer.song.tracks:
+                if hasattr(t, 'is_solo') and t.is_solo:
+                    is_any_track_soloed = True
+                    break
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     track = self.sequencer.song.tracks[ap.track_index]
@@ -1288,7 +1292,11 @@ class Sequencer:
         if not self.jack_manager.is_running:
             return
 
-        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
+        is_any_track_soloed = False
+        for t in self.song.tracks:
+            if hasattr(t, 'is_solo') and t.is_solo:
+                is_any_track_soloed = True
+                break
 
         for i, track in enumerate(self.song.tracks):
             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted

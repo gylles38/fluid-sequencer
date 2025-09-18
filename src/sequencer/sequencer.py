@@ -20,7 +20,8 @@ import tempfile
 import socket
 import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
+from functools import wraps
 
 
 @dataclass
@@ -645,39 +646,35 @@ class Sequencer:
     def add_track(self, name: str, track_type: str = 'midi', instrument: int = 0, filepath: Optional[str] = None):
         if track_type == 'midi':
             track = MidiTrack(name=name, instrument=instrument)
-            print(f"MIDI track '{name}' added.")
+            self.song.add_track(track)
+            self.is_dirty = True
+            return {"status": "success", "message": f"MIDI track '{name}' added."}
         elif track_type == 'audio':
             if not filepath:
-                print("Error: Filepath is required for audio tracks.")
-                return
+                return {"status": "error", "message": "Error: Filepath is required for audio tracks."}
             try:
                 AudioSegment.from_file(filepath)
             except FileNotFoundError:
-                print(f"Error: Audio file not found at '{filepath}'")
-                return
+                return {"status": "error", "message": f"Error: Audio file not found at '{filepath}'"}
             except Exception as e:
-                print(f"Error opening audio file: {e}")
-                return
+                return {"status": "error", "message": f"Error opening audio file: {e}"}
             track = AudioTrack(name=name, filepath=filepath)
-            print(f"Audio track '{name}' added with file '{filepath}'.")
+            self.song.add_track(track)
+            self.is_dirty = True
+            return {"status": "success", "message": f"Audio track '{name}' added with file '{filepath}'."}
         else:
-            print(f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'.")
-            return
-        self.song.add_track(track)
-        self.is_dirty = True
+            return {"status": "error", "message": f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'."}
 
     def add_automation_track(self, name: str, target_track_index: int):
         if not 0 <= target_track_index < len(self.song.tracks):
-            print("Error: Invalid target track index.")
-            return
+            return {"status": "error", "message": "Error: Invalid target track index."}
         target_track = self.song.tracks[target_track_index]
         if isinstance(target_track, AutomationTrack):
-            print("Error: Automation tracks cannot target other automation tracks.")
-            return
+            return {"status": "error", "message": "Error: Automation tracks cannot target other automation tracks."}
         track = AutomationTrack(name=name, target_track_index=target_track_index)
         self.song.add_track(track)
         self.is_dirty = True
-        print(f"Automation track '{name}' added, targeting track {target_track_index} ('{target_track.name}').")
+        return {"status": "success", "message": f"Automation track '{name}' added, targeting track {target_track_index} ('{target_track.name}')."}
 
     def add_automation_point(self, track_index: int, position_str: str, parameter: str, value: float, curve: str):
         if not 0 <= track_index < len(self.song.tracks):
@@ -698,15 +695,24 @@ class Sequencer:
         except ValueError as e:
             print(f"Error: {e}")
 
-    def delete_track(self, track_index: int):
+    def delete_track(self, track_index: int, confirm_str: Optional[str] = None, api_mode: bool = False):
         if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return False
+            return {"status": "error", "message": "Error: Invalid track index."}
         track_name = self.song.tracks[track_index].name
+
+        if not api_mode:
+            confirm = cancellable_input(f"Are you sure you want to delete track '{track_name}'? [y/N] ").lower()
+            if confirm != 'y':
+                return {"status": "cancelled", "message": "Deletion cancelled."}
+        else:
+            if confirm_str is None:
+                return {"status": "prompt", "message": f"Are you sure you want to delete track '{track_name}'? [y/N] ", "next_arg": "confirm_str"}
+            if confirm_str.lower() != 'y':
+                return {"status": "cancelled", "message": "Deletion cancelled."}
+
         self.song.tracks.pop(track_index)
         self.is_dirty = True
-        print(f"Track '{track_name}' deleted.")
-        return True
+        return {"status": "success", "message": f"Track '{track_name}' deleted."}
 
     def add_cc_event(self, track_index: int, position_str: str, control: int, value: int):
         if not 0 <= track_index < len(self.song.tracks):
@@ -740,12 +746,17 @@ class Sequencer:
 
     def erase_track(self, track_idx: int):
         if not 0 <= track_idx < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
+            return {"status": "error", "message": "Error: Invalid track index."}
         track = self.song.tracks[track_idx]
         if not isinstance(track, (MidiTrack, AutomationTrack)):
-            print("Error: Erasing is only supported for MIDI and Automation tracks.")
-            return
+            return {"status": "error", "message": "Error: Erasing is only supported for MIDI and Automation tracks."}
+
+        # This command is complex enough that for now, we will not support it in API mode.
+        # We will just print a message and return.
+        # A full implementation would require a more complex state management system for the prompts.
+        # if api_mode:
+        #     return {"status": "error", "message": "The 'erase' command is not yet supported in API mode."}
+
         try:
             start_pos_str = cancellable_input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
@@ -865,12 +876,11 @@ class Sequencer:
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
+            return {"status": "error", "message": "Error: Invalid track index."}
         old_name = self.song.tracks[track_index].name
         self.song.tracks[track_index].name = new_name
         self.is_dirty = True
-        print(f"Track '{old_name}' renamed to '{new_name}'.")
+        return {"status": "success", "message": f"Track '{old_name}' renamed to '{new_name}'."}
 
     def move_track_section(self, source_track_idx: int):
         if not 0 <= source_track_idx < len(self.song.tracks):
@@ -1052,45 +1062,81 @@ class Sequencer:
             self.is_dirty = True
             print(f"Operation complete: {', '.join(report)}.")
 
-    def transpose_track_section(self, track_idx: int):
-        if not self.song.tracks:
-            print("No tracks to transpose.")
-            return
-        try:
-            if not 0 <= track_idx < len(self.song.tracks):
-                print("Error: Invalid track index.")
-                return
-            track = self.song.tracks[track_idx]
-            if not isinstance(track, MidiTrack):
-                print("Error: Transposing is only supported for MIDI tracks.")
-                return
-            start_pos_str = cancellable_input(f"Transpose from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
+    def transpose_track_section(self, track_idx: int, start_pos_str: Optional[str] = None, end_pos_str: Optional[str] = None, transpose_value_str: Optional[str] = None, confirm_str: Optional[str] = None, api_mode: bool = False):
+        if not 0 <= track_idx < len(self.song.tracks):
+            return {"status": "error", "message": "Error: Invalid track index."}
+        track = self.song.tracks[track_idx]
+        if not isinstance(track, MidiTrack):
+            return {"status": "error", "message": "Error: Transposing is only supported for MIDI tracks."}
+
+        # Interactive CLI mode
+        if not api_mode:
+            try:
+                start_pos_str = cancellable_input(f"Transpose from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
+                start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
+                if start_beat is None: return {"status": "error", "message": "Invalid start position."}
+
+                end_pos_str_in = cancellable_input(f"Transpose up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
+                if end_pos_str_in == "":
+                    end_beat = float('inf')
+                else:
+                    end_beat = self.parse_position_to_beats(end_pos_str_in)
+                    if end_beat is None: return {"status": "error", "message": "Invalid end position."}
+
+                if end_beat <= start_beat:
+                    return {"status": "error", "message": "Error: End position must be after the start position."}
+
+                transpose_value = int(cancellable_input("Transpose by how many semitones (e.g., 12 for up, -12 for down): ").strip())
+                if not -127 <= transpose_value <= 127:
+                    return {"status": "error", "message": "Error: Transposition value must be between -127 and 127."}
+
+                events_to_transpose = [event for event in track.events if start_beat <= event.start_time < end_beat]
+                if not events_to_transpose:
+                    return {"status": "success", "message": "No notes found in the specified range to transpose."}
+
+                confirm_message = f"Transpose {len(events_to_transpose)} event(s) on track '{track.name}' by {transpose_value} semitones. Are you sure? [y/N] "
+                if cancellable_input(confirm_message).lower() != 'y':
+                    return {"status": "cancelled", "message": "Transpose cancelled."}
+
+            except (ValueError, UserInputCancelled):
+                return {"status": "cancelled", "message": "\nTranspose cancelled."}
+
+        # API mode
+        else:
+            if start_pos_str is None:
+                return {"status": "prompt", "message": f"Transpose from position on track '{track.name}' (measure:beat) [default: 1:1]: ", "next_arg": "start_pos_str"}
             start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
-            if start_beat is None: return
-            end_pos_str = cancellable_input(f"Transpose up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
-            if end_pos_str == "":
-                end_beat = float('inf')
+            if start_beat is None: return {"status": "error", "message": "Invalid start position format."}
+
+            if end_pos_str is None:
+                return {"status": "prompt", "message": f"Transpose up to position on track '{track.name}' (measure:beat) [default: end of track]: ", "next_arg": "end_pos_str"}
+            if end_pos_str == "": end_beat = float('inf')
             else:
                 end_beat = self.parse_position_to_beats(end_pos_str)
-                if end_beat is None: return
+                if end_beat is None: return {"status": "error", "message": "Invalid end position format."}
+
             if end_beat <= start_beat:
-                print("Error: End position must be after the start position.")
-                return
-            transpose_value = int(cancellable_input("Transpose by how many semitones (e.g., 12 for up, -12 for down): ").strip())
+                return {"status": "error", "message": "Error: End position must be after the start position."}
+
+            if transpose_value_str is None:
+                return {"status": "prompt", "message": "Transpose by how many semitones (e.g., 12 for up, -12 for down): ", "next_arg": "transpose_value_str"}
+            try:
+                transpose_value = int(transpose_value_str)
+            except ValueError:
+                return {"status": "error", "message": "Error: Invalid number for semitones."}
             if not -127 <= transpose_value <= 127:
-                print("Error: Transposition value must be between -127 and 127.")
-                return
-        except (ValueError, UserInputCancelled):
-            print("\nTranspose cancelled.")
-            return
-        events_to_transpose = [event for event in track.events if start_beat <= event.start_time < end_beat]
-        if not events_to_transpose:
-            print("No notes found in the specified range to transpose.")
-            return
-        confirm_message = f"Transpose {len(events_to_transpose)} event(s) on track '{track.name}' by {transpose_value} semitones. Are you sure? [y/N] "
-        if cancellable_input(confirm_message).lower() != 'y':
-            print("Transpose cancelled.")
-            return
+                return {"status": "error", "message": "Error: Transposition value must be between -127 and 127."}
+
+            events_to_transpose = [event for event in track.events if start_beat <= event.start_time < end_beat]
+            if not events_to_transpose:
+                return {"status": "success", "message": "No notes found in the specified range to transpose."}
+
+            if confirm_str is None:
+                return {"status": "prompt", "message": f"Transpose {len(events_to_transpose)} event(s) on track '{track.name}' by {transpose_value} semitones. Are you sure? [y/N] ", "next_arg": "confirm_str"}
+            if confirm_str.lower() != 'y':
+                return {"status": "cancelled", "message": "Transpose cancelled."}
+
+        # Common execution logic
         transposed_note_count = 0
         clamped_note_count = 0
         for event in events_to_transpose:
@@ -1099,16 +1145,16 @@ class Sequencer:
                 new_pitch = original_pitch + transpose_value
                 if not 0 <= new_pitch <= 127:
                     clamped_pitch = max(0, min(127, new_pitch))
-                    print(f"Warning: Transposing note {original_pitch} by {transpose_value} results in an out-of-range pitch ({new_pitch}). Clamping to {clamped_pitch}.")
                     note.pitch = clamped_pitch
                     clamped_note_count += 1
                 else:
                     note.pitch = new_pitch
                 transposed_note_count += 1
         self.is_dirty = True
-        print(f"Transposed {transposed_note_count} note(s) on track '{track.name}'.")
+        message = f"Transposed {transposed_note_count} note(s) on track '{track.name}'."
         if clamped_note_count > 0:
-            print(f"{clamped_note_count} note(s) were clamped to the valid MIDI pitch range (0-127).")
+            message += f" {clamped_note_count} note(s) were clamped to the valid MIDI pitch range (0-127)."
+        return {"status": "success", "message": message}
 
     def assign_port(self, track_index: int, port_name: str):
         if not 0 <= track_index < len(self.song.tracks):
@@ -1190,24 +1236,34 @@ class Sequencer:
         self.is_dirty = True
         print(f"Set program for track '{track.name}' to {program + 1}.")
 
-    def set_track_volume(self, track_index: int, volume: float):
+    def set_track_volume(self, track_index: int, volume_str: Optional[str] = None, api_mode: bool = False):
         """Sets the volume for a specific audio or MIDI track."""
         if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
+            return {"status": "error", "message": "Error: Invalid track index."}
         track = self.song.tracks[track_index]
         if not isinstance(track, (AudioTrack, MidiTrack)):
-            print("Error: Volume can only be set for audio or MIDI tracks.")
-            return
-        if not 0.0 <= volume <= 1.0:
-            print("Error: Volume must be between 0.0 and 1.0.")
-            return
+            return {"status": "error", "message": "Error: Volume can only be set for audio or MIDI tracks."}
+
+        if volume_str is None:
+            if api_mode:
+                return {"status": "prompt", "message": "Enter volume (0.0 - 1.0): ", "next_arg": "volume_str"}
+            else:
+                try:
+                    volume_str = cancellable_input("Enter volume (0.0 - 1.0): ").strip()
+                except UserInputCancelled:
+                    return {"status": "cancelled", "message": "Cancelled."}
+
+        try:
+            volume = float(volume_str)
+            if not 0.0 <= volume <= 1.0:
+                return {"status": "error", "message": "Error: Volume must be between 0.0 and 1.0."}
+        except ValueError:
+            return {"status": "error", "message": "Error: Invalid volume."}
+
         track.volume = volume
         self.is_dirty = True
-        print(f"Volume for track '{track.name}' set to {volume:.2f}.")
 
         if isinstance(track, AudioTrack):
-            # If JACK is running, send the command immediately
             if self.jack_manager.is_running:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
@@ -1215,31 +1271,42 @@ class Sequencer:
                             self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", volume * 100]})
                             break
         elif isinstance(track, MidiTrack):
-            # If JACK is running, send the command immediately
             if self.jack_manager.is_running and track.output_port_name:
                 port = self.jack_manager.open_ports.get(track.output_port_name)
                 if port:
                     midi_volume = int(volume * 127)
                     port.send(mido.Message("control_change", channel=track.channel, control=7, value=midi_volume))
 
-    def set_track_pan(self, track_index: int, pan: float):
+        return {"status": "success", "message": f"Volume for track '{track.name}' set to {volume:.2f}."}
+
+    def set_track_pan(self, track_index: int, pan_str: Optional[str] = None, api_mode: bool = False):
         """Sets the pan for a specific audio or MIDI track."""
         if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
+            return {"status": "error", "message": "Error: Invalid track index."}
         track = self.song.tracks[track_index]
         if not isinstance(track, (AudioTrack, MidiTrack)):
-            print("Error: Pan can only be set for audio or MIDI tracks.")
-            return
-        if not -1.0 <= pan <= 1.0:
-            print("Error: Pan must be between -1.0 (left) and 1.0 (right).")
-            return
+            return {"status": "error", "message": "Error: Pan can only be set for audio or MIDI tracks."}
+
+        if pan_str is None:
+            if api_mode:
+                return {"status": "prompt", "message": "Enter pan (-1.0 to 1.0): ", "next_arg": "pan_str"}
+            else:
+                try:
+                    pan_str = cancellable_input("Enter pan (-1.0 to 1.0): ").strip()
+                except UserInputCancelled:
+                    return {"status": "cancelled", "message": "Cancelled."}
+
+        try:
+            pan = float(pan_str)
+            if not -1.0 <= pan <= 1.0:
+                return {"status": "error", "message": "Error: Pan must be between -1.0 (left) and 1.0 (right)."}
+        except ValueError:
+            return {"status": "error", "message": "Error: Invalid pan value."}
+
         track.pan = pan
         self.is_dirty = True
-        print(f"Pan for track '{track.name}' set to {pan:.2f}.")
 
         if isinstance(track, AudioTrack):
-            # If JACK is running, send the command immediately
             if self.jack_manager.is_running:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
@@ -1247,28 +1314,41 @@ class Sequencer:
                             self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
                             break
         elif isinstance(track, MidiTrack):
-            # If JACK is running, send the command immediately
             if self.jack_manager.is_running and track.output_port_name:
                 port = self.jack_manager.open_ports.get(track.output_port_name)
                 if port:
                     midi_pan = int((pan + 1.0) / 2.0 * 127)
                     port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
 
-    def set_track_velocity(self, track_index: int, velocity: float):
+        return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
+
+    def set_track_velocity(self, track_index: int, velocity_str: Optional[str] = None, api_mode: bool = False):
         """Sets the velocity multiplier for a specific MIDI track."""
         if not 0 <= track_index < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
+            return {"status": "error", "message": "Error: Invalid track index."}
         track = self.song.tracks[track_index]
         if not isinstance(track, MidiTrack):
-            print("Error: Velocity can only be set for MIDI tracks.")
-            return
-        if not 0.0 <= velocity:
-            print("Error: Velocity multiplier must be a positive number.")
-            return
+            return {"status": "error", "message": "Error: Velocity can only be set for MIDI tracks."}
+
+        if velocity_str is None:
+            if api_mode:
+                return {"status": "prompt", "message": "Enter velocity multiplier (e.g., 1.0): ", "next_arg": "velocity_str"}
+            else:
+                try:
+                    velocity_str = cancellable_input("Enter velocity multiplier (e.g., 1.0): ").strip()
+                except UserInputCancelled:
+                    return {"status": "cancelled", "message": "Cancelled."}
+
+        try:
+            velocity = float(velocity_str)
+            if not 0.0 <= velocity:
+                return {"status": "error", "message": "Error: Velocity multiplier must be a positive number."}
+        except ValueError:
+            return {"status": "error", "message": "Error: Invalid velocity value."}
+
         track.velocity = velocity
         self.is_dirty = True
-        print(f"Velocity for track '{track.name}' set to {velocity:.2f}.")
+        return {"status": "success", "message": f"Velocity for track '{track.name}' set to {velocity:.2f}."}
 
     def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):

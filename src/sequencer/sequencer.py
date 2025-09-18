@@ -738,11 +738,11 @@ class Sequencer:
             print(f"Added new CC event at position {position_str} on track '{track.name}'.")
         self.is_dirty = True
 
-    def erase_track(self, track_index: int):
-        if not 0 <= track_index < len(self.song.tracks):
+    def erase_track(self, track_idx: int):
+        if not 0 <= track_idx < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-        track = self.song.tracks[track_index]
+        track = self.song.tracks[track_idx]
         if not isinstance(track, (MidiTrack, AutomationTrack)):
             print("Error: Erasing is only supported for MIDI and Automation tracks.")
             return
@@ -872,11 +872,11 @@ class Sequencer:
         self.is_dirty = True
         print(f"Track '{old_name}' renamed to '{new_name}'.")
 
-    def move_track_section(self, track_index: int):
-        if not 0 <= track_index < len(self.song.tracks):
+    def move_track_section(self, source_track_idx: int):
+        if not 0 <= source_track_idx < len(self.song.tracks):
             print("Error: Invalid source track index.")
             return
-        source_track = self.song.tracks[track_index]
+        source_track = self.song.tracks[source_track_idx]
         if not isinstance(source_track, MidiTrack):
             print("Error: Moving events is only supported for MIDI tracks.")
             return
@@ -890,8 +890,8 @@ class Sequencer:
             if source_end_beat <= source_start_beat:
                 print("Error: End position must be after the start position.")
                 return
-            dest_track_idx_str = cancellable_input(f"Move to destination track index (default: {track_index}, '{source_track.name}'): ").strip()
-            dest_track_idx = track_index if dest_track_idx_str == "" else int(dest_track_idx_str)
+            dest_track_idx_str = cancellable_input(f"Move to destination track index (default: {source_track_idx}, '{source_track.name}'): ").strip()
+            dest_track_idx = source_track_idx if dest_track_idx_str == "" else int(dest_track_idx_str)
             if not 0 <= dest_track_idx < len(self.song.tracks):
                 print("Error: Invalid destination track index.")
                 return
@@ -969,12 +969,11 @@ class Sequencer:
             self.is_dirty = True
             print(f"Operation complete: {', '.join(report)}.")
 
-    def copy_track_section(self):
+    def copy_track_section(self, source_track_idx: int):
         if not self.song.tracks:
             print("No tracks to copy from.")
             return
         try:
-            source_track_idx = int(cancellable_input("Copy from track index: ").strip())
             if not 0 <= source_track_idx < len(self.song.tracks):
                 print("Error: Invalid source track index.")
                 return
@@ -1053,12 +1052,11 @@ class Sequencer:
             self.is_dirty = True
             print(f"Operation complete: {', '.join(report)}.")
 
-    def transpose_track_section(self):
+    def transpose_track_section(self, track_idx: int):
         if not self.song.tracks:
             print("No tracks to transpose.")
             return
         try:
-            track_idx = int(cancellable_input("Transpose track index: ").strip())
             if not 0 <= track_idx < len(self.song.tracks):
                 print("Error: Invalid track index.")
                 return
@@ -1793,14 +1791,14 @@ class Sequencer:
         self.recording_thread.daemon = True
         self.recording_thread.start()
 
-    def record_track(self, track_index: int):
+    def record_track(self, track_idx: int):
         if self.playback_state != "stopped":
             print("Error: Please stop playback before starting a new recording.")
             return
-        if not 0 <= track_index < len(self.song.tracks):
+        if not 0 <= track_idx < len(self.song.tracks):
             print("Error: Invalid track index.")
             return
-        target_track = self.song.tracks[track_index]
+        target_track = self.song.tracks[track_idx]
         if not isinstance(target_track, MidiTrack):
             print("Error: Recording is only supported for MIDI tracks.")
             return

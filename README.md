@@ -35,6 +35,62 @@ Pour afficher l'aide sans lancer le séquenceur, vous pouvez utiliser :
 python3 main.py --help
 ```
 
+## Mode API
+
+Le séquenceur peut être lancé en "Mode API", ce qui est utile pour l'intégrer à d'autres applications ou pour le piloter par des scripts.
+
+Pour activer le mode API, utilisez l'argument `--api` :
+```bash
+python3 main.py --api
+```
+
+En mode API :
+- Le séquenceur lit les commandes depuis l'entrée standard (`stdin`), une par ligne.
+- Les réponses sont envoyées sur la sortie standard (`stdout`) au format JSON.
+- Le prompt `>` n'est pas affiché.
+
+C'est le mode idéal pour une utilisation programmatique.
+
+### Format des réponses JSON
+
+Toutes les réponses JSON suivent ce format de base :
+```json
+{
+  "status": "success" | "error" | "prompt" | "cancelled",
+  "message": "Description textuelle du résultat."
+  // ... autres champs si nécessaire
+}
+```
+
+-   **`status: "success"`** : La commande a été exécutée avec succès.
+-   **`status: "error"`** : Une erreur est survenue. Le message contient les détails.
+-   **`status: "cancelled"`** : La commande a été annulée par l'utilisateur (par exemple, en ne confirmant pas une suppression).
+-   **`status: "prompt"`** : La commande est interactive et attend une information supplémentaire.
+    -   Le champ `message` contient le texte à afficher à l'utilisateur.
+    -   Un champ `next_arg` indique le nom de l'argument attendu pour la prochaine commande.
+
+**Exemple de dialogue pour une commande interactive (`transpose`) :**
+
+1.  **Client envoie :** `transpose 0`
+2.  **Séquenceur répond (prompt) :**
+    ```json
+    {
+      "status": "prompt",
+      "message": "Transpose from position on track 'piano' (measure:beat) [default: 1:1]: ",
+      "next_arg": "start_pos_str"
+    }
+    ```
+3.  **Client envoie :** `transpose 0 1:1`
+4.  **Séquenceur répond (prompt) :**
+    ```json
+    {
+      "status": "prompt",
+      "message": "Transpose up to position on track 'piano' (measure:beat) [default: end of track]: ",
+      "next_arg": "end_pos_str"
+    }
+    ```
+5.  ... et ainsi de suite jusqu'à ce que la commande soit complète.
+
 ## Commandes disponibles
 
 ```
@@ -56,7 +112,6 @@ Sequencer CLI Commands:
   assignmetro             - Assigns an output port for the metronome click.
   unassign <track_index>  - Un-assigns a track from its output port.
   setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
-  setoffset <seconds>     - Sets the audio sync offset in seconds (default: 1.0).
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
@@ -66,9 +121,9 @@ Sequencer CLI Commands:
   mute <track_index>      - Toggles mute for a track.
   solo <track_index>      - Toggles solo for a track.
   rename <index> <new_name> - Renames a track.
-  copy                    - Copies a section of a track using 'measure:beat' positions.
+  copy <track_index>      - Copies a section of a track using 'measure:beat' positions.
   move <track_index>      - Moves a section of a track using 'measure:beat' positions.
-  transpose               - Transposes a section of a track using 'measure:beat' positions.
+  transpose <track_index> - Transposes a section of a track using 'measure:beat' positions.
   record <track_index>    - Records MIDI to a track, with 'measure:beat' precision.
   bis                     - Re-records with the last used 'record' settings.
   delete <track_index>    - Deletes a track after confirmation.

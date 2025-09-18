@@ -4,6 +4,7 @@ from sequencer.sequencer import Sequencer
 import sys
 import time
 import os
+import json
 
 # Platform-specific getch
 try:
@@ -103,7 +104,7 @@ MIDI Mapping:
 """
     print(help_text)
 
-def process_command(user_input, seq):
+def process_command(user_input, seq, api_mode=False):
     if not user_input:
         return True # Continue loop
 
@@ -112,7 +113,7 @@ def process_command(user_input, seq):
     args = parts[1:]
 
     if command == "quit":
-        if seq.is_dirty:
+        if seq.is_dirty and not api_mode:
             while True:
                 choice = input("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
                 if choice == 'c':
@@ -139,25 +140,41 @@ def process_command(user_input, seq):
                     print("Invalid choice.")
 
         if seq.playback_state != "stopped":
-            print("Stopping playback before exiting...")
+            if not api_mode:
+                print("Stopping playback before exiting...")
             seq.stop()
         return False # End loop
     elif command == "help":
         print_help()
     elif command == "add":
         if len(args) == 1:
-            seq.add_track(name=args[0], track_type='midi')
-        elif len(args) == 2:
-            prog = int(args[1])
-            if not 1 <= prog <= 128:
-                print("Error: Program number must be between 1 and 128.")
+            result = seq.add_track(name=args[0], track_type='midi')
+            if api_mode:
+                print(json.dumps(result))
             else:
-                seq.add_track(name=args[0], track_type='midi', instrument=prog - 1)
+                print(result['message'])
+        elif len(args) == 2:
+            try:
+                prog = int(args[1])
+                if not 1 <= prog <= 128:
+                    print("Error: Program number must be between 1 and 128.")
+                else:
+                    result = seq.add_track(name=args[0], track_type='midi', instrument=prog - 1)
+                    if api_mode:
+                        print(json.dumps(result))
+                    else:
+                        print(result['message'])
+            except ValueError:
+                print("Error: Invalid program number.")
         else:
             print("Usage: add <name> [program_number]")
     elif command == "addaudio":
         if len(args) == 2:
-            seq.add_track(name=args[0], track_type='audio', filepath=args[1])
+            result = seq.add_track(name=args[0], track_type='audio', filepath=args[1])
+            if api_mode:
+                print(json.dumps(result))
+            else:
+                print(result['message'])
         else:
             print("Usage: addaudio <name> <filepath>")
     elif command == "addauto":
@@ -165,7 +182,11 @@ def process_command(user_input, seq):
             try:
                 name = args[0]
                 target_index = int(args[1])
-                seq.add_automation_track(name, target_index)
+                result = seq.add_automation_track(name, target_index)
+                if api_mode:
+                    print(json.dumps(result))
+                else:
+                    print(result['message'])
             except ValueError:
                 print("Error: Invalid target track index.")
         else:
@@ -349,38 +370,50 @@ def process_command(user_input, seq):
         else:
             print("Usage: setprog <track_index> <program>")
     elif command == "volume":
-        if len(args) == 1:
+        if len(args) >= 1:
             try:
                 track_index = int(args[0])
-                volume_str = input("Enter volume (0.0 - 1.0): ").strip()
-                volume = float(volume_str)
-                seq.set_track_volume(track_index, volume)
-            except ValueError:
-                print("Error: Invalid track index or volume.")
+                volume_str = args[1] if len(args) > 1 else None
+                result = seq.set_track_volume(track_index, volume_str=volume_str, api_mode=api_mode)
+                if result:
+                    if api_mode:
+                        print(json.dumps(result))
+                    else:
+                        print(result['message'])
+            except (ValueError, IndexError):
+                print("Error: Invalid arguments for volume.")
         else:
-            print("Usage: volume <track_index>")
+            print("Usage: volume <track_index> [volume]")
     elif command == "pan":
-        if len(args) == 1:
+        if len(args) >= 1:
             try:
                 track_index = int(args[0])
-                pan_str = input("Enter pan (-1.0 to 1.0): ").strip()
-                pan = float(pan_str)
-                seq.set_track_pan(track_index, pan)
-            except ValueError:
-                print("Error: Invalid track index or pan.")
+                pan_str = args[1] if len(args) > 1 else None
+                result = seq.set_track_pan(track_index, pan_str=pan_str, api_mode=api_mode)
+                if result:
+                    if api_mode:
+                        print(json.dumps(result))
+                    else:
+                        print(result['message'])
+            except (ValueError, IndexError):
+                print("Error: Invalid arguments for pan.")
         else:
-            print("Usage: pan <track_index>")
+            print("Usage: pan <track_index> [pan]")
     elif command == "velocity":
-        if len(args) == 1:
+        if len(args) >= 1:
             try:
                 track_index = int(args[0])
-                velocity_str = input("Enter velocity multiplier (e.g., 1.0): ").strip()
-                velocity = float(velocity_str)
-                seq.set_track_velocity(track_index, velocity)
-            except ValueError:
-                print("Error: Invalid track index or velocity.")
+                velocity_str = args[1] if len(args) > 1 else None
+                result = seq.set_track_velocity(track_index, velocity_str=velocity_str, api_mode=api_mode)
+                if result:
+                    if api_mode:
+                        print(json.dumps(result))
+                    else:
+                        print(result['message'])
+            except (ValueError, IndexError):
+                print("Error: Invalid arguments for velocity.")
         else:
-            print("Usage: velocity <track_index>")
+            print("Usage: velocity <track_index> [velocity]")
     elif command == "mute":
         if len(args) == 1:
             seq.toggle_mute(track_index=int(args[0]))
@@ -403,32 +436,42 @@ def process_command(user_input, seq):
     elif command == "bis":
         seq.record_bis()
     elif command == "delete":
-        if len(args) == 1:
-            track_index = int(args[0])
-            if 0 <= track_index < len(seq.song.tracks):
-                track_name = seq.song.tracks[track_index].name
-                confirm = input(f"Are you sure you want to delete track '{track_name}'? [y/N] ").lower()
-                if confirm == 'y':
-                    seq.delete_track(track_index)
-                else:
-                    print("Deletion cancelled.")
-            else:
-                print("Error: Invalid track index.")
+        if len(args) >= 1:
+            try:
+                track_index = int(args[0])
+                confirm_str = args[1] if len(args) > 1 else None
+                result = seq.delete_track(track_index, confirm_str=confirm_str, api_mode=api_mode)
+                if result:
+                    if api_mode:
+                        print(json.dumps(result))
+                    else:
+                        print(result['message'])
+            except (ValueError, IndexError):
+                print("Error: Invalid arguments for delete.")
         else:
-            print("Usage: delete <track_index>")
+            print("Usage: delete <track_index> [y/n]")
     elif command == "erase":
         if len(args) == 1:
             try:
                 track_idx = int(args[0])
-                # The sequencer method will now handle all prompting
-                seq.erase_track(track_idx=track_idx)
+                result = seq.erase_track(track_idx=track_idx)
+                if result and 'message' in result:
+                    if api_mode:
+                        print(json.dumps(result))
+                    else:
+                        print(result['message'])
             except ValueError:
                 print("Error: Invalid track index.")
         else:
             print("Usage: erase <track_index>")
     elif command == "rename":
         if len(args) == 2:
-            seq.rename_track(track_index=int(args[0]), new_name=args[1])
+            result = seq.rename_track(track_index=int(args[0]), new_name=args[1])
+            if result:
+                if api_mode:
+                    print(json.dumps(result))
+                else:
+                    print(result['message'])
         else:
             print("Usage: rename <track_index> <new_name>")
     elif command == "move":
@@ -450,14 +493,33 @@ def process_command(user_input, seq):
         else:
             print("Usage: copy <track_index>")
     elif command == "transpose":
-        if len(args) == 1:
+        if len(args) >= 1:
             try:
                 track_idx = int(args[0])
-                seq.transpose_track_section(track_idx)
-            except ValueError:
-                print("Error: Invalid track index.")
+                start_pos_str = args[1] if len(args) > 1 else None
+                end_pos_str = args[2] if len(args) > 2 else None
+                transpose_value_str = args[3] if len(args) > 3 else None
+                confirm_str = args[4] if len(args) > 4 else None
+
+                result = seq.transpose_track_section(
+                    track_idx=track_idx,
+                    start_pos_str=start_pos_str,
+                    end_pos_str=end_pos_str,
+                    transpose_value_str=transpose_value_str,
+                    confirm_str=confirm_str,
+                    api_mode=api_mode
+                )
+
+                if result:
+                    if api_mode:
+                        print(json.dumps(result))
+                    else:
+                        print(result['message'])
+
+            except (ValueError, IndexError):
+                print("Error: Invalid arguments for transpose.")
         else:
-            print("Usage: transpose <track_index>")
+            print("Usage: transpose <track_index> [start_pos] [end_pos] [semitones] [y/n]")
     elif command == "tempo":
         if len(args) == 1:
             seq.set_tempo(tempo=int(args[0]))
@@ -690,7 +752,7 @@ def process_command(user_input, seq):
         print(f"Unknown command: '{command}'. Type 'help' for a list of commands.")
     return True
 
-def main():
+def cli_main_loop():
     """The main entry point for the CLI application."""
     print("Welcome to the Python MIDI Sequencer!")
     seq = Sequencer()
@@ -766,6 +828,22 @@ def main():
     if seq.midi_listener_thread and seq.midi_listener_thread.is_alive():
         seq.unset_control_port()
     seq.close_virtual_ports()
+
+def api_main_loop():
+    """The main entry point for the API mode."""
+    seq = Sequencer()
+    for line in sys.stdin:
+        command = line.strip()
+        if command:
+            if not process_command(command, seq, api_mode=True):
+                break
+
+def main():
+    """The main entry point for the application."""
+    if '--api' in sys.argv:
+        api_main_loop()
+    else:
+        cli_main_loop()
 
 if __name__ == "__main__":
     if '--help' in sys.argv or '-h' in sys.argv:

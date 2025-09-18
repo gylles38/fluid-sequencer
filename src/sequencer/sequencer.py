@@ -81,6 +81,14 @@ class JackManager:
         self._display_stop_event = threading.Event()
         self.automation_events = []
         self.next_automation_event_index = 0
+        self.event_to_ignore: Optional[dict] = None
+
+    def ignore_next_event(self, track_index: int, start_time: float):
+        """
+        Flags an event to be ignored by the process callback.
+        Used to prevent the first note in note-triggered recording from playing back immediately.
+        """
+        self.event_to_ignore = {"track_index": track_index, "start_time": start_time}
 
     def _display_loop(self):
         """A loop in a separate thread to display the current transport position."""
@@ -447,6 +455,16 @@ class JackManager:
                     self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
                 while self.next_event_indices[i] < len(track.events):
                     event = track.events[self.next_event_indices[i]]
+
+                    # Check if this event should be ignored
+                    if (self.event_to_ignore and
+                            i == self.event_to_ignore.get("track_index") and
+                            math.isclose(event.start_time, self.event_to_ignore.get("start_time", -1.0))):
+                        # Skip this event and clear the flag so it only happens once.
+                        self.event_to_ignore = None
+                        self.next_event_indices[i] += 1
+                        continue
+
                     if start_beat_of_block <= event.start_time < end_beat_of_block:
                         for note in event.notes:
                             note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
@@ -1641,6 +1659,7 @@ class Sequencer:
         outport = None
         is_virtual_port = False
         recording_started_beat = None
+        first_note_ref = None
 
         try:
             with mido.open_input(inport_name) as inport:
@@ -1681,11 +1700,14 @@ class Sequencer:
                 print(f"\nNote received. Starting playback and recording...")
 
                 # Manually record the first note that triggered everything BEFORE starting playback
-                note = Note(pitch=first_msg.note, velocity=first_msg.velocity, duration=0.1) # Default duration
-                target_track.add_event(Event(notes=[note], start_time=start_beat))
+                first_note_ref = Note(pitch=first_msg.note, velocity=first_msg.velocity, duration=0.01) # Placeholder duration
+                target_track.add_event(Event(notes=[first_note_ref], start_time=start_beat))
                 open_notes[first_msg.note] = (start_beat, first_msg.velocity)
                 self.is_dirty = True
                 recording_started_beat = start_beat
+
+                # Flag the event we just added to be ignored by the playback engine once.
+                self.jack_manager.ignore_next_event(track_index=self.last_record_settings['track_index'], start_time=start_beat)
 
                 # NOW start playback. The sync process inside play() will see the new note.
                 self.play(start_beat=start_beat)
@@ -1712,9 +1734,14 @@ class Sequencer:
                                 note_on_beat, velocity = open_notes.pop(msg.note)
                                 duration_beats = current_beat_for_msg - note_on_beat
                                 if duration_beats <= 0: duration_beats = 0.01
-                                note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
-                                target_track.add_event(Event(notes=[note], start_time=note_on_beat))
-                                self.is_dirty = True
+
+                                if first_note_ref and msg.note == first_note_ref.pitch:
+                                    first_note_ref.duration = duration_beats
+                                    first_note_ref = None
+                                else:
+                                    note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
+                                    target_track.add_event(Event(notes=[note], start_time=note_on_beat))
+                                    self.is_dirty = True
 
                     if num_beats_to_record and (current_beat - recording_started_beat) >= num_beats_to_record:
                         print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
@@ -1732,15 +1759,12 @@ class Sequencer:
                     outport.send(mido.Message('note_off', channel=target_track.channel, note=note_pitch, velocity=0))
                 outport.send(mido.Message('control_change', channel=target_track.channel, control=123, value=0))
                 time.sleep(0.01)
-                outport.send(mido.Message('control_change', channel=target_track.channel, control=123, value=0))
-                time.sleep(0.01)
                 if not is_virtual_port and outport and not outport.closed:
                     outport.close()
             target_track.is_muted = original_mute_state
             self.is_recording = False
             print("\nRecording thread finished.")
 
-    def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
     def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
         target_track = self.song.tracks[track_index]
         if not isinstance(target_track, MidiTrack):
@@ -1846,6 +1870,7 @@ class Sequencer:
         settings['replace_notes'] = replace_notes
         if 'enable_thru' not in settings:
             settings['enable_thru'] = True
+        self._stop_event.clear()
         self._start_recording_internal(**settings)
 
     def _get_song_length_in_beats(self) -> float:

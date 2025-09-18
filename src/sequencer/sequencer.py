@@ -1311,6 +1311,9 @@ class Sequencer:
 
         print("Priming all MIDI tracks with initial state...")
         for i, track in enumerate(self.song.tracks):
+            if self.is_recording and self.last_record_settings and i == self.last_record_settings.get('track_index'):
+                continue
+
             if isinstance(track, MidiTrack) and track.output_port_name:
                 port = self.jack_manager.open_ports.get(track.output_port_name)
                 if port:

@@ -197,6 +197,11 @@ class JackManager:
 
             # --- Prime Audio Tracks Immediately After They Are Ready ---
             print("Priming audio tracks with initial state...")
+            is_any_track_soloed = False
+            for t in self.sequencer.song.tracks:
+                if hasattr(t, 'is_solo') and t.is_solo:
+                    is_any_track_soloed = True
+                    break
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     track = self.sequencer.song.tracks[ap.track_index]
@@ -204,6 +209,8 @@ class JackManager:
                         print(f"  - Priming Audio track '{track.name}'")
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+                        should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
 
             self.jack_client.set_process_callback(self._process_callback)
             self.jack_client.set_timebase_callback(self._time_callback)
@@ -1285,7 +1292,11 @@ class Sequencer:
         if not self.jack_manager.is_running:
             return
 
-        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
+        is_any_track_soloed = False
+        for t in self.song.tracks:
+            if hasattr(t, 'is_solo') and t.is_solo:
+                is_any_track_soloed = True
+                break
 
         for i, track in enumerate(self.song.tracks):
             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
@@ -1311,6 +1322,9 @@ class Sequencer:
 
         print("Priming all MIDI tracks with initial state...")
         for i, track in enumerate(self.song.tracks):
+            if self.is_recording and self.last_record_settings and i == self.last_record_settings.get('track_index'):
+                continue
+
             if isinstance(track, MidiTrack) and track.output_port_name:
                 port = self.jack_manager.open_ports.get(track.output_port_name)
                 if port:
@@ -1627,8 +1641,13 @@ class Sequencer:
         outport = None
         is_virtual_port = False
         recording_started_beat = None
+
         try:
             with mido.open_input(inport_name) as inport:
+                # Clear any stale messages from the input buffer
+                for _ in inport.iter_pending(): pass
+
+                # Setup MIDI thru port if needed
                 if outport_name and enable_thru:
                     vp = next((p for p in self.virtual_ports if p.name == outport_name), None)
                     if vp:
@@ -1636,23 +1655,54 @@ class Sequencer:
                         is_virtual_port = True
                     else:
                         outport = open_output(outport_name)
+                    # Prime the synth for MIDI thru
                     if target_track.bank_msb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=0, value=target_track.bank_msb))
                     if target_track.bank_lsb is not None: outport.send(mido.Message('control_change', channel=target_track.channel, control=32, value=target_track.bank_lsb))
                     outport.send(mido.Message('program_change', channel=target_track.channel, program=target_track.instrument))
 
-                print(f"Armed for recording on track '{target_track.name}'. Waiting for JACK transport to roll past {self._format_beats_to_position(start_beat)}.")
+                # --- Phase 1: Wait for the first note ---
+                print(f"Armed for recording on track '{target_track.name}'. Play a note to start recording and playback from {self._format_beats_to_position(start_beat)}.")
+                first_msg = None
                 while not self._stop_event.is_set():
-                    current_beat = self._get_current_beat()
-                    is_rolling = self.jack_manager.jack_client and self.jack_manager.jack_client.transport_state == jack.ROLLING
-                    if not is_rolling or current_beat < start_beat:
-                        time.sleep(0.01)
-                        continue
-                    if recording_started_beat is None:
-                        recording_started_beat = current_beat
-                        print(f"Recording started at beat {self._format_beats_to_position(current_beat)}. Type 'stop' to finish.")
                     for msg in inport.iter_pending():
                         if outport and hasattr(msg, 'channel'):
                             outport.send(msg.copy(channel=target_track.channel))
+                        if msg.type == 'note_on' and msg.velocity > 0:
+                            first_msg = msg
+                            break
+                    if first_msg:
+                        break
+                    time.sleep(0.001)
+
+                if self._stop_event.is_set() or not first_msg:
+                    raise UserInputCancelled("Recording cancelled by user.")
+
+                # --- Phase 2: Record first note, THEN start playback ---
+                print(f"\nNote received. Starting playback and recording...")
+
+                # Manually record the first note that triggered everything BEFORE starting playback
+                note = Note(pitch=first_msg.note, velocity=first_msg.velocity, duration=0.1) # Default duration
+                target_track.add_event(Event(notes=[note], start_time=start_beat))
+                open_notes[first_msg.note] = (start_beat, first_msg.velocity)
+                self.is_dirty = True
+                recording_started_beat = start_beat
+
+                # NOW start playback. The sync process inside play() will see the new note.
+                self.play(start_beat=start_beat)
+                time.sleep(0.05) # Give JACK a moment to start and stabilize transport
+
+                # --- Phase 3: Main recording loop for subsequent notes ---
+                while not self._stop_event.is_set():
+                    current_beat = self._get_current_beat()
+                    is_rolling = self.jack_manager.jack_client and self.jack_manager.jack_client.transport_state == jack.ROLLING
+                    if not is_rolling:
+                        time.sleep(0.01)
+                        continue
+
+                    for msg in inport.iter_pending():
+                        if outport and hasattr(msg, 'channel'):
+                            outport.send(msg.copy(channel=target_track.channel))
+
                         current_beat_for_msg = current_beat
                         if msg.type == 'note_on' and msg.velocity > 0:
                             if msg.note not in open_notes:
@@ -1665,10 +1715,15 @@ class Sequencer:
                                 note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                                 target_track.add_event(Event(notes=[note], start_time=note_on_beat))
                                 self.is_dirty = True
-                    if num_beats_to_record and recording_started_beat is not None and (current_beat - recording_started_beat) >= num_beats_to_record:
+
+                    if num_beats_to_record and (current_beat - recording_started_beat) >= num_beats_to_record:
                         print(f"\nFinished recording for {num_beats_to_record:.2f} beats.")
                         self._stop_event.set()
+
                     time.sleep(0.001)
+
+        except UserInputCancelled:
+            print("\nRecording cancelled.")
         except Exception as e:
             print(f"\nAn error occurred during recording: {e}")
         finally:
@@ -1677,12 +1732,15 @@ class Sequencer:
                     outport.send(mido.Message('note_off', channel=target_track.channel, note=note_pitch, velocity=0))
                 outport.send(mido.Message('control_change', channel=target_track.channel, control=123, value=0))
                 time.sleep(0.01)
+                outport.send(mido.Message('control_change', channel=target_track.channel, control=123, value=0))
+                time.sleep(0.01)
                 if not is_virtual_port and outport and not outport.closed:
                     outport.close()
             target_track.is_muted = original_mute_state
             self.is_recording = False
             print("\nRecording thread finished.")
 
+    def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
     def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
         target_track = self.song.tracks[track_index]
         if not isinstance(target_track, MidiTrack):

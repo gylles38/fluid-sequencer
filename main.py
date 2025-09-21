@@ -162,7 +162,6 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
 
                 if basename_to_save:
                     seq.save_project(basename_to_save)
-                    break # Proceed to quit
                 else:
                     return True, "Save cancelled. Please provide a name."
             else:

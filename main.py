@@ -45,9 +45,9 @@ except ImportError:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
 
-def print_help():
+def get_help_text():
     """Prints the help message with available commands."""
-    help_text = """
+    return """
 Sequencer CLI Commands:
   help                    - Shows this help message.
   add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
@@ -102,11 +102,10 @@ MIDI Mapping:
   unmap <chan> <cc>       - Removes a MIDI CC mapping.
   listmaps                - Lists all active MIDI CC mappings.
 """
-    print(help_text)
 
-def process_command(user_input, seq, api_mode=False):
+def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
     if not user_input:
-        return True # Continue loop
+        return True, "" # Continue loop
 
     parts = user_input.split()
     command = parts[0].lower()
@@ -115,68 +114,79 @@ def process_command(user_input, seq, api_mode=False):
     if command == "quit":
         if seq.is_dirty and not api_mode:
             while True:
-                choice = input("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
+                if confirmation_handler:
+                    choice = confirmation_handler("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
+                else:
+                    choice = input("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
+
                 if choice == 'c':
-                    print("Quit cancelled.")
-                    return True # Continue main loop
+                    return True, "Quit cancelled."
                 elif choice == 'd':
                     break # Proceed to quit
                 elif choice == 's':
                     basename_to_save = seq.last_project_basename
                     if basename_to_save:
-                        overwrite = input(f"Save over '{basename_to_save}.proj.json'? [Y/n] ").lower()
+                        if confirmation_handler:
+                            overwrite = confirmation_handler(f"Save over '{basename_to_save}.proj.json'? [Y/n] ").lower()
+                        else:
+                            overwrite = input(f"Save over '{basename_to_save}.proj.json'? [Y/n] ").lower()
                         if overwrite == 'n':
-                            basename_to_save = input("Enter new project basename: ").strip()
+                            if confirmation_handler:
+                                basename_to_save = confirmation_handler("Enter new project basename: ").strip()
+                            else:
+                                basename_to_save = input("Enter new project basename: ").strip()
                     else:
-                        basename_to_save = input("Enter project basename to save: ").strip()
+                        if confirmation_handler:
+                            basename_to_save = confirmation_handler("Enter project basename to save: ").strip()
+                        else:
+                            basename_to_save = input("Enter project basename to save: ").strip()
 
                     if basename_to_save:
                         seq.save_project(basename_to_save)
                         break # Proceed to quit
                     else:
-                        print("Save cancelled. Please provide a name.")
-                        # Loop again
+                        return True, "Save cancelled. Please provide a name."
                 else:
-                    print("Invalid choice.")
+                    return True, "Invalid choice."
 
         if seq.playback_state != "stopped":
             if not api_mode:
                 print("Stopping playback before exiting...")
             seq.stop()
-        return False # End loop
+        return False, "Exiting." # End loop
     elif command == "help":
-        print_help()
+        return True, get_help_text()
     elif command == "add":
         if len(args) == 1:
             result = seq.add_track(name=args[0], track_type='midi')
             if api_mode:
-                print(json.dumps(result))
+                return True, json.dumps(result)
             else:
-                print(result['message'])
+                return True, result['message']
         elif len(args) == 2:
             try:
                 prog = int(args[1])
                 if not 1 <= prog <= 128:
-                    print("Error: Program number must be between 1 and 128.")
+                    return True, "Error: Program number must be between 1 and 128."
                 else:
                     result = seq.add_track(name=args[0], track_type='midi', instrument=prog - 1)
                     if api_mode:
-                        print(json.dumps(result))
+                        return True, json.dumps(result)
                     else:
-                        print(result['message'])
+                        return True, result['message']
             except ValueError:
-                print("Error: Invalid program number.")
+                return True, "Error: Invalid program number."
         else:
-            print("Usage: add <name> [program_number]")
+            return True, "Usage: add <name> [program_number]"
     elif command == "addaudio":
         if len(args) == 2:
             result = seq.add_track(name=args[0], track_type='audio', filepath=args[1])
             if api_mode:
-                print(json.dumps(result))
+                return True, json.dumps(result)
             else:
-                print(result['message'])
+                return True, result['message']
         else:
-            print("Usage: addaudio <name> <filepath>")
+            return True, "Usage: addaudio <name> <filepath>"
     elif command == "addauto":
         if len(args) == 2:
             try:
@@ -184,13 +194,13 @@ def process_command(user_input, seq, api_mode=False):
                 target_index = int(args[1])
                 result = seq.add_automation_track(name, target_index)
                 if api_mode:
-                    print(json.dumps(result))
+                    return True, json.dumps(result)
                 else:
-                    print(result['message'])
+                    return True, result['message']
             except ValueError:
-                print("Error: Invalid target track index.")
+                return True, "Error: Invalid target track index."
         else:
-            print("Usage: addauto <name> <target_track_index>")
+            return True, "Usage: addauto <name> <target_track_index>"
     elif command == "addap":
         if len(args) >= 4:
             try:
@@ -199,13 +209,13 @@ def process_command(user_input, seq, api_mode=False):
                 param = args[2]
                 value = float(args[3])
                 curve = args[4] if len(args) > 4 else "none"
-                seq.add_automation_point(track_index, position_str, param, value, curve)
+                return True, seq.add_automation_point(track_index, position_str, param, value, curve)
             except ValueError:
-                print("Error: Invalid number for track index or value.")
+                return True, "Error: Invalid number for track index or value."
             except Exception as e:
-                print(f"Error: {e}")
+                return True, f"Error: {e}"
         else:
-            print("Usage: addap <track_index> <position> <param> <value> [curve]")
+            return True, "Usage: addap <track_index> <position> <param> <value> [curve]"
     elif command == "addcc":
         if len(args) == 4:
             try:
@@ -213,168 +223,187 @@ def process_command(user_input, seq, api_mode=False):
                 position_str = args[1]
                 control = int(args[2])
                 value = int(args[3])
-                seq.add_cc_event(track_index, position_str, control, value)
+                return True, seq.add_cc_event(track_index, position_str, control, value)
             except ValueError:
-                print("Error: Invalid number for track index, CC, or value.")
+                return True, "Error: Invalid number for track index, CC, or value."
         else:
-            print("Usage: addcc <track_index> <position> <cc_number> <value>")
+            return True, "Usage: addcc <track_index> <position> <cc_number> <value>"
     elif command == "load":
         if len(args) == 1:
-            confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
-            if confirm == 'y':
-                seq.load_song(filepath=args[0])
+            if confirmation_handler:
+                confirm = confirmation_handler("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
             else:
-                print("Load cancelled.")
+                confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
+            if confirm == 'y':
+                return True, seq.load_song(filepath=args[0])
+            else:
+                return True, "Load cancelled."
         else:
-            print("Usage: load <filepath>")
+            return True, "Usage: load <filepath>"
     elif command == "loadproject":
         if len(args) == 1:
-            confirm = input("Loading a new project will discard the current session. Are you sure? [y/N] ").lower()
-            if confirm == 'y':
-                seq.load_project(basename=args[0])
+            if confirmation_handler:
+                confirm = confirmation_handler("Loading a new project will discard the current session. Are you sure? [y/N] ").lower()
             else:
-                print("Load cancelled.")
+                confirm = input("Loading a new project will discard the current session. Are you sure? [y/N] ").lower()
+            if confirm == 'y':
+                return True, seq.load_project(basename=args[0])
+            else:
+                return True, "Load cancelled."
         else:
-            print("Usage: loadproject <basename>")
+            return True, "Usage: loadproject <basename>"
     elif command == "newproject":
         if len(args) == 1:
             project_name = args[0]
             project_filepath = f"{project_name}.proj.json"
             if os.path.exists(project_filepath):
-                print(f"Error: Project '{project_name}' already exists.")
-                return True
+                return True, f"Error: Project '{project_name}' already exists."
 
-            confirm = input("Creating a new project will discard the current session. Are you sure? [y/N] ").lower()
+            if confirmation_handler:
+                confirm = confirmation_handler("Creating a new project will discard the current session. Are you sure? [y/N] ").lower()
+            else:
+                confirm = input("Creating a new project will discard the current session. Are you sure? [y/N] ").lower()
+
             if confirm == 'y':
                 seq.new_project()
                 seq.last_project_basename = project_name
                 seq.is_dirty = True
+                return True, f"New project '{project_name}' created."
             else:
-                print("New project cancelled.")
+                return True, "New project cancelled."
         else:
-            print("Usage: newproject <name>")
+            return True, "Usage: newproject <name>"
     elif command == "list":
-        print(seq.list_tracks())
+        return True, seq.list_tracks()
     elif command == "vport":
         if len(args) == 1:
-            seq.create_virtual_port(name=args[0])
+            return True, seq.create_virtual_port(name=args[0])
         else:
-            print("Usage: vport <port_name>")
+            return True, "Usage: vport <port_name>"
     elif command == "delvport":
         if not seq.virtual_ports:
-            print("No virtual ports to delete.")
-            return True
+            return True, "No virtual ports to delete."
 
-        print("Available virtual ports:")
+        output = "Available virtual ports:\n"
         for i, vp in enumerate(seq.virtual_ports):
-            print(f"  [{i}] {vp.name}")
+            output += f"  [{i}] {vp.name}\n"
 
         try:
-            idx = int(input("Choose a virtual port to delete: "))
-            if 0 <= idx < len(seq.virtual_ports):
-                seq.delete_virtual_port(seq.virtual_ports[idx].name)
+            if confirmation_handler:
+                idx_str = confirmation_handler(output + "Choose a virtual port to delete: ")
             else:
-                print("Error: Invalid index.")
+                print(output)
+                idx_str = input("Choose a virtual port to delete: ")
+            idx = int(idx_str)
+            if 0 <= idx < len(seq.virtual_ports):
+                return True, seq.delete_virtual_port(seq.virtual_ports[idx].name)
+            else:
+                return True, "Error: Invalid index."
         except (ValueError, IndexError):
-            print("Error: Invalid input.")
+            return True, "Error: Invalid input."
 
     elif command == "ports":
-        print(seq.list_ports())
+        return True, seq.list_ports()
     elif command == "assign":
         if len(args) == 1:
             try:
                 track_index = int(args[0])
                 if not 0 <= track_index < len(seq.song.tracks):
-                    print("Error: Invalid track index.")
-                    return True
+                    return True, "Error: Invalid track index."
 
                 hardware_ports = mido.get_output_names() # type: ignore
                 virtual_port_names = [vp.name for vp in seq.virtual_ports]
                 all_outputs = hardware_ports + virtual_port_names
 
                 if not all_outputs:
-                    print("No output ports available.")
-                    return True
+                    return True, "No output ports available."
 
-                print("Available output ports:")
+                output = "Available output ports:\n"
                 for i, name in enumerate(all_outputs):
-                    print(f"  [{i}] {name}")
+                    output += f"  [{i}] {name}\n"
 
-                port_index = int(input("Choose a port to assign: "))
+                if confirmation_handler:
+                    port_index_str = confirmation_handler(output + "Choose a port to assign: ")
+                else:
+                    print(output)
+                    port_index_str = input("Choose a port to assign: ")
+                port_index = int(port_index_str)
                 if 0 <= port_index < len(all_outputs):
                     port_name = all_outputs[port_index]
-                    seq.assign_port(track_index, port_name)
+                    return True, seq.assign_port(track_index, port_name)
                 else:
-                    print("Error: Invalid port index.")
+                    return True, "Error: Invalid port index."
 
             except (ValueError, IndexError):
-                print("Error: Invalid input.")
+                return True, "Error: Invalid input."
         else:
-            print("Usage: assign <track_index>")
+            return True, "Usage: assign <track_index>"
     elif command == "assignmetro":
         hardware_ports = mido.get_output_names() # type: ignore
         virtual_port_names = [vp.name for vp in seq.virtual_ports]
         all_outputs = hardware_ports + virtual_port_names
 
         if not all_outputs:
-            print("No output ports available.")
-            return True
+            return True, "No output ports available."
 
-        print("Available output ports:")
+        output = "Available output ports:\n"
         for i, name in enumerate(all_outputs):
-            print(f"  [{i}] {name}")
+            output += f"  [{i}] {name}\n"
 
         try:
-            port_index = int(input("Choose a port to assign for the metronome: "))
+            if confirmation_handler:
+                port_index_str = confirmation_handler(output + "Choose a port to assign for the metronome: ")
+            else:
+                print(output)
+                port_index_str = input("Choose a port to assign for the metronome: ")
+            port_index = int(port_index_str)
             if 0 <= port_index < len(all_outputs):
                 port_name = all_outputs[port_index]
                 seq.song.metronome_port_name = port_name
-                print(f"Metronome assigned to port '{port_name}'.")
+                return True, f"Metronome assigned to port '{port_name}'."
             else:
-                print("Error: Invalid port index.")
+                return True, "Error: Invalid port index."
         except (ValueError, IndexError):
-            print("Error: Invalid input.")
+            return True, "Error: Invalid input."
     elif command == "unassign":
         if len(args) == 1:
-            seq.unassign_port(track_index=int(args[0]))
+            return True, seq.unassign_port(track_index=int(args[0]))
         else:
-            print("Usage: unassign <track_index>")
+            return True, "Usage: unassign <track_index>"
     elif command == "setaudiocmd":
         if args:
             cmd_str = " ".join(args)
             seq.audio_player_command = cmd_str
-            print(f"Audio player command set to: {cmd_str}")
-            print("Note: The audio filepath will be appended to this command.")
+            return True, f"Audio player command set to: {cmd_str}\nNote: The audio filepath will be appended to this command."
         else:
-            print("Usage: setaudiocmd <command...>")
-            print(f"Current command: {seq.audio_player_command}")
+            return True, f"Usage: setaudiocmd <command...>\nCurrent command: {seq.audio_player_command}"
     elif command == "setbank":
         if len(args) == 2:
-            seq.set_bank(track_index=int(args[0]), msb=int(args[1]))
+            return True, seq.set_bank(track_index=int(args[0]), msb=int(args[1]))
         elif len(args) == 3:
-            seq.set_bank(track_index=int(args[0]), msb=int(args[1]), lsb=int(args[2]))
+            return True, seq.set_bank(track_index=int(args[0]), msb=int(args[1]), lsb=int(args[2]))
         else:
-            print("Usage: setbank <track_index> <msb> [lsb]")
+            return True, "Usage: setbank <track_index> <msb> [lsb]"
     elif command == "setch":
         if len(args) == 2:
-            seq.set_channel(track_index=int(args[0]), channel=int(args[1]))
+            return True, seq.set_channel(track_index=int(args[0]), channel=int(args[1]))
         else:
-            print("Usage: setch <track_index> <channel>")
+            return True, "Usage: setch <track_index> <channel>"
     elif command == "setprog":
         if len(args) == 2:
             prog = int(args[1])
             if not 1 <= prog <= 128:
-                print("Error: Program number must be between 1 and 128.")
+                return True, "Error: Program number must be between 1 and 128."
             else:
-                seq.set_program(track_index=int(args[0]), program=prog - 1)
+                return True, seq.set_program(track_index=int(args[0]), program=prog - 1)
         else:
-            print("Usage: setprog <track_index> <program>")
+            return True, "Usage: setprog <track_index> <program>"
     elif command == "volume":
         if len(args) >= 1:
             try:
                 track_index = int(args[0])
                 volume_str = args[1] if len(args) > 1 else None
-                result = seq.set_track_volume(track_index, volume_str=volume_str, api_mode=api_mode)
+                result = seq.set_track_volume(track_index, volume_str=volume_str, api_mode=api_mode, confirmation_handler=confirmation_handler)
                 if result:
                     if api_mode:
                         print(json.dumps(result))
@@ -389,7 +418,7 @@ def process_command(user_input, seq, api_mode=False):
             try:
                 track_index = int(args[0])
                 pan_str = args[1] if len(args) > 1 else None
-                result = seq.set_track_pan(track_index, pan_str=pan_str, api_mode=api_mode)
+                result = seq.set_track_pan(track_index, pan_str=pan_str, api_mode=api_mode, confirmation_handler=confirmation_handler)
                 if result:
                     if api_mode:
                         print(json.dumps(result))
@@ -404,7 +433,7 @@ def process_command(user_input, seq, api_mode=False):
             try:
                 track_index = int(args[0])
                 velocity_str = args[1] if len(args) > 1 else None
-                result = seq.set_track_velocity(track_index, velocity_str=velocity_str, api_mode=api_mode)
+                result = seq.set_track_velocity(track_index, velocity_str=velocity_str, api_mode=api_mode, confirmation_handler=confirmation_handler)
                 if result:
                     if api_mode:
                         print(json.dumps(result))
@@ -416,82 +445,82 @@ def process_command(user_input, seq, api_mode=False):
             print("Usage: velocity <track_index> [velocity]")
     elif command == "mute":
         if len(args) == 1:
-            seq.toggle_mute(track_index=int(args[0]))
+            return True, seq.toggle_mute(track_index=int(args[0]))
         else:
-            print("Usage: mute <track_index>")
+            return True, "Usage: mute <track_index>"
     elif command == "solo":
         if len(args) == 1:
-            seq.toggle_solo(track_index=int(args[0]))
+            return True, seq.toggle_solo(track_index=int(args[0]))
         else:
-            print("Usage: solo <track_index>")
+            return True, "Usage: solo <track_index>"
     elif command == "record":
         if len(args) == 1:
             try:
                 track_idx = int(args[0])
-                seq.record_track(track_idx)
+                seq.record_track(track_idx, confirmation_handler=confirmation_handler)
             except ValueError:
                 print("Error: Invalid track index.")
         else:
             print("Usage: record <track_index>")
     elif command == "bis":
-        seq.record_bis()
+        seq.record_bis(confirmation_handler=confirmation_handler)
     elif command == "delete":
         if len(args) >= 1:
             try:
                 track_index = int(args[0])
                 confirm_str = args[1] if len(args) > 1 else None
-                result = seq.delete_track(track_index, confirm_str=confirm_str, api_mode=api_mode)
+                result = seq.delete_track(track_index, confirm_str=confirm_str, api_mode=api_mode, confirmation_handler=confirmation_handler)
                 if result:
                     if api_mode:
-                        print(json.dumps(result))
+                        return True, json.dumps(result)
                     else:
-                        print(result['message'])
+                        return True, result['message']
             except (ValueError, IndexError):
-                print("Error: Invalid arguments for delete.")
+                return True, "Error: Invalid arguments for delete."
         else:
-            print("Usage: delete <track_index> [y/n]")
+            return True, "Usage: delete <track_index> [y/n]"
     elif command == "erase":
         if len(args) == 1:
             try:
                 track_idx = int(args[0])
-                result = seq.erase_track(track_idx=track_idx)
+                result = seq.erase_track(track_idx=track_idx, confirmation_handler=confirmation_handler)
                 if result and 'message' in result:
                     if api_mode:
-                        print(json.dumps(result))
+                        return True, json.dumps(result)
                     else:
-                        print(result['message'])
+                        return True, result['message']
             except ValueError:
-                print("Error: Invalid track index.")
+                return True, "Error: Invalid track index."
         else:
-            print("Usage: erase <track_index>")
+            return True, "Usage: erase <track_index>"
     elif command == "rename":
         if len(args) == 2:
             result = seq.rename_track(track_index=int(args[0]), new_name=args[1])
             if result:
                 if api_mode:
-                    print(json.dumps(result))
+                    return True, json.dumps(result)
                 else:
-                    print(result['message'])
+                    return True, result['message']
         else:
-            print("Usage: rename <track_index> <new_name>")
+            return True, "Usage: rename <track_index> <new_name>"
     elif command == "move":
         if len(args) == 1:
             try:
                 source_track_idx = int(args[0])
-                seq.move_track_section(source_track_idx)
+                return True, seq.move_track_section(source_track_idx, confirmation_handler=confirmation_handler)
             except ValueError:
-                print("Error: Invalid track index.")
+                return True, "Error: Invalid track index."
         else:
-            print("Usage: move <track_index>")
+            return True, "Usage: move <track_index>"
     elif command == "copy":
         if len(args) == 1:
             try:
                 source_track_idx = int(args[0])
-                seq.copy_track_section(source_track_idx)
+                return True, seq.copy_track_section(source_track_idx, confirmation_handler=confirmation_handler)
             except ValueError:
-                print("Error: Invalid track index.")
+                return True, "Error: Invalid track index."
         else:
-            print("Usage: copy <track_index>")
+            return True, "Usage: copy <track_index>"
     elif command == "transpose":
         if len(args) >= 1:
             try:
@@ -507,41 +536,42 @@ def process_command(user_input, seq, api_mode=False):
                     end_pos_str=end_pos_str,
                     transpose_value_str=transpose_value_str,
                     confirm_str=confirm_str,
-                    api_mode=api_mode
+                    api_mode=api_mode,
+                    confirmation_handler=confirmation_handler
                 )
 
                 if result:
                     if api_mode:
-                        print(json.dumps(result))
+                        return True, json.dumps(result)
                     else:
-                        print(result['message'])
+                        return True, result['message']
 
             except (ValueError, IndexError):
-                print("Error: Invalid arguments for transpose.")
+                return True, "Error: Invalid arguments for transpose."
         else:
-            print("Usage: transpose <track_index> [start_pos] [end_pos] [semitones] [y/n]")
+            return True, "Usage: transpose <track_index> [start_pos] [end_pos] [semitones] [y/n]"
     elif command == "tempo":
         if len(args) == 1:
-            seq.set_tempo(tempo=int(args[0]))
+            return True, seq.set_tempo(tempo=int(args[0]))
         else:
-            print("Usage: tempo <bpm>")
+            return True, "Usage: tempo <bpm>"
     elif command == "timesig":
         if len(args) == 2:
-            seq.set_time_signature(numerator=int(args[0]), denominator=int(args[1]))
+            return True, seq.set_time_signature(numerator=int(args[0]), denominator=int(args[1]))
         else:
-            print("Usage: timesig <numerator> <denominator>")
+            return True, "Usage: timesig <numerator> <denominator>"
     elif command == "save":
         if len(args) == 1:
-            seq.save_song(filepath=args[0])
+            return True, seq.save_song(filepath=args[0])
         else:
-            print("Usage: save <filepath>")
+            return True, "Usage: save <filepath>"
     elif command == "saveproject":
         if len(args) == 1:
-            seq.save_project(basename=args[0])
+            return True, seq.save_project(basename=args[0])
         else:
-            print("Usage: saveproject <basename>")
+            return True, "Usage: saveproject <basename>"
     elif command == "prime":
-        seq.prime_all_tracks()
+        return True, seq.prime_all_tracks()
     elif command == "cc":
         try:
             hardware_ports = mido.get_output_names()
@@ -549,126 +579,138 @@ def process_command(user_input, seq, api_mode=False):
             all_outputs = hardware_ports + virtual_port_names
 
             if not all_outputs:
-                print("No output ports available.")
-                return True
+                return True, "No output ports available."
 
-            print("Available output ports:")
+            output = "Available output ports:\n"
             for i, name in enumerate(all_outputs):
-                print(f"  [{i}] {name}")
+                output += f"  [{i}] {name}\n"
 
-            port_idx_str = input("Choose a port to send to: ").strip()
+            if confirmation_handler:
+                port_idx_str = confirmation_handler(output + "Choose a port to send to: ").strip()
+                channel_str = confirmation_handler("Enter MIDI channel (1-16): ").strip()
+                control_str = confirmation_handler("Enter CC number (0-127): ").strip()
+                value_str = confirmation_handler("Enter CC value (0-127): ").strip()
+            else:
+                print(output)
+                port_idx_str = input("Choose a port to send to: ").strip()
+                channel_str = input("Enter MIDI channel (1-16): ").strip()
+                control_str = input("Enter CC number (0-127): ").strip()
+                value_str = input("Enter CC value (0-127): ").strip()
+
             port_idx = int(port_idx_str)
             if not 0 <= port_idx < len(all_outputs):
-                print("Error: Invalid port index.")
-                return True
+                return True, "Error: Invalid port index."
             port_name = all_outputs[port_idx]
 
-            channel_str = input("Enter MIDI channel (1-16): ").strip()
             channel = int(channel_str) - 1 # To 0-indexed
-
-            control_str = input("Enter CC number (0-127): ").strip()
             control = int(control_str)
-
-            value_str = input("Enter CC value (0-127): ").strip()
             value = int(value_str)
 
-            seq.send_cc_message(port_name, channel, control, value)
+            return True, seq.send_cc_message(port_name, channel, control, value)
 
         except (ValueError, IndexError):
-            print("Error: Invalid input.")
+            return True, "Error: Invalid input."
 
     elif command == "play":
         if len(args) == 0:
             # play
             seq.play_range_enabled = False
             seq.play()
+            return True, "Playing."
         elif len(args) == 1:
             # play <start>
             start_beat = seq.parse_position_to_beats(args[0])
             if start_beat is not None:
+                output = ""
                 if seq.loop_enabled:
-                    print("Looping disabled.")
+                    output += "Looping disabled.\n"
                     seq.loop_enabled = False
                 seq.play_range_enabled = False
                 seq.play(start_beat=start_beat)
+                return True, output + f"Playing from {args[0]}."
+            else:
+                return True, "Invalid position."
         elif len(args) == 2:
             # play <start> <end>
             start_beat = seq.parse_position_to_beats(args[0])
             end_beat = seq.parse_position_to_beats(args[1])
             if start_beat is None or end_beat is None:
-                return True
+                return True, "Invalid position."
 
             if end_beat <= start_beat:
-                print("Error: End position must be after the start position.")
-                return True
+                return True, "Error: End position must be after the start position."
 
             # Set the play range and disable looping to avoid conflict
             seq.play_range_start_beat = start_beat
             seq.play_range_end_beat = end_beat
             seq.play_range_enabled = True
+            output = ""
             if seq.loop_enabled:
                 seq.loop_enabled = False
-                print("Looping disabled to allow play range.")
+                output += "Looping disabled to allow play range.\n"
 
-            print(f"Set to stop at {args[1]}.")
+            output += f"Set to stop at {args[1]}."
             seq.play(start_beat=start_beat)
+            return True, output
         else:
-            print("Usage: play [start_position] [end_position]")
-            print("Example: play 10:1 15:1")
+            return True, "Usage: play [start_position] [end_position]\nExample: play 10:1 15:1"
     elif command == "pause":
         seq.pause()
+        return True, "Toggled pause."
     elif command == "loop":
         if len(args) == 0:
             seq.loop_enabled = not seq.loop_enabled
             status = "enabled" if seq.loop_enabled else "disabled"
+            output = ""
             if seq.loop_enabled and seq.play_range_enabled:
-                print("Disabling play range to enable looping.")
+                output += "Disabling play range to enable looping.\n"
                 seq.play_range_enabled = False
-            print(f"Looping is now {status}.")
+            output += f"Looping is now {status}."
             if not seq.loop_enabled:
-                print("Note: Loop points are still saved. Use 'loop <start> <end>' to set new points.")
+                output += "\nNote: Loop points are still saved. Use 'loop <start> <end>' to set new points."
             elif seq.loop_end_beat <= seq.loop_start_beat:
-                print("Warning: Loop end is not after loop start. The loop will not function correctly.")
+                output += "\nWarning: Loop end is not after loop start. The loop will not function correctly."
+            return True, output
         elif len(args) == 2:
             start_beat = seq.parse_position_to_beats(args[0])
             end_beat = seq.parse_position_to_beats(args[1])
             if start_beat is None or end_beat is None:
-                # Error is printed by parse_position_to_beats
-                return True
+                return True, "Invalid position."
 
             if end_beat <= start_beat:
-                print("Error: Loop end position must be after the start position.")
-                return True
+                return True, "Error: Loop end position must be after the start position."
 
             seq.loop_start_beat = start_beat
             seq.loop_end_beat = end_beat
             seq.loop_enabled = True
+            output = ""
             if seq.play_range_enabled:
-                print("Disabling play range to enable looping.")
+                output += "Disabling play range to enable looping.\n"
                 seq.play_range_enabled = False
-            print(f"Loop enabled from {args[0]} to {args[1]}.")
+            output += f"Loop enabled from {args[0]} to {args[1]}."
             # Also start playback from the beginning of the loop
             seq.play(start_beat=start_beat)
+            return True, output
         else:
-            print("Usage: loop [start_position] [end_position]")
-            print("Example: loop 1:1 5:1")
+            return True, "Usage: loop [start_position] [end_position]\nExample: loop 1:1 5:1"
     elif command == "stop":
         seq.stop()
+        return True, "Stopped."
     elif command == "seek":
         if len(args) == 1:
-            seq.seek(args[0])
+            return True, seq.seek(args[0])
         else:
-            print("Usage: seek <amount> (e.g., +1m, -4b)")
+            return True, "Usage: seek <amount> (e.g., +1m, -4b)"
     elif command == "metronome":
         if len(args) == 1 and args[0].lower() in ["on", "off"]:
             is_enabled = args[0].lower() == "on"
             seq.song.metronome_enabled = is_enabled
             status = "enabled" if is_enabled else "disabled"
-            print(f"Metronome is now {status}.")
             if is_enabled and seq.playback_state != "stopped":
                 seq.start_metronome()
+            return True, f"Metronome is now {status}."
         else:
-            print("Usage: metronome <on|off>")
+            return True, "Usage: metronome <on|off>"
     elif command == "setcontrolport":
         if len(args) == 1:
             try:
@@ -676,15 +718,15 @@ def process_command(user_input, seq, api_mode=False):
                 input_ports = mido.get_input_names()
                 if 0 <= port_index < len(input_ports):
                     port_name = input_ports[port_index]
-                    seq.set_control_port(port_name)
+                    return True, seq.set_control_port(port_name)
                 else:
-                    print("Error: Invalid port index.")
+                    return True, "Error: Invalid port index."
             except (ValueError, IndexError):
-                print("Error: Invalid input.")
+                return True, "Error: Invalid input."
         else:
-            print("Usage: setcontrolport <port_index>")
+            return True, "Usage: setcontrolport <port_index>"
     elif command == "unsetcontrolport":
-        seq.unset_control_port()
+        return True, seq.unset_control_port()
     elif command == "map":
         if len(args) == 4:
             try:
@@ -694,19 +736,15 @@ def process_command(user_input, seq, api_mode=False):
                 action = args[3].lower()
 
                 if not 0 <= channel <= 15:
-                    print("Error: Channel must be between 1 and 16.")
-                    return True
+                    return True, "Error: Channel must be between 1 and 16."
                 if not 0 <= control <= 127:
-                    print("Error: CC number must be between 0 and 127.")
-                    return True
+                    return True, "Error: CC number must be between 0 and 127."
                 if not 0 <= track_index < len(seq.song.tracks):
-                    print("Error: Invalid track index.")
-                    return True
+                    return True, "Error: Invalid track index."
 
                 valid_actions = ['volume', 'pan', 'program']
                 if action not in valid_actions:
-                    print(f"Error: Invalid action. Must be one of {valid_actions}.")
-                    return True
+                    return True, f"Error: Invalid action. Must be one of {valid_actions}."
 
                 from sequencer.models import MidiMapping
                 mapping = MidiMapping(channel=channel, control=control, track_index=track_index, action=action)
@@ -714,13 +752,13 @@ def process_command(user_input, seq, api_mode=False):
                 # Remove any existing mapping for this channel/cc
                 seq.song.midi_mappings = [m for m in seq.song.midi_mappings if not (m.channel == channel and m.control == control)]
                 seq.song.midi_mappings.append(mapping)
-                print(f"Mapped Ch:{channel+1} CC:{control} to {action} on track {track_index}.")
                 seq.is_dirty = True
+                return True, f"Mapped Ch:{channel+1} CC:{control} to {action} on track {track_index}."
 
             except ValueError:
-                print("Error: Invalid number for channel, CC, or track index.")
+                return True, "Error: Invalid number for channel, CC, or track index."
         else:
-            print("Usage: map <channel> <cc> <track_index> <action>")
+            return True, "Usage: map <channel> <cc> <track_index> <action>"
     elif command == "unmap":
         if len(args) == 2:
             try:
@@ -730,36 +768,39 @@ def process_command(user_input, seq, api_mode=False):
                 initial_len = len(seq.song.midi_mappings)
                 seq.song.midi_mappings = [m for m in seq.song.midi_mappings if not (m.channel == channel and m.control == control)]
                 if len(seq.song.midi_mappings) < initial_len:
-                    print(f"Unmapped Ch:{channel+1} CC:{control}.")
                     seq.is_dirty = True
+                    return True, f"Unmapped Ch:{channel+1} CC:{control}."
                 else:
-                    print("Mapping not found.")
+                    return True, "Mapping not found."
 
             except ValueError:
-                print("Error: Invalid number for channel or CC.")
+                return True, "Error: Invalid number for channel or CC."
         else:
-            print("Usage: unmap <channel> <cc>")
+            return True, "Usage: unmap <channel> <cc>"
     elif command == "listmaps":
         if not seq.song.midi_mappings:
-            print("No MIDI mappings defined.")
-            return True
+            return True, "No MIDI mappings defined."
 
-        print("Active MIDI Mappings:")
+        output = "Active MIDI Mappings:\n"
         for m in seq.song.midi_mappings:
-            print(f"  Ch:{m.channel+1} CC:{m.control} -> Track {m.track_index} {m.action.capitalize()}")
+            output += f"  Ch:{m.channel+1} CC:{m.control} -> Track {m.track_index} {m.action.capitalize()}\n"
+        return True, output
 
     else:
-        print(f"Unknown command: '{command}'. Type 'help' for a list of commands.")
-    return True
+        return True, f"Unknown command: '{command}'. Type 'help' for a list of commands."
+    return True, ""
 
 def cli_main_loop():
     """The main entry point for the CLI application."""
     print("Welcome to the Python MIDI Sequencer!")
     seq = Sequencer()
-    print_help()
+    print(get_help_text())
 
     command_buffer = ""
     print("> ", end="", flush=True)
+
+    def cli_confirmation_handler(prompt):
+        return input(prompt)
 
     while True:
         try:
@@ -767,13 +808,17 @@ def cli_main_loop():
 
             if char == 'ARROW_LEFT':
                 print() # Move to a new line to not mess up the current command line
-                process_command("seek -1m", seq)
+                _, output = process_command("seek -1m", seq, confirmation_handler=cli_confirmation_handler)
+                if output:
+                    print(output)
                 command_buffer = "" # Clear buffer after action
                 print(f"> ", end="", flush=True)
                 continue
             elif char == 'ARROW_RIGHT':
                 print() # Move to a new line to not mess up the current command line
-                process_command("seek +1m", seq)
+                _, output = process_command("seek +1m", seq, confirmation_handler=cli_confirmation_handler)
+                if output:
+                    print(output)
                 command_buffer = "" # Clear buffer after action
                 print(f"> ", end="", flush=True)
                 continue
@@ -789,7 +834,9 @@ def cli_main_loop():
                 if seq.playback_state != "stopped" and not command_buffer:
                     # If playing and command buffer is empty, spacebar is a shortcut for pause
                     print() # Move to a new line to not mess up the current command line
-                    process_command("pause", seq)
+                    _, output = process_command("pause", seq, confirmation_handler=cli_confirmation_handler)
+                    if output:
+                        print(output)
                     command_buffer = "" # Clear buffer after pausing
                     print(f"> ", end="", flush=True)
                 else:
@@ -800,7 +847,10 @@ def cli_main_loop():
 
             elif char in ('\r', '\n'):
                 print()  # Move to the next line
-                if not process_command(command_buffer, seq):
+                should_continue, output = process_command(command_buffer, seq, confirmation_handler=cli_confirmation_handler)
+                if output:
+                    print(output)
+                if not should_continue:
                     break # Exit if process_command returns False (for 'quit')
                 command_buffer = ""
                 print("> ", end="", flush=True)
@@ -835,12 +885,18 @@ def api_main_loop():
     for line in sys.stdin:
         command = line.strip()
         if command:
-            if not process_command(command, seq, api_mode=True):
+            should_continue, output = process_command(command, seq, api_mode=True)
+            if output:
+                print(output)
+            if not should_continue:
                 break
 
 def main():
     """The main entry point for the application."""
-    if '--api' in sys.argv:
+    if '--gui' in sys.argv:
+        from sequencer.kivy_ui import SequencerApp
+        SequencerApp().run()
+    elif '--api' in sys.argv:
         api_main_loop()
     else:
         cli_main_loop()

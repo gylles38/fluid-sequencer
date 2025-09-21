@@ -452,13 +452,13 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 result = seq.set_track_volume(track_index, volume_str=volume_str, api_mode=api_mode, confirmation_handler=confirmation_handler)
                 if result:
                     if api_mode:
-                        print(json.dumps(result))
+                        return True, json.dumps(result)
                     else:
-                        print(result['message'])
+                        return True, result['message']
             except (ValueError, IndexError):
-                print("Error: Invalid arguments for volume.")
+                return True, "Error: Invalid arguments for volume."
         else:
-            print("Usage: volume <track_index> [volume]")
+            return True, "Usage: volume <track_index> [volume]"
     elif command == "pan":
         if len(args) >= 1:
             try:
@@ -467,13 +467,13 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 result = seq.set_track_pan(track_index, pan_str=pan_str, api_mode=api_mode, confirmation_handler=confirmation_handler)
                 if result:
                     if api_mode:
-                        print(json.dumps(result))
+                        return True, json.dumps(result)
                     else:
-                        print(result['message'])
+                        return True, result['message']
             except (ValueError, IndexError):
-                print("Error: Invalid arguments for pan.")
+                return True, "Error: Invalid arguments for pan."
         else:
-            print("Usage: pan <track_index> [pan]")
+            return True, "Usage: pan <track_index> [pan]"
     elif command == "velocity":
         if len(args) >= 1:
             try:
@@ -482,13 +482,13 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 result = seq.set_track_velocity(track_index, velocity_str=velocity_str, api_mode=api_mode, confirmation_handler=confirmation_handler)
                 if result:
                     if api_mode:
-                        print(json.dumps(result))
+                        return True, json.dumps(result)
                     else:
-                        print(result['message'])
+                        return True, result['message']
             except (ValueError, IndexError):
-                print("Error: Invalid arguments for velocity.")
+                return True, "Error: Invalid arguments for velocity."
         else:
-            print("Usage: velocity <track_index> [velocity]")
+            return True, "Usage: velocity <track_index> [velocity]"
     elif command == "mute":
         if len(args) == 1:
             return True, seq.toggle_mute(track_index=int(args[0]))

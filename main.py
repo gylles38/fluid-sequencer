@@ -112,7 +112,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
     args = parts[1:]
 
     if command == "quit":
-        if seq.is_dirty and not api_mode:
+        if seq.is_dirty:
             if len(args) == 0:
                 if api_mode:
                     return True, json.dumps({"status": "prompt", "message": "You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ", "next_arg": "choice"})

@@ -509,12 +509,12 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             return True, "Usage: solo <track_index>"
     elif command == "record":
         try:
-            if len(args) == 0:
+            # Step 0: Validate track index
+            if len(args) < 1:
                 return True, "Usage: record <track_index>"
-
             track_idx = int(args[0])
             if not 0 <= track_idx < len(seq.song.tracks):
-                print("Error: Invalid track index.")
+                return True, "Error: Invalid track index."
             target_track = seq.song.tracks[track_idx]
             if not isinstance(target_track, MidiTrack):
                 return True, "Error: Recording is only supported for MIDI tracks."
@@ -523,11 +523,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             if len(args) == 1:
                 prompt = f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: "
                 if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "start_pos"})
-                args.append(input(prompt).strip())
-
-            start_pos_str = args[1] if len(args) > 1 else "1:1"
-            start_beat = seq.parse_position_to_beats(start_pos_str, default="1:1")
-            if start_beat is None: return True, "Invalid start position."
+                args.append(input(prompt).strip() or "1:1")
 
             # Step 2: Get duration
             if len(args) == 2:
@@ -535,38 +531,25 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "duration"})
                 args.append(input(prompt).strip())
 
-            measures_input = args[2] if len(args) > 2 else ""
-            num_beats_to_record = None
-            if measures_input:
-                parts = measures_input.split(':')
-                num_measures = int(parts[0])
-                num_beats = int(parts[1]) if len(parts) == 2 else 0
-                num_beats_to_record = (num_measures * seq.song.time_signature_numerator) + num_beats
-
             # Step 3: Check for existing notes and ask to replace
-            replace_notes = False
             if len(args) == 3:
+                start_beat = seq.parse_position_to_beats(args[1], default="1:1")
                 existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
                 if existing_notes_in_range:
                     prompt = "There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] "
                     if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "replace"})
-                    args.append(input(prompt).lower())
+                    args.append(input(prompt).lower() or 'a')
                 else:
                     args.append('a') # Default to add if no notes
 
-            replace_notes = True if len(args) > 3 and args[3].startswith('r') else False
-
             # Step 4: Ask for MIDI Thru
-            enable_thru = True
             if len(args) == 4:
                 if target_track.output_port_name:
                     prompt = "Enable MIDI Thru (hear instrument while recording)? [Y/n] "
                     if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "thru"})
-                    args.append(input(prompt).lower())
+                    args.append(input(prompt).lower() or 'y')
                 else:
-                    args.append('y') # Default to yes if no output port
-
-            enable_thru = False if len(args) > 4 and args[4].startswith('n') else True
+                    args.append('y')
 
             # Step 5: Get input port
             if len(args) == 5:
@@ -578,13 +561,32 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "port_idx"})
                 args.append(input(prompt).strip())
 
-            inport_idx = int(args[5])
-            input_ports = mido.get_input_names()
-            if not 0 <= inport_idx < len(input_ports):
-                return True, "Error: Invalid port index."
-            inport_name = input_ports[inport_idx]
+            # Final Step: Execute with all arguments
+            if len(args) == 6:
+                start_beat = seq.parse_position_to_beats(args[1], default="1:1")
+                if start_beat is None: return True, "Invalid start position."
 
-            return True, seq.record_track(track_idx, start_beat, num_beats_to_record, inport_name, replace_notes, enable_thru)
+                measures_input = args[2]
+                num_beats_to_record = None
+                if measures_input:
+                    parts = measures_input.split(':')
+                    num_measures = int(parts[0])
+                    num_beats = int(parts[1]) if len(parts) == 2 else 0
+                    num_beats_to_record = (num_measures * seq.song.time_signature_numerator) + num_beats
+
+                replace_notes = args[3].startswith('r')
+                enable_thru = not args[4].startswith('n')
+
+                inport_idx = int(args[5])
+                input_ports = mido.get_input_names()
+                if not 0 <= inport_idx < len(input_ports):
+                    return True, "Error: Invalid port index."
+                inport_name = input_ports[inport_idx]
+
+                return True, seq.record_track(track_idx, start_beat, num_beats_to_record, inport_name, replace_notes, enable_thru)
+
+            # This part should not be reached if logic is correct
+            return True, "Error: Incomplete arguments for record."
 
         except (ValueError, IndexError):
             return True, "Error: Invalid input for record command."
@@ -593,7 +595,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
         if seq.last_record_settings is None:
             return True, "Error: No previous recording settings found. Use 'record' first."
 
-        replace_notes = False
+        # Step 1: Ask to replace if needed
         if len(args) == 0:
             track_idx = seq.last_record_settings['track_index']
             start_beat = seq.last_record_settings['start_beat']
@@ -602,11 +604,12 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             if existing_notes_in_range:
                 prompt = "There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] "
                 if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "replace"})
-                args.append(input(prompt).lower())
+                args.append(input(prompt).lower() or 'a')
             else:
                 args.append('a')
 
-        replace_notes = True if len(args) > 0 and args[0].startswith('r') else False
+        # Final step: execute
+        replace_notes = args[0].startswith('r')
         return True, seq.record_bis(replace_notes)
     elif command == "delete":
         if len(args) >= 1:

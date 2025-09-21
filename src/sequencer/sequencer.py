@@ -1857,91 +1857,34 @@ class Sequencer:
         self.recording_thread.daemon = True
         self.recording_thread.start()
 
-    def record_track(self, track_idx: int, confirmation_handler=None):
+    def record_track(self, track_idx: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
         if self.playback_state != "stopped":
-            print("Error: Please stop playback before starting a new recording.")
-            return
+            return "Error: Please stop playback before starting a new recording."
         if not 0 <= track_idx < len(self.song.tracks):
-            print("Error: Invalid track index.")
-            return
+            return "Error: Invalid track index."
         target_track = self.song.tracks[track_idx]
         if not isinstance(target_track, MidiTrack):
-            print("Error: Recording is only supported for MIDI tracks.")
-            return
+            return "Error: Recording is only supported for MIDI tracks."
 
-        _input = confirmation_handler or cancellable_input
-
-        try:
-            start_pos_str = _input(f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: ").strip()
-            start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
-            if start_beat is None: return
-            measures_input = _input("Record for how long (measures:beats)? (Press Enter for unlimited) ").strip()
-            num_beats_to_record = None
-            if measures_input:
-                parts = measures_input.split(':')
-                num_measures = int(parts[0])
-                num_beats = int(parts[1]) if len(parts) == 2 else 0
-                num_beats_to_record = (num_measures * self.song.time_signature_numerator) + num_beats
-            replace_notes = False
-            existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
-            if existing_notes_in_range:
-                choice = _input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
-                if choice.startswith('r'):
-                    replace_notes = True
-            enable_thru = True
-            if target_track.output_port_name:
-                thru_choice = _input("Enable MIDI Thru (hear instrument while recording)? [Y/n] ").lower()
-                if thru_choice.startswith('n'):
-                    enable_thru = False
-            input_ports = mido.get_input_names()
-            if not input_ports:
-                print("Error: No MIDI input ports found.")
-                return
-            print("Available MIDI input ports:")
-            for i, port in enumerate(input_ports): print(f"  [{i}] {port}")
-            inport_idx = int(_input("Choose a port to record from: "))
-            if not 0 <= inport_idx < len(input_ports):
-                print("Error: Invalid port index.")
-                return
-            inport_name = input_ports[inport_idx]
-        except (ValueError, IndexError, UserInputCancelled):
-            print("\nRecord cancelled.")
-            return
         self._stop_event.clear()
         self.last_record_settings = {"track_index": track_idx, "start_beat": start_beat, "num_beats_to_record": num_beats_to_record, "inport_name": inport_name, "replace_notes": replace_notes, "enable_thru": enable_thru}
         self._start_recording_internal(track_index=track_idx, start_beat=start_beat, num_beats_to_record=num_beats_to_record, inport_name=inport_name, replace_notes=replace_notes, enable_thru=enable_thru)
+        return "Recording started."
 
-    def record_bis(self, confirmation_handler=None):
+    def record_bis(self, replace_notes: bool):
         """Re-records using the last saved parameters."""
         if self.playback_state != "stopped":
-            print("Error: Please stop playback before starting a new recording.")
-            return
+            return "Error: Please stop playback before starting a new recording."
         if self.last_record_settings is None:
-            print("Error: No previous recording settings found. Use 'record' first.")
-            return
+            return "Error: No previous recording settings found. Use 'record' first."
 
-        _input = confirmation_handler or cancellable_input
-
-        print("Re-recording with last used settings...")
         settings = self.last_record_settings.copy()
-        track_index = settings['track_index']
-        start_beat = settings['start_beat']
-        target_track = self.song.tracks[track_index]
-        replace_notes = False
-        existing_notes_in_range = [e for e in target_track.events if e.start_time >= start_beat]
-        if existing_notes_in_range:
-            try:
-                choice = _input("There are existing notes. Do you want to (r)eplace them or (a)dd to them? [r/a] ").lower()
-                if choice.startswith('r'):
-                    replace_notes = True
-            except UserInputCancelled:
-                print("\nRecord cancelled.")
-                return
         settings['replace_notes'] = replace_notes
         if 'enable_thru' not in settings:
-            settings['enable_thru'] = True
+            settings['enable_thru'] = True # Default to True if not in old settings
         self._stop_event.clear()
         self._start_recording_internal(**settings)
+        return "Re-recording with last used settings..."
 
     def _get_song_length_in_beats(self) -> float:
         """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""

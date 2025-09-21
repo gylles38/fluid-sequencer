@@ -161,7 +161,7 @@ class SequencerLayout(BoxLayout):
                 prompt_message = data["message"]
                 if "You have unsaved changes" in prompt_message:
                     popup = SaveDiscardCancelPopup(prompt_text=prompt_message, callback=confirmation_callback)
-                elif "[y/N]" in prompt_message:
+                elif "[y/n]" in prompt_message.lower():
                     popup = YesNoPopup(prompt_text=prompt_message, callback=confirmation_callback)
                 else:
                     popup = ConfirmationPopup(prompt_text=prompt_message, callback=confirmation_callback)

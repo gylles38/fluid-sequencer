@@ -6,6 +6,7 @@ import sys
 import time
 import os
 import json
+import shlex
 
 # Platform-specific getch
 try:
@@ -108,7 +109,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
     if not user_input:
         return True, "" # Continue loop
 
-    parts = user_input.split()
+    parts = shlex.split(user_input)
     command = parts[0].lower()
     args = parts[1:]
 
@@ -524,7 +525,6 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             if len(args) == 1:
                 prompt = f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: "
                 if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "start_pos"})
-                print(f"DEBUG: About to call input() for start_pos. api_mode is {api_mode}")
                 args.append(input(prompt).strip() or "1:1")
 
             # Step 2: Get duration

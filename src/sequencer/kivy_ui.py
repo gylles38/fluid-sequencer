@@ -148,7 +148,8 @@ class SequencerLayout(BoxLayout):
 
         def confirmation_callback(user_input):
             # When the popup is answered, we append the answer to the command and process it again.
-            full_command = f"{self.current_command} {user_input}"
+            # We wrap the user input in quotes to handle empty strings and strings with spaces.
+            full_command = f'{self.current_command} "{user_input}"'
             self.process_command_ui(full_command)
 
         # We now use api_mode to get structured JSON responses

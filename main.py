@@ -1,7 +1,7 @@
 import mido
 import jack
 from sequencer.sequencer import Sequencer
-from sequencer.models import MidiTrack
+from sequencer.models import MidiTrack, AutomationTrack
 import sys
 import time
 import os

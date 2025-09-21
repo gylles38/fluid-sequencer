@@ -629,19 +629,74 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
         else:
             return True, "Usage: delete <track_index> [y/n]"
     elif command == "erase":
-        if len(args) == 1:
-            try:
-                track_idx = int(args[0])
-                result = seq.erase_track(track_idx=track_idx, confirmation_handler=confirmation_handler)
-                if result and 'message' in result:
-                    if api_mode:
-                        return True, json.dumps(result)
-                    else:
-                        return True, result['message']
-            except ValueError:
+        try:
+            if len(args) < 1:
+                return True, "Usage: erase <track_index>"
+            track_idx = int(args[0])
+            if not 0 <= track_idx < len(seq.song.tracks):
                 return True, "Error: Invalid track index."
-        else:
-            return True, "Usage: erase <track_index>"
+            track = seq.song.tracks[track_idx]
+            if not isinstance(track, (MidiTrack, AutomationTrack)):
+                return True, "Error: Erasing is only supported for MIDI and Automation tracks."
+
+            # Step 1: Get start position
+            if len(args) == 1:
+                prompt = f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: "
+                if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "start_pos"})
+                args.append(input(prompt).strip() or "1:1")
+
+            # Step 2: Get end position
+            if len(args) == 2:
+                prompt = f"Erase up to position on track '{track.name}' (measure:beat) [default: end of track]: "
+                if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "end_pos"})
+                args.append(input(prompt).strip())
+
+            # Step 3: Get what to erase
+            if len(args) == 3:
+                if isinstance(track, MidiTrack):
+                    prompt = "What do you want to erase? (a)ll, (n)otes, (c)c: "
+                    if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "erase_choice"})
+                    args.append(input(prompt).lower() or 'a')
+                elif isinstance(track, AutomationTrack):
+                    start_beat = seq.parse_position_to_beats(args[1], default="1:1")
+                    end_pos_str = args[2]
+                    end_beat = float('inf') if end_pos_str == "" else seq.parse_position_to_beats(end_pos_str)
+                    params_in_range = sorted(list({p.parameter for p in track.points if start_beat <= p.start_time < end_beat}))
+                    if not params_in_range:
+                        return True, "No automation points found in the specified range."
+                    prompt = f"What do you want to erase? (all, {', '.join(params_in_range)}): "
+                    if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "erase_choice"})
+                    args.append(input(prompt).lower() or 'all')
+
+            # Step 4: Confirm
+            if len(args) == 4:
+                start_pos_str = args[1]
+                end_pos_str = args[2]
+                erase_choice = args[3]
+                end_str_display = f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
+                confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
+                if api_mode: return True, json.dumps({"status": "prompt", "message": confirm_message, "next_arg": "confirm"})
+                args.append(input(confirm_message).lower() or 'n')
+
+            if len(args) == 5:
+                if args[4].lower() != 'y':
+                    return True, "Erase cancelled."
+
+                start_beat = seq.parse_position_to_beats(args[1], default="1:1")
+                if start_beat is None: return True, "Invalid start position."
+                end_pos_str = args[2]
+                end_beat = float('inf') if end_pos_str == "" else seq.parse_position_to_beats(end_pos_str)
+                if end_beat is None: return True, "Invalid end position."
+
+                erase_choice = args[3]
+                shift_events = False # For now, we don't ask for this interactively.
+
+                return True, seq.erase_track(track_idx, start_beat, end_beat, erase_choice, shift_events)
+
+            return True, "Error: Incomplete arguments for erase."
+
+        except (ValueError, IndexError):
+            return True, "Error: Invalid input for erase command."
     elif command == "rename":
         if len(args) == 2:
             result = seq.rename_track(track_index=int(args[0]), new_name=args[1])

@@ -742,55 +742,16 @@ class Sequencer:
             self.is_dirty = True
             return f"Added new CC event at position {position_str} on track '{track.name}'."
 
-    def erase_track(self, track_idx: int, confirmation_handler=None):
+    def erase_track(self, track_idx: int, start_beat: float, end_beat: float, erase_choice: str, shift_events: bool):
         if not 0 <= track_idx < len(self.song.tracks):
-            return {"status": "error", "message": "Error: Invalid track index."}
+            return "Error: Invalid track index."
         track = self.song.tracks[track_idx]
         if not isinstance(track, (MidiTrack, AutomationTrack)):
-            return {"status": "error", "message": "Error: Erasing is only supported for MIDI and Automation tracks."}
+            return "Error: Erasing is only supported for MIDI and Automation tracks."
+        if end_beat <= start_beat:
+            return "Error: End position must be after the start position."
 
-        # This command is complex enough that for now, we will not support it in API mode.
-        # We will just print a message and return.
-        # A full implementation would require a more complex state management system for the prompts.
-        # if api_mode:
-        #     return {"status": "error", "message": "The 'erase' command is not yet supported in API mode."}
-
-        _input = confirmation_handler or cancellable_input
-
-        try:
-            start_pos_str = _input(f"Erase from position on track '{track.name}' (measure:beat) [default: 1:1]: ").strip()
-            start_beat = self.parse_position_to_beats(start_pos_str, default="1:1")
-            if start_beat is None: return
-            end_pos_str = _input(f"Erase up to position on track '{track.name}' (measure:beat) [default: end of track]: ").strip()
-            if end_pos_str == "":
-                end_beat = float('inf')
-            else:
-                end_beat = self.parse_position_to_beats(end_pos_str)
-                if end_beat is None: return
-            if end_beat <= start_beat:
-                print("Error: End position must be after the start position.")
-                return
-        except ValueError:
-            print("Error: Invalid number format.")
-            return
-        except UserInputCancelled:
-            print("\nErase cancelled.")
-            return
         if isinstance(track, MidiTrack):
-            erase_choice = "all"
-            erase_options = {"a": "all", "n": "notes", "c": "cc"}
-            while True:
-                choice_str = _input("What do you want to erase? (a)ll, (n)otes, (c)c: ").lower()
-                if choice_str in erase_options:
-                    erase_choice = erase_options[choice_str]
-                    break
-                else:
-                    print("Invalid choice. Please try again.")
-            end_str_display = f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
-            confirm_message = f"Erase {erase_choice} from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
-            if _input(confirm_message).lower() != "y":
-                print("Erase cancelled.")
-                return
             final_events = []
             events_to_shift = []
             modified_count = 0
@@ -798,66 +759,46 @@ class Sequencer:
             for event in list(track.events):
                 if start_beat <= event.start_time < end_beat:
                     event_modified = False
-                    if erase_choice == "all" or erase_choice == "notes":
+                    if erase_choice in ("all", "notes"):
                         if event.notes:
                             event.notes.clear()
                             event_modified = True
-                    if erase_choice == "all" or erase_choice == "cc":
+                    if erase_choice in ("all", "cc"):
                         if event.cc_messages:
                             event.cc_messages.clear()
                             event_modified = True
                     if event_modified:
                         modified_count += 1
-                    is_empty = not event.notes and not event.cc_messages
-                    if not is_empty:
-                        final_events.append(event)
-                    else:
+                    if not event.notes and not event.cc_messages:
                         deleted_count += 1
+                    else:
+                        final_events.append(event)
                 elif event.start_time >= end_beat:
                     events_to_shift.append(event)
                 else:
                     final_events.append(event)
-            shift_confirmed = False
-            if events_to_shift:
-                shift_choice = _input(f"Shift subsequent {len(events_to_shift)} event(s) to start after the erased section? [y/N]: ").lower()
-                if shift_choice == 'y':
-                    shift_offset = end_beat - start_beat
-                    for event in events_to_shift:
-                        event.start_time -= shift_offset
-                    shift_confirmed = True
+
+            if shift_events:
+                shift_offset = end_beat - start_beat
+                for event in events_to_shift:
+                    event.start_time -= shift_offset
+
             final_events.extend(events_to_shift)
             track.events = final_events
             track.events.sort(key=lambda e: e.start_time)
-            report = [f"Modified {modified_count} event(s)"]
-            if shift_confirmed:
-                report.append(f"shifted {len(events_to_shift)} event(s)")
-            if modified_count > 0 or shift_confirmed:
+
+            report = []
+            if modified_count > 0: report.append(f"modified {modified_count} event(s)")
+            if deleted_count > 0: report.append(f"deleted {deleted_count} empty event(s)")
+            if shift_events: report.append(f"shifted {len(events_to_shift)} event(s)")
+
+            if report:
                  self.is_dirty = True
-                 print(f"Operation complete: {', '.join(report)} from track '{track.name}'.")
+                 return f"Operation complete: {', '.join(report)} from track '{track.name}'."
             else:
-                 print("No events were modified or shifted.")
+                 return "No events were modified, deleted, or shifted."
+
         elif isinstance(track, AutomationTrack):
-            params_in_range = sorted(list({p.parameter for p in track.points if start_beat <= p.start_time < end_beat}))
-            if not params_in_range:
-                print("No automation points found in the specified range.")
-                return
-            prompt = "What do you want to erase? (all"
-            for p in params_in_range:
-                prompt += f", {p}"
-            prompt += "): "
-            erase_choice = "all"
-            while True:
-                choice_str = _input(prompt).lower()
-                if choice_str == "all" or choice_str in params_in_range:
-                    erase_choice = choice_str
-                    break
-                else:
-                    print("Invalid choice. Please try again.")
-            end_str_display = f"up to {end_pos_str}" if end_pos_str else "to the end of the track"
-            confirm_message = f"Erase {erase_choice} points from {start_pos_str} {end_str_display} on track '{track.name}'? [y/N] "
-            if _input(confirm_message).lower() != "y":
-                print("Erase cancelled.")
-                return
             points_to_keep = []
             deleted_count = 0
             for point in track.points:
@@ -867,12 +808,15 @@ class Sequencer:
                     points_to_keep.append(point)
                 else:
                     deleted_count += 1
+
             if deleted_count > 0:
                 track.points = points_to_keep
                 self.is_dirty = True
-                print(f"Erased {deleted_count} point(s) from track '{track.name}'.")
+                return f"Erased {deleted_count} point(s) from track '{track.name}'."
             else:
-                print("No points were erased.")
+                return "No points were erased."
+
+        return "This should not be reached."
 
     def rename_track(self, track_index: int, new_name: str):
         if not 0 <= track_index < len(self.song.tracks):

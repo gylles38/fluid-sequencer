@@ -524,6 +524,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             if len(args) == 1:
                 prompt = f"Start recording at position on track '{target_track.name}' (measure:beat) [default: 1:1]: "
                 if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "start_pos"})
+                print(f"DEBUG: About to call input() for start_pos. api_mode is {api_mode}")
                 args.append(input(prompt).strip() or "1:1")
 
             # Step 2: Get duration

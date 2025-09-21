@@ -66,6 +66,8 @@ class SequencerLayout(BoxLayout):
         self.process_command_ui(command)
 
     def process_command_ui(self, command):
+        with open("kivy_debug.log", "a") as f:
+            f.write(f"kivy_ui.py: process_command_ui: command='{command}'\n")
         import json
         from main import process_command
 

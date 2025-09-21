@@ -104,6 +104,8 @@ MIDI Mapping:
 """
 
 def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
+    with open("kivy_debug.log", "a") as f:
+        f.write(f"main.py: process_command: user_input='{user_input}', api_mode={api_mode}\n")
     if not user_input:
         return True, "" # Continue loop
 

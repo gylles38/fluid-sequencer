@@ -51,6 +51,31 @@ En mode API :
 
 C'est le mode idéal pour une utilisation programmatique.
 
+## Interface Graphique (Kivy)
+
+En plus de l'interface en ligne de commande, ce séquenceur dispose d'une interface graphique basique développée avec Kivy.
+
+### Dépendances supplémentaires
+
+Pour utiliser l'interface Kivy, vous aurez besoin de dépendances système supplémentaires. Sur un système basé sur Debian (comme Ubuntu), installez-les avec :
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libjack-jackd2-dev libasound2-dev libmtdev-dev
+```
+
+### Lancement de l'interface graphique
+
+Pour lancer l'application avec l'interface graphique, utilisez la commande suivante :
+
+```bash
+KIVY_NO_ARGS=1 python3 main.py --gui
+```
+
+L'interface vous présentera une zone de texte pour entrer les commandes et une zone d'affichage pour voir les réponses du séquenceur.
+
+**Note :** L'intégration de l'interface graphique est encore en cours de développement. Les commandes nécessitant une confirmation de l'utilisateur (comme la suppression de pistes) ne sont pas encore entièrement fonctionnelles dans l'interface graphique.
+
 ### Format des réponses JSON
 
 Toutes les réponses JSON suivent ce format de base :

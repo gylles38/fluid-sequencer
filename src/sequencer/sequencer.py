@@ -743,9 +743,6 @@ class Sequencer:
             return f"Added new CC event at position {position_str} on track '{track.name}'."
 
     def erase_track(self, track_idx: int, start_beat: float, end_beat: float, erase_choice: str, shift_events: bool):
-        with open("kivy_debug.log", "a") as f:
-            f.write(f"sequencer.py: erase_track: track_idx={track_idx}, start_beat={start_beat}, end_beat={end_beat}, erase_choice='{erase_choice}', shift_events={shift_events}\n")
-
         if not 0 <= track_idx < len(self.song.tracks):
             return "Error: Invalid track index."
         track = self.song.tracks[track_idx]
@@ -755,41 +752,30 @@ class Sequencer:
             return "Error: End position must be after the start position."
 
         if isinstance(track, MidiTrack):
+            erase_notes = erase_choice.startswith('a') or erase_choice.startswith('n')
+            erase_ccs = erase_choice.startswith('a') or erase_choice.startswith('c')
+
             final_events = []
             events_to_shift = []
             modified_count = 0
             deleted_count = 0
-            with open("kivy_debug.log", "a") as f:
-                f.write(f"  Looping through {len(track.events)} events.\n")
             for event in list(track.events):
-                with open("kivy_debug.log", "a") as f:
-                    f.write(f"  - Checking event at beat {event.start_time:.2f}\n")
                 if start_beat <= event.start_time < end_beat:
-                    with open("kivy_debug.log", "a") as f:
-                        f.write(f"    -> Event is in range.\n")
                     event_modified = False
-                    if erase_choice in ("all", "notes"):
+                    if erase_notes:
                         if event.notes:
-                            with open("kivy_debug.log", "a") as f:
-                                f.write(f"      -> Erasing notes.\n")
                             event.notes.clear()
                             event_modified = True
-                    if erase_choice in ("all", "cc"):
+                    if erase_ccs:
                         if event.cc_messages:
-                            with open("kivy_debug.log", "a") as f:
-                                f.write(f"      -> Erasing CCs.\n")
                             event.cc_messages.clear()
                             event_modified = True
                     if event_modified:
                         modified_count += 1
                     if not event.notes and not event.cc_messages:
                         deleted_count += 1
-                        with open("kivy_debug.log", "a") as f:
-                            f.write(f"      -> Event is now empty, will be deleted.\n")
                     else:
                         final_events.append(event)
-                        with open("kivy_debug.log", "a") as f:
-                            f.write(f"      -> Event not empty, keeping it.\n")
                 elif event.start_time >= end_beat:
                     events_to_shift.append(event)
                 else:
@@ -801,8 +787,6 @@ class Sequencer:
                     event.start_time -= shift_offset
 
             final_events.extend(events_to_shift)
-            with open("kivy_debug.log", "a") as f:
-                f.write(f"  Finished loop. Final event count will be {len(final_events)}. Original was {len(track.events)}.\n")
             track.events = final_events
             track.events.sort(key=lambda e: e.start_time)
 

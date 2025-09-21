@@ -23,20 +23,10 @@ import time
 from typing import List, Optional, Any, Dict
 from functools import wraps
 from contextlib import contextmanager
+import logging
 
-@contextmanager
-def suppress_stdout_stderr():
-    """A context manager for suppressing stdout and stderr."""
-    with open(os.devnull, 'w') as fnull:
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        sys.stdout = fnull
-        sys.stderr = fnull
-        try:
-            yield
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+# Suppress pydub's "subprocess.call" DEBUG messages
+logging.getLogger("pydub.utils").setLevel(logging.WARNING)
 
 @dataclass
 class ActiveAudioProcess:
@@ -672,8 +662,7 @@ class Sequencer:
             if not filepath:
                 return {"status": "error", "message": "Error: Filepath is required for audio tracks."}
             try:
-                with suppress_stdout_stderr():
-                    AudioSegment.from_file(filepath)
+                AudioSegment.from_file(filepath)
             except FileNotFoundError:
                 return {"status": "error", "message": f"Error: Audio file not found at '{filepath}'"}
             except Exception as e:
@@ -1875,8 +1864,7 @@ class Sequencer:
                     should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                     if not should_play:
                         continue
-                    with suppress_stdout_stderr():
-                        segment = AudioSegment.from_file(track.filepath)
+                    segment = AudioSegment.from_file(track.filepath)
                     duration_beats = (len(segment) / 1000.0) * (self.song.tempo / 60.0)
                     track_end_beat = track.start_time + duration_beats
                     if track_end_beat > max_beats:

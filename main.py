@@ -284,17 +284,19 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
         if not seq.virtual_ports:
             return True, "No virtual ports to delete."
 
-        output = "Available virtual ports:\n"
-        for i, vp in enumerate(seq.virtual_ports):
-            output += f"  [{i}] {vp.name}\n"
-
-        try:
-            if confirmation_handler:
-                idx_str = confirmation_handler(output + "Choose a virtual port to delete: ")
+        if len(args) == 0:
+            output = "Available virtual ports:\n"
+            for i, vp in enumerate(seq.virtual_ports):
+                output += f"  [{i}] {vp.name}\n"
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": output + "Choose a virtual port to delete: ", "next_arg": "idx_str"})
             else:
                 print(output)
                 idx_str = input("Choose a virtual port to delete: ")
-            idx = int(idx_str)
+                args.append(idx_str)
+
+        try:
+            idx = int(args[0])
             if 0 <= idx < len(seq.virtual_ports):
                 return True, seq.delete_virtual_port(seq.virtual_ports[idx].name)
             else:
@@ -322,49 +324,65 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 for i, name in enumerate(all_outputs):
                     output += f"  [{i}] {name}\n"
 
-                if confirmation_handler:
-                    port_index_str = confirmation_handler(output + "Choose a port to assign: ")
+                if api_mode:
+                    return True, json.dumps({"status": "prompt", "message": output + "Choose a port to assign: ", "next_arg": "port_index_str"})
                 else:
                     print(output)
                     port_index_str = input("Choose a port to assign: ")
-                port_index = int(port_index_str)
+                    args.append(port_index_str)
+            except (ValueError, IndexError):
+                return True, "Error: Invalid input."
+
+        if len(args) == 2:
+            try:
+                track_index = int(args[0])
+                port_index = int(args[1])
+                hardware_ports = mido.get_output_names() # type: ignore
+                virtual_port_names = [vp.name for vp in seq.virtual_ports]
+                all_outputs = hardware_ports + virtual_port_names
                 if 0 <= port_index < len(all_outputs):
                     port_name = all_outputs[port_index]
                     return True, seq.assign_port(track_index, port_name)
                 else:
                     return True, "Error: Invalid port index."
-
             except (ValueError, IndexError):
                 return True, "Error: Invalid input."
         else:
             return True, "Usage: assign <track_index>"
     elif command == "assignmetro":
-        hardware_ports = mido.get_output_names() # type: ignore
-        virtual_port_names = [vp.name for vp in seq.virtual_ports]
-        all_outputs = hardware_ports + virtual_port_names
+        if len(args) == 0:
+            hardware_ports = mido.get_output_names() # type: ignore
+            virtual_port_names = [vp.name for vp in seq.virtual_ports]
+            all_outputs = hardware_ports + virtual_port_names
 
-        if not all_outputs:
-            return True, "No output ports available."
+            if not all_outputs:
+                return True, "No output ports available."
 
-        output = "Available output ports:\n"
-        for i, name in enumerate(all_outputs):
-            output += f"  [{i}] {name}\n"
+            output = "Available output ports:\n"
+            for i, name in enumerate(all_outputs):
+                output += f"  [{i}] {name}\n"
 
-        try:
-            if confirmation_handler:
-                port_index_str = confirmation_handler(output + "Choose a port to assign for the metronome: ")
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": output + "Choose a port to assign for the metronome: ", "next_arg": "port_index_str"})
             else:
                 print(output)
                 port_index_str = input("Choose a port to assign for the metronome: ")
-            port_index = int(port_index_str)
-            if 0 <= port_index < len(all_outputs):
-                port_name = all_outputs[port_index]
-                seq.song.metronome_port_name = port_name
-                return True, f"Metronome assigned to port '{port_name}'."
-            else:
-                return True, "Error: Invalid port index."
-        except (ValueError, IndexError):
-            return True, "Error: Invalid input."
+                args.append(port_index_str)
+
+        if len(args) == 1:
+            try:
+                port_index = int(args[0])
+                hardware_ports = mido.get_output_names() # type: ignore
+                virtual_port_names = [vp.name for vp in seq.virtual_ports]
+                all_outputs = hardware_ports + virtual_port_names
+                if 0 <= port_index < len(all_outputs):
+                    port_name = all_outputs[port_index]
+                    seq.song.metronome_port_name = port_name
+                    return True, f"Metronome assigned to port '{port_name}'."
+                else:
+                    return True, "Error: Invalid port index."
+            except (ValueError, IndexError):
+                return True, "Error: Invalid input."
     elif command == "unassign":
         if len(args) == 1:
             return True, seq.unassign_port(track_index=int(args[0]))
@@ -573,7 +591,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
     elif command == "prime":
         return True, seq.prime_all_tracks()
     elif command == "cc":
-        try:
+        if len(args) == 0:
             hardware_ports = mido.get_output_names()
             virtual_port_names = [vp.name for vp in seq.virtual_ports]
             all_outputs = hardware_ports + virtual_port_names
@@ -585,31 +603,50 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             for i, name in enumerate(all_outputs):
                 output += f"  [{i}] {name}\n"
 
-            if confirmation_handler:
-                port_idx_str = confirmation_handler(output + "Choose a port to send to: ").strip()
-                channel_str = confirmation_handler("Enter MIDI channel (1-16): ").strip()
-                control_str = confirmation_handler("Enter CC number (0-127): ").strip()
-                value_str = confirmation_handler("Enter CC value (0-127): ").strip()
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": output + "Choose a port to send to: ", "next_arg": "port_idx_str"})
             else:
                 print(output)
                 port_idx_str = input("Choose a port to send to: ").strip()
+                args.append(port_idx_str)
+
+        if len(args) == 1:
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": "Enter MIDI channel (1-16): ", "next_arg": "channel_str"})
+            else:
                 channel_str = input("Enter MIDI channel (1-16): ").strip()
+                args.append(channel_str)
+
+        if len(args) == 2:
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": "Enter CC number (0-127): ", "next_arg": "control_str"})
+            else:
                 control_str = input("Enter CC number (0-127): ").strip()
+                args.append(control_str)
+
+        if len(args) == 3:
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": "Enter CC value (0-127): ", "next_arg": "value_str"})
+            else:
                 value_str = input("Enter CC value (0-127): ").strip()
+                args.append(value_str)
 
-            port_idx = int(port_idx_str)
-            if not 0 <= port_idx < len(all_outputs):
-                return True, "Error: Invalid port index."
-            port_name = all_outputs[port_idx]
+        if len(args) == 4:
+            try:
+                port_idx = int(args[0])
+                hardware_ports = mido.get_output_names()
+                virtual_port_names = [vp.name for vp in seq.virtual_ports]
+                all_outputs = hardware_ports + virtual_port_names
+                if not 0 <= port_idx < len(all_outputs):
+                    return True, "Error: Invalid port index."
+                port_name = all_outputs[port_idx]
 
-            channel = int(channel_str) - 1 # To 0-indexed
-            control = int(control_str)
-            value = int(value_str)
-
-            return True, seq.send_cc_message(port_name, channel, control, value)
-
-        except (ValueError, IndexError):
-            return True, "Error: Invalid input."
+                channel = int(args[1]) - 1
+                control = int(args[2])
+                value = int(args[3])
+                return True, seq.send_cc_message(port_name, channel, control, value)
+            except (ValueError, IndexError):
+                return True, "Error: Invalid input."
 
     elif command == "play":
         if len(args) == 0:

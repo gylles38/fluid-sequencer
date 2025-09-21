@@ -743,6 +743,9 @@ class Sequencer:
             return f"Added new CC event at position {position_str} on track '{track.name}'."
 
     def erase_track(self, track_idx: int, start_beat: float, end_beat: float, erase_choice: str, shift_events: bool):
+        with open("kivy_debug.log", "a") as f:
+            f.write(f"sequencer.py: erase_track: track_idx={track_idx}, start_beat={start_beat}, end_beat={end_beat}, erase_choice='{erase_choice}', shift_events={shift_events}\n")
+
         if not 0 <= track_idx < len(self.song.tracks):
             return "Error: Invalid track index."
         track = self.song.tracks[track_idx]
@@ -756,8 +759,14 @@ class Sequencer:
             events_to_shift = []
             modified_count = 0
             deleted_count = 0
+            with open("kivy_debug.log", "a") as f:
+                f.write(f"  Looping through {len(track.events)} events.\n")
             for event in list(track.events):
+                with open("kivy_debug.log", "a") as f:
+                    f.write(f"  - Checking event at beat {event.start_time:.2f}\n")
                 if start_beat <= event.start_time < end_beat:
+                    with open("kivy_debug.log", "a") as f:
+                        f.write(f"    -> Event is in range.\n")
                     event_modified = False
                     if erase_choice in ("all", "notes"):
                         if event.notes:

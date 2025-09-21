@@ -663,10 +663,13 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                     end_beat = float('inf') if end_pos_str == "" else seq.parse_position_to_beats(end_pos_str)
                     params_in_range = sorted(list({p.parameter for p in track.points if start_beat <= p.start_time < end_beat}))
                     if not params_in_range:
-                        return True, "No automation points found in the specified range."
-                    prompt = f"What do you want to erase? (all, {', '.join(params_in_range)}): "
-                    if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "erase_choice"})
-                    args.append(input(prompt).lower() or 'all')
+                        # If no points, we can just say the operation is complete.
+                        args.append("all") # Add dummy arg to proceed
+                        args.append("y") # Add dummy arg to proceed
+                    else:
+                        prompt = f"What do you want to erase? (all, {', '.join(params_in_range)}): "
+                        if api_mode: return True, json.dumps({"status": "prompt", "message": prompt, "next_arg": "erase_choice"})
+                        args.append(input(prompt).lower() or 'all')
 
             # Step 4: Confirm
             if len(args) == 4:
@@ -678,6 +681,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 if api_mode: return True, json.dumps({"status": "prompt", "message": confirm_message, "next_arg": "confirm"})
                 args.append(input(confirm_message).lower() or 'n')
 
+            # Step 5: Execute
             if len(args) == 5:
                 if args[4].lower() != 'y':
                     return True, "Erase cancelled."

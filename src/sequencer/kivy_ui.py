@@ -12,6 +12,34 @@ from kivy.uix.popup import Popup
 from sequencer.sequencer import Sequencer
 import sys
 
+class SaveDiscardCancelPopup(Popup):
+    def __init__(self, prompt_text, callback, **kwargs):
+        super(SaveDiscardCancelPopup, self).__init__(**kwargs)
+        self.title = "Unsaved Changes"
+        self.size_hint = (0.8, 0.4)
+        self.callback = callback
+
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        layout.add_widget(Label(text=prompt_text))
+
+        buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
+        save_button = Button(text='Save')
+        save_button.bind(on_press=lambda instance: self.on_answer(instance, 's'))
+        discard_button = Button(text='Discard')
+        discard_button.bind(on_press=lambda instance: self.on_answer(instance, 'd'))
+        cancel_button = Button(text='Cancel')
+        cancel_button.bind(on_press=lambda instance: self.on_answer(instance, 'c'))
+        buttons_layout.add_widget(save_button)
+        buttons_layout.add_widget(discard_button)
+        buttons_layout.add_widget(cancel_button)
+        layout.add_widget(buttons_layout)
+
+        self.content = layout
+
+    def on_answer(self, instance, answer):
+        self.callback(answer)
+        self.dismiss()
+
 class YesNoPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
         super(YesNoPopup, self).__init__(**kwargs)
@@ -131,7 +159,9 @@ class SequencerLayout(BoxLayout):
             data = json.loads(output)
             if data.get("status") == "prompt":
                 prompt_message = data["message"]
-                if "[y/N]" in prompt_message:
+                if "You have unsaved changes" in prompt_message:
+                    popup = SaveDiscardCancelPopup(prompt_text=prompt_message, callback=confirmation_callback)
+                elif "[y/N]" in prompt_message:
                     popup = YesNoPopup(prompt_text=prompt_message, callback=confirmation_callback)
                 else:
                     popup = ConfirmationPopup(prompt_text=prompt_message, callback=confirmation_callback)

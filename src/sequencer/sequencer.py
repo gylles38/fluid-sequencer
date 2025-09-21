@@ -548,6 +548,12 @@ class JackManager:
                     port.send(note_on)
                     self._metronome_notes_to_turn_off.append(note_off)
                     beat_to_check += 1
+
+            song_length_beats = self.sequencer._get_song_length_in_beats()
+            if not self.sequencer.loop_enabled and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
+                if start_beat_of_block < song_length_beats:
+                    self.jack_client.transport_stop()
+
             self.last_beat = end_beat_of_block
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")

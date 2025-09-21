@@ -142,18 +142,27 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                             args.append(basename_to_save)
 
                 if len(args) == 2:
-                    if args[1] == 'n':
-                        if len(args) == 2:
+                    if args[1].lower() == 'n':
+                        if len(args) == 2: # We need to ask for a new name
                             if api_mode:
                                 return True, json.dumps({"status": "prompt", "message": "Enter new project basename: ", "next_arg": "basename"})
                             else:
                                 basename_to_save = input("Enter new project basename: ").strip()
-                                args.append(basename_to_save)
-                    else:
+                                # No args.append here, we'll fall through to the save
+                        else: # This case should not be hit in api_mode
+                            basename_to_save = args[2]
+
+                    elif args[1].lower() != 'y':
+                        # This case handles when a new basename is provided directly
                         basename_to_save = args[1]
+                    # If args[1] is 'y', we do nothing and let basename_to_save keep its value.
+
+                if len(args) == 3: # This handles the case where we asked for a new name after 'n'
+                    basename_to_save = args[2]
 
                 if basename_to_save:
                     seq.save_project(basename_to_save)
+                    break # Proceed to quit
                 else:
                     return True, "Save cancelled. Please provide a name."
             else:

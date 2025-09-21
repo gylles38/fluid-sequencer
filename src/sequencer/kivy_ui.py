@@ -103,7 +103,11 @@ class SequencerLayout(BoxLayout):
         should_continue, output = process_command(self.current_command, self.sequencer, api_mode=True, confirmation_handler=None)
 
         try:
+            with open("kivy_debug.log", "a") as f:
+                f.write(f"kivy_ui.py: process_command_ui: output='{output}'\n")
             data = json.loads(output)
+            with open("kivy_debug.log", "a") as f:
+                f.write(f"kivy_ui.py: process_command_ui: data={data}\n")
             if data.get("status") == "prompt":
                 popup = ConfirmationPopup(prompt_text=data["message"], callback=confirmation_callback)
                 popup.open()

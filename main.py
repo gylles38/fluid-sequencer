@@ -199,7 +199,12 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
         else:
             return True, "Usage: add <name> [program_number]"
     elif command == "addaudio":
-        if len(args) == 2:
+        if len(args) == 1:
+            if api_mode:
+                return True, json.dumps({"status": "file_chooser_prompt", "track_name": args[0]})
+            else:
+                return True, "Usage: addaudio <name> <filepath>"
+        elif len(args) == 2:
             result = seq.add_track(name=args[0], track_type='audio', filepath=args[1])
             if api_mode:
                 return True, json.dumps(result)

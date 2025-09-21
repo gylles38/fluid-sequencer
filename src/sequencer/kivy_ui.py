@@ -8,6 +8,7 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
+from kivy.uix.filechooser import FileChooserListView
 
 from sequencer.sequencer import Sequencer
 import sys
@@ -80,6 +81,34 @@ class LoopPopup(Popup):
     def on_ok(self, instance):
         self.callback(self.start_input.text, self.end_input.text)
         self.dismiss()
+
+class FileChooserPopup(Popup):
+    def __init__(self, callback, **kwargs):
+        super(FileChooserPopup, self).__init__(**kwargs)
+        self.title = "Select Audio File"
+        self.size_hint = (0.9, 0.9)
+        self.callback = callback
+
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+
+        self.filechooser = FileChooserListView()
+        layout.add_widget(self.filechooser)
+
+        buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
+        select_button = Button(text='Select')
+        select_button.bind(on_press=self.on_select)
+        cancel_button = Button(text='Cancel')
+        cancel_button.bind(on_press=self.dismiss)
+        buttons_layout.add_widget(select_button)
+        buttons_layout.add_widget(cancel_button)
+        layout.add_widget(buttons_layout)
+
+        self.content = layout
+
+    def on_select(self, instance):
+        if self.filechooser.selection:
+            self.callback(self.filechooser.selection[0])
+            self.dismiss()
 
 class YesNoPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
@@ -199,9 +228,16 @@ class SequencerLayout(BoxLayout):
 
         try:
             data = json.loads(output)
-            if data.get("status") == "loop_prompt":
+            if data.get("status") == "file_chooser_prompt":
+                def file_chooser_callback(filepath):
+                    track_name = data["track_name"]
+                    full_command = f'addaudio "{track_name}" "{filepath}"'
+                    self.process_command_ui(full_command)
+                popup = FileChooserPopup(callback=file_chooser_callback)
+                popup.open()
+            elif data.get("status") == "loop_prompt":
                 def loop_callback(start, end):
-                    full_command = f"loop {start} {end}"
+                    full_command = f'loop "{start}" "{end}"'
                     self.process_command_ui(full_command)
                 popup = LoopPopup(sequencer=self.sequencer, callback=loop_callback)
                 popup.open()

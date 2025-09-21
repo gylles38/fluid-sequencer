@@ -104,8 +104,6 @@ MIDI Mapping:
 """
 
 def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
-    with open("kivy_debug.log", "a") as f:
-        f.write(f"main.py: process_command: user_input='{user_input}', api_mode={api_mode}\n")
     if not user_input:
         return True, "" # Continue loop
 
@@ -115,41 +113,51 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
 
     if command == "quit":
         if seq.is_dirty and not api_mode:
-            while True:
-                if confirmation_handler:
-                    choice = confirmation_handler("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
+            if len(args) == 0:
+                if api_mode:
+                    return True, json.dumps({"status": "prompt", "message": "You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ", "next_arg": "choice"})
                 else:
                     choice = input("You have unsaved changes. (S)ave, (D)iscard, or (C)ancel? ").lower()
+                    args.append(choice)
 
-                if choice == 'c':
-                    return True, "Quit cancelled."
-                elif choice == 'd':
-                    break # Proceed to quit
-                elif choice == 's':
-                    basename_to_save = seq.last_project_basename
+            choice = args[0]
+            if choice == 'c':
+                return True, "Quit cancelled."
+            elif choice == 'd':
+                pass # Proceed to quit
+            elif choice == 's':
+                basename_to_save = seq.last_project_basename
+                if len(args) == 1:
                     if basename_to_save:
-                        if confirmation_handler:
-                            overwrite = confirmation_handler(f"Save over '{basename_to_save}.proj.json'? [Y/n] ").lower()
+                        if api_mode:
+                            return True, json.dumps({"status": "prompt", "message": f"Save over '{basename_to_save}.proj.json'? [Y/n] ", "next_arg": "overwrite"})
                         else:
                             overwrite = input(f"Save over '{basename_to_save}.proj.json'? [Y/n] ").lower()
-                        if overwrite == 'n':
-                            if confirmation_handler:
-                                basename_to_save = confirmation_handler("Enter new project basename: ").strip()
-                            else:
-                                basename_to_save = input("Enter new project basename: ").strip()
+                            args.append(overwrite)
                     else:
-                        if confirmation_handler:
-                            basename_to_save = confirmation_handler("Enter project basename to save: ").strip()
+                        if api_mode:
+                            return True, json.dumps({"status": "prompt", "message": "Enter project basename to save: ", "next_arg": "basename"})
                         else:
                             basename_to_save = input("Enter project basename to save: ").strip()
+                            args.append(basename_to_save)
 
-                    if basename_to_save:
-                        seq.save_project(basename_to_save)
-                        break # Proceed to quit
+                if len(args) == 2:
+                    if args[1] == 'n':
+                        if len(args) == 2:
+                            if api_mode:
+                                return True, json.dumps({"status": "prompt", "message": "Enter new project basename: ", "next_arg": "basename"})
+                            else:
+                                basename_to_save = input("Enter new project basename: ").strip()
+                                args.append(basename_to_save)
                     else:
-                        return True, "Save cancelled. Please provide a name."
+                        basename_to_save = args[1]
+
+                if basename_to_save:
+                    seq.save_project(basename_to_save)
                 else:
-                    return True, "Invalid choice."
+                    return True, "Save cancelled. Please provide a name."
+            else:
+                return True, "Invalid choice."
 
         if seq.playback_state != "stopped":
             if not api_mode:
@@ -232,11 +240,16 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             return True, "Usage: addcc <track_index> <position> <cc_number> <value>"
     elif command == "load":
         if len(args) == 1:
-            if confirmation_handler:
-                confirm = confirmation_handler("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": "Loading a new song will discard the current session. Are you sure? [y/N] ", "next_arg": "confirm"})
             else:
                 confirm = input("Loading a new song will discard the current session. Are you sure? [y/N] ").lower()
-            if confirm == 'y':
+                if confirm == 'y':
+                    return True, seq.load_song(filepath=args[0])
+                else:
+                    return True, "Load cancelled."
+        elif len(args) == 2:
+            if args[1] == 'y':
                 return True, seq.load_song(filepath=args[0])
             else:
                 return True, "Load cancelled."
@@ -244,11 +257,16 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             return True, "Usage: load <filepath>"
     elif command == "loadproject":
         if len(args) == 1:
-            if confirmation_handler:
-                confirm = confirmation_handler("Loading a new project will discard the current session. Are you sure? [y/N] ").lower()
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": "Loading a new project will discard the current session. Are you sure? [y/N] ", "next_arg": "confirm"})
             else:
                 confirm = input("Loading a new project will discard the current session. Are you sure? [y/N] ").lower()
-            if confirm == 'y':
+                if confirm == 'y':
+                    return True, seq.load_project(basename=args[0])
+                else:
+                    return True, "Load cancelled."
+        elif len(args) == 2:
+            if args[1] == 'y':
                 return True, seq.load_project(basename=args[0])
             else:
                 return True, "Load cancelled."
@@ -261,12 +279,20 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             if os.path.exists(project_filepath):
                 return True, f"Error: Project '{project_name}' already exists."
 
-            if confirmation_handler:
-                confirm = confirmation_handler("Creating a new project will discard the current session. Are you sure? [y/N] ").lower()
+            if api_mode:
+                return True, json.dumps({"status": "prompt", "message": "Creating a new project will discard the current session. Are you sure? [y/N] ", "next_arg": "confirm"})
             else:
                 confirm = input("Creating a new project will discard the current session. Are you sure? [y/N] ").lower()
-
-            if confirm == 'y':
+                if confirm == 'y':
+                    seq.new_project()
+                    seq.last_project_basename = project_name
+                    seq.is_dirty = True
+                    return True, f"New project '{project_name}' created."
+                else:
+                    return True, "New project cancelled."
+        elif len(args) == 2:
+            if args[1] == 'y':
+                project_name = args[0]
                 seq.new_project()
                 seq.last_project_basename = project_name
                 seq.is_dirty = True

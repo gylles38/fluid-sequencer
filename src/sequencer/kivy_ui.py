@@ -166,7 +166,7 @@ class SequencerLayout(BoxLayout):
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
-        self.sequencer = Sequencer()
+        self.sequencer = Sequencer(gui_mode=True)
         self.current_command = ""
 
         # Status Display
@@ -175,10 +175,12 @@ class SequencerLayout(BoxLayout):
         self.tempo_label = Label(text="Tempo: 120 BPM")
         self.timesig_label = Label(text="Time Sig: 4/4")
         self.metronome_label = Label(text="Metronome: OFF")
+        self.playhead_label = Label(text="Position: 1:1")
         status_layout.add_widget(self.song_name_label)
         status_layout.add_widget(self.tempo_label)
         status_layout.add_widget(self.timesig_label)
         status_layout.add_widget(self.metronome_label)
+        status_layout.add_widget(self.playhead_label)
         self.add_widget(status_layout)
 
         self.output_label = Label(size_hint_y=None, height=400)
@@ -196,6 +198,10 @@ class SequencerLayout(BoxLayout):
         self.add_widget(self.send_button)
 
         self.update_status_display()
+        self.sequencer.bind(current_beat=self.update_playhead_display)
+
+    def update_playhead_display(self, instance, value):
+        self.playhead_label.text = f"Position: {self.sequencer._format_beats_to_position(value)}"
 
     def update_status_display(self):
         song = self.sequencer.song

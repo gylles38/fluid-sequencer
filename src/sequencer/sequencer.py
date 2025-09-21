@@ -23,10 +23,21 @@ import time
 from typing import List, Optional, Any, Dict
 from functools import wraps
 from contextlib import contextmanager
-import logging
+from contextlib import contextmanager
 
-# Suppress pydub's "subprocess.call" DEBUG messages
-logging.getLogger("pydub.utils").setLevel(logging.WARNING)
+@contextmanager
+def suppress_stdout_stderr():
+    """A context manager for suppressing stdout and stderr."""
+    with open(os.devnull, 'w') as fnull:
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = fnull
+        sys.stderr = fnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 @dataclass
 class ActiveAudioProcess:
@@ -69,6 +80,9 @@ def song_decoder(d):
             return MidiMapping(**d)
     return d
 
+
+from kivy.properties import NumericProperty
+from kivy.event import EventDispatcher
 
 class JackManager:
     def __init__(self, sequencer: 'Sequencer'):
@@ -245,11 +259,12 @@ class JackManager:
             else:
                 self._sync_playhead_to_beat(0.0)
 
-            # Start display thread
-            self._display_stop_event.clear()
-            self._display_thread = threading.Thread(target=self._display_loop)
-            self._display_thread.daemon = True
-            self._display_thread.start()
+            # Start display thread only if not in GUI mode
+            if not self.sequencer.gui_mode:
+                self._display_stop_event.clear()
+                self._display_thread = threading.Thread(target=self._display_loop)
+                self._display_thread.daemon = True
+                self._display_thread.start()
 
             print("JACK client started and activated.")
         except jack.JackError as e:
@@ -559,14 +574,19 @@ class JackManager:
                     self.jack_client.transport_stop()
 
             self.last_beat = end_beat_of_block
+            if self.sequencer.gui_mode:
+                self.sequencer.current_beat = self.last_beat
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
 
 
-class Sequencer:
+class Sequencer(EventDispatcher):
+    current_beat = NumericProperty(0)
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
 
-    def __init__(self, tempo: int = 120):
+    def __init__(self, tempo: int = 120, gui_mode=False):
+        super().__init__()
+        self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
         self.playback_state = "stopped"
         self.jack_manager = JackManager(self)
@@ -662,7 +682,8 @@ class Sequencer:
             if not filepath:
                 return {"status": "error", "message": "Error: Filepath is required for audio tracks."}
             try:
-                AudioSegment.from_file(filepath)
+                with suppress_stdout_stderr():
+                    AudioSegment.from_file(filepath)
             except FileNotFoundError:
                 return {"status": "error", "message": f"Error: Audio file not found at '{filepath}'"}
             except Exception as e:
@@ -1864,7 +1885,8 @@ class Sequencer:
                     should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                     if not should_play:
                         continue
-                    segment = AudioSegment.from_file(track.filepath)
+                    with suppress_stdout_stderr():
+                        segment = AudioSegment.from_file(track.filepath)
                     duration_beats = (len(segment) / 1000.0) * (self.song.tempo / 60.0)
                     track_end_beat = track.start_time + duration_beats
                     if track_end_beat > max_beats:

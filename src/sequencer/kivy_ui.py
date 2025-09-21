@@ -46,6 +46,18 @@ class SequencerLayout(BoxLayout):
         self.sequencer = Sequencer()
         self.current_command = ""
 
+        # Status Display
+        status_layout = BoxLayout(size_hint_y=None, height=30)
+        self.song_name_label = Label(text="Song: New Song")
+        self.tempo_label = Label(text="Tempo: 120 BPM")
+        self.timesig_label = Label(text="Time Sig: 4/4")
+        self.metronome_label = Label(text="Metronome: OFF")
+        status_layout.add_widget(self.song_name_label)
+        status_layout.add_widget(self.tempo_label)
+        status_layout.add_widget(self.timesig_label)
+        status_layout.add_widget(self.metronome_label)
+        self.add_widget(status_layout)
+
         self.output_label = Label(size_hint_y=None, height=400)
         self.output_label.bind(texture_size=self.output_label.setter('size'))
         self.output_scroll = ScrollView(size_hint=(1, 0.8))
@@ -59,6 +71,16 @@ class SequencerLayout(BoxLayout):
         self.send_button = Button(text='Send', size_hint=(1, 0.1))
         self.send_button.bind(on_press=self.on_enter)
         self.add_widget(self.send_button)
+
+        self.update_status_display()
+
+    def update_status_display(self):
+        song = self.sequencer.song
+        self.song_name_label.text = f"Song: {song.name}"
+        self.tempo_label.text = f"Tempo: {song.tempo} BPM"
+        self.timesig_label.text = f"Time Sig: {song.time_signature_numerator}/{song.time_signature_denominator}"
+        metro_status = "ON" if song.metronome_enabled else "OFF"
+        self.metronome_label.text = f"Metronome: {metro_status}"
 
     def on_enter(self, instance):
         command = self.input_text.text
@@ -88,11 +110,13 @@ class SequencerLayout(BoxLayout):
             else:
                 self.output_label.text += data.get("message", "") + "\n"
                 self.current_command = "" # Reset after a final response
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             # Not a JSON response, just print it
-            self.output_label.text += output + "\n"
+            if output:
+                self.output_label.text += output + "\n"
             self.current_command = "" # Reset after a non-JSON response
 
+        self.update_status_display()
 
         if not should_continue:
             App.get_running_app().stop()

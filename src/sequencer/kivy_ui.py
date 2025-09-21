@@ -40,6 +40,47 @@ class SaveDiscardCancelPopup(Popup):
         self.callback(answer)
         self.dismiss()
 
+class LoopPopup(Popup):
+    def __init__(self, sequencer, callback, **kwargs):
+        super(LoopPopup, self).__init__(**kwargs)
+        self.title = "Set Loop Range"
+        self.size_hint = (0.8, 0.5)
+        self.sequencer = sequencer
+        self.callback = callback
+
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+
+        # Start Position
+        start_layout = BoxLayout(size_hint_y=None, height=30)
+        start_layout.add_widget(Label(text="Start (measure:beat):"))
+        self.start_input = TextInput(text="1:1", multiline=False)
+        start_layout.add_widget(self.start_input)
+        layout.add_widget(start_layout)
+
+        # End Position
+        end_layout = BoxLayout(size_hint_y=None, height=30)
+        end_layout.add_widget(Label(text="End (measure:beat):"))
+        end_of_song = self.sequencer._format_beats_to_position(self.sequencer._get_song_length_in_beats())
+        self.end_input = TextInput(text=end_of_song, multiline=False)
+        end_layout.add_widget(self.end_input)
+        layout.add_widget(end_layout)
+
+        # Buttons
+        buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
+        ok_button = Button(text='OK')
+        ok_button.bind(on_press=self.on_ok)
+        cancel_button = Button(text='Cancel')
+        cancel_button.bind(on_press=self.dismiss)
+        buttons_layout.add_widget(ok_button)
+        buttons_layout.add_widget(cancel_button)
+        layout.add_widget(buttons_layout)
+
+        self.content = layout
+
+    def on_ok(self, instance):
+        self.callback(self.start_input.text, self.end_input.text)
+        self.dismiss()
+
 class YesNoPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
         super(YesNoPopup, self).__init__(**kwargs)
@@ -158,7 +199,13 @@ class SequencerLayout(BoxLayout):
 
         try:
             data = json.loads(output)
-            if data.get("status") == "prompt":
+            if data.get("status") == "loop_prompt":
+                def loop_callback(start, end):
+                    full_command = f"loop {start} {end}"
+                    self.process_command_ui(full_command)
+                popup = LoopPopup(sequencer=self.sequencer, callback=loop_callback)
+                popup.open()
+            elif data.get("status") == "prompt":
                 prompt_message = data["message"]
                 if "You have unsaved changes" in prompt_message:
                     popup = SaveDiscardCancelPopup(prompt_text=prompt_message, callback=confirmation_callback)

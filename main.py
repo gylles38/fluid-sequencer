@@ -886,18 +886,21 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
         return True, "Toggled pause."
     elif command == "loop":
         if len(args) == 0:
-            seq.loop_enabled = not seq.loop_enabled
-            status = "enabled" if seq.loop_enabled else "disabled"
-            output = ""
-            if seq.loop_enabled and seq.play_range_enabled:
-                output += "Disabling play range to enable looping.\n"
-                seq.play_range_enabled = False
-            output += f"Looping is now {status}."
-            if not seq.loop_enabled:
-                output += "\nNote: Loop points are still saved. Use 'loop <start> <end>' to set new points."
-            elif seq.loop_end_beat <= seq.loop_start_beat:
-                output += "\nWarning: Loop end is not after loop start. The loop will not function correctly."
-            return True, output
+            if api_mode:
+                return True, json.dumps({"status": "loop_prompt"})
+            else:
+                seq.loop_enabled = not seq.loop_enabled
+                status = "enabled" if seq.loop_enabled else "disabled"
+                output = ""
+                if seq.loop_enabled and seq.play_range_enabled:
+                    output += "Disabling play range to enable looping.\n"
+                    seq.play_range_enabled = False
+                output += f"Looping is now {status}."
+                if not seq.loop_enabled:
+                    output += "\nNote: Loop points are still saved. Use 'loop <start> <end>' to set new points."
+                elif seq.loop_end_beat <= seq.loop_start_beat:
+                    output += "\nWarning: Loop end is not after loop start. The loop will not function correctly."
+                return True, output
         elif len(args) == 2:
             start_beat = seq.parse_position_to_beats(args[0])
             end_beat = seq.parse_position_to_beats(args[1])

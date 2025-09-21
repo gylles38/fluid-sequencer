@@ -770,18 +770,26 @@ class Sequencer:
                     event_modified = False
                     if erase_choice in ("all", "notes"):
                         if event.notes:
+                            with open("kivy_debug.log", "a") as f:
+                                f.write(f"      -> Erasing notes.\n")
                             event.notes.clear()
                             event_modified = True
                     if erase_choice in ("all", "cc"):
                         if event.cc_messages:
+                            with open("kivy_debug.log", "a") as f:
+                                f.write(f"      -> Erasing CCs.\n")
                             event.cc_messages.clear()
                             event_modified = True
                     if event_modified:
                         modified_count += 1
                     if not event.notes and not event.cc_messages:
                         deleted_count += 1
+                        with open("kivy_debug.log", "a") as f:
+                            f.write(f"      -> Event is now empty, will be deleted.\n")
                     else:
                         final_events.append(event)
+                        with open("kivy_debug.log", "a") as f:
+                            f.write(f"      -> Event not empty, keeping it.\n")
                 elif event.start_time >= end_beat:
                     events_to_shift.append(event)
                 else:
@@ -793,6 +801,8 @@ class Sequencer:
                     event.start_time -= shift_offset
 
             final_events.extend(events_to_shift)
+            with open("kivy_debug.log", "a") as f:
+                f.write(f"  Finished loop. Final event count will be {len(final_events)}. Original was {len(track.events)}.\n")
             track.events = final_events
             track.events.sort(key=lambda e: e.start_time)
 

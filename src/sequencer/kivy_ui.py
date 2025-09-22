@@ -61,7 +61,7 @@ class LoopPopup(Popup):
         # End Position
         end_layout = BoxLayout(size_hint_y=None, height=30)
         end_layout.add_widget(Label(text="End (measure:beat):"))
-        end_of_song = self.sequencer._format_beats_to_position(self.sequencer._get_song_length_in_beats())
+        end_of_song = self.sequencer._format_beats_to_position(self.sequencer.get_song_length_in_beats())
         self.end_input = TextInput(text=end_of_song, multiline=False)
         end_layout.add_widget(self.end_input)
         layout.add_widget(end_layout)

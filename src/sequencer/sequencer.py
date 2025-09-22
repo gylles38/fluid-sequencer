@@ -557,13 +557,10 @@ class JackManager:
 
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
-                # Use math.ceil to find the first integer beat >= start_beat_of_block.
-                # This correctly includes beat 0 when starting from the beginning.
-                beat_to_check = math.ceil(start_beat_of_block)
+                beat_to_check = math.floor(start_beat_of_block) + 1
                 while beat_to_check < end_beat_of_block:
                     beats_per_measure = self.sequencer.song.time_signature_numerator
-                    # Correct downbeat logic for 0-indexed beats (beat 0 is the first beat).
-                    is_downbeat = (int(beat_to_check) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 0
+                    is_downbeat = ((beat_to_check - 1) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 1
                     pitch = self.sequencer.metronome_pitch_downbeat if is_downbeat else self.sequencer.metronome_pitch_beat
                     note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=100)
                     note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)
@@ -571,7 +568,7 @@ class JackManager:
                     self._metronome_notes_to_turn_off.append(note_off)
                     beat_to_check += 1
 
-            song_length_beats = self.sequencer.get_song_length_in_beats()
+            song_length_beats = self.sequencer._get_song_length_in_beats()
             if not self.sequencer.loop_enabled and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
                 if start_beat_of_block < song_length_beats:
                     self.jack_client.transport_stop()
@@ -621,20 +618,6 @@ class Sequencer(EventDispatcher):
         self.last_record_settings = None
         self.is_dirty = False
         self.last_project_basename = None
-        self._cached_song_length_beats: Optional[float] = None
-
-    def invalidate_song_length_cache(self):
-        """Invalidates the cached song length."""
-        self._cached_song_length_beats = None
-
-    def get_song_length_in_beats(self) -> float:
-        """
-        Returns the cached song length in beats.
-        If the cache is invalid, it recalculates, caches, and returns the length.
-        """
-        if self._cached_song_length_beats is None:
-            self._cached_song_length_beats = self._calculate_song_length_in_beats()
-        return self._cached_song_length_beats
 
     def _all_notes_off(self):
         for port in self.open_ports.values():
@@ -679,7 +662,6 @@ class Sequencer(EventDispatcher):
             return "Error: Tempo must be positive."
         self.song.tempo = tempo
         self.is_dirty = True
-        self.invalidate_song_length_cache()
         return f"Tempo set to {self.song.tempo} BPM."
 
     def set_time_signature(self, numerator: int, denominator: int) -> str:
@@ -695,7 +677,6 @@ class Sequencer(EventDispatcher):
             track = MidiTrack(name=name, instrument=instrument)
             self.song.add_track(track)
             self.is_dirty = True
-            self.invalidate_song_length_cache()
             return {"status": "success", "message": f"MIDI track '{name}' added."}
         elif track_type == 'audio':
             if not filepath:
@@ -710,7 +691,6 @@ class Sequencer(EventDispatcher):
             track = AudioTrack(name=name, filepath=filepath)
             self.song.add_track(track)
             self.is_dirty = True
-            self.invalidate_song_length_cache()
             return {"status": "success", "message": f"Audio track '{name}' added with file '{filepath}'."}
         else:
             return {"status": "error", "message": f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'."}
@@ -739,7 +719,6 @@ class Sequencer(EventDispatcher):
             point = AutomationPoint(start_time=start_beat, parameter=parameter, value=value, curve=curve)
             track.add_point(point)
             self.is_dirty = True
-            self.invalidate_song_length_cache()
             return f"Added '{parameter}' automation point to track '{track.name}' at position {position_str}."
         except ValueError as e:
             return f"Error: {e}"
@@ -764,7 +743,6 @@ class Sequencer(EventDispatcher):
 
         self.song.tracks.pop(track_index)
         self.is_dirty = True
-        self.invalidate_song_length_cache()
         return {"status": "success", "message": f"Track '{track_name}' deleted."}
 
     def add_cc_event(self, track_index: int, position_str: str, control: int, value: int) -> str:
@@ -788,13 +766,11 @@ class Sequencer(EventDispatcher):
         if existing_event:
             existing_event.cc_messages.append(new_cc)
             self.is_dirty = True
-            self.invalidate_song_length_cache()
             return f"Added CC to existing event at position {position_str} on track '{track.name}'."
         else:
             new_event = Event(start_time=start_beat, cc_messages=[new_cc])
             track.add_event(new_event)
             self.is_dirty = True
-            self.invalidate_song_length_cache()
             return f"Added new CC event at position {position_str} on track '{track.name}'."
 
     def erase_track(self, track_idx: int, start_beat: float, end_beat: float, erase_choice: str, shift_events: bool):
@@ -852,7 +828,6 @@ class Sequencer(EventDispatcher):
 
             if report:
                  self.is_dirty = True
-                 self.invalidate_song_length_cache()
                  return f"Operation complete: {', '.join(report)} from track '{track.name}'."
             else:
                  return "No events were modified, deleted, or shifted."
@@ -871,7 +846,6 @@ class Sequencer(EventDispatcher):
             if deleted_count > 0:
                 track.points = points_to_keep
                 self.is_dirty = True
-                self.invalidate_song_length_cache()
                 return f"Erased {deleted_count} point(s) from track '{track.name}'."
             else:
                 return "No points were erased."
@@ -978,7 +952,6 @@ class Sequencer(EventDispatcher):
             return "No notes were found in the source range to move."
         else:
             self.is_dirty = True
-            self.invalidate_song_length_cache()
             return f"Operation complete: {', '.join(report)}."
 
     def copy_track_section(self, source_track_idx: int, confirmation_handler=None) -> str:
@@ -1058,7 +1031,6 @@ class Sequencer(EventDispatcher):
             return "No notes were found in the source range to copy."
         else:
             self.is_dirty = True
-            self.invalidate_song_length_cache()
             return f"Operation complete: {', '.join(report)}."
 
     def transpose_track_section(self, track_idx: int, start_pos_str: Optional[str] = None, end_pos_str: Optional[str] = None, transpose_value_str: Optional[str] = None, confirm_str: Optional[str] = None, api_mode: bool = False, confirmation_handler=None):
@@ -1349,7 +1321,6 @@ class Sequencer(EventDispatcher):
         track.is_muted = not track.is_muted
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
-        self.invalidate_song_length_cache()
         self._update_all_tracks_audibility()
         return f"Track '{track.name}' is now {status}."
 
@@ -1369,7 +1340,6 @@ class Sequencer(EventDispatcher):
                     output += f"Track '{other_track.name}' is now Un-soloed.\n"
         status = "Solo" if target_track.is_solo else "Un-soloed"
         self.is_dirty = True
-        self.invalidate_song_length_cache()
         self._update_all_tracks_audibility()
         output += f"Track '{target_track.name}' is now {status}."
         return output
@@ -1516,7 +1486,6 @@ class Sequencer(EventDispatcher):
             self.song = import_song(filepath)
             self.is_dirty = True
             self.last_project_basename = None
-            self.invalidate_song_length_cache()
             return f"Successfully loaded song from '{filepath}'."
         except Exception as e:
             return f"Error loading MIDI file: {e}"
@@ -1560,7 +1529,6 @@ class Sequencer(EventDispatcher):
                 self.set_control_port(control_port_name)
             self.is_dirty = False
             self.last_project_basename = basename
-            self.invalidate_song_length_cache()
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:
             return f"Error: Project file not found at '{project_filepath}'"
@@ -1577,7 +1545,6 @@ class Sequencer(EventDispatcher):
         self.unset_control_port()
         self.last_project_basename = None
         self.is_dirty = False
-        self.invalidate_song_length_cache()
         print("New project created.")
 
     def list_tracks(self) -> str:
@@ -1777,7 +1744,6 @@ class Sequencer(EventDispatcher):
                 # Manually record the first note that triggered everything BEFORE starting playback
                 first_note_ref = Note(pitch=first_msg.note, velocity=first_msg.velocity, duration=0.01) # Placeholder duration
                 target_track.add_event(Event(notes=[first_note_ref], start_time=start_beat))
-                self.invalidate_song_length_cache()
                 open_notes[first_msg.note] = (start_beat, first_msg.velocity)
                 self.is_dirty = True
                 recording_started_beat = start_beat
@@ -1817,7 +1783,6 @@ class Sequencer(EventDispatcher):
                                 else:
                                     note = Note(pitch=msg.note, velocity=velocity, duration=duration_beats)
                                     target_track.add_event(Event(notes=[note], start_time=note_on_beat))
-                                    self.invalidate_song_length_cache()
                                     self.is_dirty = True
 
                     if num_beats_to_record and (current_beat - recording_started_beat) >= num_beats_to_record:
@@ -1899,7 +1864,7 @@ class Sequencer(EventDispatcher):
         self._start_recording_internal(**settings)
         return "Re-recording with last used settings..."
 
-    def _calculate_song_length_in_beats(self) -> float:
+    def _get_song_length_in_beats(self) -> float:
         """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""
         max_beats = 0.0
         for track in self.song.tracks:

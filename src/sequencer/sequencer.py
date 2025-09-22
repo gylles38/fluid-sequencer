@@ -622,6 +622,7 @@ class Sequencer(EventDispatcher):
         self.is_dirty = False
         self.last_project_basename = None
         self._cached_song_length_beats: Optional[float] = None
+        self.audio_track_duration_ms: Dict[str, int] = {}
 
     def invalidate_song_length_cache(self):
         """Invalidates the cached song length."""
@@ -702,7 +703,8 @@ class Sequencer(EventDispatcher):
                 return {"status": "error", "message": "Error: Filepath is required for audio tracks."}
             try:
                 with suppress_stdout_stderr():
-                    AudioSegment.from_file(filepath)
+                    segment = AudioSegment.from_file(filepath)
+                self.audio_track_duration_ms[filepath] = len(segment)
             except FileNotFoundError:
                 return {"status": "error", "message": f"Error: Audio file not found at '{filepath}'"}
             except Exception as e:
@@ -1920,9 +1922,15 @@ class Sequencer(EventDispatcher):
                     should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                     if not should_play:
                         continue
-                    with suppress_stdout_stderr():
-                        segment = AudioSegment.from_file(track.filepath)
-                    duration_beats = (len(segment) / 1000.0) * (self.song.tempo / 60.0)
+
+                    duration_ms = self.audio_track_duration_ms.get(track.filepath)
+                    if duration_ms is None:
+                        with suppress_stdout_stderr():
+                            segment = AudioSegment.from_file(track.filepath)
+                        duration_ms = len(segment)
+                        self.audio_track_duration_ms[track.filepath] = duration_ms
+
+                    duration_beats = (duration_ms / 1000.0) * (self.song.tempo / 60.0)
                     track_end_beat = track.start_time + duration_beats
                     if track_end_beat > max_beats:
                         max_beats = track_end_beat

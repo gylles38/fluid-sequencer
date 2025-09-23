@@ -1273,6 +1273,7 @@ class Sequencer(EventDispatcher):
 
     def set_track_pan(self, track_index: int, pan_str: Optional[str] = None, api_mode: bool = False, confirmation_handler=None):
         """Sets the pan for a specific audio or MIDI track."""
+        print(f"[DEBUG] set_track_pan called for track {track_index}")
         if not 0 <= track_index < len(self.song.tracks):
             return {"status": "error", "message": "Error: Invalid track index."}
         track = self.song.tracks[track_index]
@@ -1296,22 +1297,39 @@ class Sequencer(EventDispatcher):
         except ValueError:
             return {"status": "error", "message": "Error: Invalid pan value."}
 
+        print(f"[DEBUG] Setting track.pan to {pan}")
         track.pan = pan
         self.is_dirty = True
 
+        print(f"[DEBUG] Jack manager is_running: {self.jack_manager.is_running}")
         if isinstance(track, AudioTrack):
             if self.jack_manager.is_running:
+                print("[DEBUG] Is AudioTrack, checking active processes...")
+                found_process = False
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
+                            print(f"[DEBUG] Found audio process for track {track_index}, sending IPC command.")
                             self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
+                            found_process = True
                             break
+                if not found_process:
+                    print(f"[DEBUG] No active audio process found for track {track_index}")
         elif isinstance(track, MidiTrack):
             if self.jack_manager.is_running and track.output_port_name:
+                print(f"[DEBUG] Is MidiTrack, checking for port '{track.output_port_name}'")
                 port = self.jack_manager.open_ports.get(track.output_port_name)
                 if port:
+                    print(f"[DEBUG] Port '{track.output_port_name}' found, sending CC.")
                     midi_pan = int((pan + 1.0) / 2.0 * 127)
                     port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
+                else:
+                    print(f"[DEBUG] Port '{track.output_port_name}' NOT found in open_ports.")
+            elif not self.jack_manager.is_running:
+                 print("[DEBUG] Is MidiTrack, but Jack manager is not running.")
+            elif not track.output_port_name:
+                 print("[DEBUG] Is MidiTrack, but no output port is assigned.")
+
 
         return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
 

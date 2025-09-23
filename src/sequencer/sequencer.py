@@ -235,7 +235,7 @@ class JackManager:
                     if isinstance(track, AudioTrack):
                         print(f"  - Priming Audio track '{track.name}'")
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
-                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+                        self.sequencer.set_track_pan(ap.track_index, str(track.pan)) # Send initial pan
                         should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
 
@@ -585,7 +585,7 @@ class JackManager:
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=@panner:pan=stereo"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
@@ -701,15 +701,18 @@ class Sequencer(EventDispatcher):
         elif track_type == 'audio':
             if not filepath:
                 return {"status": "error", "message": "Error: Filepath is required for audio tracks."}
+
+            track = AudioTrack(name=name, filepath=filepath)
             try:
                 with suppress_stdout_stderr():
                     segment = AudioSegment.from_file(filepath)
                 self.audio_track_duration_ms[filepath] = len(segment)
+                track.channels = segment.channels
             except FileNotFoundError:
                 return {"status": "error", "message": f"Error: Audio file not found at '{filepath}'"}
             except Exception as e:
                 return {"status": "error", "message": f"Error opening audio file: {e}"}
-            track = AudioTrack(name=name, filepath=filepath)
+
             self.song.add_track(track)
             self.is_dirty = True
             self.invalidate_song_length_cache()
@@ -1301,10 +1304,29 @@ class Sequencer(EventDispatcher):
 
         if isinstance(track, AudioTrack):
             if self.jack_manager.is_running:
+                # Pan is from -1.0 (L) to 1.0 (R)
+                # This logic maps the -1 to 1 range to gains for left and right channels.
+                if pan <= 0: # Panning left or center
+                    left_gain = 1.0
+                    right_gain = 1.0 + pan
+                else: # Panning right
+                    left_gain = 1.0 - pan
+                    right_gain = 1.0
+
+                left_gain_str = f"{left_gain:.2f}"
+                right_gain_str = f"{right_gain:.2f}"
+
+                if track.channels == 1: # Mono
+                    filter_str = f"@panner:pan=stereo|c0={left_gain_str}*c0|c1={right_gain_str}*c0"
+                else: # Stereo or unknown (default to stereo)
+                    filter_str = f"@panner:pan=stereo|c0={left_gain_str}*c0|c1={right_gain_str}*c1"
+
+                command = {"command": ["af", "set", filter_str]}
+
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
+                            self.jack_manager._send_ipc_command(ap.socket_path, command)
                             break
         elif isinstance(track, MidiTrack):
             if self.jack_manager.is_running and track.output_port_name:

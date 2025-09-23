@@ -712,6 +712,7 @@ class Sequencer(EventDispatcher):
             track = AudioTrack(name=name, filepath=filepath)
             self.song.add_track(track)
             self.is_dirty = True
+            self.invalidate_song_length_cache()
             return {"status": "success", "message": f"Audio track '{name}' added with file '{filepath}'."}
         else:
             return {"status": "error", "message": f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'."}
@@ -1900,43 +1901,43 @@ class Sequencer(EventDispatcher):
         self._start_recording_internal(**settings)
         return "Re-recording with last used settings..."
 
-def _calculate_song_length_in_beats(self) -> float:
-    """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""
-    max_beats = 0.0
-    for track in self.song.tracks:
-        if isinstance(track, MidiTrack):
-            is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
-            should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-            if not should_play:
-                continue
-            for event in track.events:
-                for note in event.notes:
-                    event_end_beat = event.start_time + note.duration
-                    if event_end_beat > max_beats:
-                        max_beats = event_end_beat
-    for track in self.song.tracks:
-        if isinstance(track, AudioTrack):
-            try:
+    def _calculate_song_length_in_beats(self) -> float:
+        """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""
+        max_beats = 0.0
+        for track in self.song.tracks:
+            if isinstance(track, MidiTrack):
                 is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
                 should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                 if not should_play:
                     continue
+                for event in track.events:
+                    for note in event.notes:
+                        event_end_beat = event.start_time + note.duration
+                        if event_end_beat > max_beats:
+                            max_beats = event_end_beat
+        for track in self.song.tracks:
+            if isinstance(track, AudioTrack):
+                try:
+                    is_any_track_soloed = any(t.is_solo for t in self.song.tracks)
+                    should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+                    if not should_play:
+                        continue
 
-                duration_ms = self.audio_track_duration_ms.get(track.filepath)
-                if duration_ms is None:
-                    with suppress_stdout_stderr():
-                        segment = AudioSegment.from_file(track.filepath)
-                    duration_ms = len(segment)
-                    self.audio_track_duration_ms[track.filepath] = duration_ms
+                    duration_ms = self.audio_track_duration_ms.get(track.filepath)
+                    if duration_ms is None:
+                        with suppress_stdout_stderr():
+                            segment = AudioSegment.from_file(track.filepath)
+                        duration_ms = len(segment)
+                        self.audio_track_duration_ms[track.filepath] = duration_ms
 
-                duration_beats = (duration_ms / 1000.0) * (self.song.tempo / 60.0)
-                track_end_beat = track.start_time + duration_beats
-                if track_end_beat > max_beats:
-                    max_beats = track_end_beat
-            except Exception as e:
-                print(f"Could not calculate duration for {track.filepath}: {e}")
-                pass
-    return max_beats
+                    duration_beats = (duration_ms / 1000.0) * (self.song.tempo / 60.0)
+                    track_end_beat = track.start_time + duration_beats
+                    if track_end_beat > max_beats:
+                        max_beats = track_end_beat
+                except Exception as e:
+                    print(f"Could not calculate duration for {track.filepath}: {e}")
+                    pass
+        return max_beats
 
     def _generate_automation_events(self, auto_track: 'AutomationTrack') -> List[dict]:
         """

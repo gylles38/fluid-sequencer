@@ -585,7 +585,7 @@ class JackManager:
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack --af=pan=2"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()

@@ -305,9 +305,7 @@ class JackManager:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                     s.settimeout(0.1)
                     s.connect(socket_path)
-                    command_str = json.dumps(command_data)
-                    print(f"[DEBUG] Sending IPC command to {socket_path}: {command_str}")
-                    s.sendall(command_str.encode('utf-8') + b'\n')
+                    s.sendall(json.dumps(command_data).encode('utf-8') + b'\n')
             return True
         except (socket.timeout, ConnectionRefusedError, FileNotFoundError, BrokenPipeError):
             return False
@@ -1314,6 +1312,7 @@ class Sequencer(EventDispatcher):
                 if port:
                     midi_pan = int((pan + 1.0) / 2.0 * 127)
                     port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
+                    time.sleep(0.01)
 
         return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
 

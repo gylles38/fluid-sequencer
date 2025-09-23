@@ -941,8 +941,6 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             is_enabled = args[0].lower() == "on"
             seq.song.metronome_enabled = is_enabled
             status = "enabled" if is_enabled else "disabled"
-            # The call to the non-existent start_metronome() is removed.
-            # The main process loop will pick up the change to metronome_enabled.
             return True, f"Metronome is now {status}."
         else:
             return True, "Usage: metronome <on|off>"

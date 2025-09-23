@@ -305,10 +305,11 @@ class JackManager:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                     s.settimeout(0.1)
                     s.connect(socket_path)
-                    s.sendall(json.dumps(command_data).encode('utf-8') + b'\n')
+                    command_str = json.dumps(command_data)
+                    print(f"[DEBUG] Sending IPC command to {socket_path}: {command_str}")
+                    s.sendall(command_str.encode('utf-8') + b'\n')
             return True
-        except (socket.timeout, ConnectionRefusedError, FileNotFoundError, BrokenPipeError) as e:
-            print(f"[DEBUG] IPC command to {socket_path} failed: {e}", file=sys.stderr)
+        except (socket.timeout, ConnectionRefusedError, FileNotFoundError, BrokenPipeError):
             return False
         except Exception as e:
             print(f"Error sending IPC command to {socket_path}: {e}", file=sys.stderr)

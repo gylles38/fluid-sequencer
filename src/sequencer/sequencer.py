@@ -585,7 +585,7 @@ class JackManager:
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=@panner:pan=stereo"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
@@ -1304,24 +1304,21 @@ class Sequencer(EventDispatcher):
 
         if isinstance(track, AudioTrack):
             if self.jack_manager.is_running:
-                # Pan is from -1.0 (L) to 1.0 (R)
-                # This logic maps the -1 to 1 range to gains for left and right channels.
-                if pan <= 0: # Panning left or center
-                    left_gain = 1.0
-                    right_gain = 1.0 + pan
-                else: # Panning right
-                    left_gain = 1.0 - pan
-                    right_gain = 1.0
+                # Use a constant-power panning law for a more natural sound.
+                # The angle is mapped from the pan value (-1 to 1) to a 0-pi/2 range.
+                angle = (pan + 1.0) * math.pi / 4.0
+                left_gain = math.cos(angle)
+                right_gain = math.sin(angle)
 
-                left_gain_str = f"{left_gain:.2f}"
-                right_gain_str = f"{right_gain:.2f}"
+                left_gain_str = f"{left_gain:.3f}"
+                right_gain_str = f"{right_gain:.3f}"
 
-                if track.channels == 1: # Mono
-                    filter_str = f"@panner:pan=stereo|c0={left_gain_str}*c0|c1={right_gain_str}*c0"
-                else: # Stereo or unknown (default to stereo)
-                    filter_str = f"@panner:pan=stereo|c0={left_gain_str}*c0|c1={right_gain_str}*c1"
+                if track.channels == 1:
+                    filter_graph = f"lavfi=[pan=stereo|c0={left_gain_str}*c0|c1={right_gain_str}*c0]"
+                else:
+                    filter_graph = f"lavfi=[pan=stereo|c0={left_gain_str}*c0|c1={right_gain_str}*c1]"
 
-                command = {"command": ["af", "set", filter_str]}
+                command = {"command": ["set_property", "af", filter_graph]}
 
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:

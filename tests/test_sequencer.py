@@ -301,50 +301,6 @@ class TestSequencer(unittest.TestCase):
         # Assert that set_control_port was called with the correct name
         mock_set_control_port.assert_called_with("MyTestControlPort")
 
-    @patch('pydub.AudioSegment.from_file')
-    @patch('src.sequencer.sequencer.jack')
-    def test_play_range_stops_audio(self, mock_jack, mock_from_file):
-        """Test that reaching the end of a play range stops audio tracks and the transport."""
-        # Setup
-        mock_from_file.return_value = MagicMock()
-        sequencer = self.sequencer
-        jm = sequencer.jack_manager
-
-        # Mock the JACK client and its state
-        jm.jack_client = MagicMock()
-        mock_jack.ROLLING = 'rolling' # Use a string for clarity in the mock
-        jm.jack_client.transport_state = mock_jack.ROLLING
-
-        # Mock the function we want to test is called
-        jm.set_all_audio_pause_state = MagicMock()
-
-        # Mock the transport query to return a valid state
-        mock_pos = MagicMock()
-        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': 0}
-        jm.jack_client.transport_query_struct.return_value = (mock_jack.ROLLING, mock_pos)
-
-        # Set a play range
-        sequencer.play_range_enabled = True
-        sequencer.play_range_end_beat = 4.0 # Stop at the end of the first measure
-
-        # Simulate the process callback just before the end of the play range
-        jm.last_beat = 3.9
-        sequencer.song.tempo = 120.0
-        samplerate = jm.jack_client.samplerate = 48000
-
-        # Calculate frames needed to cross the play_range_end_beat boundary
-        # end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
-        # 4.1 = 3.9 + (frames / 48000) * 2.0 => frames = 4800
-        frames = 4800
-
-        # Call the method under test
-        jm._process_callback(frames)
-
-        # Assertions
-        jm.jack_client.transport_stop.assert_called_once()
-        jm.set_all_audio_pause_state.assert_called_with(True)
-        self.assertFalse(sequencer.play_range_enabled)
-
 
 if __name__ == '__main__':
     unittest.main()

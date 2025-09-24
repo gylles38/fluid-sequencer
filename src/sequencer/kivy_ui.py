@@ -183,11 +183,45 @@ class SequencerLayout(BoxLayout):
         status_layout.add_widget(self.playhead_label)
         self.add_widget(status_layout)
 
+        # Transport Controls
+        transport_layout = BoxLayout(size_hint_y=None, height=40, spacing=5, padding=5)
+        transport_layout.add_widget(Label(text='Start:', size_hint_x=0.1))
+        self.start_pos_input = TextInput(text='1:1', multiline=False, size_hint_x=0.2)
+        transport_layout.add_widget(self.start_pos_input)
+        transport_layout.add_widget(Label(text='End:', size_hint_x=0.1))
+        self.end_pos_input = TextInput(text='', multiline=False, size_hint_x=0.2)
+        transport_layout.add_widget(self.end_pos_input)
+
+        play_button = Button(text='Play', on_press=self.play_pressed)
+        loop_button = Button(text='Loop', on_press=self.loop_pressed)
+        pause_button = Button(text='Pause', on_press=lambda x: self.process_command_ui('pause'))
+        stop_button = Button(text='Stop', on_press=lambda x: self.process_command_ui('stop'))
+        record_button = Button(text='Record', on_press=lambda x: self.process_command_ui('record'))
+
+        transport_layout.add_widget(play_button)
+        transport_layout.add_widget(loop_button)
+        transport_layout.add_widget(pause_button)
+        transport_layout.add_widget(stop_button)
+        transport_layout.add_widget(record_button)
+        self.add_widget(transport_layout)
+
         self.output_label = Label(size_hint_y=None, height=400)
         self.output_label.bind(texture_size=self.output_label.setter('size'))
         self.output_scroll = ScrollView(size_hint=(1, 0.8))
         self.output_scroll.add_widget(self.output_label)
         self.add_widget(self.output_scroll)
+
+    def play_pressed(self, instance):
+        start_pos = self.start_pos_input.text
+        end_pos = self.end_pos_input.text
+        command = f'play "{start_pos}" "{end_pos}"'
+        self.process_command_ui(command)
+
+    def loop_pressed(self, instance):
+        start_pos = self.start_pos_input.text
+        end_pos = self.end_pos_input.text
+        command = f'loop "{start_pos}" "{end_pos}"'
+        self.process_command_ui(command)
 
         self.input_text = TextInput(size_hint=(1, 0.1), multiline=False)
         self.input_text.bind(on_text_validate=self.on_enter)

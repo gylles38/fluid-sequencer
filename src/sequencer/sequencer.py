@@ -2018,7 +2018,8 @@ class Sequencer(EventDispatcher):
         It then ensures the transport is rolling.
         """
         # 1. Ensure client is running.
-        if not self.jack_manager.is_running:
+        is_first_play = not self.jack_manager.is_running # This captures the state before starting
+        if is_first_play:
             print("JACK client not active. Starting...")
             self.jack_manager.start()
             time.sleep(0.1) # Give it a moment to stabilize
@@ -2035,15 +2036,8 @@ class Sequencer(EventDispatcher):
             _ , pos_struct = self.jack_manager.jack_client.transport_query_struct()
             pos_dict = jack.position2dict(pos_struct)
 
-            if start_beat is None:
-                # If no start_beat, use current transport position
-                frame = pos_dict.get('frame', 0)
-                samplerate = self.jack_manager.jack_client.samplerate
-                beats_per_second = self.song.tempo / 60.0
-                if samplerate > 0 and beats_per_second > 0:
-                    current_beat = (frame / samplerate) * beats_per_second
-            else:
-                # If start_beat is given, use it and reposition transport
+            # If start_beat is given, always use it and reposition transport
+            if start_beat is not None:
                 current_beat = start_beat
                 beats_per_second = self.song.tempo / 60.0
                 samplerate = self.jack_manager.jack_client.samplerate
@@ -2052,6 +2046,19 @@ class Sequencer(EventDispatcher):
                     pos_struct.frame = target_frame
                     self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
                     print(f"Seeking JACK transport to {self._format_beats_to_position(current_beat)}.")
+            # If this is the first play (and start_beat was None), force transport to frame 0.
+            elif is_first_play:
+                print("First playback: Forcing transport to start.")
+                pos_struct.frame = 0
+                self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
+                current_beat = 0.0
+            # Otherwise (not first play, start_beat is None), use current transport position.
+            else:
+                frame = pos_dict.get('frame', 0)
+                samplerate = self.jack_manager.jack_client.samplerate
+                beats_per_second = self.song.tempo / 60.0
+                if samplerate > 0 and beats_per_second > 0:
+                    current_beat = (frame / samplerate) * beats_per_second
 
         except jack.JackError as e:
             print(f"Error querying or seeking JACK transport: {e}")

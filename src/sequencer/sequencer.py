@@ -543,6 +543,7 @@ class JackManager:
             if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
                 if start_beat_of_block < self.sequencer.play_range_end_beat:
                     self.jack_client.transport_stop()
+                    self.set_all_audio_pause_state(True)
                     self.sequencer.play_range_enabled = False
 
             if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:

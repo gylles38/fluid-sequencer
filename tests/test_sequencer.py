@@ -20,76 +20,75 @@ class TestSequencer(unittest.TestCase):
         self.assertIsInstance(self.sequencer.song, Song)
         self.assertEqual(len(self.sequencer.song.tracks), 0)
 
-    @patch('builtins.print')
-    def test_set_tempo(self, mock_print):
+    def test_set_tempo(self):
         """Test the set_tempo method."""
-        self.sequencer.set_tempo(150)
+        result = self.sequencer.set_tempo(150)
         self.assertEqual(self.sequencer.song.tempo, 150)
-        mock_print.assert_called_with("Tempo set to 150 BPM.")
+        self.assertEqual(result, "Tempo set to 150 BPM.")
 
-        with self.assertRaises(ValueError):
-            self.sequencer.set_tempo(0)
-        with self.assertRaises(ValueError):
-            self.sequencer.set_tempo(-100)
+        result = self.sequencer.set_tempo(0)
+        self.assertEqual(result, "Error: Tempo must be positive.")
+        result = self.sequencer.set_tempo(-100)
+        self.assertEqual(result, "Error: Tempo must be positive.")
 
-    @patch('builtins.print')
-    def test_set_time_signature(self, mock_print):
+    def test_set_time_signature(self):
         """Test the set_time_signature method."""
-        self.sequencer.set_time_signature(3, 4)
+        result = self.sequencer.set_time_signature(3, 4)
         self.assertEqual(self.sequencer.song.time_signature_numerator, 3)
         self.assertEqual(self.sequencer.song.time_signature_denominator, 4)
-        mock_print.assert_called_with("Time signature set to 3/4.")
+        self.assertEqual(result, "Time signature set to 3/4.")
 
         # Test invalid denominator
-        self.sequencer.set_time_signature(4, 5)
-        mock_print.assert_called_with("Error: Invalid time signature. Denominator must be a power of 2.")
+        result = self.sequencer.set_time_signature(4, 5)
+        self.assertEqual(result, "Error: Invalid time signature. Denominator must be a power of 2.")
 
-    @patch('builtins.print')
-    def test_add_midi_track(self, mock_print):
+    def test_add_midi_track(self):
         """Test adding a MIDI track."""
-        self.sequencer.add_track(name="Test MIDI", track_type='midi', instrument=5)
+        result = self.sequencer.add_track(name="Test MIDI", track_type='midi', instrument=5)
         self.assertEqual(len(self.sequencer.song.tracks), 1)
         track = self.sequencer.song.tracks[0]
         self.assertIsInstance(track, MidiTrack)
         self.assertEqual(track.name, "Test MIDI")
         self.assertEqual(track.instrument, 5)
-        mock_print.assert_called_with("MIDI track 'Test MIDI' added.")
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['message'], "MIDI track 'Test MIDI' added.")
 
     @patch('pydub.AudioSegment.from_file')
-    @patch('builtins.print')
-    def test_add_audio_track(self, mock_print, mock_from_file):
+    def test_add_audio_track(self, mock_from_file):
         """Test adding an Audio track."""
-        mock_from_file.return_value = MagicMock() # Mock the successful loading of an audio file
-        self.sequencer.add_track(name="Test Audio", track_type='audio', filepath="test.wav")
+        mock_segment = MagicMock()
+        mock_segment.__len__.return_value = 1000 # 1 second
+        mock_from_file.return_value = mock_segment # Mock the successful loading of an audio file
+        result = self.sequencer.add_track(name="Test Audio", track_type='audio', filepath="test.wav")
         self.assertEqual(len(self.sequencer.song.tracks), 1)
         track = self.sequencer.song.tracks[0]
         self.assertIsInstance(track, AudioTrack)
         self.assertEqual(track.name, "Test Audio")
         self.assertEqual(track.filepath, "test.wav")
-        mock_print.assert_called_with("Audio track 'Test Audio' added with file 'test.wav'.")
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['message'], "Audio track 'Test Audio' added with file 'test.wav'.")
 
-    @patch('builtins.print')
-    def test_delete_track(self, mock_print):
+    def test_delete_track(self):
         """Test deleting a track."""
         self.sequencer.add_track(name="To Delete", track_type='midi')
         self.assertEqual(len(self.sequencer.song.tracks), 1)
 
-        result = self.sequencer.delete_track(0)
-        self.assertTrue(result)
+        result = self.sequencer.delete_track(0, confirm_str='y', api_mode=True)
+        self.assertEqual(result['status'], 'success')
         self.assertEqual(len(self.sequencer.song.tracks), 0)
-        mock_print.assert_called_with("Track 'To Delete' deleted.")
+        self.assertEqual(result['message'], "Track 'To Delete' deleted.")
 
-        result = self.sequencer.delete_track(99)
-        self.assertFalse(result)
-        mock_print.assert_called_with("Error: Invalid track index.")
+        result = self.sequencer.delete_track(99, confirm_str='y', api_mode=True)
+        self.assertEqual(result['status'], 'error')
+        self.assertEqual(result['message'], "Error: Invalid track index.")
 
-    @patch('builtins.print')
-    def test_rename_track(self, mock_print):
+    def test_rename_track(self):
         """Test renaming a track."""
         self.sequencer.add_track(name="Old Name", track_type='midi')
-        self.sequencer.rename_track(0, "New Name")
+        result = self.sequencer.rename_track(0, "New Name")
         self.assertEqual(self.sequencer.song.tracks[0].name, "New Name")
-        mock_print.assert_called_with("Track 'Old Name' renamed to 'New Name'.")
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['message'], "Track 'Old Name' renamed to 'New Name'.")
 
     def test_parse_position_to_beats(self):
         """Test the position string parsing logic."""
@@ -100,11 +99,10 @@ class TestSequencer(unittest.TestCase):
         self.assertIsNone(self.sequencer.parse_position_to_beats("1:5")) # Invalid beat
         self.assertIsNone(self.sequencer.parse_position_to_beats("abc")) # Invalid format
 
-    @patch('builtins.print')
-    def test_add_cc_event(self, mock_print):
+    def test_add_cc_event(self):
         """Test adding a CC event to a track."""
         self.sequencer.add_track(name="MIDI", track_type='midi')
-        self.sequencer.add_cc_event(track_index=0, position_str="1:2", control=7, value=100)
+        result = self.sequencer.add_cc_event(track_index=0, position_str="1:2", control=7, value=100)
 
         track = self.sequencer.song.tracks[0]
         self.assertEqual(len(track.events), 1)
@@ -114,14 +112,14 @@ class TestSequencer(unittest.TestCase):
         cc = event.cc_messages[0]
         self.assertEqual(cc.control, 7)
         self.assertEqual(cc.value, 100)
-        mock_print.assert_called_with("Added new CC event at position 1:2 on track 'MIDI'.")
+        self.assertEqual(result, "Added new CC event at position 1:2 on track 'MIDI'.")
 
-    @patch('src.sequencer.sequencer.open_output')
-    def test_assign_port(self, mock_open_output):
+    def test_assign_port(self):
         """Test assigning a port to a track."""
         self.sequencer.add_track(name="MIDI", track_type='midi')
-        self.sequencer.assign_port(0, "MyMIDIPort")
+        result = self.sequencer.assign_port(0, "MyMIDIPort")
         self.assertEqual(self.sequencer.song.tracks[0].output_port_name, "MyMIDIPort")
+        self.assertEqual(result, "Assigned port 'MyMIDIPort' to track 'MIDI'.")
 
     def test_save_and_load_project(self):
         """Test saving and loading a project file."""
@@ -148,31 +146,31 @@ class TestSequencer(unittest.TestCase):
         self.assertEqual(len(new_sequencer.song.tracks), 1)
         self.assertEqual(new_sequencer.song.tracks[0].name, "Test MIDI")
 
-    @patch('builtins.print')
-    def test_add_automation_track(self, mock_print):
+    def test_add_automation_track(self):
         """Test adding an automation track."""
         self.sequencer.add_track(name="MIDI 1", track_type='midi')
-        self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
+        result = self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
 
         self.assertEqual(len(self.sequencer.song.tracks), 2)
         auto_track = self.sequencer.song.tracks[1]
         self.assertIsInstance(auto_track, AutomationTrack)
         self.assertEqual(auto_track.name, "Volume Automation")
         self.assertEqual(auto_track.target_track_index, 0)
-        mock_print.assert_called_with("Automation track 'Volume Automation' added, targeting track 0 ('MIDI 1').")
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['message'], "Automation track 'Volume Automation' added, targeting track 0 ('MIDI 1').")
 
         # Test adding automation track targeting another automation track (should fail)
-        self.sequencer.add_automation_track(name="Invalid Automation", target_track_index=1)
-        mock_print.assert_called_with("Error: Automation tracks cannot target other automation tracks.")
+        result = self.sequencer.add_automation_track(name="Invalid Automation", target_track_index=1)
+        self.assertEqual(result['status'], 'error')
+        self.assertEqual(result['message'], "Error: Automation tracks cannot target other automation tracks.")
         self.assertEqual(len(self.sequencer.song.tracks), 2) # Should not have been added
 
-    @patch('builtins.print')
-    def test_add_automation_point(self, mock_print):
+    def test_add_automation_point(self):
         """Test adding an automation point to a track."""
         self.sequencer.add_track(name="MIDI 1", track_type='midi')
         self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
 
-        self.sequencer.add_automation_point(track_index=1, position_str="1:1", parameter="vol", value=0.5, curve="linear")
+        result = self.sequencer.add_automation_point(track_index=1, position_str="1:1", parameter="vol", value=0.5, curve="linear")
 
         auto_track = self.sequencer.song.tracks[1]
         self.assertEqual(len(auto_track.points), 1)
@@ -181,11 +179,11 @@ class TestSequencer(unittest.TestCase):
         self.assertEqual(point.parameter, "vol")
         self.assertEqual(point.value, 0.5)
         self.assertEqual(point.curve, "linear")
-        mock_print.assert_called_with("Added 'vol' automation point to track 'Volume Automation' at position 1:1.")
+        self.assertEqual(result, "Added 'vol' automation point to track 'Volume Automation' at position 1:1.")
 
         # Test adding to a non-automation track
-        self.sequencer.add_automation_point(track_index=0, position_str="1:1", parameter="vol", value=0.5, curve="step")
-        mock_print.assert_called_with("Error: Automation points can only be added to automation tracks.")
+        result = self.sequencer.add_automation_point(track_index=0, position_str="1:1", parameter="vol", value=0.5, curve="step")
+        self.assertEqual(result, "Error: Automation points can only be added to automation tracks.")
 
     @patch('src.sequencer.sequencer.JackManager.start')
     def test_play_starts_jack_manager(self, mock_jack_start):
@@ -193,24 +191,22 @@ class TestSequencer(unittest.TestCase):
         self.sequencer.play()
         mock_jack_start.assert_called_once()
 
-    @patch('builtins.print')
-    def test_set_track_pan(self, mock_print):
+    def test_set_track_pan(self):
         """Test setting the pan for a track."""
         self.sequencer.add_track(name="MIDI 1", track_type='midi')
-        self.sequencer.set_track_pan(0, -0.5)
+        result = self.sequencer.set_track_pan(0, pan_str="-0.5", api_mode=True)
         self.assertEqual(self.sequencer.song.tracks[0].pan, -0.5)
-        mock_print.assert_called_with("Pan for track 'MIDI 1' set to -0.50.")
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['message'], "Pan for track 'MIDI 1' set to -0.50.")
 
-    @patch('builtins.input', side_effect=['1:1', '2:1', 'n', 'y', 'n']) # Add 'n' for shift prompt
-    @patch('builtins.print')
-    def test_erase_track_notes_only(self, mock_print, mock_input):
+    def test_erase_track_notes_only(self):
         """Test that erase command can remove only notes."""
         self.sequencer.add_track(name="Test Track", track_type='midi')
         track = self.sequencer.song.tracks[0]
         track.add_event(Event(start_time=0.0, notes=[Note(pitch=60, velocity=100, duration=1.0)], cc_messages=[CCMessage(control=7, value=100)]))
         track.add_event(Event(start_time=2.0, notes=[Note(pitch=62, velocity=100, duration=1.0)]))
 
-        self.sequencer.erase_track(0)
+        self.sequencer.erase_track(track_idx=0, start_beat=0.0, end_beat=4.0, erase_choice='notes', shift_events=False)
 
         # After erasing notes, the first event should still exist because of the CC.
         # The second event, which only contained a note, should be removed.
@@ -219,9 +215,7 @@ class TestSequencer(unittest.TestCase):
         self.assertEqual(len(track.events[0].cc_messages), 1)
         self.assertEqual(track.events[0].cc_messages[0].control, 7)
 
-
-    @patch('builtins.input', side_effect=['1:1', '', 'vol', 'y'])
-    def test_erase_automation_track_specific_param(self, mock_input):
+    def test_erase_automation_track_specific_param(self):
         """Test erasing a specific parameter from an automation track."""
         self.sequencer.add_track(name="Target", track_type='midi')
         self.sequencer.add_automation_track(name="Auto", target_track_index=0)
@@ -230,13 +224,12 @@ class TestSequencer(unittest.TestCase):
         auto_track.add_point(AutomationPoint(start_time=1.0, parameter="pan", value=-0.5))
         auto_track.add_point(AutomationPoint(start_time=2.0, parameter="vol", value=1.0))
 
-        self.sequencer.erase_track(1)
+        self.sequencer.erase_track(track_idx=1, start_beat=0.0, end_beat=4.0, erase_choice='vol', shift_events=False)
 
         self.assertEqual(len(auto_track.points), 1)
         self.assertEqual(auto_track.points[0].parameter, "pan")
 
-    @patch('builtins.input', side_effect=['1:1', '5:1', 'all', 'y'])
-    def test_erase_automation_track_all_params_in_range(self, mock_input):
+    def test_erase_automation_track_all_params_in_range(self):
         """Test erasing all parameters from an automation track in a range."""
         self.sequencer.add_track(name="Target", track_type='midi')
         self.sequencer.add_automation_track(name="Auto", target_track_index=0)
@@ -245,9 +238,10 @@ class TestSequencer(unittest.TestCase):
         auto_track.add_point(AutomationPoint(start_time=1.0, parameter="pan", value=-0.5))
         auto_track.add_point(AutomationPoint(start_time=5.0, parameter="vol", value=1.0)) # This one is outside the erase range
 
-        self.sequencer.erase_track(1)
+        self.sequencer.erase_track(track_idx=1, start_beat=0.0, end_beat=4.0, erase_choice='all', shift_events=False)
 
-        self.assertEqual(len(auto_track.points), 0)
+        self.assertEqual(len(auto_track.points), 1)
+        self.assertEqual(auto_track.points[0].start_time, 5.0)
 
     def test_new_project(self):
         """Test creating a new project."""
@@ -277,7 +271,7 @@ class TestSequencer(unittest.TestCase):
         track.is_muted = False
 
         # Call the internal method directly to test the logic
-        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=False)
+        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=False, enable_thru=False)
 
         # Check that the track is not muted
         self.assertFalse(track.is_muted)
@@ -307,6 +301,50 @@ class TestSequencer(unittest.TestCase):
         # Assert that set_control_port was called with the correct name
         mock_set_control_port.assert_called_with("MyTestControlPort")
 
+    @patch('pydub.AudioSegment.from_file')
+    @patch('src.sequencer.sequencer.jack')
+    def test_play_range_stops_audio(self, mock_jack, mock_from_file):
+        """Test that reaching the end of a play range stops audio tracks and the transport."""
+        # Setup
+        mock_from_file.return_value = MagicMock()
+        sequencer = self.sequencer
+        jm = sequencer.jack_manager
+
+        # Mock the JACK client and its state
+        jm.jack_client = MagicMock()
+        mock_jack.ROLLING = 'rolling' # Use a string for clarity in the mock
+        jm.jack_client.transport_state = mock_jack.ROLLING
+
+        # Mock the function we want to test is called
+        jm.set_all_audio_pause_state = MagicMock()
+
+        # Mock the transport query to return a valid state
+        mock_pos = MagicMock()
+        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': 0}
+        jm.jack_client.transport_query_struct.return_value = (mock_jack.ROLLING, mock_pos)
+
+        # Set a play range
+        sequencer.play_range_enabled = True
+        sequencer.play_range_end_beat = 4.0 # Stop at the end of the first measure
+
+        # Simulate the process callback just before the end of the play range
+        jm.last_beat = 3.9
+        sequencer.song.tempo = 120.0
+        samplerate = jm.jack_client.samplerate = 48000
+
+        # Calculate frames needed to cross the play_range_end_beat boundary
+        # end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
+        # 4.1 = 3.9 + (frames / 48000) * 2.0 => frames = 4800
+        frames = 4800
+
+        # Call the method under test
+        jm._process_callback(frames)
+
+        # Assertions
+        jm.jack_client.transport_stop.assert_called_once()
+        jm.set_all_audio_pause_state.assert_called_with(True)
+        self.assertFalse(sequencer.play_range_enabled)
+
 
 if __name__ == '__main__':
     unittest.main()
@@ -328,7 +366,7 @@ class TestRecording(unittest.TestCase):
         track.add_event(Event(start_time=1.0, notes=[Note(pitch=60, velocity=100, duration=1.0)], cc_messages=[CCMessage(control=7, value=100)]))
 
         # Call the internal method directly to test the replacement logic
-        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=True)
+        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=True, enable_thru=False)
 
         # Check that the event still exists but the note is gone
         self.assertEqual(len(track.events), 1)
@@ -344,32 +382,23 @@ class TestRecording(unittest.TestCase):
         track.is_muted = False
 
         # Call the internal method directly to test the logic
-        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=False)
+        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=False, enable_thru=False)
 
         # Check that the track is not muted
         self.assertFalse(track.is_muted)
         mock_thread.assert_called_once()
 
     @patch('src.sequencer.sequencer.Sequencer._start_recording_internal')
-    @patch('mido.get_input_names', return_value=['TestInputPort'])
-    @patch('src.sequencer.sequencer.cancellable_input', side_effect=['1:1', '1:0', 'r', '0'])
-    def test_record_track_flow(self, mock_input, mock_get_inputs, mock_start_recording):
+    def test_record_track_flow(self, mock_start_recording):
         """Test the main record_track function flow."""
         self.sequencer.add_track(name="Track 2", track_type="midi")
         # Add an existing note to trigger the replace/add prompt
         self.sequencer.song.tracks[0].add_event(Event(start_time=2.0, notes=[Note(pitch=1, velocity=1, duration=1)]))
 
-        self.sequencer.record_track(0)
+        self.sequencer.record_track(track_idx=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='TestInputPort', replace_notes=True, enable_thru=True)
 
         # Assert that the internal recording function was called with the correct parameters
-        mock_start_recording.assert_called_once()
-        call_args = mock_start_recording.call_args[1]
-
-        self.assertEqual(call_args['track_index'], 0)
-        self.assertEqual(call_args['start_beat'], 0.0)
-        self.assertEqual(call_args['num_beats_to_record'], 4.0) # 1 measure of 4/4
-        self.assertEqual(call_args['inport_name'], 'TestInputPort')
-        self.assertTrue(call_args['replace_notes'])
+        mock_start_recording.assert_called_once_with(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='TestInputPort', replace_notes=True, enable_thru=True)
 
     def test_note_capture_logic_in_isolation(self):
         """Tests the core logic of capturing a note from note-on/note-off messages."""

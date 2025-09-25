@@ -241,6 +241,17 @@ class SequencerLayout(BoxLayout):
         self.output_scroll.add_widget(self.output_label)
         self.add_widget(self.output_scroll)
 
+        self.input_text = TextInput(size_hint=(1, 0.1), multiline=False)
+        self.input_text.bind(on_text_validate=self.on_enter)
+        self.add_widget(self.input_text)
+
+        self.send_button = Button(text='Send', size_hint=(1, 0.1))
+        self.send_button.bind(on_press=self.on_enter)
+        self.add_widget(self.send_button)
+
+        self.update_status_display()
+        self.sequencer.bind(current_beat=self.update_playhead_display)
+
     def load_project_popup(self):
         def callback(filepath):
             import os
@@ -286,17 +297,6 @@ class SequencerLayout(BoxLayout):
         end_pos = self.end_pos_input.text
         command = f'loop "{start_pos}" "{end_pos}"'
         self.process_command_ui(command)
-
-        self.input_text = TextInput(size_hint=(1, 0.1), multiline=False)
-        self.input_text.bind(on_text_validate=self.on_enter)
-        self.add_widget(self.input_text)
-
-        self.send_button = Button(text='Send', size_hint=(1, 0.1))
-        self.send_button.bind(on_press=self.on_enter)
-        self.add_widget(self.send_button)
-
-        self.update_status_display()
-        self.sequencer.bind(current_beat=self.update_playhead_display)
 
     def update_playhead_display(self, instance, value):
         self.playhead_label.text = f"Position: {self.sequencer._format_beats_to_position(value)}"

@@ -444,10 +444,10 @@ class TrackWidget(BoxLayout):
 
         # Mute/Solo Buttons
         buttons_layout = BoxLayout(orientation='vertical', size_hint_x=0.1)
-        self.mute_button = ToggleButton(text='Mute', state='normal' if not track.mute else 'down')
+        self.mute_button = ToggleButton(text='Mute', state='normal' if not track.is_muted else 'down')
         self.mute_button.bind(on_press=self.on_mute_toggle)
         buttons_layout.add_widget(self.mute_button)
-        self.solo_button = ToggleButton(text='Solo', state='normal' if not track.solo else 'down')
+        self.solo_button = ToggleButton(text='Solo', state='normal' if not track.is_solo else 'down')
         self.solo_button.bind(on_press=self.on_solo_toggle)
         buttons_layout.add_widget(self.solo_button)
         self.add_widget(buttons_layout)

@@ -169,6 +169,7 @@ class SequencerLayout(BoxLayout):
         self.orientation = 'vertical'
         self.sequencer = Sequencer(gui_mode=True)
         self.current_command = ""
+        self.end_pos_manual_override = False
 
         # Menu Bar
         menu_bar = BoxLayout(size_hint_y=None, height=30)
@@ -220,6 +221,7 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(self.start_pos_input)
         transport_layout.add_widget(Label(text='End:', size_hint_x=0.1))
         self.end_pos_input = TextInput(text='', multiline=False, size_hint_x=0.2)
+        self.end_pos_input.bind(on_text_validate=self.on_end_pos_manual_set)
         transport_layout.add_widget(self.end_pos_input)
 
         play_button = Button(text='Play', on_press=self.play_pressed)
@@ -252,12 +254,17 @@ class SequencerLayout(BoxLayout):
         self.update_status_display()
         self.sequencer.bind(current_beat=self.update_playhead_display)
 
+    def on_end_pos_manual_set(self, instance):
+        if instance.text:
+            self.end_pos_manual_override = True
+
     def load_project_popup(self):
         def callback(filepath):
             import os
             if filepath:
                 # We need the basename without extension for the command
                 basename = os.path.basename(filepath).removesuffix('.proj.json')
+                self.end_pos_manual_override = False # Reset the flag
                 self.process_command_ui(f'loadproject "{basename}"')
         popup = FileChooserPopup(
             callback=callback,
@@ -269,6 +276,7 @@ class SequencerLayout(BoxLayout):
     def new_project_popup(self):
         def callback(name):
             if name:
+                self.end_pos_manual_override = False # Reset the flag
                 self.process_command_ui(f'newproject "{name}"')
         popup = ConfirmationPopup(prompt_text="Enter new project name:", callback=callback)
         popup.open()
@@ -289,12 +297,16 @@ class SequencerLayout(BoxLayout):
     def play_pressed(self, instance):
         start_pos = self.start_pos_input.text
         end_pos = self.end_pos_input.text
+        if end_pos:
+            self.end_pos_manual_override = True
         command = f'play "{start_pos}" "{end_pos}"'
         self.process_command_ui(command)
 
     def loop_pressed(self, instance):
         start_pos = self.start_pos_input.text
         end_pos = self.end_pos_input.text
+        if end_pos:
+            self.end_pos_manual_override = True
         command = f'loop "{start_pos}" "{end_pos}"'
         self.process_command_ui(command)
 
@@ -309,9 +321,10 @@ class SequencerLayout(BoxLayout):
         metro_status = "ON" if song.metronome_enabled else "OFF"
         self.metronome_label.text = f"Metronome: {metro_status}"
 
-        # Update end position input
-        end_of_song_beats = self.sequencer.get_song_length_in_beats()
-        self.end_pos_input.text = self.sequencer._format_beats_to_position(end_of_song_beats)
+        # Update end position input, but only if the user hasn't manually set it.
+        if not self.end_pos_manual_override:
+            end_of_song_beats = self.sequencer.get_song_length_in_beats()
+            self.end_pos_input.text = self.sequencer._format_beats_to_position(end_of_song_beats)
 
     def on_enter(self, instance):
         command = self.input_text.text

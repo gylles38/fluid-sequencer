@@ -173,29 +173,29 @@ class SequencerLayout(BoxLayout):
         # Menu Bar
         menu_bar = BoxLayout(size_hint_y=None, height=30)
         file_button = Button(text='File', size_hint_x=None, width=100)
-        file_dropdown = DropDown()
+        self.file_dropdown = DropDown()
 
         btn_new = Button(text='New Project', size_hint_y=None, height=44)
-        btn_new.bind(on_release=lambda x: (file_dropdown.dismiss(), self.new_project_popup()))
-        file_dropdown.add_widget(btn_new)
+        btn_new.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.new_project_popup()))
+        self.file_dropdown.add_widget(btn_new)
 
         btn_load = Button(text='Load Project', size_hint_y=None, height=44)
-        btn_load.bind(on_release=lambda x: (file_dropdown.dismiss(), self.load_project_popup()))
-        file_dropdown.add_widget(btn_load)
+        btn_load.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.load_project_popup()))
+        self.file_dropdown.add_widget(btn_load)
 
         btn_save = Button(text='Save Project', size_hint_y=None, height=44)
-        btn_save.bind(on_release=lambda x: (file_dropdown.dismiss(), self.save_project()))
-        file_dropdown.add_widget(btn_save)
+        btn_save.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.save_project()))
+        self.file_dropdown.add_widget(btn_save)
 
         btn_save_as = Button(text='Save Project As...', size_hint_y=None, height=44)
-        btn_save_as.bind(on_release=lambda x: (file_dropdown.dismiss(), self.save_project_as_popup()))
-        file_dropdown.add_widget(btn_save_as)
+        btn_save_as.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.save_project_as_popup()))
+        self.file_dropdown.add_widget(btn_save_as)
 
         btn_quit = Button(text='Quit', size_hint_y=None, height=44)
         btn_quit.bind(on_release=lambda x: self.process_command_ui('quit'))
-        file_dropdown.add_widget(btn_quit)
+        self.file_dropdown.add_widget(btn_quit)
 
-        file_button.bind(on_release=file_dropdown.open)
+        file_button.bind(on_release=self.file_dropdown.open)
         menu_bar.add_widget(file_button)
         self.add_widget(menu_bar)
 

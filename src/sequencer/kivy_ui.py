@@ -12,9 +12,10 @@ from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.slider import Slider
 from kivy.uix.togglebutton import ToggleButton
+from kivy.uix.widget import Widget
 
 from sequencer.sequencer import Sequencer
-from sequencer.models import MidiTrack
+from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 import sys
 
 class SaveDiscardCancelPopup(Popup):
@@ -418,61 +419,65 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout = sequencer_layout
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = 100  # Adjust height as needed
+        self.height = 100
 
-        # Track Info
-        info_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
-        self.name_label = Label(text=f"[{track_index}] {track.name}")
-        info_layout.add_widget(self.name_label)
+        # --- Column 1: Track Info ---
+        info_layout = BoxLayout(orientation='vertical', size_hint_x=0.4)
+        name_label = Label(text=f"[{track_index}] {track.name}")
+
+        track_type_text = "Unknown"
+        if isinstance(track, MidiTrack):
+            track_type_text = "Type: MIDI"
+        elif isinstance(track, AudioTrack):
+            track_type_text = "Type: Audio"
+        elif isinstance(track, AutomationTrack):
+            track_type_text = "Type: Automation"
+        type_label = Label(text=track_type_text, font_size='12sp', color=(0.8, 0.8, 0.8, 1))
+
+        info_layout.add_widget(name_label)
+        info_layout.add_widget(type_label)
         self.add_widget(info_layout)
 
-        # Volume Slider
-        volume_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
-        volume_layout.add_widget(Label(text='Volume'))
-        self.volume_slider = Slider(min=0, max=1, value=track.volume)
-        self.volume_slider.bind(value=self.on_volume_change)
-        volume_layout.add_widget(self.volume_slider)
-        self.add_widget(volume_layout)
+        # --- Column 2: Volume & Pan ---
+        slider_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
+        volume_slider = Slider(min=0, max=1, value=track.volume)
+        volume_slider.bind(value=self.on_volume_change)
+        pan_slider = Slider(min=-1, max=1, value=track.pan)
+        pan_slider.bind(value=self.on_pan_change)
+        slider_layout.add_widget(volume_slider)
+        slider_layout.add_widget(pan_slider)
+        self.add_widget(slider_layout)
 
-        # Pan Slider
-        pan_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
-        pan_layout.add_widget(Label(text='Pan'))
-        self.pan_slider = Slider(min=-1, max=1, value=track.pan)
-        self.pan_slider.bind(value=self.on_pan_change)
-        pan_layout.add_widget(self.pan_slider)
-        self.add_widget(pan_layout)
-
-        # Mute/Solo Buttons
+        # --- Column 3: Mute & Solo ---
         buttons_layout = BoxLayout(orientation='vertical', size_hint_x=0.1)
-        self.mute_button = ToggleButton(text='Mute', state='normal' if not track.is_muted else 'down')
-        self.mute_button.bind(on_press=self.on_mute_toggle)
-        buttons_layout.add_widget(self.mute_button)
-        self.solo_button = ToggleButton(text='Solo', state='normal' if not track.is_solo else 'down')
-        self.solo_button.bind(on_press=self.on_solo_toggle)
-        buttons_layout.add_widget(self.solo_button)
+        mute_button = ToggleButton(text='Mute', state='normal' if not track.is_muted else 'down')
+        mute_button.bind(on_press=self.on_mute_toggle)
+        solo_button = ToggleButton(text='Solo', state='normal' if not track.is_solo else 'down')
+        solo_button.bind(on_press=self.on_solo_toggle)
+        buttons_layout.add_widget(mute_button)
+        buttons_layout.add_widget(solo_button)
         self.add_widget(buttons_layout)
 
-        # MIDI Controls (only for MIDI tracks)
+        # --- Column 4: MIDI Controls or Spacer ---
+        midi_controls_placeholder = BoxLayout(orientation='vertical', size_hint_x=0.3)
         if isinstance(track, MidiTrack):
-            midi_layout = BoxLayout(orientation='vertical', size_hint_x=0.3)
-
             # Channel
             ch_layout = BoxLayout()
             ch_layout.add_widget(Label(text='Ch:'))
-            self.channel_input = TextInput(text=str(track.channel + 1), multiline=False)
-            self.channel_input.bind(on_text_validate=self.on_channel_change)
-            ch_layout.add_widget(self.channel_input)
-            midi_layout.add_widget(ch_layout)
-
+            channel_input = TextInput(text=str(track.channel + 1), multiline=False)
+            channel_input.bind(on_text_validate=self.on_channel_change)
+            ch_layout.add_widget(channel_input)
+            midi_controls_placeholder.add_widget(ch_layout)
             # Program
             prog_layout = BoxLayout()
             prog_layout.add_widget(Label(text='Prog:'))
-            self.program_input = TextInput(text=str(track.instrument + 1), multiline=False)
-            self.program_input.bind(on_text_validate=self.on_program_change)
-            prog_layout.add_widget(self.program_input)
-            midi_layout.add_widget(prog_layout)
-
-            self.add_widget(midi_layout)
+            program_input = TextInput(text=str(track.instrument + 1), multiline=False)
+            program_input.bind(on_text_validate=self.on_program_change)
+            prog_layout.add_widget(program_input)
+            midi_controls_placeholder.add_widget(prog_layout)
+        else:
+            midi_controls_placeholder.add_widget(Widget()) # Spacer
+        self.add_widget(midi_controls_placeholder)
 
     def on_volume_change(self, instance, value):
         self.sequencer_layout.process_command_ui(f'volume {self.track_index} {value}')

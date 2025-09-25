@@ -10,8 +10,11 @@ from kivy.uix.dropdown import DropDown
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.slider import Slider
+from kivy.uix.togglebutton import ToggleButton
 
 from sequencer.sequencer import Sequencer
+from sequencer.models import MidiTrack
 import sys
 
 class SaveDiscardCancelPopup(Popup):
@@ -237,11 +240,15 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(record_button)
         self.add_widget(transport_layout)
 
-        self.output_label = Label(size_hint_y=None, height=400)
-        self.output_label.bind(texture_size=self.output_label.setter('size'))
-        self.output_scroll = ScrollView(size_hint=(1, 0.8))
-        self.output_scroll.add_widget(self.output_label)
-        self.add_widget(self.output_scroll)
+        # Track List (Mixer)
+        self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
+        track_scroll_view = ScrollView(size_hint=(1, 0.8))
+        track_scroll_view.add_widget(self.track_list_layout)
+        self.add_widget(track_scroll_view)
+
+        self.output_label = Label(size_hint_y=0.1, text="Welcome!") # For general feedback
+        self.add_widget(self.output_label)
 
         self.input_text = TextInput(size_hint=(1, 0.1), multiline=False)
         self.input_text.bind(on_text_validate=self.on_enter)
@@ -313,6 +320,12 @@ class SequencerLayout(BoxLayout):
     def update_playhead_display(self, instance, value):
         self.playhead_label.text = f"Position: {self.sequencer._format_beats_to_position(value)}"
 
+    def update_track_list(self):
+        self.track_list_layout.clear_widgets()
+        for i, track in enumerate(self.sequencer.song.tracks):
+            track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
+            self.track_list_layout.add_widget(track_widget)
+
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"
@@ -325,6 +338,8 @@ class SequencerLayout(BoxLayout):
         if not self.end_pos_manual_override:
             end_of_song_beats = self.sequencer.get_song_length_in_beats()
             self.end_pos_input.text = self.sequencer._format_beats_to_position(end_of_song_beats)
+
+        self.update_track_list()
 
     def on_enter(self, instance):
         command = self.input_text.text
@@ -394,3 +409,85 @@ class SequencerApp(App):
         layout = self.root
         layout.sequencer.stop()
         layout.sequencer.close_virtual_ports()
+
+class TrackWidget(BoxLayout):
+    def __init__(self, track, track_index, sequencer_layout, **kwargs):
+        super(TrackWidget, self).__init__(**kwargs)
+        self.track = track
+        self.track_index = track_index
+        self.sequencer_layout = sequencer_layout
+        self.orientation = 'horizontal'
+        self.size_hint_y = None
+        self.height = 100  # Adjust height as needed
+
+        # Track Info
+        info_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
+        self.name_label = Label(text=f"[{track_index}] {track.name}")
+        info_layout.add_widget(self.name_label)
+        self.add_widget(info_layout)
+
+        # Volume Slider
+        volume_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
+        volume_layout.add_widget(Label(text='Volume'))
+        self.volume_slider = Slider(min=0, max=1, value=track.volume)
+        self.volume_slider.bind(value=self.on_volume_change)
+        volume_layout.add_widget(self.volume_slider)
+        self.add_widget(volume_layout)
+
+        # Pan Slider
+        pan_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
+        pan_layout.add_widget(Label(text='Pan'))
+        self.pan_slider = Slider(min=-1, max=1, value=track.pan)
+        self.pan_slider.bind(value=self.on_pan_change)
+        pan_layout.add_widget(self.pan_slider)
+        self.add_widget(pan_layout)
+
+        # Mute/Solo Buttons
+        buttons_layout = BoxLayout(orientation='vertical', size_hint_x=0.1)
+        self.mute_button = ToggleButton(text='Mute', state='normal' if not track.mute else 'down')
+        self.mute_button.bind(on_press=self.on_mute_toggle)
+        buttons_layout.add_widget(self.mute_button)
+        self.solo_button = ToggleButton(text='Solo', state='normal' if not track.solo else 'down')
+        self.solo_button.bind(on_press=self.on_solo_toggle)
+        buttons_layout.add_widget(self.solo_button)
+        self.add_widget(buttons_layout)
+
+        # MIDI Controls (only for MIDI tracks)
+        if isinstance(track, MidiTrack):
+            midi_layout = BoxLayout(orientation='vertical', size_hint_x=0.3)
+
+            # Channel
+            ch_layout = BoxLayout()
+            ch_layout.add_widget(Label(text='Ch:'))
+            self.channel_input = TextInput(text=str(track.channel + 1), multiline=False)
+            self.channel_input.bind(on_text_validate=self.on_channel_change)
+            ch_layout.add_widget(self.channel_input)
+            midi_layout.add_widget(ch_layout)
+
+            # Program
+            prog_layout = BoxLayout()
+            prog_layout.add_widget(Label(text='Prog:'))
+            self.program_input = TextInput(text=str(track.program + 1), multiline=False)
+            self.program_input.bind(on_text_validate=self.on_program_change)
+            prog_layout.add_widget(self.program_input)
+            midi_layout.add_widget(prog_layout)
+
+            self.add_widget(midi_layout)
+
+    def on_volume_change(self, instance, value):
+        self.sequencer_layout.process_command_ui(f'volume {self.track_index} {value}')
+
+    def on_pan_change(self, instance, value):
+        self.sequencer_layout.process_command_ui(f'pan {self.track_index} {value}')
+
+    def on_mute_toggle(self, instance):
+        self.sequencer_layout.process_command_ui(f'mute {self.track_index}')
+
+    def on_solo_toggle(self, instance):
+        self.sequencer_layout.process_command_ui(f'solo {self.track_index}')
+
+    def on_channel_change(self, instance):
+        self.sequencer_layout.process_command_ui(f'setch {self.track_index} {instance.text}')
+
+    def on_program_change(self, instance):
+        self.sequencer_layout.process_command_ui(f'setprog {self.track_index} {instance.text}')

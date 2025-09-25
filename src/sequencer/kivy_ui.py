@@ -246,7 +246,7 @@ class SequencerLayout(BoxLayout):
             import os
             if filepath:
                 # We need the basename without extension for the command
-                basename = os.path.splitext(os.path.basename(filepath))[0]
+                basename = os.path.basename(filepath).removesuffix('.proj.json')
                 self.process_command_ui(f'loadproject "{basename}"')
         popup = FileChooserPopup(
             callback=callback,

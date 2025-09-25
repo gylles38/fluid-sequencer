@@ -6,6 +6,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
@@ -83,15 +84,15 @@ class LoopPopup(Popup):
         self.dismiss()
 
 class FileChooserPopup(Popup):
-    def __init__(self, callback, **kwargs):
+    def __init__(self, callback, title="Select File", filters=None, **kwargs):
         super(FileChooserPopup, self).__init__(**kwargs)
-        self.title = "Select Audio File"
+        self.title = title
         self.size_hint = (0.9, 0.9)
         self.callback = callback
 
         layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
-        self.filechooser = FileChooserListView()
+        self.filechooser = FileChooserListView(filters=filters or [])
         layout.add_widget(self.filechooser)
 
         buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
@@ -169,6 +170,35 @@ class SequencerLayout(BoxLayout):
         self.sequencer = Sequencer(gui_mode=True)
         self.current_command = ""
 
+        # Menu Bar
+        menu_bar = BoxLayout(size_hint_y=None, height=30)
+        file_button = Button(text='File', size_hint_x=None, width=100)
+        file_dropdown = DropDown()
+
+        btn_new = Button(text='New Project', size_hint_y=None, height=44)
+        btn_new.bind(on_release=lambda x: (file_dropdown.dismiss(), self.new_project_popup()))
+        file_dropdown.add_widget(btn_new)
+
+        btn_load = Button(text='Load Project', size_hint_y=None, height=44)
+        btn_load.bind(on_release=lambda x: (file_dropdown.dismiss(), self.load_project_popup()))
+        file_dropdown.add_widget(btn_load)
+
+        btn_save = Button(text='Save Project', size_hint_y=None, height=44)
+        btn_save.bind(on_release=lambda x: (file_dropdown.dismiss(), self.save_project()))
+        file_dropdown.add_widget(btn_save)
+
+        btn_save_as = Button(text='Save Project As...', size_hint_y=None, height=44)
+        btn_save_as.bind(on_release=lambda x: (file_dropdown.dismiss(), self.save_project_as_popup()))
+        file_dropdown.add_widget(btn_save_as)
+
+        btn_quit = Button(text='Quit', size_hint_y=None, height=44)
+        btn_quit.bind(on_release=lambda x: self.process_command_ui('quit'))
+        file_dropdown.add_widget(btn_quit)
+
+        file_button.bind(on_release=file_dropdown.open)
+        menu_bar.add_widget(file_button)
+        self.add_widget(menu_bar)
+
         # Status Display
         status_layout = BoxLayout(size_hint_y=None, height=30)
         self.song_name_label = Label(text="Song: New Song")
@@ -210,6 +240,40 @@ class SequencerLayout(BoxLayout):
         self.output_scroll = ScrollView(size_hint=(1, 0.8))
         self.output_scroll.add_widget(self.output_label)
         self.add_widget(self.output_scroll)
+
+    def load_project_popup(self):
+        def callback(filepath):
+            import os
+            if filepath:
+                # We need the basename without extension for the command
+                basename = os.path.splitext(os.path.basename(filepath))[0]
+                self.process_command_ui(f'loadproject "{basename}"')
+        popup = FileChooserPopup(
+            callback=callback,
+            title="Load Project",
+            filters=['*.proj.json']
+        )
+        popup.open()
+
+    def new_project_popup(self):
+        def callback(name):
+            if name:
+                self.process_command_ui(f'newproject "{name}"')
+        popup = ConfirmationPopup(prompt_text="Enter new project name:", callback=callback)
+        popup.open()
+
+    def save_project(self):
+        if self.sequencer.last_project_basename:
+            self.process_command_ui(f'saveproject "{self.sequencer.last_project_basename}"')
+        else:
+            self.save_project_as_popup()
+
+    def save_project_as_popup(self):
+        def callback(basename):
+            if basename:
+                self.process_command_ui(f'saveproject "{basename}"')
+        popup = ConfirmationPopup(prompt_text="Enter project basename to save:", callback=callback)
+        popup.open()
 
     def play_pressed(self, instance):
         start_pos = self.start_pos_input.text
@@ -273,7 +337,7 @@ class SequencerLayout(BoxLayout):
                     track_name = data["track_name"]
                     full_command = f'addaudio "{track_name}" "{filepath}"'
                     self.process_command_ui(full_command)
-                popup = FileChooserPopup(callback=file_chooser_callback)
+                popup = FileChooserPopup(callback=file_chooser_callback, title="Select Audio File")
                 popup.open()
             elif data.get("status") == "loop_prompt":
                 def loop_callback(start, end):

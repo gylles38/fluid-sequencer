@@ -467,7 +467,7 @@ class TrackWidget(BoxLayout):
             # Program
             prog_layout = BoxLayout()
             prog_layout.add_widget(Label(text='Prog:'))
-            self.program_input = TextInput(text=str(track.program + 1), multiline=False)
+            self.program_input = TextInput(text=str(track.instrument + 1), multiline=False)
             self.program_input.bind(on_text_validate=self.on_program_change)
             prog_layout.add_widget(self.program_input)
             midi_layout.add_widget(prog_layout)

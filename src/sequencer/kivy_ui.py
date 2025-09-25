@@ -309,6 +309,10 @@ class SequencerLayout(BoxLayout):
         metro_status = "ON" if song.metronome_enabled else "OFF"
         self.metronome_label.text = f"Metronome: {metro_status}"
 
+        # Update end position input
+        end_of_song_beats = self.sequencer.get_song_length_in_beats()
+        self.end_pos_input.text = self.sequencer._format_beats_to_position(end_of_song_beats)
+
     def on_enter(self, instance):
         command = self.input_text.text
         self.input_text.text = ''

@@ -439,17 +439,17 @@ class TrackWidget(BoxLayout):
         self.add_widget(info_layout)
 
         # --- Column 2: Volume & Pan ---
-        slider_layout = BoxLayout(orientation='vertical', size_hint_x=0.2)
-        volume_slider = Slider(min=0, max=1, value=track.volume)
+        slider_layout = BoxLayout(orientation='horizontal', size_hint_x=0.2)
+        volume_slider = Slider(orientation='vertical', min=0, max=1, value=track.volume)
         volume_slider.bind(value=self.on_volume_change)
-        pan_slider = Slider(min=-1, max=1, value=track.pan)
+        pan_slider = Slider(orientation='vertical', min=-1, max=1, value=track.pan)
         pan_slider.bind(value=self.on_pan_change)
         slider_layout.add_widget(volume_slider)
         slider_layout.add_widget(pan_slider)
         self.add_widget(slider_layout)
 
         # --- Column 3: Mute & Solo ---
-        buttons_layout = BoxLayout(orientation='vertical', size_hint_x=0.1)
+        buttons_layout = BoxLayout(orientation='horizontal', size_hint_x=0.1)
         mute_button = ToggleButton(text='Mute', state='normal' if not track.is_muted else 'down')
         mute_button.bind(on_press=self.on_mute_toggle)
         solo_button = ToggleButton(text='Solo', state='normal' if not track.is_solo else 'down')

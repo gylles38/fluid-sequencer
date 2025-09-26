@@ -11,11 +11,13 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.slider import Slider
+from kivymd.uix.slider import MDSlider
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDRaisedButton
 from kivymd.uix.tooltip import MDTooltip
 from kivymd.uix.menu import MDDropdownMenu
+from kivymd.uix.list import OneLineIconListItem
 
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
@@ -186,11 +188,11 @@ class SequencerLayout(BoxLayout):
         file_button = MDRaisedButton(text='File', pos_hint={'center_y': 0.5})
 
         menu_items = [
-            {"text": "New Project", "on_release": self.new_project_popup, "leading_icon": "file-plus"},
-            {"text": "Load Project", "on_release": self.load_project_popup, "leading_icon": "folder-open"},
-            {"text": "Save Project", "on_release": self.save_project, "leading_icon": "content-save"},
-            {"text": "Save Project As...", "on_release": self.save_project_as_popup, "leading_icon": "content-save-edit"},
-            {"text": "Quit", "on_release": lambda: self.process_command_ui('quit'), "leading_icon": "exit-to-app"},
+            {"viewclass": "OneLineIconListItem", "text": "New Project", "on_release": lambda: self.new_project_popup(), "leading_icon": "file-plus"},
+            {"viewclass": "OneLineIconListItem", "text": "Load Project", "on_release": lambda: self.load_project_popup(), "leading_icon": "folder-open"},
+            {"viewclass": "OneLineIconListItem", "text": "Save Project", "on_release": lambda: self.save_project(), "leading_icon": "content-save"},
+            {"viewclass": "OneLineIconListItem", "text": "Save Project As...", "on_release": lambda: self.save_project_as_popup(), "leading_icon": "content-save-edit"},
+            {"viewclass": "OneLineIconListItem", "text": "Quit", "on_release": lambda: self.process_command_ui('quit'), "leading_icon": "exit-to-app"},
         ]
         self.file_menu = MDDropdownMenu(
             caller=file_button,
@@ -439,9 +441,9 @@ class TrackWidget(BoxLayout):
 
         # --- Column 2: Volume & Pan ---
         slider_layout = BoxLayout(orientation='horizontal', size_hint_x=0.2)
-        volume_slider = Slider(orientation='vertical', min=0, max=1, value=track.volume)
+        volume_slider = MDSlider(orientation='vertical', min=0, max=1, value=track.volume)
         volume_slider.bind(value=self.on_volume_change)
-        pan_slider = Slider(orientation='vertical', min=-1, max=1, value=track.pan)
+        pan_slider = MDSlider(orientation='vertical', min=-1, max=1, value=track.pan)
         pan_slider.bind(value=self.on_pan_change)
         slider_layout.add_widget(volume_slider)
         slider_layout.add_widget(pan_slider)
@@ -449,10 +451,16 @@ class TrackWidget(BoxLayout):
 
         # --- Column 3: Mute & Solo ---
         buttons_layout = BoxLayout(orientation='horizontal', size_hint_x=0.1)
-        mute_button = ToggleButton(text='Mute', state='normal' if not track.is_muted else 'down')
-        mute_button.bind(on_press=self.on_mute_toggle)
-        solo_button = ToggleButton(text='Solo', state='normal' if not track.is_solo else 'down')
-        solo_button.bind(on_press=self.on_solo_toggle)
+        mute_button = TooltipMDIconButton(
+            icon='volume-off' if track.is_muted else 'volume-high',
+            tooltip_text='Mute',
+            on_press=self.on_mute_toggle
+        )
+        solo_button = TooltipMDIconButton(
+            icon='headphones' if track.is_solo else 'headphones-off',
+            tooltip_text='Solo',
+            on_press=self.on_solo_toggle
+        )
         buttons_layout.add_widget(mute_button)
         buttons_layout.add_widget(solo_button)
         self.add_widget(buttons_layout)

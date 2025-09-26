@@ -506,12 +506,20 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             return True, "Usage: velocity <track_index> [velocity]"
     elif command == "mute":
         if len(args) == 1:
-            return True, seq.toggle_mute(track_index=int(args[0]))
+            result = seq.toggle_mute(track_index=int(args[0]))
+            if api_mode:
+                return True, json.dumps(result)
+            else:
+                return True, result['message']
         else:
             return True, "Usage: mute <track_index>"
     elif command == "solo":
         if len(args) == 1:
-            return True, seq.toggle_solo(track_index=int(args[0]))
+            result = seq.toggle_solo(track_index=int(args[0]))
+            if api_mode:
+                return True, json.dumps(result)
+            else:
+                return True, result['message']
         else:
             return True, "Usage: solo <track_index>"
     elif command == "record":

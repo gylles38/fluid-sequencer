@@ -1344,20 +1344,20 @@ class Sequencer(EventDispatcher):
         self.is_dirty = True
         return {"status": "success", "message": f"Velocity for track '{track.name}' set to {velocity:.2f}."}
 
-    def toggle_mute(self, track_index: int) -> str:
+    def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
-            return "Error: Invalid track index."
+            return {"status": "error", "message": "Error: Invalid track index."}
         track = self.song.tracks[track_index]
         track.is_muted = not track.is_muted
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
         self.invalidate_song_length_cache()
         self._update_all_tracks_audibility()
-        return f"Track '{track.name}' is now {status}."
+        return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 
-    def toggle_solo(self, track_index: int) -> str:
+    def toggle_solo(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
-            return "Error: Invalid track index."
+            return {"status": "error", "message": "Error: Invalid track index."}
         target_track = self.song.tracks[track_index]
         is_being_soloed = not target_track.is_solo
         target_track.is_solo = is_being_soloed
@@ -1374,7 +1374,7 @@ class Sequencer(EventDispatcher):
         self.invalidate_song_length_cache()
         self._update_all_tracks_audibility()
         output += f"Track '{target_track.name}' is now {status}."
-        return output
+        return {"status": "success", "message": output}
 
     def _update_all_tracks_audibility(self):
         """

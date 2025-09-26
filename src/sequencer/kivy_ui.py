@@ -30,6 +30,11 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
 class DraggableSlider(MDSlider):
     parameter_type = StringProperty('volume')  # Default to 'volume'
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Set initial text, as on_value might not be called on creation
+        self.on_value(self, self.value)
+
     def on_value(self, instance, value):
         if self.parameter_type == 'volume':
             self.value_track_text = f"{int(self.value * 100)}%"

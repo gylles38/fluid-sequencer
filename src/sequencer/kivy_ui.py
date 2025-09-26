@@ -11,6 +11,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.slider import Slider
+from kivymd.uix.slider import MDSlider
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDRaisedButton
@@ -25,7 +26,7 @@ import sys
 class TooltipMDIconButton(MDIconButton, MDTooltip):
     pass
 
-class DraggableSlider(Slider):
+class DraggableSlider(MDSlider):
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
             # Find the parent ScrollView and disable scrolling

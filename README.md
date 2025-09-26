@@ -16,10 +16,10 @@ Ce projet est un séquenceur MIDI interactif en ligne de commande, écrit en Pyt
     source venv/bin/activate
     ```
 
-3.  **Installez le projet** :
-    Cette commande installe le projet et ses dépendances (comme `mido`).
+3.  **Installez les dépendances** :
+    Cette commande installe toutes les dépendances Python nécessaires, y compris celles pour l'interface graphique (`kivy`, `kivymd`).
     ```bash
-    pip install -e .
+    pip install -r requirements.txt
     ```
 
 ## Utilisation
@@ -51,18 +51,20 @@ En mode API :
 
 C'est le mode idéal pour une utilisation programmatique.
 
-## Interface Graphique (Kivy)
+## Interface Graphique (KivyMD)
 
-En plus de l'interface en ligne de commande, ce séquenceur dispose d'une interface graphique basique développée avec Kivy.
+En plus de l'interface en ligne de commande, ce séquenceur dispose d'une interface graphique développée avec Kivy et KivyMD, offrant une expérience utilisateur plus moderne avec des icônes et des thèmes.
 
 ### Dépendances supplémentaires
 
-Pour utiliser l'interface Kivy, vous aurez besoin de dépendances système supplémentaires. Sur un système basé sur Debian (comme Ubuntu), installez-les avec :
+Pour utiliser l'interface graphique, vous aurez besoin de dépendances système supplémentaires. Sur un système basé sur Debian (comme Ubuntu), installez-les avec :
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y libjack-jackd2-dev libasound2-dev libmtdev-dev
 ```
+
+Les dépendances Python, y compris `kivy` et `kivymd`, sont gérées par le fichier `requirements.txt` et installées avec la commande `pip install -r requirements.txt` mentionnée dans la section d'installation principale.
 
 ### Lancement de l'interface graphique
 

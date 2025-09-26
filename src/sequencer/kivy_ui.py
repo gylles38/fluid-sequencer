@@ -11,7 +11,6 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.slider import Slider
-from kivymd.uix.slider import MDSlider
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDRaisedButton
@@ -228,7 +227,7 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(self.end_pos_input)
 
         play_button = TooltipMDIconButton(icon='play', tooltip_text='Play', on_press=self.play_pressed)
-        loop_button = TooltipMDIconButton(icon='loop', tooltip_text='Loop', on_press=self.loop_pressed)
+        loop_button = TooltipMDIconButton(icon='repeat', tooltip_text='Loop', on_press=self.loop_pressed)
         pause_button = TooltipMDIconButton(icon='pause', tooltip_text='Pause', on_press=lambda x: self.process_command_ui('pause'))
         stop_button = TooltipMDIconButton(icon='stop', tooltip_text='Stop', on_press=lambda x: self.process_command_ui('stop'))
         record_button = TooltipMDIconButton(icon='record', tooltip_text='Record', on_press=lambda x: self.process_command_ui('record'))
@@ -441,9 +440,9 @@ class TrackWidget(BoxLayout):
 
         # --- Column 2: Volume & Pan ---
         slider_layout = BoxLayout(orientation='horizontal', size_hint_x=0.2)
-        volume_slider = MDSlider(orientation='vertical', min=0, max=1, value=track.volume)
+        volume_slider = Slider(orientation='vertical', min=0, max=1, value=track.volume)
         volume_slider.bind(value=self.on_volume_change)
-        pan_slider = MDSlider(orientation='vertical', min=-1, max=1, value=track.pan)
+        pan_slider = Slider(orientation='vertical', min=-1, max=1, value=track.pan)
         pan_slider.bind(value=self.on_pan_change)
         slider_layout.add_widget(volume_slider)
         slider_layout.add_widget(pan_slider)
@@ -457,7 +456,7 @@ class TrackWidget(BoxLayout):
             on_press=self.on_mute_toggle
         )
         solo_button = TooltipMDIconButton(
-            icon='headphones' if track.is_solo else 'headphones-off',
+            icon='alpha-s-box' if track.is_solo else 'alpha-s-box-outline',
             tooltip_text='Solo',
             on_press=self.on_solo_toggle
         )

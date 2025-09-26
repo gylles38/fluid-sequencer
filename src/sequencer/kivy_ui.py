@@ -549,12 +549,10 @@ class TrackWidget(BoxLayout):
         self.add_widget(midi_controls_placeholder)
 
     def on_volume_change(self, instance, value):
-        # Call the sequencer function directly to avoid full UI refresh and provide live feedback
-        self.sequencer_layout.sequencer.set_track_volume(self.track_index, str(value))
+        self.sequencer_layout.process_command_ui(f'volume {self.track_index} {value}')
 
     def on_pan_change(self, instance, value):
-        # Call the sequencer function directly to avoid full UI refresh and provide live feedback
-        self.sequencer_layout.sequencer.set_track_pan(self.track_index, str(value))
+        self.sequencer_layout.process_command_ui(f'pan {self.track_index} {value}')
 
     def on_mute_toggle(self, instance):
         self.sequencer_layout.process_command_ui(f'mute {self.track_index}')

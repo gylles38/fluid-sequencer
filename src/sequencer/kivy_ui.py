@@ -16,7 +16,7 @@ from kivy.properties import StringProperty
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
-from kivymd.uix.tooltip import MDTooltip
+from kivymd.uix.tooltip import MDTooltip, MDTooltipPlain
 from kivymd.uix.menu import MDDropdownMenu
 
 from sequencer.sequencer import Sequencer
@@ -24,7 +24,17 @@ from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 import sys
 
 class TooltipMDIconButton(MDIconButton, MDTooltip):
-    pass
+    tooltip_text = StringProperty()
+
+    def __init__(self, **kwargs):
+        self.tooltip_text = kwargs.pop('tooltip_text', '')
+        super().__init__(**kwargs)
+        self.tooltip_widget = MDTooltipPlain(text=self.tooltip_text)
+        self.widgets = [self.tooltip_widget]
+
+    def on_tooltip_text(self, instance, value):
+        if hasattr(self, 'tooltip_widget'):
+            self.tooltip_widget.text = value
 
 class DraggableSlider(MDSlider):
     parameter_type = StringProperty('volume')  # Default to 'volume'

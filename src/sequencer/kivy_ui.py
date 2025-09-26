@@ -397,7 +397,7 @@ class SequencerLayout(BoxLayout):
         self.update_status_display()
 
         if not should_continue:
-            App.get_running_app().stop()
+            MDApp.get_running_app().stop()
 
 
 class SequencerApp(MDApp):
@@ -441,9 +441,9 @@ class TrackWidget(BoxLayout):
         # --- Column 2: Volume & Pan ---
         slider_layout = BoxLayout(orientation='horizontal', size_hint_x=0.2)
         volume_slider = Slider(orientation='vertical', min=0, max=1, value=track.volume)
-        volume_slider.bind(value=self.on_volume_change)
+        volume_slider.bind(on_touch_up=self.on_volume_release)
         pan_slider = Slider(orientation='vertical', min=-1, max=1, value=track.pan)
-        pan_slider.bind(value=self.on_pan_change)
+        pan_slider.bind(on_touch_up=self.on_pan_release)
         slider_layout.add_widget(volume_slider)
         slider_layout.add_widget(pan_slider)
         self.add_widget(slider_layout)
@@ -485,11 +485,13 @@ class TrackWidget(BoxLayout):
             midi_controls_placeholder.add_widget(Widget()) # Spacer
         self.add_widget(midi_controls_placeholder)
 
-    def on_volume_change(self, instance, value):
-        self.sequencer_layout.process_command_ui(f'volume {self.track_index} {value}')
+    def on_volume_release(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            self.sequencer_layout.process_command_ui(f'volume {self.track_index} {instance.value}')
 
-    def on_pan_change(self, instance, value):
-        self.sequencer_layout.process_command_ui(f'pan {self.track_index} {value}')
+    def on_pan_release(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            self.sequencer_layout.process_command_ui(f'pan {self.track_index} {instance.value}')
 
     def on_mute_toggle(self, instance):
         self.sequencer_layout.process_command_ui(f'mute {self.track_index}')

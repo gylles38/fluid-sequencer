@@ -1304,7 +1304,15 @@ class Sequencer(EventDispatcher):
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
+                            # Pan value from -1.0 (L) to 1.0 (R)
+                            # Convert to a 0-1 range for gain calculation
+                            x = (pan + 1.0) / 2.0
+                            gain_l = 1.0 - x
+                            gain_r = x
+                            # The filter string sums the stereo input to mono, then pans it.
+                            pan_filter = f"lavfi=[pan=stereo|FL={gain_l:.2f}*FL+{gain_l:.2f}*FR|FR={gain_r:.2f}*FL+{gain_r:.2f}*FR]"
+                            command = {"command": ["set_property", "af", pan_filter]}
+                            self.jack_manager._send_ipc_command(ap.socket_path, command)
                             break
         elif isinstance(track, MidiTrack):
             if self.jack_manager.is_running and track.output_port_name:

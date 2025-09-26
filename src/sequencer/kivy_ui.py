@@ -491,7 +491,7 @@ class TrackWidget(BoxLayout):
             value_track=True,
             parameter_type='volume'
         )
-        volume_slider.bind(on_touch_up=self.on_volume_release)
+        volume_slider.bind(value=self.on_volume_change)
         pan_slider = DraggableSlider(
             orientation='vertical',
             min=-1,
@@ -500,7 +500,7 @@ class TrackWidget(BoxLayout):
             value_track=True,
             parameter_type='pan'
         )
-        pan_slider.bind(on_touch_up=self.on_pan_release)
+        pan_slider.bind(value=self.on_pan_change)
         slider_layout.add_widget(volume_slider)
         slider_layout.add_widget(pan_slider)
         self.add_widget(slider_layout)
@@ -542,13 +542,11 @@ class TrackWidget(BoxLayout):
             midi_controls_placeholder.add_widget(Widget()) # Spacer
         self.add_widget(midi_controls_placeholder)
 
-    def on_volume_release(self, instance, touch):
-        if instance.collide_point(*touch.pos):
-            self.sequencer_layout.process_command_ui(f'volume {self.track_index} {instance.value}')
+    def on_volume_change(self, instance, value):
+        self.sequencer_layout.process_command_ui(f'volume {self.track_index} {value}')
 
-    def on_pan_release(self, instance, touch):
-        if instance.collide_point(*touch.pos):
-            self.sequencer_layout.process_command_ui(f'pan {self.track_index} {instance.value}')
+    def on_pan_change(self, instance, value):
+        self.sequencer_layout.process_command_ui(f'pan {self.track_index} {value}')
 
     def on_mute_toggle(self, instance):
         self.sequencer_layout.process_command_ui(f'mute {self.track_index}')

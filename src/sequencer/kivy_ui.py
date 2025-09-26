@@ -442,7 +442,7 @@ class SequencerLayout(BoxLayout):
 class SequencerApp(MDApp):
     def build(self):
         self.theme_cls.theme_style = "Dark"
-        self.theme_cls.primary_palette = "BlueGray"
+        self.theme_cls.primary_palette = "Blue"
         return SequencerLayout()
 
     def on_stop(self):

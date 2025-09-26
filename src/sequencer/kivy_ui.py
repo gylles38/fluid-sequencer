@@ -257,19 +257,22 @@ class SequencerLayout(BoxLayout):
         self.add_widget(transport_layout)
 
         # Track List (Mixer)
-        self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=0.8)
+        self.track_list_layout = BoxLayout(orientation='vertical')
         self.add_widget(self.track_list_layout)
 
+        # Bottom controls
+        bottom_layout = BoxLayout(orientation='vertical', size_hint_y=0.3)
         self.output_label = Label(size_hint_y=0.1, text="Welcome!") # For general feedback
-        self.add_widget(self.output_label)
+        bottom_layout.add_widget(self.output_label)
 
-        self.input_text = TextInput(size_hint=(1, 0.1), multiline=False)
+        self.input_text = TextInput(size_hint_y=0.1, multiline=False)
         self.input_text.bind(on_text_validate=self.on_enter)
-        self.add_widget(self.input_text)
+        bottom_layout.add_widget(self.input_text)
 
-        self.send_button = TooltipMDIconButton(icon='send', tooltip_text='Send', size_hint=(1, 0.1))
+        self.send_button = TooltipMDIconButton(icon='send', tooltip_text='Send', size_hint_y=0.1)
         self.send_button.bind(on_press=self.on_enter)
-        self.add_widget(self.send_button)
+        bottom_layout.add_widget(self.send_button)
+        self.add_widget(bottom_layout)
 
         self.update_status_display()
         self.sequencer.bind(current_beat=self.update_playhead_display)

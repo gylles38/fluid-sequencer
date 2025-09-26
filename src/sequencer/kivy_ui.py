@@ -388,6 +388,13 @@ class SequencerLayout(BoxLayout):
         self.input_text.text = ''
         self.process_command_ui(command)
 
+    def process_slider_command(self, command):
+        # This is a lightweight version of process_command_ui that does not
+        # trigger a full UI refresh, which would interrupt the slider drag.
+        from main import process_command
+        # We don't handle prompts here as sliders are not interactive.
+        process_command(command, self.sequencer, api_mode=True, confirmation_handler=None)
+
     def process_command_ui(self, command):
         import json
         from main import process_command
@@ -543,10 +550,10 @@ class TrackWidget(BoxLayout):
         self.add_widget(midi_controls_placeholder)
 
     def on_volume_change(self, instance, value):
-        self.sequencer_layout.process_command_ui(f'volume {self.track_index} {value}')
+        self.sequencer_layout.process_slider_command(f'volume {self.track_index} {value}')
 
     def on_pan_change(self, instance, value):
-        self.sequencer_layout.process_command_ui(f'pan {self.track_index} {value}')
+        self.sequencer_layout.process_slider_command(f'pan {self.track_index} {value}')
 
     def on_mute_toggle(self, instance):
         self.sequencer_layout.process_command_ui(f'mute {self.track_index}')

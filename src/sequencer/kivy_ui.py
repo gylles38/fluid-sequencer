@@ -1,7 +1,7 @@
 import kivy
 kivy.require('2.3.1') # replace with your kivy version
 
-from kivy.app import App
+from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
@@ -13,10 +13,16 @@ from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.slider import Slider
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
+from kivymd.uix.button import MDIconButton, MDRaisedButton
+from kivymd.uix.tooltip import MDTooltip
+from kivymd.uix.menu import MDDropdownMenu
 
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 import sys
+
+class TooltipMDIconButton(MDIconButton, MDTooltip):
+    pass
 
 class SaveDiscardCancelPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
@@ -29,11 +35,11 @@ class SaveDiscardCancelPopup(Popup):
         layout.add_widget(Label(text=prompt_text))
 
         buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        save_button = Button(text='Save')
+        save_button = TooltipMDIconButton(icon='content-save', tooltip_text='Save')
         save_button.bind(on_press=lambda instance: self.on_answer(instance, 's'))
-        discard_button = Button(text='Discard')
+        discard_button = TooltipMDIconButton(icon='delete', tooltip_text='Discard')
         discard_button.bind(on_press=lambda instance: self.on_answer(instance, 'd'))
-        cancel_button = Button(text='Cancel')
+        cancel_button = TooltipMDIconButton(icon='cancel', tooltip_text='Cancel')
         cancel_button.bind(on_press=lambda instance: self.on_answer(instance, 'c'))
         buttons_layout.add_widget(save_button)
         buttons_layout.add_widget(discard_button)
@@ -73,9 +79,9 @@ class LoopPopup(Popup):
 
         # Buttons
         buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        ok_button = Button(text='OK')
+        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
         ok_button.bind(on_press=self.on_ok)
-        cancel_button = Button(text='Cancel')
+        cancel_button = TooltipMDIconButton(icon='cancel', tooltip_text='Cancel')
         cancel_button.bind(on_press=self.dismiss)
         buttons_layout.add_widget(ok_button)
         buttons_layout.add_widget(cancel_button)
@@ -100,9 +106,9 @@ class FileChooserPopup(Popup):
         layout.add_widget(self.filechooser)
 
         buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        select_button = Button(text='Select')
+        select_button = TooltipMDIconButton(icon='check', tooltip_text='Select')
         select_button.bind(on_press=self.on_select)
-        cancel_button = Button(text='Cancel')
+        cancel_button = TooltipMDIconButton(icon='cancel', tooltip_text='Cancel')
         cancel_button.bind(on_press=self.dismiss)
         buttons_layout.add_widget(select_button)
         buttons_layout.add_widget(cancel_button)
@@ -126,9 +132,9 @@ class YesNoPopup(Popup):
         layout.add_widget(Label(text=prompt_text))
 
         buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        yes_button = Button(text='Yes')
+        yes_button = TooltipMDIconButton(icon='check', tooltip_text='Yes')
         yes_button.bind(on_press=lambda instance: self.on_answer(instance, 'y'))
-        no_button = Button(text='No')
+        no_button = TooltipMDIconButton(icon='cancel', tooltip_text='No')
         no_button.bind(on_press=lambda instance: self.on_answer(instance, 'n'))
         buttons_layout.add_widget(yes_button)
         buttons_layout.add_widget(no_button)
@@ -153,9 +159,9 @@ class ConfirmationPopup(Popup):
         layout.add_widget(self.text_input)
 
         buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
-        ok_button = Button(text='OK')
+        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
         ok_button.bind(on_press=self.on_ok)
-        cancel_button = Button(text='Cancel')
+        cancel_button = TooltipMDIconButton(icon='cancel', tooltip_text='Cancel')
         cancel_button.bind(on_press=self.dismiss)
         buttons_layout.add_widget(ok_button)
         buttons_layout.add_widget(cancel_button)
@@ -176,31 +182,22 @@ class SequencerLayout(BoxLayout):
         self.end_pos_manual_override = False
 
         # Menu Bar
-        menu_bar = BoxLayout(size_hint_y=None, height=30)
-        file_button = Button(text='File', size_hint_x=None, width=100)
-        self.file_dropdown = DropDown()
+        menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
+        file_button = MDRaisedButton(text='File', pos_hint={'center_y': 0.5})
 
-        btn_new = Button(text='New Project', size_hint_y=None, height=44)
-        btn_new.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.new_project_popup()))
-        self.file_dropdown.add_widget(btn_new)
-
-        btn_load = Button(text='Load Project', size_hint_y=None, height=44)
-        btn_load.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.load_project_popup()))
-        self.file_dropdown.add_widget(btn_load)
-
-        btn_save = Button(text='Save Project', size_hint_y=None, height=44)
-        btn_save.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.save_project()))
-        self.file_dropdown.add_widget(btn_save)
-
-        btn_save_as = Button(text='Save Project As...', size_hint_y=None, height=44)
-        btn_save_as.bind(on_release=lambda x: (self.file_dropdown.dismiss(), self.save_project_as_popup()))
-        self.file_dropdown.add_widget(btn_save_as)
-
-        btn_quit = Button(text='Quit', size_hint_y=None, height=44)
-        btn_quit.bind(on_release=lambda x: self.process_command_ui('quit'))
-        self.file_dropdown.add_widget(btn_quit)
-
-        file_button.bind(on_release=self.file_dropdown.open)
+        menu_items = [
+            {"text": "New Project", "on_release": self.new_project_popup, "leading_icon": "file-plus"},
+            {"text": "Load Project", "on_release": self.load_project_popup, "leading_icon": "folder-open"},
+            {"text": "Save Project", "on_release": self.save_project, "leading_icon": "content-save"},
+            {"text": "Save Project As...", "on_release": self.save_project_as_popup, "leading_icon": "content-save-edit"},
+            {"text": "Quit", "on_release": lambda: self.process_command_ui('quit'), "leading_icon": "exit-to-app"},
+        ]
+        self.file_menu = MDDropdownMenu(
+            caller=file_button,
+            items=menu_items,
+            width_mult=4,
+        )
+        file_button.bind(on_release=lambda x: self.file_menu.open())
         menu_bar.add_widget(file_button)
         self.add_widget(menu_bar)
 
@@ -228,11 +225,11 @@ class SequencerLayout(BoxLayout):
         self.end_pos_input.bind(on_text_validate=self.on_end_pos_manual_set)
         transport_layout.add_widget(self.end_pos_input)
 
-        play_button = Button(text='Play', on_press=self.play_pressed)
-        loop_button = Button(text='Loop', on_press=self.loop_pressed)
-        pause_button = Button(text='Pause', on_press=lambda x: self.process_command_ui('pause'))
-        stop_button = Button(text='Stop', on_press=lambda x: self.process_command_ui('stop'))
-        record_button = Button(text='Record', on_press=lambda x: self.process_command_ui('record'))
+        play_button = TooltipMDIconButton(icon='play', tooltip_text='Play', on_press=self.play_pressed)
+        loop_button = TooltipMDIconButton(icon='loop', tooltip_text='Loop', on_press=self.loop_pressed)
+        pause_button = TooltipMDIconButton(icon='pause', tooltip_text='Pause', on_press=lambda x: self.process_command_ui('pause'))
+        stop_button = TooltipMDIconButton(icon='stop', tooltip_text='Stop', on_press=lambda x: self.process_command_ui('stop'))
+        record_button = TooltipMDIconButton(icon='record', tooltip_text='Record', on_press=lambda x: self.process_command_ui('record'))
 
         transport_layout.add_widget(play_button)
         transport_layout.add_widget(loop_button)
@@ -255,7 +252,7 @@ class SequencerLayout(BoxLayout):
         self.input_text.bind(on_text_validate=self.on_enter)
         self.add_widget(self.input_text)
 
-        self.send_button = Button(text='Send', size_hint=(1, 0.1))
+        self.send_button = TooltipMDIconButton(icon='send', tooltip_text='Send', size_hint=(1, 0.1))
         self.send_button.bind(on_press=self.on_enter)
         self.add_widget(self.send_button)
 
@@ -402,8 +399,10 @@ class SequencerLayout(BoxLayout):
             App.get_running_app().stop()
 
 
-class SequencerApp(App):
+class SequencerApp(MDApp):
     def build(self):
+        self.theme_cls.theme_style = "Dark"
+        self.theme_cls.primary_palette = "BlueGray"
         return SequencerLayout()
 
     def on_stop(self):

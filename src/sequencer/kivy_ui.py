@@ -12,6 +12,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.slider import Slider
 from kivymd.uix.slider import MDSlider
+from kivy.properties import StringProperty
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDRaisedButton
@@ -27,6 +28,14 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
     pass
 
 class DraggableSlider(MDSlider):
+    parameter_type = StringProperty('volume')  # Default to 'volume'
+
+    def on_value(self, instance, value):
+        if self.parameter_type == 'volume':
+            self.value_track_text = f"{int(self.value * 100)}%"
+        elif self.parameter_type == 'pan':
+            self.value_track_text = f"{self.value:.1f}"
+
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
             # Find the parent ScrollView and disable scrolling
@@ -461,9 +470,23 @@ class TrackWidget(BoxLayout):
 
         # --- Column 2: Volume & Pan ---
         slider_layout = BoxLayout(orientation='horizontal', size_hint_x=0.2)
-        volume_slider = DraggableSlider(orientation='vertical', min=0, max=1, value=track.volume)
+        volume_slider = DraggableSlider(
+            orientation='vertical',
+            min=0,
+            max=1,
+            value=track.volume,
+            value_track=True,
+            parameter_type='volume'
+        )
         volume_slider.bind(value=self.on_volume_change)
-        pan_slider = DraggableSlider(orientation='vertical', min=-1, max=1, value=track.pan)
+        pan_slider = DraggableSlider(
+            orientation='vertical',
+            min=-1,
+            max=1,
+            value=track.pan,
+            value_track=True,
+            parameter_type='pan'
+        )
         pan_slider.bind(value=self.on_pan_change)
         slider_layout.add_widget(volume_slider)
         slider_layout.add_widget(pan_slider)

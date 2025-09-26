@@ -37,11 +37,10 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
             self.tooltip_widget.text = value
 
 class DraggableSlider(MDSlider):
-    parameter_type = StringProperty('volume')  # Default to 'volume'
+    parameter_type = StringProperty('volume')
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Set initial text, as on_value might not be called on creation
         self.on_value(self, self.value)
 
     def on_value(self, instance, value):
@@ -52,22 +51,17 @@ class DraggableSlider(MDSlider):
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            # Find the parent ScrollView and disable scrolling
-            parent = self.parent
-            while parent and not isinstance(parent, ScrollView):
-                parent = parent.parent
-            if parent:
-                parent.do_scroll_y = False
-        return super(DraggableSlider, self).on_touch_down(touch)
+            touch.grab(self)
+            return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            return super().on_touch_move(touch)
 
     def on_touch_up(self, touch):
-        # Find the parent ScrollView and re-enable scrolling
-        parent = self.parent
-        while parent and not isinstance(parent, ScrollView):
-            parent = parent.parent
-        if parent:
-            parent.do_scroll_y = True
-        return super(DraggableSlider, self).on_touch_up(touch)
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            return super().on_touch_up(touch)
 
 class SaveDiscardCancelPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
@@ -497,7 +491,7 @@ class TrackWidget(BoxLayout):
             value_track=True,
             parameter_type='volume'
         )
-        volume_slider.bind(value=self.on_volume_change)
+        volume_slider.bind(on_touch_up=self.on_volume_release)
         pan_slider = DraggableSlider(
             orientation='vertical',
             min=-1,
@@ -506,7 +500,7 @@ class TrackWidget(BoxLayout):
             value_track=True,
             parameter_type='pan'
         )
-        pan_slider.bind(value=self.on_pan_change)
+        pan_slider.bind(on_touch_up=self.on_pan_release)
         slider_layout.add_widget(volume_slider)
         slider_layout.add_widget(pan_slider)
         self.add_widget(slider_layout)
@@ -548,11 +542,13 @@ class TrackWidget(BoxLayout):
             midi_controls_placeholder.add_widget(Widget()) # Spacer
         self.add_widget(midi_controls_placeholder)
 
-    def on_volume_change(self, instance, value):
-        self.sequencer_layout.process_command_ui(f'volume {self.track_index} {value}')
+    def on_volume_release(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            self.sequencer_layout.process_command_ui(f'volume {self.track_index} {instance.value}')
 
-    def on_pan_change(self, instance, value):
-        self.sequencer_layout.process_command_ui(f'pan {self.track_index} {value}')
+    def on_pan_release(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            self.sequencer_layout.process_command_ui(f'pan {self.track_index} {instance.value}')
 
     def on_mute_toggle(self, instance):
         self.sequencer_layout.process_command_ui(f'mute {self.track_index}')

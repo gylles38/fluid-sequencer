@@ -18,7 +18,6 @@ from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.tooltip import MDTooltip
 from kivymd.uix.menu import MDDropdownMenu
-from kivymd.uix.list import OneLineIconListItem
 
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
@@ -228,11 +227,11 @@ class SequencerLayout(BoxLayout):
         )
 
         menu_items = [
-            {"icon": "file-plus", "text": "New Project", "on_release": lambda: self.new_project_popup()},
-            {"icon": "folder-open", "text": "Load Project", "on_release": lambda: self.load_project_popup()},
-            {"icon": "content-save", "text": "Save Project", "on_release": lambda: self.save_project()},
-            {"icon": "content-save-edit", "text": "Save Project As...", "on_release": lambda: self.save_project_as_popup()},
-            {"icon": "exit-to-app", "text": "Quit", "on_release": lambda: self.process_command_ui('quit')},
+            {"leading_icon": "file-plus", "text": "New Project", "on_release": lambda: self.new_project_popup()},
+            {"leading_icon": "folder-open", "text": "Load Project", "on_release": lambda: self.load_project_popup()},
+            {"leading_icon": "content-save", "text": "Save Project", "on_release": lambda: self.save_project()},
+            {"leading_icon": "content-save-edit", "text": "Save Project As...", "on_release": lambda: self.save_project_as_popup()},
+            {"leading_icon": "exit-to-app", "text": "Quit", "on_release": lambda: self.process_command_ui('quit')},
         ]
         self.file_menu = MDDropdownMenu(
             caller=file_button,

@@ -36,32 +36,6 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
         if hasattr(self, 'tooltip_widget'):
             self.tooltip_widget.text = value
 
-class DraggableSlider(MDSlider):
-    parameter_type = StringProperty('volume')
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.on_value(self, self.value)
-
-    def on_value(self, instance, value):
-        if self.parameter_type == 'volume':
-            self.value_track_text = f"{int(self.value * 100)}%"
-        elif self.parameter_type == 'pan':
-            self.value_track_text = f"{self.value:.1f}"
-
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            touch.grab(self)
-            return super().on_touch_down(touch)
-
-    def on_touch_move(self, touch):
-        if touch.grab_current is self:
-            return super().on_touch_move(touch)
-
-    def on_touch_up(self, touch):
-        if touch.grab_current is self:
-            touch.ungrab(self)
-            return super().on_touch_up(touch)
 
 class SaveDiscardCancelPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
@@ -283,11 +257,8 @@ class SequencerLayout(BoxLayout):
         self.add_widget(transport_layout)
 
         # Track List (Mixer)
-        self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
-        self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
-        track_scroll_view = ScrollView(size_hint=(1, 0.8))
-        track_scroll_view.add_widget(self.track_list_layout)
-        self.add_widget(track_scroll_view)
+        self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=0.8)
+        self.add_widget(self.track_list_layout)
 
         self.output_label = Label(size_hint_y=0.1, text="Welcome!") # For general feedback
         self.add_widget(self.output_label)
@@ -490,27 +461,29 @@ class TrackWidget(BoxLayout):
 
         # --- Column 2: Volume & Pan ---
         slider_layout = BoxLayout(orientation='horizontal', size_hint_x=0.2)
-        volume_slider = DraggableSlider(
+        self.volume_slider = MDSlider(
             orientation='vertical',
             min=0,
             max=1,
             value=track.volume,
             value_track=True,
-            parameter_type='volume'
         )
-        volume_slider.bind(value=self.on_volume_change)
-        pan_slider = DraggableSlider(
+        self.volume_slider.bind(value=self.on_volume_change)
+        self.pan_slider = MDSlider(
             orientation='vertical',
             min=-1,
             max=1,
             value=track.pan,
             value_track=True,
-            parameter_type='pan'
         )
-        pan_slider.bind(value=self.on_pan_change)
-        slider_layout.add_widget(volume_slider)
-        slider_layout.add_widget(pan_slider)
+        self.pan_slider.bind(value=self.on_pan_change)
+        slider_layout.add_widget(self.volume_slider)
+        slider_layout.add_widget(self.pan_slider)
         self.add_widget(slider_layout)
+
+        # Set initial text for sliders
+        self.on_volume_change(self.volume_slider, self.volume_slider.value)
+        self.on_pan_change(self.pan_slider, self.pan_slider.value)
 
         # --- Column 3: Mute & Solo ---
         buttons_layout = BoxLayout(orientation='horizontal', size_hint_x=0.1)
@@ -550,9 +523,11 @@ class TrackWidget(BoxLayout):
         self.add_widget(midi_controls_placeholder)
 
     def on_volume_change(self, instance, value):
+        instance.value_track_text = f"{int(value * 100)}%"
         self.sequencer_layout.process_slider_command(f'volume {self.track_index} {value}')
 
     def on_pan_change(self, instance, value):
+        instance.value_track_text = f"{value:.1f}"
         self.sequencer_layout.process_slider_command(f'pan {self.track_index} {value}')
 
     def on_mute_toggle(self, instance):

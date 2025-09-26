@@ -15,7 +15,7 @@ from kivymd.uix.slider import MDSlider
 from kivy.properties import StringProperty
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
-from kivymd.uix.button import MDIconButton, MDRaisedButton
+from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.tooltip import MDTooltip
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.list import OneLineIconListItem
@@ -219,7 +219,13 @@ class SequencerLayout(BoxLayout):
 
         # Menu Bar
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
-        file_button = MDRaisedButton(text='File', pos_hint={'center_y': 0.5})
+        file_button = MDButton(
+            MDButtonText(
+                text="File",
+            ),
+            style="elevated",
+            pos_hint={'center_y': 0.5}
+        )
 
         menu_items = [
             {"icon": "file-plus", "text": "New Project", "on_release": lambda: self.new_project_popup()},
@@ -231,7 +237,6 @@ class SequencerLayout(BoxLayout):
         self.file_menu = MDDropdownMenu(
             caller=file_button,
             items=menu_items,
-            width_mult=4,
         )
         file_button.bind(on_release=lambda x: self.file_menu.open())
         menu_bar.add_widget(file_button)

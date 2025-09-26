@@ -1419,26 +1419,35 @@ class Sequencer(EventDispatcher):
             return "Warning: prime_all_tracks called but JACK manager is not running. State will not be sent."
 
         output = "Priming all MIDI tracks with initial state...\n"
+        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
+
         for i, track in enumerate(self.song.tracks):
             if self.is_recording and self.last_record_settings and i == self.last_record_settings.get('track_index'):
                 continue
 
             if isinstance(track, MidiTrack) and track.output_port_name:
+                should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                 port = self.jack_manager.open_ports.get(track.output_port_name)
+
                 if port:
-                    try:
-                        output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
-                        if track.bank_msb is not None:
-                            port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                        if track.bank_lsb is not None:
-                            port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-                        midi_volume = int(track.volume * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
-                    except Exception as e:
-                        output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
+                    if should_be_audible:
+                        try:
+                            output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
+                            if track.bank_msb is not None:
+                                port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                            if track.bank_lsb is not None:
+                                port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                            port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                            midi_volume = int(track.volume * 127)
+                            port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                            midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                            port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                        except Exception as e:
+                            output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
+                    else:
+                        # Silence the track if it's not supposed to be audible
+                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
+                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
                 else:
                     output += f"  - Skipping track '{track.name}', port '{track.output_port_name}' not open in JackManager.\n"
         return output

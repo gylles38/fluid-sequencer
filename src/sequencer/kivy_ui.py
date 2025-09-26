@@ -222,11 +222,11 @@ class SequencerLayout(BoxLayout):
         file_button = MDRaisedButton(text='File', pos_hint={'center_y': 0.5})
 
         menu_items = [
-            {"viewclass": "OneLineIconListItem", "text": "New Project", "on_release": lambda: self.new_project_popup(), "leading_icon": "file-plus"},
-            {"viewclass": "OneLineIconListItem", "text": "Load Project", "on_release": lambda: self.load_project_popup(), "leading_icon": "folder-open"},
-            {"viewclass": "OneLineIconListItem", "text": "Save Project", "on_release": lambda: self.save_project(), "leading_icon": "content-save"},
-            {"viewclass": "OneLineIconListItem", "text": "Save Project As...", "on_release": lambda: self.save_project_as_popup(), "leading_icon": "content-save-edit"},
-            {"viewclass": "OneLineIconListItem", "text": "Quit", "on_release": lambda: self.process_command_ui('quit'), "leading_icon": "exit-to-app"},
+            {"icon": "file-plus", "text": "New Project", "on_release": lambda: self.new_project_popup()},
+            {"icon": "folder-open", "text": "Load Project", "on_release": lambda: self.load_project_popup()},
+            {"icon": "content-save", "text": "Save Project", "on_release": lambda: self.save_project()},
+            {"icon": "content-save-edit", "text": "Save Project As...", "on_release": lambda: self.save_project_as_popup()},
+            {"icon": "exit-to-app", "text": "Quit", "on_release": lambda: self.process_command_ui('quit')},
         ]
         self.file_menu = MDDropdownMenu(
             caller=file_button,

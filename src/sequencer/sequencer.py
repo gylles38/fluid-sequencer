@@ -96,6 +96,7 @@ class JackManager:
         self._metronome_notes_to_turn_off = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
+        self.command_queue = queue.Queue()
         self._display_thread = None
         self._display_stop_event = threading.Event()
         self.automation_events = []
@@ -428,6 +429,17 @@ class JackManager:
 
     def _process_callback(self, frames: int):
         try:
+            # Process any commands from the main thread
+            while not self.command_queue.empty():
+                command = self.command_queue.get()
+                action = command.get('action')
+                if action == 'send_midi':
+                    port_name = command.get('port_name')
+                    message_data = command.get('message')
+                    if port_name and message_data and port_name in self.open_ports:
+                        port = self.open_ports[port_name]
+                        port.send(mido.Message(**message_data))
+
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
                 for note_off_msg in self._metronome_notes_to_turn_off:
@@ -1413,10 +1425,13 @@ class Sequencer(EventDispatcher):
                         self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
             elif isinstance(track, MidiTrack):
                 if not should_be_audible and track.output_port_name in self.jack_manager.open_ports:
-                    port = self.jack_manager.open_ports.get(track.output_port_name)
-                    if port:
-                        # Send All-Notes-Off message to silence the track immediately
-                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+                    # Enqueue the All-Notes-Off message to be sent from the audio thread
+                    command = {
+                        'action': 'send_midi',
+                        'port_name': track.output_port_name,
+                        'message': {'type': 'control_change', 'channel': track.channel, 'control': 123, 'value': 0}
+                    }
+                    self.jack_manager.command_queue.put(command)
 
     def prime_all_tracks(self) -> str:
         """Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks."""

@@ -557,15 +557,19 @@ class JackManager:
 
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
-                # Use math.ceil to find the first integer beat >= start_beat_of_block.
-                # This correctly includes beat 0 when starting from the beginning.
                 beat_to_check = math.ceil(start_beat_of_block)
+
+                if beat_to_check < end_beat_of_block:
+                    # Send pan control once per block if there are clicks
+                    midi_pan = int((self.sequencer.song.metronome_pan + 1.0) / 2.0 * 127)
+                    port.send(mido.Message('control_change', channel=self.sequencer.metronome_channel, control=10, value=midi_pan))
+
                 while beat_to_check < end_beat_of_block:
                     beats_per_measure = self.sequencer.song.time_signature_numerator
-                    # Correct downbeat logic for 0-indexed beats (beat 0 is the first beat).
                     is_downbeat = (int(beat_to_check) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 0
                     pitch = self.sequencer.metronome_pitch_downbeat if is_downbeat else self.sequencer.metronome_pitch_beat
-                    note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=100)
+                    velocity = int(100 * self.sequencer.song.metronome_volume)
+                    note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=velocity)
                     note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)
                     port.send(note_on)
                     self._metronome_notes_to_turn_off.append(note_off)

@@ -288,30 +288,35 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(self.end_pos_input)
 
         # Boutons avec icônes
-        self.play_button = MDIconButton(  # Remplacez TooltipMDIconButton par MDIconButton si nécessaire
+        self.play_button = MDIconButton(
             icon='play',
             size_hint_x=None,
-            width=40
+            width=40,
+            md_bg_color=(0, 0.5, 0, 1)  # Green
         )
         loop_button = MDIconButton(
             icon='repeat',
             size_hint_x=None,
-            width=40
+            width=40,
+            md_bg_color=(0.1, 0.1, 0.8, 1)  # Blue
         )
         pause_button = MDIconButton(
             icon='pause',
             size_hint_x=None,
-            width=40
+            width=40,
+            md_bg_color=(0.8, 0.4, 0, 1)  # Orange
         )
         stop_button = MDIconButton(
             icon='stop',
             size_hint_x=None,
-            width=40
+            width=40,
+            md_bg_color=(0.2, 0.2, 0.2, 1)  # Dark Grey
         )
         record_button = MDIconButton(
             icon='record',
             size_hint_x=None,
-            width=40
+            width=40,
+            md_bg_color=(0.7, 0, 0, 1)  # Red
         )
 
         # Bind des actions aux boutons
@@ -396,22 +401,6 @@ class SequencerLayout(BoxLayout):
         popup.open()
 
     def play_pressed(self, instance):
-        # Basculer l'état du bouton
-        self.is_playing = not self.is_playing
-        if self.is_playing:
-            # État actif (enfoncé)
-            self.play_button.md_bg_color = [0, 0.5, 0, 1]  # Vert pour indiquer l'état actif
-            self.play_button.icon = 'play-circle'  # Optionnel : changer l'icône
-            self.process_command_ui('play')
-        else:
-            self.is_playing = False
-            # État au repos
-            self.play_button.md_bg_color = [0.2, 0.2, 0.2, 1]  # Gris pour l'état repos
-            self.play_button.icon = 'play'  # Revenir à l'icône par défaut
-            self.process_command_ui('pause')  # Ou 'pause', selon votre logique
-            return            
-
-    # Méthodes factices pour éviter les erreurs (remplacez par vos implémentations)        
         start_pos = self.start_pos_input.text
         end_pos = self.end_pos_input.text
         if end_pos:

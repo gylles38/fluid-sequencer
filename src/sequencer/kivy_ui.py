@@ -225,22 +225,21 @@ class SequencerLayout(BoxLayout):
         self.add_widget(menu_bar)
 
         # Status Display
-        status_layout = BoxLayout(size_hint_y=None, height=40, spacing=10, padding=5)
-        self.song_name_label = Label(text="Song: New Song", size_hint_x=None, width=200, halign='left', text_size=(200, None))
-        self.tempo_label = Label(text="Tempo: 120 BPM", size_hint_x=None, width=120, halign='left', text_size=(120, None))
-        self.timesig_label = Label(text="Time Sig: 4/4", size_hint_x=None, width=100, halign='left', text_size=(100, None))
-        self.metronome_button = TooltipMDIconButton(
-            icon='metronome',
-            tooltip_text="Toggle Metronome (M)",
+        status_layout = BoxLayout(size_hint_y=None, height=30)
+        self.song_name_label = Label(text="Song: New Song")
+        self.tempo_label = Label(text="Tempo: 120 BPM")
+        self.timesig_label = Label(text="Time Sig: 4/4")
+        self.metronome_button = MDButton(
+            MDButtonText(text="Metronome: OFF"),
+            style="filled",
             on_press=self.toggle_metronome
         )
-        self.playhead_label = Label(text="Position: 1:1", size_hint_x=None, width=120, halign='left', text_size=(120, None))
+        self.playhead_label = Label(text="Position: 1:1")
         status_layout.add_widget(self.song_name_label)
         status_layout.add_widget(self.tempo_label)
         status_layout.add_widget(self.timesig_label)
         status_layout.add_widget(self.metronome_button)
         status_layout.add_widget(self.playhead_label)
-        status_layout.add_widget(Widget()) # Spacer to push everything to the left
         self.add_widget(status_layout)
 
 # Transport Controls
@@ -412,12 +411,13 @@ class SequencerLayout(BoxLayout):
         self.process_command_ui(command)
 
     def toggle_metronome(self, instance):
-        # Optimistically update the icon
-        if instance.icon == 'metronome':
-            instance.icon = 'metronome-tick'
+        # Optimistically update the button text
+        button_text_widget = instance.children[0]
+        if "OFF" in button_text_widget.text:
+            button_text_widget.text = "Metronome: ON"
             self.process_command_ui('metronome on')
         else:
-            instance.icon = 'metronome'
+            button_text_widget.text = "Metronome: OFF"
             self.process_command_ui('metronome off')
 
     def update_playhead_display(self, instance, value):
@@ -437,7 +437,8 @@ class SequencerLayout(BoxLayout):
         self.song_name_label.text = f"Song: {song.name}"
         self.tempo_label.text = f"Tempo: {song.tempo} BPM"
         self.timesig_label.text = f"Time Sig: {song.time_signature_numerator}/{song.time_signature_denominator}"
-        self.metronome_button.icon = 'metronome-tick' if song.metronome_enabled else 'metronome'
+        metro_status = "ON" if song.metronome_enabled else "OFF"
+        self.metronome_button.children[0].text = f"Metronome: {metro_status}"
 
         # Update end position input, but only if the user hasn't manually set it.
         if not self.end_pos_manual_override:

@@ -15,7 +15,7 @@ from kivymd.uix.slider import MDSlider
 from kivy.properties import StringProperty
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
-from kivymd.uix.button import MDIconButton, MDButton, MDButtonText, MDFillRoundFlatIconButton
+from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.tooltip import MDTooltip, MDTooltipPlain
 from kivymd.uix.menu import MDDropdownMenu
 
@@ -225,21 +225,22 @@ class SequencerLayout(BoxLayout):
         self.add_widget(menu_bar)
 
         # Status Display
-        status_layout = BoxLayout(size_hint_y=None, height=30)
-        self.song_name_label = Label(text="Song: New Song")
-        self.tempo_label = Label(text="Tempo: 120 BPM")
-        self.timesig_label = Label(text="Time Sig: 4/4")
-        self.metronome_button = MDButton(
-            MDButtonText(text="Metronome: OFF"),
-            style="filled",
+        status_layout = BoxLayout(size_hint_y=None, height=40, spacing=10, padding=5)
+        self.song_name_label = Label(text="Song: New Song", size_hint_x=None, width=200, halign='left', text_size=(200, None))
+        self.tempo_label = Label(text="Tempo: 120 BPM", size_hint_x=None, width=120, halign='left', text_size=(120, None))
+        self.timesig_label = Label(text="Time Sig: 4/4", size_hint_x=None, width=100, halign='left', text_size=(100, None))
+        self.metronome_button = TooltipMDIconButton(
+            icon='metronome',
+            tooltip_text="Toggle Metronome (M)",
             on_press=self.toggle_metronome
         )
-        self.playhead_label = Label(text="Position: 1:1")
+        self.playhead_label = Label(text="Position: 1:1", size_hint_x=None, width=120, halign='left', text_size=(120, None))
         status_layout.add_widget(self.song_name_label)
         status_layout.add_widget(self.tempo_label)
         status_layout.add_widget(self.timesig_label)
         status_layout.add_widget(self.metronome_button)
         status_layout.add_widget(self.playhead_label)
+        status_layout.add_widget(Widget()) # Spacer to push everything to the left
         self.add_widget(status_layout)
 
 # Transport Controls
@@ -287,30 +288,30 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(self.end_pos_input)
 
         # Boutons avec icônes
-        self.play_button = MDFillRoundFlatIconButton(
+        self.play_button = MDIconButton(  # Remplacez TooltipMDIconButton par MDIconButton si nécessaire
             icon='play',
-            text="",
-            md_bg_color=(0, 0.5, 0, 1)  # Green
+            size_hint_x=None,
+            width=40
         )
-        loop_button = MDFillRoundFlatIconButton(
+        loop_button = MDIconButton(
             icon='repeat',
-            text="",
-            md_bg_color=(0.1, 0.1, 0.8, 1)  # Blue
+            size_hint_x=None,
+            width=40
         )
-        pause_button = MDFillRoundFlatIconButton(
+        pause_button = MDIconButton(
             icon='pause',
-            text="",
-            md_bg_color=(0.8, 0.4, 0, 1)  # Orange
+            size_hint_x=None,
+            width=40
         )
-        stop_button = MDFillRoundFlatIconButton(
+        stop_button = MDIconButton(
             icon='stop',
-            text="",
-            md_bg_color=(0.2, 0.2, 0.2, 1)  # Dark Grey
+            size_hint_x=None,
+            width=40
         )
-        record_button = MDFillRoundFlatIconButton(
+        record_button = MDIconButton(
             icon='record',
-            text="",
-            md_bg_color=(0.7, 0, 0, 1)  # Red
+            size_hint_x=None,
+            width=40
         )
 
         # Bind des actions aux boutons
@@ -395,6 +396,22 @@ class SequencerLayout(BoxLayout):
         popup.open()
 
     def play_pressed(self, instance):
+        # Basculer l'état du bouton
+        self.is_playing = not self.is_playing
+        if self.is_playing:
+            # État actif (enfoncé)
+            self.play_button.md_bg_color = [0, 0.5, 0, 1]  # Vert pour indiquer l'état actif
+            self.play_button.icon = 'play-circle'  # Optionnel : changer l'icône
+            self.process_command_ui('play')
+        else:
+            self.is_playing = False
+            # État au repos
+            self.play_button.md_bg_color = [0.2, 0.2, 0.2, 1]  # Gris pour l'état repos
+            self.play_button.icon = 'play'  # Revenir à l'icône par défaut
+            self.process_command_ui('pause')  # Ou 'pause', selon votre logique
+            return            
+
+    # Méthodes factices pour éviter les erreurs (remplacez par vos implémentations)        
         start_pos = self.start_pos_input.text
         end_pos = self.end_pos_input.text
         if end_pos:
@@ -411,13 +428,12 @@ class SequencerLayout(BoxLayout):
         self.process_command_ui(command)
 
     def toggle_metronome(self, instance):
-        # Optimistically update the button text
-        button_text_widget = instance.children[0]
-        if "OFF" in button_text_widget.text:
-            button_text_widget.text = "Metronome: ON"
+        # Optimistically update the icon
+        if instance.icon == 'metronome':
+            instance.icon = 'metronome-tick'
             self.process_command_ui('metronome on')
         else:
-            button_text_widget.text = "Metronome: OFF"
+            instance.icon = 'metronome'
             self.process_command_ui('metronome off')
 
     def update_playhead_display(self, instance, value):
@@ -437,8 +453,7 @@ class SequencerLayout(BoxLayout):
         self.song_name_label.text = f"Song: {song.name}"
         self.tempo_label.text = f"Tempo: {song.tempo} BPM"
         self.timesig_label.text = f"Time Sig: {song.time_signature_numerator}/{song.time_signature_denominator}"
-        metro_status = "ON" if song.metronome_enabled else "OFF"
-        self.metronome_button.children[0].text = f"Metronome: {metro_status}"
+        self.metronome_button.icon = 'metronome-tick' if song.metronome_enabled else 'metronome'
 
         # Update end position input, but only if the user hasn't manually set it.
         if not self.end_pos_manual_override:

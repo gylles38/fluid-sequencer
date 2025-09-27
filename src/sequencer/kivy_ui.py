@@ -422,7 +422,10 @@ class SequencerLayout(BoxLayout):
                 self.output_label.text += output + "\n"
             self.current_command = "" # Reset after a non-JSON response
 
-        self.update_status_display()
+        # Don't do a full refresh for mute, as it causes a race condition.
+        # The widget will update its own icon optimistically.
+        if not command.strip().startswith('mute'):
+            self.update_status_display()
 
         if not should_continue:
             MDApp.get_running_app().stop()
@@ -538,6 +541,14 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout.process_slider_command(f'pan {self.track_index} {value}')
 
     def on_mute_toggle(self, instance):
+        # Optimistically update the icon to provide immediate feedback
+        if instance.icon == 'volume-high':
+            instance.icon = 'volume-off'
+        else:
+            instance.icon = 'volume-high'
+
+        # Now, send the command to the backend to update the actual state.
+        # The full UI refresh is disabled for this command to prevent the race condition.
         self.sequencer_layout.process_command_ui(f'mute {self.track_index}')
 
     def on_solo_toggle(self, instance):

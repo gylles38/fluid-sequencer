@@ -433,12 +433,37 @@ class JackManager:
             while not self.command_queue.empty():
                 command = self.command_queue.get()
                 action = command.get('action')
-                if action == 'send_midi':
-                    port_name = command.get('port_name')
-                    message_data = command.get('message')
-                    if port_name and message_data and port_name in self.open_ports:
-                        port = self.open_ports[port_name]
-                        port.send(mido.Message(**message_data))
+
+                if action == 'toggle_mute':
+                    track_index = command.get('track_index')
+                    if 0 <= track_index < len(self.sequencer.song.tracks):
+                        track = self.sequencer.song.tracks[track_index]
+                        track.is_muted = not track.is_muted
+
+                        # If we are muting a MIDI track, send an all-notes-off message for it
+                        if track.is_muted and isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                            port = self.open_ports[track.output_port_name]
+                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
+                elif action == 'toggle_solo':
+                    track_index = command.get('track_index')
+                    if 0 <= track_index < len(self.sequencer.song.tracks):
+                        target_track = self.sequencer.song.tracks[track_index]
+                        is_being_soloed = not target_track.is_solo
+                        target_track.is_solo = is_being_soloed
+
+                        if is_being_soloed:
+                            for i, other_track in enumerate(self.sequencer.song.tracks):
+                                if i == track_index: continue
+                                if other_track.is_solo: other_track.is_solo = False
+
+                        # After any solo change, we need to re-evaluate all tracks' audibility
+                        for i, track in enumerate(self.sequencer.song.tracks):
+                             if isinstance(track, MidiTrack) and not ((track.is_solo or not any(t.is_solo for t in self.sequencer.song.tracks)) and not track.is_muted):
+                                if track.output_port_name in self.open_ports:
+                                    port = self.open_ports[track.output_port_name]
+                                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
 
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
@@ -1371,67 +1396,45 @@ class Sequencer(EventDispatcher):
     def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             return {"status": "error", "message": "Error: Invalid track index."}
+
+        # The actual state change will happen in the audio thread.
+        # We predict the new state for the immediate GUI feedback.
         track = self.song.tracks[track_index]
-        track.is_muted = not track.is_muted
-        status = "Muted" if track.is_muted else "Unmuted"
+        new_muted_state = not track.is_muted
+        status = "Muted" if new_muted_state else "Unmuted"
+
+        if self.jack_manager.is_running:
+            self.jack_manager.command_queue.put({'action': 'toggle_mute', 'track_index': track_index})
+        else:
+            # If JACK isn't running, we can change the state directly.
+            track.is_muted = new_muted_state
+
         self.is_dirty = True
         self.invalidate_song_length_cache()
-        self._update_all_tracks_audibility()
         return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 
     def toggle_solo(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             return {"status": "error", "message": "Error: Invalid track index."}
+
+        # Predict the change for immediate GUI feedback.
         target_track = self.song.tracks[track_index]
-        is_being_soloed = not target_track.is_solo
-        target_track.is_solo = is_being_soloed
-        output = ""
-        if is_being_soloed:
-            for i, other_track in enumerate(self.song.tracks):
-                if i == track_index:
-                    continue
-                if other_track.is_solo:
-                    other_track.is_solo = False
-                    output += f"Track '{other_track.name}' is now Un-soloed.\n"
-        status = "Solo" if target_track.is_solo else "Un-soloed"
+        new_solo_state = not target_track.is_solo
+        status = "Solo" if new_solo_state else "Un-soloed"
+
+        if self.jack_manager.is_running:
+            self.jack_manager.command_queue.put({'action': 'toggle_solo', 'track_index': track_index})
+        else:
+            # If JACK isn't running, perform the state change directly.
+            target_track.is_solo = new_solo_state
+            if new_solo_state:
+                for i, other_track in enumerate(self.song.tracks):
+                    if i != track_index:
+                        other_track.is_solo = False
+
         self.is_dirty = True
         self.invalidate_song_length_cache()
-        self._update_all_tracks_audibility()
-        output += f"Track '{target_track.name}' is now {status}."
-        return {"status": "success", "message": output}
-
-    def _update_all_tracks_audibility(self):
-        """
-        Checks all tracks and applies the correct mute/solo state.
-        This should be called whenever a mute or solo flag is changed.
-        """
-        if not self.jack_manager.is_running:
-            return
-
-        is_any_track_soloed = False
-        for t in self.song.tracks:
-            if hasattr(t, 'is_solo') and t.is_solo:
-                is_any_track_soloed = True
-                break
-
-        for i, track in enumerate(self.song.tracks):
-            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-
-            if isinstance(track, AudioTrack):
-                with self.jack_manager.process_lock:
-                    active_process = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
-                    if active_process:
-                        # We send 'mute' with the inverse of audibility
-                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
-            elif isinstance(track, MidiTrack):
-                if not should_be_audible and track.output_port_name in self.jack_manager.open_ports:
-                    # Enqueue the All-Notes-Off message to be sent from the audio thread
-                    command = {
-                        'action': 'send_midi',
-                        'port_name': track.output_port_name,
-                        'message': {'type': 'control_change', 'channel': track.channel, 'control': 123, 'value': 0}
-                    }
-                    self.jack_manager.command_queue.put(command)
+        return {"status": "success", "message": f"Track '{target_track.name}' is now {status}."}
 
     def prime_all_tracks(self) -> str:
         """Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks."""

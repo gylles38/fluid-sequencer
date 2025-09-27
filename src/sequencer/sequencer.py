@@ -463,16 +463,15 @@ class JackManager:
             is_any_track_soloed = any(t.is_solo for t in self.sequencer.song.tracks if hasattr(t, 'is_solo'))
 
             for i, track in enumerate(self.sequencer.song.tracks):
-                if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
+                if not isinstance(track, MidiTrack):
                     continue
 
                 should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                if not should_be_audible:
-                    continue
+                port = self.open_ports.get(track.output_port_name)
 
-                port = self.open_ports[track.output_port_name]
                 if i >= len(self.next_event_indices):
                     self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
+
                 while self.next_event_indices[i] < len(track.events):
                     event = track.events[self.next_event_indices[i]]
 
@@ -486,14 +485,15 @@ class JackManager:
                         continue
 
                     if start_beat_of_block <= event.start_time < end_beat_of_block:
-                        for note in event.notes:
-                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
-                            port.send(note_on_msg)
-                            note_end_beat = event.start_time + note.duration
-                            self._active_notes[(i, note.pitch)] = note_end_beat
-                        for cc in event.cc_messages:
-                            cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
-                            port.send(cc_msg)
+                        if should_be_audible and port:
+                            for note in event.notes:
+                                note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
+                                port.send(note_on_msg)
+                                note_end_beat = event.start_time + note.duration
+                                self._active_notes[(i, note.pitch)] = note_end_beat
+                            for cc in event.cc_messages:
+                                cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
+                                port.send(cc_msg)
                         self.next_event_indices[i] += 1
                     elif event.start_time >= end_beat_of_block:
                         break

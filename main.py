@@ -70,6 +70,7 @@ Sequencer CLI Commands:
   setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
   setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
   setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
+  setmetrotrack <track>   - Designates a MIDI track to be the metronome track (hides it from UI).
   setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
   volume <track_index>    - Sets the volume for an audio or MIDI track (0.0 to 1.0).
   pan <track_index>       - Sets the pan for an audio or MIDI track (-1.0 to 1.0).
@@ -459,6 +460,15 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 return True, seq.set_program(track_index=int(args[0]), program=prog - 1)
         else:
             return True, "Usage: setprog <track_index> <program>"
+    elif command == "setmetrotrack":
+        if len(args) == 1:
+            try:
+                track_index = int(args[0])
+                return True, seq.set_metronome_track(track_index)
+            except ValueError:
+                return True, "Error: Invalid track index."
+        else:
+            return True, "Usage: setmetrotrack <track_index>"
     elif command == "volume":
         if len(args) >= 1:
             try:

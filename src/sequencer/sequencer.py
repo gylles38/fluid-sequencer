@@ -1232,6 +1232,22 @@ class Sequencer(EventDispatcher):
         self.is_dirty = True
         return f"Set program for track '{track.name}' to {program + 1}."
 
+    def set_metronome_track(self, track_index: int) -> str:
+        """Designates a specific MIDI track as the one to be hidden in the UI."""
+        if not 0 <= track_index < len(self.song.tracks):
+            return "Error: Invalid track index."
+
+        track_to_set = self.song.tracks[track_index]
+        if not isinstance(track_to_set, MidiTrack):
+            return "Error: Only MIDI tracks can be designated as metronome tracks."
+
+        for i, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack):
+                track.is_metronome = (i == track_index)
+
+        self.is_dirty = True
+        return f"Track '{track_to_set.name}' is now designated as the metronome track."
+
     def set_track_volume(self, track_index: int, volume_str: Optional[str] = None, api_mode: bool = False, confirmation_handler=None):
         """Sets the volume for a specific audio or MIDI track."""
         if not 0 <= track_index < len(self.song.tracks):

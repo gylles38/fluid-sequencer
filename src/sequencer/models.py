@@ -50,6 +50,7 @@ class MidiTrack(BaseTrack):
     """Represents a MIDI track, which is a sequence of musical events."""
     is_muted: bool = False
     is_solo: bool = False
+    is_metronome: bool = False
     channel: int = 0  # MIDI channel (0-15)
     volume: float = 0.8 # Default volume (0.0 to 1.0, maps to 0-127)
     pan: float = 0.0  # Pan (-1.0 left to 1.0 right, maps to 0-127)

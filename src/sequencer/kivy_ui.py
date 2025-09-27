@@ -15,7 +15,7 @@ from kivymd.uix.slider import MDSlider
 from kivy.properties import StringProperty
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
-from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
+from kivymd.uix.button import MDIconButton, MDButton, MDButtonText, MDFillRoundFlatIconButton
 from kivymd.uix.tooltip import MDTooltip, MDTooltipPlain
 from kivymd.uix.menu import MDDropdownMenu
 
@@ -288,34 +288,29 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(self.end_pos_input)
 
         # Boutons avec icônes
-        self.play_button = MDIconButton(
+        self.play_button = MDFillRoundFlatIconButton(
             icon='play',
-            size_hint_x=None,
-            width=40,
+            text="",
             md_bg_color=(0, 0.5, 0, 1)  # Green
         )
-        loop_button = MDIconButton(
+        loop_button = MDFillRoundFlatIconButton(
             icon='repeat',
-            size_hint_x=None,
-            width=40,
+            text="",
             md_bg_color=(0.1, 0.1, 0.8, 1)  # Blue
         )
-        pause_button = MDIconButton(
+        pause_button = MDFillRoundFlatIconButton(
             icon='pause',
-            size_hint_x=None,
-            width=40,
+            text="",
             md_bg_color=(0.8, 0.4, 0, 1)  # Orange
         )
-        stop_button = MDIconButton(
+        stop_button = MDFillRoundFlatIconButton(
             icon='stop',
-            size_hint_x=None,
-            width=40,
+            text="",
             md_bg_color=(0.2, 0.2, 0.2, 1)  # Dark Grey
         )
-        record_button = MDIconButton(
+        record_button = MDFillRoundFlatIconButton(
             icon='record',
-            size_hint_x=None,
-            width=40,
+            text="",
             md_bg_color=(0.7, 0, 0, 1)  # Red
         )
 

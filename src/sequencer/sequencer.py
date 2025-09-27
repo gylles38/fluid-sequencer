@@ -174,7 +174,8 @@ class JackManager:
             # --- MIDI Port Setup ---
             self.open_ports.clear()
             required_ports = {track.output_port_name for track in self.sequencer.song.tracks if isinstance(track, MidiTrack) and track.output_port_name}
-            if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name:
+            # Always open the metronome port if it's assigned, so it's ready when enabled mid-playback.
+            if self.sequencer.song.metronome_port_name:
                 required_ports.add(self.sequencer.song.metronome_port_name)
 
             for name in required_ports:

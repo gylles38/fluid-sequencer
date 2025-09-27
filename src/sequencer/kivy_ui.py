@@ -115,7 +115,11 @@ class FileChooserPopup(Popup):
 
         layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
-        self.filechooser = FileChooserListView(filters=filters or [])
+        # Créer le FileChooser avec chemin et filtres
+        self.filechooser = FileChooserListView(
+            path='/home/gilles/fluid-sequencer',  # Chemin initial
+            filters=['*.proj.json', '*.mid']     # Extensions à filtrer
+        )  
         layout.add_widget(self.filechooser)
 
         buttons_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)

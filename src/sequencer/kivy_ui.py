@@ -230,7 +230,7 @@ class SequencerLayout(BoxLayout):
         self.timesig_label = Label(text="Time Sig: 4/4")
         self.metronome_button = MDButton(
             MDButtonText(text="Metronome: OFF"),
-            style="unelevated",
+            style="filled",
             on_press=self.toggle_metronome
         )
         self.playhead_label = Label(text="Position: 1:1")

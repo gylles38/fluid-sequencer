@@ -197,6 +197,7 @@ class SequencerLayout(BoxLayout):
         self.sequencer = Sequencer(gui_mode=True)
         self.current_command = ""
         self.end_pos_manual_override = False
+        self.is_playing = False  # Propriété pour suivre l'état du bouton play 
 
         # Menu Bar
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
@@ -241,27 +242,95 @@ class SequencerLayout(BoxLayout):
         status_layout.add_widget(self.playhead_label)
         self.add_widget(status_layout)
 
-        # Transport Controls
-        transport_layout = BoxLayout(size_hint_y=None, height=40, spacing=5, padding=5)
-        transport_layout.add_widget(Label(text='Start:', size_hint_x=0.1))
-        self.start_pos_input = TextInput(text='1:1', multiline=False, size_hint_x=0.2)
+# Transport Controls
+        transport_layout = BoxLayout(
+            size_hint_y=None,
+            height=40,
+            spacing=10,  # Espacement fixe entre les widgets
+            padding=5,
+            orientation='horizontal'
+        )
+
+        # Label et TextInput pour Start
+        start_label = Label(
+            text='Start:',
+            size_hint_x=None,
+            width=50,  # Largeur fixe pour le label
+            halign='left',
+            text_size=(50, None)  # Limiter la taille du texte pour éviter le débordement
+        )
+        self.start_pos_input = TextInput(
+            text='1:1',
+            multiline=False,
+            size_hint_x=None,
+            width=60  # Largeur fixe pour le TextInput
+        )
+        transport_layout.add_widget(start_label)
         transport_layout.add_widget(self.start_pos_input)
-        transport_layout.add_widget(Label(text='End:', size_hint_x=0.1))
-        self.end_pos_input = TextInput(text='', multiline=False, size_hint_x=0.2)
+
+        # Label et TextInput pour End
+        end_label = Label(
+            text='End:',
+            size_hint_x=None,
+            width=50,
+            halign='left',
+            text_size=(50, None)
+        )
+        self.end_pos_input = TextInput(
+            text='',
+            multiline=False,
+            size_hint_x=None,
+            width=60
+        )
         self.end_pos_input.bind(on_text_validate=self.on_end_pos_manual_set)
+        transport_layout.add_widget(end_label)
         transport_layout.add_widget(self.end_pos_input)
 
-        play_button = TooltipMDIconButton(icon='play', tooltip_text='Play', on_press=self.play_pressed)
-        loop_button = TooltipMDIconButton(icon='repeat', tooltip_text='Loop', on_press=self.loop_pressed)
-        pause_button = TooltipMDIconButton(icon='pause', tooltip_text='Pause', on_press=lambda x: self.process_command_ui('pause'))
-        stop_button = TooltipMDIconButton(icon='stop', tooltip_text='Stop', on_press=lambda x: self.process_command_ui('stop'))
-        record_button = TooltipMDIconButton(icon='record', tooltip_text='Record', on_press=lambda x: self.process_command_ui('record'))
+        # Boutons avec icônes
+        self.play_button = MDIconButton(  # Remplacez TooltipMDIconButton par MDIconButton si nécessaire
+            icon='play',
+            size_hint_x=None,
+            width=40
+        )
+        loop_button = MDIconButton(
+            icon='repeat',
+            size_hint_x=None,
+            width=40
+        )
+        pause_button = MDIconButton(
+            icon='pause',
+            size_hint_x=None,
+            width=40
+        )
+        stop_button = MDIconButton(
+            icon='stop',
+            size_hint_x=None,
+            width=40
+        )
+        record_button = MDIconButton(
+            icon='record',
+            size_hint_x=None,
+            width=40
+        )
 
-        transport_layout.add_widget(play_button)
+        # Bind des actions aux boutons
+        self.play_button.bind(on_press=self.play_pressed)
+        loop_button.bind(on_press=self.loop_pressed)
+        pause_button.bind(on_press=lambda x: self.process_command_ui('pause'))
+        stop_button.bind(on_press=lambda x: self.process_command_ui('stop'))
+        record_button.bind(on_press=lambda x: self.process_command_ui('record'))
+
+        # Ajout des boutons au layout
+        transport_layout.add_widget(self.play_button)
         transport_layout.add_widget(loop_button)
         transport_layout.add_widget(pause_button)
         transport_layout.add_widget(stop_button)
         transport_layout.add_widget(record_button)
+
+        # Ajouter un widget vide pour occuper l'espace restant
+        transport_layout.add_widget(Widget(size_hint_x=1))
+
+        # Ajouter le transport_layout au widget principal
         self.add_widget(transport_layout)
 
         # Track List (Mixer)
@@ -326,6 +395,22 @@ class SequencerLayout(BoxLayout):
         popup.open()
 
     def play_pressed(self, instance):
+        # Basculer l'état du bouton
+        self.is_playing = not self.is_playing
+        if self.is_playing:
+            # État actif (enfoncé)
+            self.play_button.md_bg_color = [0, 0.5, 0, 1]  # Vert pour indiquer l'état actif
+            self.play_button.icon = 'play-circle'  # Optionnel : changer l'icône
+            self.process_command_ui('play')
+        else:
+            self.is_playing = False
+            # État au repos
+            self.play_button.md_bg_color = [0.2, 0.2, 0.2, 1]  # Gris pour l'état repos
+            self.play_button.icon = 'play'  # Revenir à l'icône par défaut
+            self.process_command_ui('pause')  # Ou 'pause', selon votre logique
+            return            
+
+    # Méthodes factices pour éviter les erreurs (remplacez par vos implémentations)        
         start_pos = self.start_pos_input.text
         end_pos = self.end_pos_input.text
         if end_pos:

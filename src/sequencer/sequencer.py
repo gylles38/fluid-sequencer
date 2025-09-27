@@ -558,15 +558,19 @@ class JackManager:
 
             if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                 port = self.open_ports[self.sequencer.song.metronome_port_name]
-                # Use math.ceil to find the first integer beat >= start_beat_of_block.
-                # This correctly includes beat 0 when starting from the beginning.
                 beat_to_check = math.ceil(start_beat_of_block)
+
+                if beat_to_check < end_beat_of_block:
+                    # Send pan control once per block if there are clicks
+                    midi_pan = int((self.sequencer.song.metronome_pan + 1.0) / 2.0 * 127)
+                    port.send(mido.Message('control_change', channel=self.sequencer.metronome_channel, control=10, value=midi_pan))
+
                 while beat_to_check < end_beat_of_block:
                     beats_per_measure = self.sequencer.song.time_signature_numerator
-                    # Correct downbeat logic for 0-indexed beats (beat 0 is the first beat).
                     is_downbeat = (int(beat_to_check) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 0
                     pitch = self.sequencer.metronome_pitch_downbeat if is_downbeat else self.sequencer.metronome_pitch_beat
-                    note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=100)
+                    velocity = int(100 * self.sequencer.song.metronome_volume)
+                    note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=velocity)
                     note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)
                     port.send(note_on)
                     self._metronome_notes_to_turn_off.append(note_off)
@@ -1305,7 +1309,14 @@ class Sequencer(EventDispatcher):
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", pan]})
+                            # Pan value from -1.0 (L) to 1.0 (R)
+                            # Gains for stereo panning that preserves stereo separation
+                            gain_l = min(1.0, 1.0 - pan)
+                            gain_r = min(1.0, 1.0 + pan)
+                            # The filter string pans left and right channels independently
+                            pan_filter = f"lavfi=[pan=stereo|FL={gain_l:.2f}*FL|FR={gain_r:.2f}*FR]"
+                            command = {"command": ["set_property", "af", pan_filter]}
+                            self.jack_manager._send_ipc_command(ap.socket_path, command)
                             break
         elif isinstance(track, MidiTrack):
             if self.jack_manager.is_running and track.output_port_name:
@@ -1345,20 +1356,20 @@ class Sequencer(EventDispatcher):
         self.is_dirty = True
         return {"status": "success", "message": f"Velocity for track '{track.name}' set to {velocity:.2f}."}
 
-    def toggle_mute(self, track_index: int) -> str:
+    def toggle_mute(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
-            return "Error: Invalid track index."
+            return {"status": "error", "message": "Error: Invalid track index."}
         track = self.song.tracks[track_index]
         track.is_muted = not track.is_muted
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
         self.invalidate_song_length_cache()
         self._update_all_tracks_audibility()
-        return f"Track '{track.name}' is now {status}."
+        return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 
-    def toggle_solo(self, track_index: int) -> str:
+    def toggle_solo(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
-            return "Error: Invalid track index."
+            return {"status": "error", "message": "Error: Invalid track index."}
         target_track = self.song.tracks[track_index]
         is_being_soloed = not target_track.is_solo
         target_track.is_solo = is_being_soloed
@@ -1375,7 +1386,7 @@ class Sequencer(EventDispatcher):
         self.invalidate_song_length_cache()
         self._update_all_tracks_audibility()
         output += f"Track '{target_track.name}' is now {status}."
-        return output
+        return {"status": "success", "message": output}
 
     def _update_all_tracks_audibility(self):
         """
@@ -1413,26 +1424,35 @@ class Sequencer(EventDispatcher):
             return "Warning: prime_all_tracks called but JACK manager is not running. State will not be sent."
 
         output = "Priming all MIDI tracks with initial state...\n"
+        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
+
         for i, track in enumerate(self.song.tracks):
             if self.is_recording and self.last_record_settings and i == self.last_record_settings.get('track_index'):
                 continue
 
             if isinstance(track, MidiTrack) and track.output_port_name:
+                should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                 port = self.jack_manager.open_ports.get(track.output_port_name)
+
                 if port:
-                    try:
-                        output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
-                        if track.bank_msb is not None:
-                            port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                        if track.bank_lsb is not None:
-                            port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-                        midi_volume = int(track.volume * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
-                    except Exception as e:
-                        output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
+                    if should_be_audible:
+                        try:
+                            output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
+                            if track.bank_msb is not None:
+                                port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                            if track.bank_lsb is not None:
+                                port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                            port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                            midi_volume = int(track.volume * 127)
+                            port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                            midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                            port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                        except Exception as e:
+                            output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
+                    else:
+                        # Silence the track if it's not supposed to be audible
+                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
+                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
                 else:
                     output += f"  - Skipping track '{track.name}', port '{track.output_port_name}' not open in JackManager.\n"
         return output

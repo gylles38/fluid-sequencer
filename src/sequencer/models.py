@@ -146,6 +146,8 @@ class Song:
     midi_mappings: List[MidiMapping] = field(default_factory=list)
     metronome_enabled: bool = False
     metronome_port_name: Optional[str] = None
+    metronome_volume: float = 1.0
+    metronome_pan: float = 0.0
 
     def add_track(self, track: AnyTrack):
         """Adds a track to the song, assigning a default channel if it's a MIDI track."""

@@ -422,9 +422,10 @@ class SequencerLayout(BoxLayout):
                 self.output_label.text += output + "\n"
             self.current_command = "" # Reset after a non-JSON response
 
-        # Don't do a full refresh for mute, as it causes a race condition.
+        # Don't do a full refresh for mute/solo, as it causes a race condition.
         # The widget will update its own icon optimistically.
-        if not command.strip().startswith('mute'):
+        stripped_command = command.strip()
+        if not (stripped_command.startswith('mute') or stripped_command.startswith('solo')):
             self.update_status_display()
 
         if not should_continue:
@@ -552,6 +553,21 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout.process_command_ui(f'mute {self.track_index}')
 
     def on_solo_toggle(self, instance):
+        # Optimistically update the icon to provide immediate feedback
+        if instance.icon == 'alpha-s-box-outline':
+            # Turn solo ON for this track
+            instance.icon = 'alpha-s-box'
+            # Visually un-solo all other tracks
+            for widget in self.parent.children:
+                if isinstance(widget, TrackWidget) and widget != self:
+                    # The solo button is the first child of the buttons_layout (added second)
+                    solo_button = widget.children[1].children[0]
+                    solo_button.icon = 'alpha-s-box-outline'
+        else:
+            # Turn solo OFF for this track
+            instance.icon = 'alpha-s-box-outline'
+
+        # Now, send the command to the backend to update the actual state.
         self.sequencer_layout.process_command_ui(f'solo {self.track_index}')
 
     def on_channel_change(self, instance):

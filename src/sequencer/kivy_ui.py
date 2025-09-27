@@ -357,6 +357,9 @@ class SequencerLayout(BoxLayout):
     def update_track_list(self):
         self.track_list_layout.clear_widgets()
         for i, track in enumerate(self.sequencer.song.tracks):
+            # Hide the metronome track from the mixer view as it has its own button
+            if track.name.lower() == 'metronome':
+                continue
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
             self.track_list_layout.add_widget(track_widget)
 

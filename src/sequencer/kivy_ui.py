@@ -228,12 +228,16 @@ class SequencerLayout(BoxLayout):
         self.song_name_label = Label(text="Song: New Song")
         self.tempo_label = Label(text="Tempo: 120 BPM")
         self.timesig_label = Label(text="Time Sig: 4/4")
-        self.metronome_label = Label(text="Metronome: OFF")
+        self.metronome_button = MDButton(
+            MDButtonText(text="Metronome: OFF"),
+            style="unelevated",
+            on_press=self.toggle_metronome
+        )
         self.playhead_label = Label(text="Position: 1:1")
         status_layout.add_widget(self.song_name_label)
         status_layout.add_widget(self.tempo_label)
         status_layout.add_widget(self.timesig_label)
-        status_layout.add_widget(self.metronome_label)
+        status_layout.add_widget(self.metronome_button)
         status_layout.add_widget(self.playhead_label)
         self.add_widget(status_layout)
 
@@ -337,6 +341,16 @@ class SequencerLayout(BoxLayout):
         command = f'loop "{start_pos}" "{end_pos}"'
         self.process_command_ui(command)
 
+    def toggle_metronome(self, instance):
+        # Optimistically update the button text
+        button_text_widget = instance.children[0]
+        if "OFF" in button_text_widget.text:
+            button_text_widget.text = "Metronome: ON"
+            self.process_command_ui('metronome on')
+        else:
+            button_text_widget.text = "Metronome: OFF"
+            self.process_command_ui('metronome off')
+
     def update_playhead_display(self, instance, value):
         self.playhead_label.text = f"Position: {self.sequencer._format_beats_to_position(value)}"
 
@@ -352,7 +366,7 @@ class SequencerLayout(BoxLayout):
         self.tempo_label.text = f"Tempo: {song.tempo} BPM"
         self.timesig_label.text = f"Time Sig: {song.time_signature_numerator}/{song.time_signature_denominator}"
         metro_status = "ON" if song.metronome_enabled else "OFF"
-        self.metronome_label.text = f"Metronome: {metro_status}"
+        self.metronome_button.children[0].text = f"Metronome: {metro_status}"
 
         # Update end position input, but only if the user hasn't manually set it.
         if not self.end_pos_manual_override:
@@ -422,10 +436,10 @@ class SequencerLayout(BoxLayout):
                 self.output_label.text += output + "\n"
             self.current_command = "" # Reset after a non-JSON response
 
-        # Don't do a full refresh for mute/solo, as it causes a race condition.
-        # The widget will update its own icon optimistically.
+        # Don't do a full refresh for commands that have optimistic updates,
+        # as it causes a race condition.
         stripped_command = command.strip()
-        if not (stripped_command.startswith('mute') or stripped_command.startswith('solo')):
+        if not (stripped_command.startswith('mute') or stripped_command.startswith('solo') or stripped_command.startswith('metronome')):
             self.update_status_display()
 
         if not should_continue:

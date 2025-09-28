@@ -629,7 +629,6 @@ class Sequencer(EventDispatcher):
         self.last_project_basename = None
         self._cached_song_length_beats: Optional[float] = None
         self.audio_track_duration_ms: Dict[str, int] = {}
-        self.last_audible_states: Dict[int, bool] = {}
 
     def invalidate_song_length_cache(self):
         """Invalidates the cached song length."""
@@ -1382,7 +1381,9 @@ class Sequencer(EventDispatcher):
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
         self.invalidate_song_length_cache()
-        self._update_all_tracks_audibility()
+        if self.playback_state != "stopped":
+            current_beat = self._get_current_beat()
+            self._resync_all_at_beat(current_beat)
         return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 
     def toggle_solo(self, track_index: int):
@@ -1396,60 +1397,17 @@ class Sequencer(EventDispatcher):
             for i, other_track in enumerate(self.song.tracks):
                 if i == track_index:
                     continue
-                if other_track.is_solo:
+                if hasattr(other_track, 'is_solo') and other_track.is_solo:
                     other_track.is_solo = False
                     output += f"Track '{other_track.name}' is now Un-soloed.\n"
         status = "Solo" if target_track.is_solo else "Un-soloed"
         self.is_dirty = True
         self.invalidate_song_length_cache()
-        self._update_all_tracks_audibility()
+        if self.playback_state != "stopped":
+            current_beat = self._get_current_beat()
+            self._resync_all_at_beat(current_beat)
         output += f"Track '{target_track.name}' is now {status}."
         return {"status": "success", "message": output}
-
-    def _update_all_tracks_audibility(self):
-        """
-        Checks all tracks and applies the correct mute/solo state. This should be
-        called whenever a mute or solo flag is changed. It now tracks the last
-        audible state to only 'prime' MIDI tracks when they become audible.
-        """
-        if not self.jack_manager.is_running:
-            return
-
-        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
-
-        for i, track in enumerate(self.song.tracks):
-            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-            last_state = self.last_audible_states.get(i, not should_be_audible)
-            just_became_audible = should_be_audible and not last_state
-
-            if isinstance(track, AudioTrack):
-                with self.jack_manager.process_lock:
-                    active_process = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
-                    if active_process:
-                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
-
-            elif isinstance(track, MidiTrack):
-                port = self.jack_manager.open_ports.get(track.output_port_name)
-                if not port:
-                    continue
-
-                if not should_be_audible:
-                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
-                elif just_became_audible:
-                    try:
-                        if track.bank_msb is not None:
-                            port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                        if track.bank_lsb is not None:
-                            port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-                        midi_volume = int(track.volume * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
-                    except Exception as e:
-                        print(f"Warning: Could not prime MIDI track '{track.name}': {e}", file=sys.stderr)
-
-            self.last_audible_states[i] = should_be_audible
 
     def prime_all_tracks(self) -> str:
         """Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks."""
@@ -2044,6 +2002,52 @@ class Sequencer(EventDispatcher):
             for step_time, step_value in zip(time_steps, value_steps):
                 generated_events.append({"time": step_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": step_value})
         return generated_events
+
+    def _resync_all_at_beat(self, beat: float):
+        """
+        Resynchronizes all tracks to a specific beat. This is used when the audible
+        state of tracks changes mid-playback (e.g., via solo/mute) to prevent timing drift.
+        """
+        # 1. Sync the internal playhead and event indices for all tracks
+        self.jack_manager._sync_playhead_to_beat(beat)
+
+        # 2. Seek all audio players to the correct time
+        self.jack_manager.seek_audio_to_beat(beat)
+
+        # 3. Prime all audible tracks with their correct state
+        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
+
+        for i, track in enumerate(self.song.tracks):
+            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+
+            if isinstance(track, AudioTrack):
+                with self.jack_manager.process_lock:
+                    active_process = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
+                    if active_process:
+                        self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
+
+            elif isinstance(track, MidiTrack):
+                port = self.jack_manager.open_ports.get(track.output_port_name)
+                if not port:
+                    continue
+
+                if not should_be_audible:
+                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
+                else:
+                    # Prime the track with its current state
+                    try:
+                        if track.bank_msb is not None:
+                            port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                        if track.bank_lsb is not None:
+                            port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                        midi_volume = int(track.volume * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                    except Exception as e:
+                        print(f"Warning: Could not prime MIDI track '{track.name}': {e}", file=sys.stderr)
+
 
     def play(self, start_beat: Optional[float] = None):
         """

@@ -1413,11 +1413,7 @@ class Sequencer(EventDispatcher):
         if not self.jack_manager.is_running:
             return
 
-        is_any_track_soloed = False
-        for t in self.song.tracks:
-            if hasattr(t, 'is_solo') and t.is_solo:
-                is_any_track_soloed = True
-                break
+        is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
 
         for i, track in enumerate(self.song.tracks):
             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
@@ -1428,12 +1424,30 @@ class Sequencer(EventDispatcher):
                     if active_process:
                         # We send 'mute' with the inverse of audibility
                         self.jack_manager._send_ipc_command(active_process.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
+
             elif isinstance(track, MidiTrack):
-                if not should_be_audible and track.output_port_name in self.jack_manager.open_ports:
-                    port = self.jack_manager.open_ports.get(track.output_port_name)
-                    if port:
-                        # Send All-Notes-Off message to silence the track immediately
-                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+                port = self.jack_manager.open_ports.get(track.output_port_name)
+                if not port:
+                    continue
+
+                if not should_be_audible:
+                    # Send All-Notes-Off message to silence the track immediately
+                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+                else:
+                    # This track has just become audible, so we need to prime it.
+                    try:
+                        if track.bank_msb is not None:
+                            port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                        if track.bank_lsb is not None:
+                            port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                        midi_volume = int(track.volume * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                    except Exception as e:
+                        # Avoid crashing if the port is closed or has an issue.
+                        print(f"Warning: Could not prime MIDI track '{track.name}': {e}", file=sys.stderr)
 
     def prime_all_tracks(self) -> str:
         """Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks."""

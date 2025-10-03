@@ -28,6 +28,9 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
 
     def __init__(self, **kwargs):
         self.tooltip_text = kwargs.pop('tooltip_text', '')
+        # Pop custom arguments before calling super
+        if 'tooltip_widget' in kwargs:
+            kwargs.pop('tooltip_widget')
         super().__init__(**kwargs)
         self.tooltip_widget = MDTooltipPlain(text=self.tooltip_text)
         self.widgets = [self.tooltip_widget]
@@ -35,6 +38,68 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
     def on_tooltip_text(self, instance, value):
         if hasattr(self, 'tooltip_widget'):
             self.tooltip_widget.text = value
+
+class ValueSpinner(BoxLayout):
+    def __init__(self, min_val, max_val, initial_value, callback, **kwargs):
+        super(ValueSpinner, self).__init__(**kwargs)
+        self.min_val = min_val
+        self.max_val = max_val
+        self.callback = callback
+        self.orientation = 'horizontal'
+        self.size_hint_y = None
+        self.height = 30
+
+        minus_button = MDIconButton(icon='minus', on_press=self.decrement)
+        self.add_widget(minus_button)
+
+        self.text_input = TextInput(
+            text=str(initial_value),
+            multiline=False,
+            halign='center',
+            padding=[6, 6, 6, 6],
+            size_hint_x=None,
+            width=50
+        )
+        self.text_input.bind(on_text_validate=self.on_text_change)
+        self.add_widget(self.text_input)
+
+        plus_button = MDIconButton(icon='plus', on_press=self.increment)
+        self.add_widget(plus_button)
+
+    def increment(self, instance):
+        try:
+            value = int(self.text_input.text)
+            if value < self.max_val:
+                value += 1
+                self.text_input.text = str(value)
+                self.callback(self.text_input)
+        except ValueError:
+            pass # Ignore if text is not a valid integer
+
+    def decrement(self, instance):
+        try:
+            value = int(self.text_input.text)
+            if value > self.min_val:
+                value -= 1
+                self.text_input.text = str(value)
+                self.callback(self.text_input)
+        except ValueError:
+            pass # Ignore if text is not a valid integer
+
+    def on_text_change(self, instance):
+        try:
+            value = int(instance.text)
+            if self.min_val <= value <= self.max_val:
+                self.callback(instance)
+            else:
+                # Revert to a valid value if out of bounds, maybe clamp it
+                clamped_value = max(self.min_val, min(value, self.max_val))
+                instance.text = str(clamped_value)
+                self.callback(instance)
+        except ValueError:
+            # Revert to a default/previous valid value if input is invalid
+            instance.text = str(self.min_val)
+            self.callback(instance)
 
 
 class SaveDiscardCancelPopup(Popup):
@@ -610,23 +675,25 @@ class TrackWidget(BoxLayout):
         self.add_widget(self.solo_button)
 
         # 4. MIDI Controls (or a spacer of the same size)
-        midi_controls_layout = BoxLayout(size_hint_x=None, width=180, spacing=5, pos_hint={'center_y': 0.5})
+        midi_controls_layout = BoxLayout(size_hint_x=None, width=320, spacing=5, pos_hint={'center_y': 0.5})
         if isinstance(track, MidiTrack):
             midi_controls_layout.add_widget(Label(text='Ch:', size_hint_x=None, width=25))
-            channel_input = TextInput(
-                text=str(track.channel + 1), multiline=False, size_hint_y=None, height=30,
-                halign='center', padding=[6, 6, 6, 6]
+            channel_spinner = ValueSpinner(
+                min_val=1,
+                max_val=16,
+                initial_value=track.channel + 1,
+                callback=self.on_channel_change
             )
-            channel_input.bind(on_text_validate=self.on_channel_change)
-            midi_controls_layout.add_widget(channel_input)
+            midi_controls_layout.add_widget(channel_spinner)
 
             midi_controls_layout.add_widget(Label(text='Prog:', size_hint_x=None, width=35))
-            program_input = TextInput(
-                text=str(track.instrument + 1), multiline=False, size_hint_y=None, height=30,
-                halign='center', padding=[6, 6, 6, 6]
+            program_spinner = ValueSpinner(
+                min_val=1,
+                max_val=128,
+                initial_value=track.instrument + 1,
+                callback=self.on_program_change
             )
-            program_input.bind(on_text_validate=self.on_program_change)
-            midi_controls_layout.add_widget(program_input)
+            midi_controls_layout.add_widget(program_spinner)
         else:
             # Add a spacer to keep alignment consistent for non-MIDI tracks
             midi_controls_layout.add_widget(Widget())

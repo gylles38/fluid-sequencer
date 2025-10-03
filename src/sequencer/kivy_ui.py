@@ -28,9 +28,6 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
 
     def __init__(self, **kwargs):
         self.tooltip_text = kwargs.pop('tooltip_text', '')
-        # Pop custom arguments before calling super
-        if 'tooltip_widget' in kwargs:
-            kwargs.pop('tooltip_widget')
         super().__init__(**kwargs)
         self.tooltip_widget = MDTooltipPlain(text=self.tooltip_text)
         self.widgets = [self.tooltip_widget]
@@ -45,6 +42,7 @@ class ValueSpinner(BoxLayout):
         self.min_val = min_val
         self.max_val = max_val
         self.callback = callback
+        self.last_valid_value = initial_value
         self.orientation = 'horizontal'
         self.size_hint_y = None
         self.height = 30
@@ -66,40 +64,36 @@ class ValueSpinner(BoxLayout):
         plus_button = MDIconButton(icon='plus', on_press=self.increment)
         self.add_widget(plus_button)
 
+    def _update_value(self, new_value):
+        self.text_input.text = str(new_value)
+        self.last_valid_value = new_value
+        self.callback(self.text_input)
+
     def increment(self, instance):
         try:
             value = int(self.text_input.text)
             if value < self.max_val:
-                value += 1
-                self.text_input.text = str(value)
-                self.callback(self.text_input)
+                self._update_value(value + 1)
         except ValueError:
-            pass # Ignore if text is not a valid integer
+            self.text_input.text = str(self.last_valid_value)
 
     def decrement(self, instance):
         try:
             value = int(self.text_input.text)
             if value > self.min_val:
-                value -= 1
-                self.text_input.text = str(value)
-                self.callback(self.text_input)
+                self._update_value(value - 1)
         except ValueError:
-            pass # Ignore if text is not a valid integer
+            self.text_input.text = str(self.last_valid_value)
 
     def on_text_change(self, instance):
         try:
             value = int(instance.text)
-            if self.min_val <= value <= self.max_val:
-                self.callback(instance)
-            else:
-                # Revert to a valid value if out of bounds, maybe clamp it
-                clamped_value = max(self.min_val, min(value, self.max_val))
-                instance.text = str(clamped_value)
-                self.callback(instance)
+            if not (self.min_val <= value <= self.max_val):
+                value = max(self.min_val, min(value, self.max_val))
         except ValueError:
-            # Revert to a default/previous valid value if input is invalid
-            instance.text = str(self.min_val)
-            self.callback(instance)
+            value = self.last_valid_value
+
+        self._update_value(value)
 
 
 class SaveDiscardCancelPopup(Popup):
@@ -700,15 +694,7 @@ class TrackWidget(BoxLayout):
         self.add_widget(midi_controls_layout)
 
         # 5. Volume Slider with Label
-        volume_layout = BoxLayout(size_hint_x=None, width=170, spacing=5, pos_hint={'center_y': 0.5})
-        volume_icon = TooltipMDIconButton(
-            icon='volume-high',
-            tooltip_text='Volume',
-            size_hint_x=None,
-            width=24,
-            pos_hint={'center_y': 0.5}
-        )
-        volume_layout.add_widget(volume_icon)
+        volume_layout = BoxLayout(size_hint_x=0.4, spacing=5, pos_hint={'center_y': 0.5})
         self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=35)
         self.volume_slider = MDSlider(min=0, max=1, value=track.volume)
         self.volume_slider.bind(value=self.on_volume_change)
@@ -717,15 +703,7 @@ class TrackWidget(BoxLayout):
         self.add_widget(volume_layout)
 
         # 6. Pan Slider with Label
-        pan_layout = BoxLayout(size_hint_x=None, width=170, spacing=5, pos_hint={'center_y': 0.5})
-        pan_icon = TooltipMDIconButton(
-            icon='swap-horizontal',
-            tooltip_text='Pan',
-            size_hint_x=None,
-            width=24,
-            pos_hint={'center_y': 0.5}
-        )
-        pan_layout.add_widget(pan_icon)
+        pan_layout = BoxLayout(size_hint_x=0.4, spacing=5, pos_hint={'center_y': 0.5})
         self.pan_label = Label(text=f"{track.pan:.1f}", size_hint_x=None, width=35)
         self.pan_slider = MDSlider(min=-1, max=1, value=track.pan)
         self.pan_slider.bind(value=self.on_pan_change)
@@ -757,10 +735,10 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout.process_command_ui(f'solo {self.track_index}')
 
     def on_channel_change(self, instance):
-        self.sequencer_layout.process_command_ui(f'setch {self.track_index} {instance.text}')
+        self.sequencer_layout.process_slider_command(f'setch {self.track_index} {instance.text}')
 
     def on_program_change(self, instance):
-        self.sequencer_layout.process_command_ui(f'setprog {self.track_index} {instance.text}')
+        self.sequencer_layout.process_slider_command(f'setprog {self.track_index} {instance.text}')
 
     def on_set_as_metronome(self, instance):
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')

@@ -347,10 +347,12 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(self.end_pos_input)
 
         # Boutons avec icônes
-        self.play_button = MDIconButton(  # Remplacez TooltipMDIconButton par MDIconButton si nécessaire
+        self.play_button = MDIconButton(
             icon='play',
             size_hint_x=None,
-            width=40
+            width=40,
+            theme_icon_color="Custom",
+            icon_color=(0, 1, 0, 1)  # Green
         )
         loop_button = MDIconButton(
             icon='repeat',
@@ -360,17 +362,23 @@ class SequencerLayout(BoxLayout):
         pause_button = MDIconButton(
             icon='pause',
             size_hint_x=None,
-            width=40
+            width=40,
+            theme_icon_color="Custom",
+            icon_color=(1, 1, 0, 1)  # Yellow
         )
         stop_button = MDIconButton(
             icon='stop',
             size_hint_x=None,
-            width=40
+            width=40,
+            theme_icon_color="Custom",
+            icon_color=(1, 0, 0, 1)  # Red
         )
         record_button = MDIconButton(
             icon='record',
             size_hint_x=None,
-            width=40
+            width=40,
+            theme_icon_color="Custom",
+            icon_color=(1, 0, 0, 1)  # Red
         )
 
         # Bind des actions aux boutons
@@ -694,7 +702,15 @@ class TrackWidget(BoxLayout):
         self.add_widget(midi_controls_layout)
 
         # 5. Volume Slider with Label
-        volume_layout = BoxLayout(size_hint_x=0.4, spacing=5, pos_hint={'center_y': 0.5})
+        volume_layout = BoxLayout(size_hint_x=None, width=170, spacing=5, pos_hint={'center_y': 0.5})
+        volume_icon = TooltipMDIconButton(
+            icon='volume-high',
+            tooltip_text='Volume',
+            size_hint_x=None,
+            width=24,
+            pos_hint={'center_y': 0.5}
+        )
+        volume_layout.add_widget(volume_icon)
         self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=35)
         self.volume_slider = MDSlider(min=0, max=1, value=track.volume)
         self.volume_slider.bind(value=self.on_volume_change)
@@ -703,7 +719,15 @@ class TrackWidget(BoxLayout):
         self.add_widget(volume_layout)
 
         # 6. Pan Slider with Label
-        pan_layout = BoxLayout(size_hint_x=0.4, spacing=5, pos_hint={'center_y': 0.5})
+        pan_layout = BoxLayout(size_hint_x=None, width=170, spacing=5, pos_hint={'center_y': 0.5})
+        pan_icon = TooltipMDIconButton(
+            icon='swap-horizontal',
+            tooltip_text='Pan',
+            size_hint_x=None,
+            width=24,
+            pos_hint={'center_y': 0.5}
+        )
+        pan_layout.add_widget(pan_icon)
         self.pan_label = Label(text=f"{track.pan:.1f}", size_hint_x=None, width=35)
         self.pan_slider = MDSlider(min=-1, max=1, value=track.pan)
         self.pan_slider.bind(value=self.on_pan_change)

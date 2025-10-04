@@ -28,12 +28,14 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
     tooltip_text = StringProperty()
 
     def __init__(self, **kwargs):
-        # Extraire tooltip_text des kwargs
         self.tooltip_text = kwargs.pop('tooltip_text', '')
         super().__init__(**kwargs)
-        # Définir la durée et la position du tooltip (optionnel)
-        self.tooltip_display_delay = 0.2  # Délai d'affichage en secondes
-        self.tooltip_pos = 'top'  # Position du tooltip (peut être 'top', 'bottom', etc)
+        self.tooltip_widget = MDTooltipPlain(text=self.tooltip_text)
+        self.widgets = [self.tooltip_widget]
+
+    def on_tooltip_text(self, instance, value):
+        if hasattr(self, 'tooltip_widget'):
+            self.tooltip_widget.text = value
 
 class ValueSpinner(BoxLayout):
     def __init__(self, min_val, max_val, initial_value, callback, **kwargs):
@@ -724,7 +726,7 @@ class TrackWidget(BoxLayout):
         self.add_widget(self.solo_button)
 
         # 4. MIDI Controls (or a spacer of the same size)
-        midi_controls_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(5), pos_hint={'center_y': 0.5})
+        midi_controls_layout = BoxLayout(size_hint_x=None, width=dp(400), spacing=dp(5), pos_hint={'center_y': 0.5})
         if isinstance(track, MidiTrack):
             midi_controls_layout.add_widget(Label(text='Ch:', size_hint_x=None, width=dp(25)))
             channel_spinner = ValueSpinner(
@@ -745,7 +747,7 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(program_spinner)
         else:
             # Add a spacer to keep alignment consistent for non-MIDI tracks
-            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(320)))
+            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(400)))
         self.add_widget(midi_controls_layout)
 
         # 5. Volume Slider with Label

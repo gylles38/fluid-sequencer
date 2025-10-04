@@ -18,6 +18,7 @@ from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.tooltip import MDTooltip, MDTooltipPlain
 from kivymd.uix.menu import MDDropdownMenu
+from kivy.metrics import dp
 
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
@@ -27,14 +28,12 @@ class TooltipMDIconButton(MDIconButton, MDTooltip):
     tooltip_text = StringProperty()
 
     def __init__(self, **kwargs):
+        # Extraire tooltip_text des kwargs
         self.tooltip_text = kwargs.pop('tooltip_text', '')
         super().__init__(**kwargs)
-        self.tooltip_widget = MDTooltipPlain(text=self.tooltip_text)
-        self.widgets = [self.tooltip_widget]
-
-    def on_tooltip_text(self, instance, value):
-        if hasattr(self, 'tooltip_widget'):
-            self.tooltip_widget.text = value
+        # Définir la durée et la position du tooltip (optionnel)
+        self.tooltip_display_delay = 0.2  # Délai d'affichage en secondes
+        self.tooltip_pos = 'top'  # Position du tooltip (peut être 'top', 'bottom', etc)
 
 class ValueSpinner(BoxLayout):
     def __init__(self, min_val, max_val, initial_value, callback, **kwargs):
@@ -45,23 +44,39 @@ class ValueSpinner(BoxLayout):
         self.last_valid_value = initial_value
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = 30
+        self.height = dp(30)
 
-        minus_button = MDIconButton(icon='minus', on_press=self.decrement)
+        minus_button = TooltipMDIconButton(
+            icon='minus',
+            tooltip_text='Decrement',
+            on_press=self.decrement,
+            theme_icon_color="Custom",
+            icon_color=[0.9, 0.3, 0.3, 1], # Reddish
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
+        )
         self.add_widget(minus_button)
 
         self.text_input = TextInput(
             text=str(initial_value),
             multiline=False,
             halign='center',
-            padding=[6, 6, 6, 6],
+            padding=[dp(6), dp(6), dp(6), dp(6)],
             size_hint_x=None,
-            width=50
+            width=dp(50)
         )
         self.text_input.bind(on_text_validate=self.on_text_change)
         self.add_widget(self.text_input)
 
-        plus_button = MDIconButton(icon='plus', on_press=self.increment)
+        plus_button = TooltipMDIconButton(
+            icon='plus',
+            tooltip_text='Increment',
+            on_press=self.increment,
+            theme_icon_color="Custom",
+            icon_color=[0.3, 0.9, 0.3, 1], # Greenish
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
+        )
         self.add_widget(plus_button)
 
     def _update_value(self, new_value):
@@ -94,7 +109,6 @@ class ValueSpinner(BoxLayout):
             value = self.last_valid_value
 
         self._update_value(value)
-
 
 class SaveDiscardCancelPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
@@ -347,38 +361,55 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(self.end_pos_input)
 
         # Boutons avec icônes
-        self.play_button = MDIconButton(
+        self.play_button = TooltipMDIconButton(
             icon='play',
+            tooltip_text='Play',
             size_hint_x=None,
-            width=40,
+            width=dp(40),
             theme_icon_color="Custom",
-            icon_color=(0, 1, 0, 1)  # Green
+            icon_color=[0, 0.7, 0.3, 1],  # Vert pour l'icône
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]  # Gris foncé pour le fond
         )
-        loop_button = MDIconButton(
+        loop_button = TooltipMDIconButton(
             icon='repeat',
+            tooltip_text='Loop',
             size_hint_x=None,
-            width=40
+            width=dp(40),
+            theme_icon_color="Custom",
+            icon_color=[0.2, 0.6, 0.8, 1],  # Blue for loop
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
-        pause_button = MDIconButton(
+        pause_button = TooltipMDIconButton(
             icon='pause',
+            tooltip_text='Pause',
             size_hint_x=None,
-            width=40,
+            width=dp(40),
             theme_icon_color="Custom",
-            icon_color=(1, 1, 0, 1)  # Yellow
+            icon_color=[0.9, 0.9, 0.2, 1],  # Yellow for pause
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
-        stop_button = MDIconButton(
+        stop_button = TooltipMDIconButton(
             icon='stop',
+            tooltip_text='Stop',
             size_hint_x=None,
-            width=40,
+            width=dp(40),
             theme_icon_color="Custom",
-            icon_color=(1, 0, 0, 1)  # Red
+            icon_color=[0.8, 0.2, 0.2, 1],  # Red for stop
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
-        record_button = MDIconButton(
+        record_button = TooltipMDIconButton(
             icon='record',
+            tooltip_text='Record',
             size_hint_x=None,
-            width=40,
+            width=dp(40),
             theme_icon_color="Custom",
-            icon_color=(1, 0, 0, 1)  # Red
+            icon_color=[1, 0, 0, 1],  # Bright Red for record
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
 
         # Bind des actions aux boutons
@@ -636,22 +667,30 @@ class TrackWidget(BoxLayout):
         # 2. Track Type Icon
         track_type_icon = "help-circle"
         track_type_tooltip = "Unknown"
+        track_type_color = [0.5, 0.5, 0.5, 1] # Grey for unknown
         if isinstance(track, MidiTrack):
             track_type_icon = "midi"
             track_type_tooltip = "MIDI"
+            track_type_color = [0.3, 0.5, 0.9, 1] # Blue for MIDI
         elif isinstance(track, AudioTrack):
             track_type_icon = "waveform"
             track_type_tooltip = "Audio"
+            track_type_color = [0.9, 0.5, 0.2, 1] # Orange for Audio
         elif isinstance(track, AutomationTrack):
             track_type_icon = "chart-line"
             track_type_tooltip = "Automation"
+            track_type_color = [0.2, 0.8, 0.8, 1] # Cyan for Automation
 
         type_icon_button = TooltipMDIconButton(
             icon=track_type_icon,
             tooltip_text=track_type_tooltip,
             size_hint_x=None,
-            width=36,
-            pos_hint={'center_y': 0.5}
+            width=dp(36),
+            pos_hint={'center_y': 0.5},
+            theme_icon_color="Custom",
+            icon_color=track_type_color,
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
         self.add_widget(type_icon_button)
 
@@ -661,8 +700,12 @@ class TrackWidget(BoxLayout):
             tooltip_text='Mute',
             on_press=self.on_mute_toggle,
             size_hint_x=None,
-            width=36,
-            pos_hint={'center_y': 0.5}
+            width=dp(36),
+            pos_hint={'center_y': 0.5},
+            theme_icon_color="Custom",
+            icon_color=[1, 0.6, 0, 1], # Orange for Mute
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
         self.add_widget(mute_button)
 
@@ -671,15 +714,19 @@ class TrackWidget(BoxLayout):
             tooltip_text='Solo',
             on_press=self.on_solo_toggle,
             size_hint_x=None,
-            width=36,
-            pos_hint={'center_y': 0.5}
+            width=dp(36),
+            pos_hint={'center_y': 0.5},
+            theme_icon_color="Custom",
+            icon_color=[1, 1, 0, 1], # Yellow for Solo
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
         self.add_widget(self.solo_button)
 
         # 4. MIDI Controls (or a spacer of the same size)
-        midi_controls_layout = BoxLayout(size_hint_x=None, width=320, spacing=5, pos_hint={'center_y': 0.5})
+        midi_controls_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(5), pos_hint={'center_y': 0.5})
         if isinstance(track, MidiTrack):
-            midi_controls_layout.add_widget(Label(text='Ch:', size_hint_x=None, width=25))
+            midi_controls_layout.add_widget(Label(text='Ch:', size_hint_x=None, width=dp(25)))
             channel_spinner = ValueSpinner(
                 min_val=1,
                 max_val=16,
@@ -688,7 +735,7 @@ class TrackWidget(BoxLayout):
             )
             midi_controls_layout.add_widget(channel_spinner)
 
-            midi_controls_layout.add_widget(Label(text='Prog:', size_hint_x=None, width=35))
+            midi_controls_layout.add_widget(Label(text='Prog:', size_hint_x=None, width=dp(35)))
             program_spinner = ValueSpinner(
                 min_val=1,
                 max_val=128,
@@ -698,20 +745,24 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(program_spinner)
         else:
             # Add a spacer to keep alignment consistent for non-MIDI tracks
-            midi_controls_layout.add_widget(Widget())
+            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(320)))
         self.add_widget(midi_controls_layout)
 
         # 5. Volume Slider with Label
-        volume_layout = BoxLayout(size_hint_x=None, width=170, spacing=5, pos_hint={'center_y': 0.5})
+        volume_layout = BoxLayout(size_hint_x=None, width=dp(170), spacing=dp(5), pos_hint={'center_y': 0.5})
         volume_icon = TooltipMDIconButton(
             icon='volume-high',
             tooltip_text='Volume',
             size_hint_x=None,
-            width=24,
-            pos_hint={'center_y': 0.5}
+            width=dp(24),
+            pos_hint={'center_y': 0.5},
+            theme_icon_color="Custom",
+            icon_color=[0.6, 0.6, 1, 1], # Light blue for volume
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
         volume_layout.add_widget(volume_icon)
-        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=35)
+        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=dp(35))
         self.volume_slider = MDSlider(min=0, max=1, value=track.volume)
         self.volume_slider.bind(value=self.on_volume_change)
         volume_layout.add_widget(self.volume_label)
@@ -719,16 +770,20 @@ class TrackWidget(BoxLayout):
         self.add_widget(volume_layout)
 
         # 6. Pan Slider with Label
-        pan_layout = BoxLayout(size_hint_x=None, width=170, spacing=5, pos_hint={'center_y': 0.5})
+        pan_layout = BoxLayout(size_hint_x=None, width=dp(170), spacing=dp(5), pos_hint={'center_y': 0.5})
         pan_icon = TooltipMDIconButton(
             icon='swap-horizontal',
             tooltip_text='Pan',
             size_hint_x=None,
-            width=24,
-            pos_hint={'center_y': 0.5}
+            width=dp(24),
+            pos_hint={'center_y': 0.5},
+            theme_icon_color="Custom",
+            icon_color=[0.6, 0.6, 1, 1], # Light blue for pan
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
         )
         pan_layout.add_widget(pan_icon)
-        self.pan_label = Label(text=f"{track.pan:.1f}", size_hint_x=None, width=35)
+        self.pan_label = Label(text=f"{track.pan:.1f}", size_hint_x=None, width=dp(35))
         self.pan_slider = MDSlider(min=-1, max=1, value=track.pan)
         self.pan_slider.bind(value=self.on_pan_change)
         pan_layout.add_widget(self.pan_label)

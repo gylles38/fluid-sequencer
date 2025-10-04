@@ -2011,6 +2011,9 @@ class Sequencer(EventDispatcher):
         # 1. Sync the internal playhead and event indices for all tracks
         self.jack_manager._sync_playhead_to_beat(beat)
 
+        # Regenerate automation events to reflect the new solo/mute state
+        self.jack_manager._prepare_automation_events()
+
         # 2. Seek all audio players to the correct time
         self.jack_manager.seek_audio_to_beat(beat)
 

@@ -5,35 +5,136 @@ from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.uix.dropdown import DropDown
-from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.filechooser import FileChooserListView
-from kivy.uix.slider import Slider
 from kivymd.uix.slider import MDSlider
 from kivy.properties import StringProperty
-from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
-from kivymd.uix.tooltip import MDTooltip, MDTooltipPlain
 from kivymd.uix.menu import MDDropdownMenu
 from kivy.metrics import dp
+from kivy.core.window import Window
+from kivy.clock import Clock
+from kivy.logger import Logger
+from kivy.graphics import Color, Rectangle
 
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 import sys
 
-class TooltipMDIconButton(MDIconButton, MDTooltip):
+class TooltipMDIconButton(MDIconButton):
     tooltip_text = StringProperty()
 
     def __init__(self, **kwargs):
-        # Extraire tooltip_text des kwargs
-        self.tooltip_text = kwargs.pop('tooltip_text', '')
+        self.tooltip_text = kwargs.pop("tooltip_text", "")
         super().__init__(**kwargs)
-        # Définir la durée et la position du tooltip (optionnel)
-        self.tooltip_display_delay = 0.2  # Délai d'affichage en secondes
-        self.tooltip_pos = 'top'  # Position du tooltip (peut être 'top', 'bottom', etc)
+
+        # paramètres du tooltip
+        self.tooltip_delay = 0.2          # secondes avant affichage
+        self.tooltip_label = None         # widget du tooltip
+        self._show_event = None           # référence Clock pour annuler
+
+        # on écoute le mouvement de la souris une seule fois (global)
+        Window.bind(mouse_pos=self.on_mouse_pos)
+
+    # ------------------------------------------------------------------
+    # 1. Détection du survol
+    # ------------------------------------------------------------------
+    def on_mouse_pos(self, window, pos):
+        # convertir la position de la fenêtre → position locale du bouton
+        collide = self.collide_point(*self.to_widget(*pos))
+
+        if collide:
+            # on entre / on reste sur le bouton
+            self._ensure_tooltip()
+            self._update_tooltip_position(pos)
+            if not self._show_event:
+                # planifier l’affichage (on ne le fait qu’une fois)
+                self._show_event = Clock.schedule_once(
+                    self._do_show_tooltip, self.tooltip_delay
+                )
+        else:
+            # on sort du bouton
+            self._hide_tooltip()
+
+    # ------------------------------------------------------------------
+    # 2. Création du Label (une seule fois)
+    # ------------------------------------------------------------------
+    def _ensure_tooltip(self):
+        if self.tooltip_label:
+            return
+
+        self.tooltip_label = Label(
+            text=self.tooltip_text,
+            size_hint=(None, None),
+            size=(dp(120), dp(32)),
+            color=(1, 1, 1, 1),
+            font_size=dp(14),
+        )
+        # fond noir semi‑transparent
+        with self.tooltip_label.canvas.before:
+            Color(0, 0, 0, 0.85)
+            self._bg_rect = Rectangle(pos=self.tooltip_label.pos,
+                                      size=self.tooltip_label.size)
+
+        # mise à jour du fond quand le label bouge/redimensionne
+        self.tooltip_label.bind(pos=self._update_bg, size=self._update_bg)
+
+    # ------------------------------------------------------------------
+    # 3. Mise à jour du fond
+    # ------------------------------------------------------------------
+    def _update_bg(self, instance, value):
+        if hasattr(self, "_bg_rect"):
+            self._bg_rect.pos = instance.pos
+            self._bg_rect.size = instance.size
+
+    # ------------------------------------------------------------------
+    # 4. Affichage réel (après le délai)
+    # ------------------------------------------------------------------
+    def _do_show_tooltip(self, dt):
+        if self.tooltip_label and self.tooltip_label.parent is None:
+            # on ajoute le tooltip à la fenêtre (coordonnées absolues)
+            Window.add_widget(self.tooltip_label)
+        self._show_event = None
+
+    # ------------------------------------------------------------------
+    # 5. Mise à jour de la position tant que la souris reste dessus
+    # ------------------------------------------------------------------
+    def _update_tooltip_position(self, mouse_pos):
+        if not self.tooltip_label:
+            return
+
+        # convertir la position de la souris en coordonnées de la fenêtre
+        # on place le tooltip juste au‑dessus du pointeur
+        x, y = mouse_pos
+        self.tooltip_label.pos = (x + dp(10), y + dp(10))
+
+        # mettre à jour le fond (le bind ci‑dessus le fait déjà,
+        # mais on le force ici pour éviter un décalage d’une frame)
+        self._update_bg(self.tooltip_label, None)
+
+    # ------------------------------------------------------------------
+    # 6. Masquage
+    # ------------------------------------------------------------------
+    def _hide_tooltip(self):
+        if self._show_event:
+            self._show_event.cancel()
+            self._show_event = None
+
+        if self.tooltip_label and self.tooltip_label.parent:
+            Window.remove_widget(self.tooltip_label)
+            # on ne détruit pas le widget, on le garde pour le ré‑afficher
+            # (on le retire juste de l’arbre)
+
+    # ------------------------------------------------------------------
+    # Nettoyage à la destruction du bouton
+    # ------------------------------------------------------------------
+    def on_parent(self, instance, parent):
+        # Si le bouton est retiré de l’arbre, on enlève aussi le tooltip
+        if parent is None:
+            self._hide_tooltip()
+            if self.tooltip_label:
+                self.tooltip_label = None
 
 class ValueSpinner(BoxLayout):
     def __init__(self, min_val, max_val, initial_value, callback, **kwargs):
@@ -360,16 +461,16 @@ class SequencerLayout(BoxLayout):
         transport_layout.add_widget(end_label)
         transport_layout.add_widget(self.end_pos_input)
 
-        # Boutons avec icônes
+        # Boutons avec icônes, couleurs et tooltips
         self.play_button = TooltipMDIconButton(
             icon='play',
             tooltip_text='Play',
             size_hint_x=None,
             width=dp(40),
             theme_icon_color="Custom",
-            icon_color=[0, 0.7, 0.3, 1],  # Vert pour l'icône
+            icon_color=[0, 0.7, 0.3, 1],  # Vert
             theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 1]  # Gris foncé pour le fond
+            md_bg_color=[0.1, 0.1, 0.1, 1]  # Gris foncé
         )
         loop_button = TooltipMDIconButton(
             icon='repeat',
@@ -724,7 +825,7 @@ class TrackWidget(BoxLayout):
         self.add_widget(self.solo_button)
 
         # 4. MIDI Controls (or a spacer of the same size)
-        midi_controls_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(5), pos_hint={'center_y': 0.5})
+        midi_controls_layout = BoxLayout(size_hint_x=None, width=dp(400), spacing=dp(5), pos_hint={'center_y': 0.5})
         if isinstance(track, MidiTrack):
             midi_controls_layout.add_widget(Label(text='Ch:', size_hint_x=None, width=dp(25)))
             channel_spinner = ValueSpinner(
@@ -745,7 +846,7 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(program_spinner)
         else:
             # Add a spacer to keep alignment consistent for non-MIDI tracks
-            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(320)))
+            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(400)))
         self.add_widget(midi_controls_layout)
 
         # 5. Volume Slider with Label

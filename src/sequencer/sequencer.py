@@ -2032,6 +2032,7 @@ class Sequencer(EventDispatcher):
                     continue
 
                 if not should_be_audible:
+                    port.send(mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
                     port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
                 else:
                     # Prime the track with its current state

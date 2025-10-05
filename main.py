@@ -860,28 +860,25 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 return True, seq.send_cc_message(port_name, channel, control, value)
             except (ValueError, IndexError):
                 return True, "Error: Invalid input."
-
     elif command == "play":
         if len(args) == 0:
-            # play
+            # play - simple play without positions
             seq.play_range_enabled = False
             seq.play()
             return True, "Playing."
         elif len(args) == 1:
-            # play <start>
+            # play <start> - play from specific position
             start_beat = seq.parse_position_to_beats(args[0])
             if start_beat is not None:
                 output = ""
-                if seq.loop_enabled:
-                    output += "Looping disabled.\n"
-                    seq.loop_enabled = False
+                # Ne pas désactiver le looping si on veut juste changer la position de départ
                 seq.play_range_enabled = False
                 seq.play(start_beat=start_beat)
                 return True, output + f"Playing from {args[0]}."
             else:
                 return True, "Invalid position."
         elif len(args) == 2:
-            # play <start> <end>
+            # play <start> <end> - play range (désactive le looping)
             start_beat = seq.parse_position_to_beats(args[0])
             end_beat = seq.parse_position_to_beats(args[1])
             if start_beat is None or end_beat is None:
@@ -890,7 +887,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             if end_beat <= start_beat:
                 return True, "Error: End position must be after the start position."
 
-            # Set the play range and disable looping to avoid conflict
+            # Play range et looping sont mutuellement exclusifs
             seq.play_range_start_beat = start_beat
             seq.play_range_end_beat = end_beat
             seq.play_range_enabled = True
@@ -902,29 +899,65 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             output += f"Set to stop at {args[1]}."
             seq.play(start_beat=start_beat)
             return True, output
-        else:
-            return True, "Usage: play [start_position] [end_position]\nExample: play 10:1 15:1"
+
     elif command == "pause":
         seq.pause()
         return True, "Toggled pause."
+    elif command == "setloop":
+        # Commande pour l'interface graphique - simple toggle
+        seq.loop_enabled = not seq.loop_enabled
+        status = "enabled" if seq.loop_enabled else "disabled"
+        output = ""
+        if seq.loop_enabled and seq.play_range_enabled:
+            output += "Disabling play range to enable looping.\n"
+            seq.play_range_enabled = False
+        output += f"Looping is now {status}."
+        if api_mode:
+            return True, json.dumps({"status": "success", "message": output, "loop_enabled": seq.loop_enabled})
+        else:
+            return True, output
     elif command == "loop":
+        print(f"DEBUG: loop command received with args: {args}")  # À supprimer après debug
+        
         if len(args) == 0:
+            # Simple toggle - no parameters needed
+            seq.loop_enabled = not seq.loop_enabled
+            status = "enabled" if seq.loop_enabled else "disabled"
+            output = ""
+            if seq.loop_enabled and seq.play_range_enabled:
+                output += "Disabling play range to enable looping.\n"
+                seq.play_range_enabled = False
+            output += f"Looping is now {status}."
+            if not seq.loop_enabled:
+                output += "\nNote: Loop points are still saved. Use 'loop <start> <end>' to set new points."
+            elif seq.loop_end_beat <= seq.loop_start_beat:
+                output += "\nWarning: Loop end is not after loop start. The loop will not function correctly."
+            
             if api_mode:
-                return True, json.dumps({"status": "loop_prompt"})
+                return True, json.dumps({"status": "success", "message": output, "loop_enabled": seq.loop_enabled})
             else:
-                seq.loop_enabled = not seq.loop_enabled
-                status = "enabled" if seq.loop_enabled else "disabled"
-                output = ""
-                if seq.loop_enabled and seq.play_range_enabled:
-                    output += "Disabling play range to enable looping.\n"
-                    seq.play_range_enabled = False
-                output += f"Looping is now {status}."
-                if not seq.loop_enabled:
-                    output += "\nNote: Loop points are still saved. Use 'loop <start> <end>' to set new points."
-                elif seq.loop_end_beat <= seq.loop_start_beat:
-                    output += "\nWarning: Loop end is not after loop start. The loop will not function correctly."
                 return True, output
+        
+        elif len(args) == 1:
+            # Handle "loop on" and "loop off" commands
+            if args[0].lower() == "on":
+                seq.loop_enabled = True
+                output = "Looping enabled."
+                if seq.loop_end_beat <= seq.loop_start_beat:
+                    output += "\nWarning: Loop end is not after loop start. The loop will not function correctly."
+            elif args[0].lower() == "off":
+                seq.loop_enabled = False
+                output = "Looping disabled."
+            else:
+                return True, "Usage: loop [on|off] or loop [start_position] [end_position]"
+            
+            if api_mode:
+                return True, json.dumps({"status": "success", "message": output, "loop_enabled": seq.loop_enabled})
+            else:
+                return True, output
+        
         elif len(args) == 2:
+            # Set loop points with start and end
             start_beat = seq.parse_position_to_beats(args[0])
             end_beat = seq.parse_position_to_beats(args[1])
             if start_beat is None or end_beat is None:
@@ -941,11 +974,14 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 output += "Disabling play range to enable looping.\n"
                 seq.play_range_enabled = False
             output += f"Loop enabled from {args[0]} to {args[1]}."
-            # Also start playback from the beginning of the loop
-            seq.play(start_beat=start_beat)
-            return True, output
+            
+            if api_mode:
+                return True, json.dumps({"status": "success", "message": output, "loop_enabled": seq.loop_enabled})
+            else:
+                return True, output
         else:
-            return True, "Usage: loop [start_position] [end_position]\nExample: loop 1:1 5:1"
+            return True, "Usage: loop [on|off] or loop [start_position] [end_position]\nExample: loop on, loop off, loop 1:1 5:1"
+
     elif command == "stop":
         seq.stop()
         return True, "Stopped."

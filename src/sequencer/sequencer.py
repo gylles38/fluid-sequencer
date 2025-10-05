@@ -1545,6 +1545,8 @@ class Sequencer(EventDispatcher):
     def save_project(self, basename: str) -> str:
         project_filepath = f"{basename}.proj.json"
         try:
+            # Update the song name to match the project basename
+            self.song.name = basename
             project_data = {"song": self.song, "virtual_ports": [vp.name for vp in self.virtual_ports], "control_port_name": self.control_port_name, "audio_player_command": self.audio_player_command}
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
@@ -1553,6 +1555,7 @@ class Sequencer(EventDispatcher):
             return f"Project saved to '{project_filepath}'"
         except Exception as e:
             return f"Error saving project file: {e}"
+        
 
     def load_project(self, basename: str) -> str:
         project_filepath = f"{basename}.proj.json"
@@ -2054,6 +2057,10 @@ class Sequencer(EventDispatcher):
 
 
     def play(self, start_beat: Optional[float] = None):
+        print(f"DEBUG PLAY: play called with start_beat={start_beat}")
+        print(f"DEBUG PLAY: loop_enabled={self.loop_enabled}, loop_start={self.loop_start_beat}, loop_end={self.loop_end_beat}")
+        print(f"DEBUG PLAY: playback_state={self.playback_state}")
+        print(f"DEBUG PLAY: jack_transport state={self.jack_client.transport_state if hasattr(self, 'jack_client') else 'No jack client'}")        
         """
         Starts or seeks the JACK transport.
         If start_beat is provided, it seeks the transport to that position.
@@ -2154,6 +2161,28 @@ class Sequencer(EventDispatcher):
         self.playback_state = "stopped"
         self._all_notes_off()
         print("Session stopped.")
+
+    def set_loop_range(self, start_pos_str: str, end_pos_str: str) -> str:
+        """Sets the loop range without starting playback."""
+        start_beat = self.parse_position_to_beats(start_pos_str)
+        if start_beat is None:
+            return "Error: Invalid start position."
+        
+        end_beat = self.parse_position_to_beats(end_pos_str)
+        if end_beat is None:
+            return "Error: Invalid end position."
+        
+        if end_beat <= start_beat:
+            return "Error: End position must be after the start position."
+        
+        self.loop_start_beat = start_beat
+        self.loop_end_beat = end_beat
+        self.loop_enabled = True
+        self.is_dirty = True
+        
+        start_pos = self._format_beats_to_position(start_beat)
+        end_pos = self._format_beats_to_position(end_beat)
+        return f"Loop range set from {start_pos} to {end_pos}. Use 'play' to start playback."
 
     def restart(self):
         """Restarts playback from the beginning."""

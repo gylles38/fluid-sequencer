@@ -955,6 +955,20 @@ class SequencerLayout(BoxLayout):
             self.process_command_ui('stop')
 
     def loop_pressed(self, instance):
+        # Si on désactive le looping pendant la lecture
+        if self.is_looping and self.is_playing:
+            # Récupérer la position de fin actuelle du loop
+            end_pos = self.end_pos_input.text
+            if end_pos:
+                # Mettre à jour la position de fin pour la lecture normale
+                self.end_pos_input.text = end_pos
+                # Récupérer la position actuelle
+                current_pos = self.playhead_label.text.replace("Pos: ", "")
+                # Envoyer une commande play avec la nouvelle fin
+                command = f'play "{current_pos}" "{end_pos}"'
+                print(f"DEBUG: Loop disabled, setting play range from {current_pos} to {end_pos}")
+                self.process_command_ui(command)
+        
         self.is_looping = not self.is_looping
         if self.is_looping:
             self.loop_button.icon = 'repeat-variant'
@@ -963,14 +977,11 @@ class SequencerLayout(BoxLayout):
             end_pos = self.end_pos_input.text
             if end_pos:
                 self.end_pos_manual_override = True
-            # Utiliser la nouvelle commande setloop qui ne démarre pas la lecture
             command = f'setloop "{start_pos}" "{end_pos}"'
             self.process_command_ui(command)
-            # Ne pas démarrer la lecture automatiquement
         else:
             self.loop_button.icon = 'repeat'
             self.loop_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-            # Utiliser simplement 'loop off' sans paramètres
             self.process_command_ui('loop off')
             
     def toggle_metronome(self, instance):

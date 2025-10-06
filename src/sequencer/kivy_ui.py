@@ -112,7 +112,8 @@ class ValueSpinner(BoxLayout):
         )
         self.add_widget(minus_button)
 
-        self.text_input = TextInput(
+        # Utiliser CustomTextInput
+        self.text_input = CustomTextInput(
             text=str(initial_value),
             multiline=False,
             halign='center',
@@ -121,8 +122,10 @@ class ValueSpinner(BoxLayout):
             width=dp(50),
             size_hint_y=None,
             height=dp(28),
-            pos_hint={'center_y': 0.65},  # Ajusté de 0.6 à 0.65 pour un meilleur alignement
-            font_size=dp(16)
+            pos_hint={'center_y': 0.65},
+            font_size=dp(16),
+            field_type='program',
+            callback=self.handle_arrow_keys  # Callback pour les flèches
         )
         self.text_input.bind(on_text_validate=self.on_text_change)
         self.add_widget(self.text_input)
@@ -138,10 +141,33 @@ class ValueSpinner(BoxLayout):
         )
         self.add_widget(plus_button)
 
+    def handle_arrow_keys(self, textinput, direction, modifiers, cursor_pos=None):
+        """Gère les flèches haut/bas dans le spinner"""
+        print(f"DEBUG: Arrow key in program spinner: {direction}")
+        
+        try:
+            current_value = int(self.text_input.text)
+            step = 10 if 'shift' in modifiers else 1
+            
+            if direction == 'up':
+                new_value = min(self.max_val, current_value + step)
+            else:  # 'down'
+                new_value = max(self.min_val, current_value - step)
+            
+            # Mettre à jour la valeur
+            self._update_value(new_value)
+            
+        except ValueError:
+            # En cas d'erreur, revenir à la dernière valeur valide
+            self.text_input.text = str(self.last_valid_value)
+
     def _update_value(self, new_value):
+        """Met à jour la valeur et déclenche le callback"""
         self.text_input.text = str(new_value)
         self.last_valid_value = new_value
-        self.callback(self.text_input)
+        # Appeler le callback original
+        if self.callback:
+            self.callback(self.text_input)
 
     def increment(self, instance):
         try:
@@ -288,6 +314,29 @@ class YesNoPopup(Popup):
         self.callback(answer)
         self.dismiss()
 
+class CustomTextInput(TextInput):
+    def __init__(self, field_type='', callback=None, **kwargs):
+        self.field_type = field_type
+        self.callback = callback
+        super().__init__(**kwargs)
+    
+    def keyboard_on_key_down(self, window, keycode, text, modifiers):
+        print(f"DEBUG: Key pressed in {self.field_type}: {keycode}")
+        
+        if isinstance(keycode, tuple) and len(keycode) > 1:
+            key_name = keycode[1]
+        else:
+            key_name = str(keycode)
+        
+        if key_name in ('up', 'down') and self.callback:
+            print(f"DEBUG: Processing arrow key {key_name}")
+            # Passer la position du curseur au callback
+            cursor_pos = self.cursor_index()
+            self.callback(self, key_name, modifiers, cursor_pos)
+            return True
+        
+        return super().keyboard_on_key_down(window, keycode, text, modifiers)
+
 class ConfirmationPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
         super(ConfirmationPopup, self).__init__(**kwargs)
@@ -375,7 +424,7 @@ class SequencerLayout(BoxLayout):
         self.is_paused = False
         self.is_recording = False
         self.is_looping = False
-        self.blink_animation = None  # Référence à l'animation de clignotemen
+        self.blink_animation = None  # Référence à l'animation de clignotement
 
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
@@ -472,17 +521,29 @@ class SequencerLayout(BoxLayout):
         combined_layout.add_widget(self.song_name_label)
 
         self.tempo_label = Label(
-            text="Tempo: 120", 
+            text="Tempo:", 
             size_hint_x=None, 
-            width=80,
+            width=20,
             size_hint_y=None,
             height=common_height,
             halign='left', 
             valign='middle',
             text_size=(80, None)
         )
-        combined_layout.add_widget(self.tempo_label)
+        combined_layout.add_widget(self.tempo_label)        
 
+        self.tempo_input = CustomTextInput(
+            text='120', 
+            multiline=False, 
+            size_hint_x=None, 
+            width=40,
+            size_hint_y=None,
+            height=common_height,
+            field_type='tempo',
+            callback=self.handle_textinput_arrows
+        )
+        combined_layout.add_widget(self.tempo_input)
+                
         self.timesig_label = Label(
             text="TS: 4/4", 
             size_hint_x=None, 
@@ -544,13 +605,15 @@ class SequencerLayout(BoxLayout):
         )
         combined_layout.add_widget(start_label)
 
-        self.start_pos_input = TextInput(
+        self.start_pos_input = CustomTextInput(
             text='1:1', 
             multiline=False, 
             size_hint_x=None, 
             width=55,
             size_hint_y=None,
-            height=common_height
+            height=common_height,
+            field_type='position',
+            callback=self.handle_textinput_arrows
         )
         combined_layout.add_widget(self.start_pos_input)
 
@@ -566,17 +629,24 @@ class SequencerLayout(BoxLayout):
         )
         combined_layout.add_widget(end_label)
 
-        self.end_pos_input = TextInput(
+        self.end_pos_input = CustomTextInput(
             text='', 
             multiline=False, 
             size_hint_x=None, 
             width=55,
             size_hint_y=None,
-            height=common_height
+            height=common_height,
+            field_type='position', 
+            callback=self.handle_textinput_arrows
         )
-        self.end_pos_input.bind(on_text_validate=self.on_end_pos_manual_set)
         combined_layout.add_widget(self.end_pos_input)
 
+        # Variable pour suivre le champ focus
+        #self.focused_input = None
+        self.start_pos_input.bind(on_text_validate=self.on_start_position_validate)
+        self.end_pos_input.bind(on_text_validate=self.on_end_position_validate)
+   
+        
         # Séparateur
         combined_layout.add_widget(Widget(size_hint_x=None, width=dp(15)))
         
@@ -724,6 +794,14 @@ class SequencerLayout(BoxLayout):
     def on_end_pos_manual_set(self, instance):
         if instance.text:
             self.end_pos_manual_override = True
+
+    def on_tempo_change(self, tempo):
+        self.process_command_ui(f'tempo {tempo}')
+
+    def on_position_change(self, position):
+        # Pour start_pos_input et end_pos_input
+        # La gestion spécifique dépend de quel champ a changé
+        pass
 
     def load_project_popup(self):
         def file_chooser_callback(filepath):
@@ -1008,7 +1086,7 @@ class SequencerLayout(BoxLayout):
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"
-        self.tempo_label.text = f"Tempo: {song.tempo}"
+        self.tempo_input.text = f"{song.tempo}"
         self.timesig_label.text = f"TS: {song.time_signature_numerator}/{song.time_signature_denominator}"
         self.metronome_button.icon = 'metronome-tick' if song.metronome_enabled else 'metronome'
         self.metronome_button.md_bg_color = [0.5, 0.5, 0.5, 1] if song.metronome_enabled else [0.1, 0.1, 0.1, 1]
@@ -1016,6 +1094,162 @@ class SequencerLayout(BoxLayout):
             end_of_song_beats = self.sequencer.get_song_length_in_beats()
             self.end_pos_input.text = self.sequencer._format_beats_to_position(end_of_song_beats)
         self.update_track_list()
+        
+####
+    def on_tempo_validate(self, instance=None):
+        """Valide le tempo saisi"""
+        try:
+            tempo = int(self.tempo_input.text)
+            if 1 <= tempo <= 300:
+                self.process_command_ui(f'tempo {tempo}')
+            else:
+                # Remettre la valeur précédente si hors limites
+                self.tempo_input.text = str(self.sequencer.song.tempo)
+        except ValueError:
+            # Remettre la valeur précédente si invalide
+            self.tempo_input.text = str(self.sequencer.song.tempo)
+
+    def on_start_position_validate(self, instance=None):
+        """Valide la position de début"""
+        position = self.start_pos_input.text
+        print(f"Start position validated: {position}")
+        # Ici vous pouvez ajouter la logique pour traiter la nouvelle position de début
+        # Par exemple :
+        # self.process_command_ui(f'startpos "{position}"')
+
+    def on_end_position_validate(self, instance=None):
+        """Valide la position de fin"""
+        position = self.end_pos_input.text
+        print(f"End position validated: {position}")
+        self.end_pos_manual_override = True
+        # Ici vous pouvez ajouter la logique pour traiter la nouvelle position de fin
+        # Par exemple :
+        # self.process_command_ui(f'endpos "{position}"')
+
+    # Méthodes de gestion des flèches
+    def handle_textinput_arrows(self, textinput, direction, modifiers, cursor_pos):
+        """Gère les flèches haut/bas dans les TextInput avec position du curseur"""
+        print(f"DEBUG: handle_textinput_arrows called - {textinput.field_type}, {direction}, cursor_pos: {cursor_pos}")
+        
+        if textinput.field_type == 'position':
+            self.handle_position_arrows_in_textinput(textinput, direction, modifiers, cursor_pos)
+        elif textinput.field_type == 'tempo':
+            self.handle_tempo_arrows_in_textinput(textinput, direction, modifiers)
+
+    def handle_position_arrows_in_textinput(self, textinput, direction, modifiers, cursor_pos):
+        """Gère les flèches pour les champs position avec gestion du curseur"""
+        try:
+            # Analyser la position actuelle
+            measure, beat = map(int, textinput.text.split(':'))
+            step = 10 if 'shift' in modifiers else 1
+            
+            # Déterminer si le curseur est sur la mesure ou le beat
+            cursor_index = cursor_pos  # Position du curseur dans le texte
+            colon_index = textinput.text.find(':')
+            
+            if cursor_index <= colon_index:
+                # Curseur sur la mesure (avant ou sur le ':')
+                if direction == 'up':
+                    measure += step
+                else:  # 'down'
+                    measure = max(1, measure - step)
+                # Le beat reste inchangé
+                print(f"DEBUG: Adjusting measure only: {measure}:{beat}")
+                
+            else:
+                # Curseur sur le beat (après le ':')
+                if direction == 'up':
+                    beat += step
+                    # Gérer le débordement
+                    if beat > 16:
+                        measure += 1
+                        beat = 1
+                else:  # 'down'
+                    beat -= step
+                    # Gérer le débordement négatif
+                    if beat < 1:
+                        measure -= 1
+                        beat = 16
+                print(f"DEBUG: Adjusting beat only: {measure}:{beat}")
+                    
+            measure = max(1, measure)  # Mesure minimum = 1
+            beat = max(1, beat)  # Beat minimum = 1
+            
+            new_position = f"{measure}:{beat}"
+            textinput.text = new_position
+            
+            # Restaurer la position approximative du curseur
+            self.restore_cursor_position(textinput, cursor_index, colon_index, new_position)
+            
+            print(f"DEBUG: Position changed to {new_position}")
+            
+            # Déclencher la validation
+            if textinput == self.start_pos_input:
+                self.on_start_position_validate()
+            elif textinput == self.end_pos_input:
+                self.on_end_position_validate()
+                
+        except ValueError as e:
+            print(f"DEBUG: Error parsing position: {e}")
+            textinput.text = "1:1"
+
+    def restore_cursor_position(self, textinput, old_cursor_index, old_colon_index, new_text):
+        """Tente de restaurer une position logique du curseur"""
+        new_colon_index = new_text.find(':')
+        
+        if old_cursor_index <= old_colon_index:
+            # Curseur était sur la mesure - le garder sur la mesure
+            # Calculer la nouvelle longueur de la mesure
+            new_measure_length = len(new_text.split(':')[0])
+            # Placer le curseur à la fin de la mesure ou à sa position relative
+            if old_cursor_index == old_colon_index:
+                # Curseur était sur le ':' - le placer sur le nouveau ':'
+                new_cursor_pos = new_colon_index
+            else:
+                # Curseur était dans la mesure - ajuster proportionnellement
+                old_measure_length = old_colon_index
+                if old_measure_length > 0:
+                    ratio = old_cursor_index / old_measure_length
+                    new_cursor_pos = min(int(new_measure_length * ratio), new_measure_length)
+                else:
+                    new_cursor_pos = new_measure_length
+        else:
+            # Curseur était sur le beat - le garder sur le beat
+            old_beat_position = old_cursor_index - old_colon_index - 1
+            old_beat_length = len(textinput.text) - old_colon_index - 1
+            
+            new_beat_length = len(new_text) - new_colon_index - 1
+            
+            if old_beat_length > 0:
+                ratio = old_beat_position / old_beat_length
+                new_beat_position = min(int(new_beat_length * ratio), new_beat_length)
+                new_cursor_pos = new_colon_index + 1 + new_beat_position
+            else:
+                new_cursor_pos = new_colon_index + 1
+        
+        # Appliquer la nouvelle position du curseur
+        textinput.cursor = (new_cursor_pos, new_cursor_pos)
+
+    def handle_tempo_arrows_in_textinput(self, textinput, direction, modifiers):
+        """Gère les flèches pour le champ tempo"""
+        try:
+            current_tempo = int(textinput.text)
+            step = 10 if 'shift' in modifiers else 1
+            
+            if direction == 'up':
+                new_tempo = current_tempo + step
+            else:  # 'down'
+                new_tempo = max(1, current_tempo - step)
+                
+            textinput.text = str(new_tempo)
+            print(f"DEBUG: Tempo changed to {new_tempo}")
+            self.on_tempo_validate()
+            
+        except ValueError as e:
+            print(f"DEBUG: Error parsing tempo: {e}")
+            textinput.text = str(self.sequencer.song.tempo)
+
+####
 
     def on_enter(self, instance):
         command = self.input_text.text
@@ -1231,10 +1465,11 @@ class TrackWidget(BoxLayout):
             
             channel_spinner = ValueSpinner(
                 min_val=1,
-                max_val=16,
+                max_val=16,  # Canaux MIDI 1-16
                 initial_value=track.channel + 1,
                 callback=self.on_channel_change
             )
+
             channel_container.add_widget(channel_spinner)
             midi_controls_layout.add_widget(channel_container)
 
@@ -1261,9 +1496,10 @@ class TrackWidget(BoxLayout):
             program_spinner = ValueSpinner(
                 min_val=1,
                 max_val=128,
-                initial_value=track.instrument + 1,
+                initial_value=track.channel + 1,
                 callback=self.on_program_change
-            )
+            )          
+          
             program_container.add_widget(program_spinner)
             midi_controls_layout.add_widget(program_container)
             

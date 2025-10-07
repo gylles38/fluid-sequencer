@@ -60,7 +60,8 @@ class MidiTrack(BaseTrack):
     bank_msb: Optional[int] = None  # Bank Select MSB (CC#0)
     bank_lsb: Optional[int] = None  # Bank Select LSB (CC#32)
     output_port_name: Optional[str] = None
-
+    record_mode: str = 'OFF'  # NOUVEAU: 'OFF', 'OVERWRITE', 'KEEP'
+    
     def add_event(self, event: Event):
         """Adds a MIDI event to the track and keeps the event list sorted by start time."""
         self.events.append(event)

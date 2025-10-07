@@ -33,10 +33,32 @@ class TooltipMDIconButton(MDIconButton):
         self.tooltip_label = None
         self._show_event = None
         Window.bind(mouse_pos=self.on_mouse_pos)
+        
+        self.bind(tooltip_text=self._on_tooltip_text_changed)
+
+    def _on_tooltip_text_changed(self, instance, value):
+        """Quand le tooltip_text change, mettre à jour le tooltip existant"""
+        if self.tooltip_label:
+            # Mettre à jour le texte
+            self.tooltip_label.text = value
+            
+            # Recalculer la taille
+            self.tooltip_label.texture_update()
+            natural_size = self.tooltip_label.texture_size
+            if natural_size:
+                new_size = (natural_size[0] + dp(20), dp(32))
+            else:
+                new_size = (dp(120), dp(32))
+            
+            # Mettre à jour la taille
+            self.tooltip_label.size = new_size
+            
+            # Mettre à jour le fond
+            if hasattr(self, "_bg_rect"):
+                self._bg_rect.size = new_size
 
     def on_mouse_pos(self, window, pos):
         collide = self.collide_point(*self.to_widget(*pos))
-        #Logger.info(f"Tooltip: '{self.tooltip_text}' – mouse {pos} – collide {collide}")
         if collide:
             self._ensure_tooltip()
             self._update_tooltip_position(pos)
@@ -48,13 +70,24 @@ class TooltipMDIconButton(MDIconButton):
     def _ensure_tooltip(self):
         if self.tooltip_label:
             return
+            
+        # Créer le label
         self.tooltip_label = Label(
             text=self.tooltip_text,
             size_hint=(None, None),
-            size=(dp(120), dp(32)),
             color=(1, 1, 1, 1),
             font_size=dp(14),
+            padding=(dp(10), dp(6))
         )
+        
+        # Calculer la taille naturelle
+        self.tooltip_label.texture_update()
+        natural_size = self.tooltip_label.texture_size
+        if natural_size:
+            self.tooltip_label.size = (natural_size[0] + dp(20), dp(32))
+        else:
+            self.tooltip_label.size = (dp(120), dp(32))
+        
         with self.tooltip_label.canvas.before:
             Color(0, 0, 0, 0.85)
             self._bg_rect = Rectangle(pos=self.tooltip_label.pos, size=self.tooltip_label.size)
@@ -100,7 +133,7 @@ class ValueSpinner(BoxLayout):
         self.orientation = 'horizontal'
         self.size_hint_y = None
         self.height = dp(30)
-
+        '''
         minus_button = TooltipMDIconButton(
             icon='minus',
             tooltip_text='Decrement',
@@ -111,7 +144,8 @@ class ValueSpinner(BoxLayout):
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
         self.add_widget(minus_button)
-
+        '''
+        
         # Utiliser CustomTextInput
         self.text_input = CustomTextInput(
             text=str(initial_value),
@@ -129,7 +163,7 @@ class ValueSpinner(BoxLayout):
         )
         self.text_input.bind(on_text_validate=self.on_text_change)
         self.add_widget(self.text_input)
-
+        '''
         plus_button = TooltipMDIconButton(
             icon='plus',
             tooltip_text='Increment',
@@ -140,6 +174,7 @@ class ValueSpinner(BoxLayout):
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
         self.add_widget(plus_button)
+        '''
 
     def handle_arrow_keys(self, textinput, direction, modifiers, cursor_pos=None):
         """Gère les flèches haut/bas dans le spinner"""
@@ -336,6 +371,110 @@ class CustomTextInput(TextInput):
             return True
         
         return super().keyboard_on_key_down(window, keycode, text, modifiers)
+   
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            self.focus = True
+        return super().on_touch_down(touch)   
+    
+    def on_touch_up(self, touch):
+        # Capturer la molette dans on_touch_up
+        if self.collide_point(*touch.pos) and hasattr(touch, 'button'):
+            if touch.button == 'scrollup' and self.callback:
+                cursor_pos = self.cursor_index()
+                self.callback(self, 'down', [], cursor_pos)
+                return True
+            elif touch.button == 'scrolldown' and self.callback:
+                cursor_pos = self.cursor_index()
+                self.callback(self, 'up', [], cursor_pos)
+                return True
+        return super().on_touch_up(touch)    
+
+class ThreeStateRecordButton(TooltipMDIconButton):
+    def __init__(self, track, track_index, sequencer_layout, callback=None, **kwargs):
+        super().__init__(**kwargs)
+        
+        self.track = track
+        self.track_index = track_index
+        self.sequencer_layout = sequencer_layout
+        self.callback = callback
+        self.size_hint_x = None
+        self.width = dp(44)
+        self.size_hint_y = None
+        self.height = dp(44)
+        self.pos_hint = {'center_y': 0.5}
+        self.theme_icon_color = "Custom"
+        self.theme_bg_color = "Custom"
+        
+        self.states = {
+            'OFF': {
+                'icon': 'record-circle-outline',
+                'tooltip': 'Record: OFF - Piste désactivée',
+                'icon_color': [0.5, 0.5, 0.5, 1],
+                'bg_color': [0.1, 0.1, 0.1, 1]
+            },
+            'OVERWRITE': {
+                'icon': 'record-rec',
+                'tooltip': 'Record: OVERWRITE - Écrase les notes existantes',
+                'icon_color': [1, 0, 0, 1],  # Rouge
+                'bg_color': [0.1, 0.1, 0.1, 1]
+            },
+            'KEEP': {
+                'icon': 'record-circle',
+                'tooltip': 'Record: KEEP - Conserve les notes existantes',
+                'icon_color': [1, 0.6, 0, 1],  # Orange pour différencier
+                'bg_color': [0.1, 0.1, 0.1, 1]
+            }
+        }
+        
+        self.update_appearance()
+        
+    def on_press(self):
+        """Cycle through the 3 states on press avec gestion d'exclusivité"""
+        old_mode = self.track.record_mode
+        
+        # Si on essaie d'activer une piste (passer de OFF à OVERWRITE/KEEP)
+        if old_mode == 'OFF':
+            # Désactiver toutes les autres pistes MIDI
+            self._disable_other_tracks()
+            # Activer cette piste
+            self.track.record_mode = 'OVERWRITE'
+            
+        # Si on est déjà activé, cycler entre OVERWRITE et KEEP
+        elif old_mode == 'OVERWRITE':
+            self.track.record_mode = 'KEEP'
+            
+        else:  # 'KEEP' -> retour à OFF
+            self.track.record_mode = 'OFF'
+            
+        print(f"DEBUG: Track {self.track_index} record mode changed from {old_mode} to {self.track.record_mode}")
+            
+        self.update_appearance()
+        
+        # FORCER la mise à jour de tous les boutons record
+        self.sequencer_layout.update_track_record_buttons()
+        
+        if self.callback:
+            self.callback(self.track)
+    
+    def _disable_other_tracks(self):
+        """Désactive toutes les autres pistes MIDI"""
+        print(f"DEBUG: Disabling other MIDI tracks...")
+        for i, track in enumerate(self.sequencer_layout.sequencer.song.tracks):
+            if (isinstance(track, MidiTrack) and 
+                i != self.track_index and 
+                track.record_mode != 'OFF'):
+                
+                print(f"DEBUG: Disabling track {i} (was {track.record_mode})")
+                track.record_mode = 'OFF'
+    
+    def update_appearance(self):
+        """Update button appearance and tooltip based on current state"""
+        state_config = self.states[self.track.record_mode]
+        self.icon = state_config['icon']
+        self.tooltip_text = state_config['tooltip']
+        self.icon_color = state_config['icon_color']
+        self.md_bg_color = state_config['bg_color']
 
 class ConfirmationPopup(Popup):
     def __init__(self, prompt_text, callback, **kwargs):
@@ -1072,8 +1211,22 @@ class SequencerLayout(BoxLayout):
             instance.md_bg_color = [0.1, 0.1, 0.1, 1]
             self.process_command_ui('metronome off')
 
+    def update_track_record_buttons(self, track_index=None):
+        """Met à jour l'apparence des boutons record des pistes"""
+        if track_index is not None:
+            # Mettre à jour une piste spécifique
+            if track_index < len(self.track_list_layout.children):
+                track_widget = self.track_list_layout.children[-(track_index + 1)]
+                if hasattr(track_widget, 'record_mode_button'):
+                    track_widget.record_mode_button.update_appearance()
+        else:
+            # Mettre à jour toutes les pistes - CORRECTION ICI
+            for i, track_widget in enumerate(self.track_list_layout.children):
+                if hasattr(track_widget, 'record_mode_button'):
+                    track_widget.record_mode_button.update_appearance()
+
     def update_playhead_display(self, instance, value):
-        self.playhead_label.text = f"Pos: {self.sequencer._format_beats_to_position(value)}"
+        self.playhead_label.text = f"Pos: { self.sequencer._format_beats_to_position(value)}"
 
     def update_track_list(self):
         self.track_list_layout.clear_widgets()
@@ -1402,6 +1555,19 @@ class TrackWidget(BoxLayout):
 
         type_icon_layout.bind(pos=self._update_type_icon_bg, size=self._update_type_icon_bg)
 
+       # 3. BOUTON RECORD MODE (MODIFIÉ)
+        if isinstance(track, MidiTrack):
+            self.record_mode_button = ThreeStateRecordButton(
+                track=track,
+                track_index=track_index,  # NOUVEAU
+                sequencer_layout=sequencer_layout,  # NOUVEAU
+                callback=self.on_record_mode_change
+            )
+            self.add_widget(self.record_mode_button)
+        else:
+            # Pour les pistes non-MIDI, ajouter un espaceur de même largeur
+            self.add_widget(Widget(size_hint_x=None, width=dp(44)))
+
         type_icon = MDIcon(
             icon=track_type_icon,
             theme_text_color="Custom",
@@ -1433,78 +1599,88 @@ class TrackWidget(BoxLayout):
         )
         self.add_widget(self.solo_button)
 
-
         # 4. MIDI Controls (or a spacer of the same size)
         midi_controls_layout = BoxLayout(
             size_hint_x=None, 
-            width=dp(300),
-            spacing=dp(15),
+            width=dp(260),  # 125 + 4 + 125 + marge = ~260
+            spacing=dp(8),
             size_hint_y=None, 
-            height=dp(50),
+            height=dp(44),
             pos_hint={'center_y': 0.5}
         )
 
         if isinstance(track, MidiTrack):
-            # Channel - layout vertical
+            # Channel
             channel_container = BoxLayout(
                 size_hint_x=None,
-                width=dp(80),
-                orientation='vertical',
-                spacing=dp(2)
-            )
-            channel_label = Label(
-                text='Channel', 
+                width=dp(125),
+                orientation='horizontal',
+                spacing=dp(4),
                 size_hint_y=None,
-                height=dp(16),
+                height=dp(44),
+                pos_hint={'center_y': 0.5}
+            )
+            
+            channel_label = Label(
+                text='Channel:',
+                size_hint_x=None,
+                width=dp(42),
+                size_hint_y=None,
+                height=dp(44),
                 halign='right',
-                text_size=(dp(90), None),  # FORCE le centrage en définissant text_size
-                color=[0.8, 0.8, 0.8, 1],
-                font_size=dp(11),
+                valign='middle',
+                color=[0.9, 0.9, 0.9, 1],
+                font_size=dp(13),
             )
             channel_container.add_widget(channel_label)
             
             channel_spinner = ValueSpinner(
                 min_val=1,
-                max_val=16,  # Canaux MIDI 1-16
+                max_val=16,
                 initial_value=track.channel + 1,
                 callback=self.on_channel_change
             )
-
+            channel_spinner.height = dp(32)
             channel_container.add_widget(channel_spinner)
             midi_controls_layout.add_widget(channel_container)
 
-            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(20)))
+            # RÉDUIRE FORTEMENT l'espace entre Channel et Program
+            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(4)))  # Espace très réduit
 
-            # Program - layout vertical
+            # Program
             program_container = BoxLayout(
                 size_hint_x=None,
-                width=dp(80),
-                orientation='vertical',
-                spacing=dp(2)
-            )
-            program_label = Label(
-                text='Program', 
+                width=dp(125),
+                orientation='horizontal',
+                spacing=dp(4),
                 size_hint_y=None,
-                height=dp(16),
+                height=dp(44),
+                pos_hint={'center_y': 0.5}
+            )
+            
+            program_label = Label(
+                text='Program:',
+                size_hint_x=None,
+                width=dp(42),
+                size_hint_y=None,
+                height=dp(44),
                 halign='right',
-                text_size=(dp(90), None),  # FORCE le centrage en définissant text_size
-                color=[0.8, 0.8, 0.8, 1],
-                font_size=dp(11)
+                valign='middle',
+                color=[0.9, 0.9, 0.9, 1],
+                font_size=dp(13),
             )
             program_container.add_widget(program_label)
             
             program_spinner = ValueSpinner(
                 min_val=1,
                 max_val=128,
-                initial_value=track.channel + 1,
+                initial_value=track.instrument + 1,
                 callback=self.on_program_change
-            )          
-          
+            )
+            program_spinner.height = dp(32)
             program_container.add_widget(program_spinner)
             midi_controls_layout.add_widget(program_container)
-            
-            # Espace restant
-            midi_controls_layout.add_widget(Widget(size_hint_x=1))
+
         else:
             # Pour les pistes non-MIDI, on garde la même largeur
             midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(300)))
@@ -1632,6 +1808,23 @@ class TrackWidget(BoxLayout):
     def on_solo_toggle(self, instance):
         self.sequencer_layout.process_command_ui(f'solo {self.track_index}')
         # La mise à jour visuelle se fera via update_status_display
+
+    def get_record_mode_tooltip(self, mode):
+        """Retourne le texte du tooltip selon le mode"""
+        tooltips = {
+            'OFF': 'Record: OFF - Piste désactivée',
+            'OVERWRITE': 'Record: OVERWRITE - Écrase les notes existantes',
+            'KEEP': 'Record: KEEP - Conserve les notes existantes'
+        }
+        return tooltips.get(mode, 'Record Mode')
+
+    def on_record_mode_change(self, track):
+        """Callback quand le mode d'enregistrement change"""
+        print(f"Record mode changed for track {self.track_index}: {track.record_mode}")
+        # Mettre à jour le tooltip
+        self.record_mode_button.tooltip_text = self.get_record_mode_tooltip(track.record_mode)
+        # Ici vous pouvez ajouter la logique pour informer le séquenceur
+        # self.sequencer_layout.process_command_ui(f'recordmode {self.track_index} {track.record_mode}')
 
     def on_channel_change(self, instance):
         self.sequencer_layout.process_slider_command(f'setch {self.track_index} {instance.text}')

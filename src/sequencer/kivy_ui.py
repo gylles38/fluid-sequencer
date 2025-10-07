@@ -21,6 +21,7 @@ from kivymd.uix.label import MDIcon
 
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
+from typing import Optional
 import sys, os
 
 class TooltipMDIconButton(MDIconButton):
@@ -381,14 +382,16 @@ class CustomTextInput(TextInput):
         # Capturer la molette dans on_touch_up
         if self.collide_point(*touch.pos) and hasattr(touch, 'button'):
             if touch.button == 'scrollup' and self.callback:
+                # 'scrollup' = vers le haut = diminuer la valeur
                 cursor_pos = self.cursor_index()
-                self.callback(self, 'down', [], cursor_pos)
+                self.callback(self, 'down', [], cursor_pos)  # Note: 'down' pour scrollup
                 return True
             elif touch.button == 'scrolldown' and self.callback:
+                # 'scrolldown' = vers le bas = augmenter la valeur  
                 cursor_pos = self.cursor_index()
-                self.callback(self, 'up', [], cursor_pos)
+                self.callback(self, 'up', [], cursor_pos)  # Note: 'up' pour scrolldown
                 return True
-        return super().on_touch_up(touch)    
+        return super().on_touch_up(touch)  
 
 class ThreeStateRecordButton(TooltipMDIconButton):
     def __init__(self, track, track_index, sequencer_layout, callback=None, **kwargs):
@@ -564,6 +567,7 @@ class SequencerLayout(BoxLayout):
         self.is_recording = False
         self.is_looping = False
         self.blink_animation = None  # Référence à l'animation de clignotement
+        self._current_measure = None # Initialisation pour la détection du beat 1
 
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
@@ -626,6 +630,33 @@ class SequencerLayout(BoxLayout):
         edit_button.bind(on_release=lambda x: self.edit_menu.open())
         menu_bar.add_widget(edit_button)
 
+        settings_button = MDButton(
+            MDButtonText(text="Settings"),
+            style="text", 
+            pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
+        )
+
+        with settings_button.canvas.before:
+            Color(0.5, 0.5, 0.5, 1)
+            self.settings_line = Line(points=[0, -1, settings_button.width, -1], width=1)
+
+        settings_items = [
+            {"leading_icon": "midi", "text": "MIDI Input Settings", "on_release": lambda: self.menu_action(self.show_midi_settings)},
+            {"leading_icon": "audio-input-stereo-minijack", "text": "Audio Settings", "on_release": lambda: self.menu_action(self.show_audio_settings)},
+        ]
+
+        self.settings_menu = MDDropdownMenu(
+            caller=settings_button,
+            items=settings_items,
+        )
+        settings_button.bind(on_release=lambda x: self.settings_menu.open())
+        menu_bar.add_widget(settings_button)
+
+        # Lier la mise à jour des lignes
+        menu_bar.bind(size=self.update_menu_lines)
+
+###
         # Lier la mise à jour des lignes à la taille du menu_bar
         menu_bar.bind(size=update_lines)
 
@@ -907,6 +938,15 @@ class SequencerLayout(BoxLayout):
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
 
+    def update_menu_lines(self, instance, value):
+        """Met à jour toutes les lignes des menus"""
+        if hasattr(self, 'file_line'):
+            self.file_line.points = [0, -1, instance.width, -1]
+        if hasattr(self, 'edit_line'):
+            self.edit_line.points = [0, -1, instance.width, -1]
+        if hasattr(self, 'settings_line'):
+            self.settings_line.points = [0, -1, instance.width, -1]
+
     def check_if_playback_finished(self, dt):
         """Vérifie si la lecture est terminée et arrête le clignotement si besoin"""
         if self.is_playing and not self.is_looping:
@@ -926,9 +966,197 @@ class SequencerLayout(BoxLayout):
                 except:
                     pass
 
+
+    def show_audio_settings(self):
+        """Affiche les paramètres audio"""
+        # Pour l'instant, on peut juste afficher un message
+        self.show_info_popup("Audio Settings", "Audio settings configuration will be available in a future version.")
+
+    def show_midi_settings(self):
+        """Affiche les paramètres MIDI"""
+        # Le menu est déjà fermé par menu_action()
+        
+        def apply_settings(port_name):
+            if port_name:
+                try:
+                    import mido
+                    input_ports = mido.get_input_names()
+                    if port_name not in input_ports:
+                        self.show_error_popup("Invalid Port", 
+                                            f"Port '{port_name}' is not available.")
+                        return
+                    
+                    self.process_command_ui(f'setrecordport "{port_name}"')
+                    self.show_info_popup("Success", f"MIDI input port set to:\n{port_name}")
+                    
+                except Exception as e:
+                    self.show_error_popup("Error", f"Failed to set MIDI port:\n{str(e)}")
+        
+        try:
+            import mido
+            input_ports = mido.get_input_names()
+            
+            if not input_ports:
+                self.show_error_popup("No MIDI Input Ports", 
+                                    "No MIDI input ports found.")
+                return
+                
+            current_port = getattr(self.sequencer, 'default_record_port', None)
+            
+            self.show_port_selection_popup(
+                title="Select MIDI Input Port",
+                ports=input_ports,
+                callback=apply_settings,
+                current_port=current_port
+            )
+            
+        except Exception as e:
+            self.show_error_popup("MIDI Error", f"Cannot access MIDI system:\n\n{str(e)}")
+
+    def show_port_selection_popup(self, title, ports, callback, current_port=None):
+        """Affiche un popup de sélection de port avec ListView scrollable"""
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        
+        # Label
+        content.add_widget(Label(
+            text=f"Select {title.split()[-1]} Port:",
+            size_hint_y=None,
+            height=dp(30)
+        ))
+        
+        # Container scrollable pour les ports
+        from kivy.uix.scrollview import ScrollView
+        from kivy.uix.gridlayout import GridLayout
+        from kivy.uix.button import Button
+        
+        scroll_view = ScrollView(size_hint=(1, 1))
+        grid_layout = GridLayout(
+            cols=1,
+            spacing=dp(5),
+            size_hint_y=None
+        )
+        grid_layout.bind(minimum_height=grid_layout.setter('height'))
+        
+        selected_port = [current_port or ports[0]]  # Liste pour stocker la sélection
+        
+        def on_port_select(instance):
+            selected_port[0] = instance.text
+            # Mettre en surbrillance la sélection
+            for child in grid_layout.children:
+                if hasattr(child, 'background_color'):
+                    if child.text == selected_port[0]:
+                        child.background_color = [0.2, 0.6, 0.8, 1]  # Bleu sélectionné
+                    else:
+                        child.background_color = [0.1, 0.1, 0.1, 1]  # Gris par défaut
+        
+        # Créer un bouton pour chaque port
+        for port in ports:
+            btn = Button(
+                text=port,
+                size_hint_y=None,
+                height=dp(40),
+                background_color=[0.1, 0.1, 0.1, 1],
+                color=[1, 1, 1, 1]
+            )
+            if port == selected_port[0]:
+                btn.background_color = [0.2, 0.6, 0.8, 1]
+            btn.bind(on_press=on_port_select)
+            grid_layout.add_widget(btn)
+        
+        scroll_view.add_widget(grid_layout)
+        content.add_widget(scroll_view)
+        
+        # Info sur le nombre de ports
+        info_label = Label(
+            text=f"Found {len(ports)} port(s) - Select one and click OK",
+            size_hint_y=None,
+            height=dp(30),
+            font_size=dp(12)
+        )
+        content.add_widget(info_label)
+        
+        # Boutons
+        buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        
+        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
+        cancel_button = TooltipMDIconButton(icon='cancel', tooltip_text='Cancel')
+        
+        def on_ok(instance):
+            callback(selected_port[0])
+            popup.dismiss()
+        
+        def on_cancel(instance):
+            popup.dismiss()
+        
+        ok_button.bind(on_press=on_ok)
+        cancel_button.bind(on_press=on_cancel)
+        
+        buttons_layout.add_widget(ok_button)
+        buttons_layout.add_widget(cancel_button)
+        content.add_widget(buttons_layout)
+        
+        # Taille adaptative avec maximum
+        max_height = min(dp(600), dp(200) + (len(ports) * dp(45)))
+        
+        popup = Popup(
+            title=title,
+            content=content,
+            size_hint=(0.8, None),  # Encore plus large
+            height=max_height,
+            auto_dismiss=False
+        )
+        popup.open()
+
+    def show_error_popup(self, title, message):
+        """Affiche un popup d'erreur"""
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        content.add_widget(Label(text=message))
+        
+        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
+        buttons_layout = BoxLayout(size_hint_y=None, height=dp(50))
+        buttons_layout.add_widget(ok_button)
+        content.add_widget(buttons_layout)
+        
+        popup = Popup(
+            title=title,
+            content=content,
+            size_hint=(0.5, 0.3)
+        )
+        ok_button.bind(on_press=popup.dismiss)
+        popup.open()
+
+    def show_info_popup(self, title, message):
+        """Affiche un popup d'information"""
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        content.add_widget(Label(text=message))
+        
+        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
+        buttons_layout = BoxLayout(size_hint_y=None, height=dp(50))
+        buttons_layout.add_widget(ok_button)
+        content.add_widget(buttons_layout)
+        
+        popup = Popup(
+            title=title,
+            content=content,
+            size_hint=(0.5, 0.3)
+        )
+        ok_button.bind(on_press=popup.dismiss)
+        popup.open()
+
+    def close_all_menus(self):
+        """Ferme tous les menus ouverts"""
+        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu']
+        for menu_name in menus_to_close:
+            if hasattr(self, menu_name) and getattr(self, menu_name):
+                try:
+                    getattr(self, menu_name).dismiss()
+                except:
+                    pass
+
     def menu_action(self, action_callback):
+        """Exécute une action de menu et ferme le menu"""
+        self.close_all_menus()
         action_callback()
-        self.file_menu.dismiss()
         
     def on_end_pos_manual_set(self, instance):
         if instance.text:
@@ -1068,6 +1296,73 @@ class SequencerLayout(BoxLayout):
         print(f"DEBUG: Starting playback: {command}")
         self.process_command_ui(command)
 
+    def start_recording_from_ui(self):
+        """Démarre l'enregistrement en utilisant les paramètres de l'interface"""
+        # Vérifier qu'un port MIDI est configuré
+        if not self.sequencer.default_record_port:
+            self.show_midi_settings()
+            return False
+        
+        # Trouver la piste armée
+        armed_track_index = None
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+                if armed_track_index is not None:
+                    self.show_error_popup("Multiple Tracks Armed", 
+                                        "Multiple tracks are armed for recording.\nPlease arm only one track.")
+                    return False
+                armed_track_index = i
+        
+        if armed_track_index is None:
+            self.show_error_popup("No Track Armed", 
+                                "No track is armed for recording.\nPlease arm a MIDI track first.")
+            return False
+        
+        # Récupérer la position de départ
+        start_pos_text = self.start_pos_input.text.strip()
+        if not start_pos_text:
+            start_pos_text = "1:1"  # Par défaut
+        
+        # Convertir en beats
+        start_beat = self.sequencer.parse_position_to_beats(start_pos_text)
+        if start_beat is None:
+            self.show_error_popup("Invalid Start Position", 
+                                f"Invalid start position: {start_pos_text}")
+            return False
+        
+        # Démarrer l'enregistrement
+        try:
+            result = self.sequencer.record_track(
+                track_idx=armed_track_index,
+                start_beat=start_beat,
+                inport_name=self.sequencer.default_record_port
+            )
+            
+            if "Error" in result:
+                self.show_error_popup("Recording Error", result)
+                return False
+                
+            # Mettre à jour l'interface
+            self.is_recording = True
+            self.record_button.icon = 'record-circle-outline'
+            self.record_button.md_bg_color = [0.8, 0, 0, 1]
+            
+            # Arrêter la lecture si active
+            if self.is_playing:
+                self.is_playing = False
+                self.play_button.icon = 'play'
+                self.stop_play_blink()
+            if self.is_paused:
+                self.is_paused = False
+                self.pause_button.icon = 'pause'
+                self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+                
+            return True
+            
+        except Exception as e:
+            self.show_error_popup("Recording Error", f"Failed to start recording:\n{str(e)}")
+            return False
+
     def pause_pressed(self, instance):
         # Vérifier si une lecture est en cours OU si on est en pause
         if not self.is_playing and not self.is_paused:
@@ -1138,13 +1433,14 @@ class SequencerLayout(BoxLayout):
         self.is_playing = False
         self.is_paused = False
         self.is_recording = False
-        # Optionnel : désactiver aussi le loop au stop si vous le souhaitez
-        # self.is_looping = False
-        # self.loop_button.icon = 'repeat'
-        # self.loop_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+        
+        # Arrêter l'animation du beat 1 si active
+        self.stop_beat_pulse_animation()
+        
+        # Arrêter aussi l'animation de clignotement play
+        self.stop_play_blink()
         
         self.play_button.icon = 'play'
-        self.stop_play_blink()
         self.pause_button.icon = 'pause'
         self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
         self.record_button.icon = 'record'
@@ -1152,24 +1448,23 @@ class SequencerLayout(BoxLayout):
         self.process_command_ui('stop')
 
     def record_pressed(self, instance):
-        self.is_recording = not self.is_recording
         if self.is_recording:
-            self.record_button.icon = 'record-circle-outline'
-            self.record_button.md_bg_color = [0.8, 0, 0, 1]
-            self.process_command_ui('record')
-            # Arrêter le clignotement du play si actif
-            if self.is_playing:
-                self.is_playing = False
-                self.play_button.icon = 'play'
-                self.stop_play_blink()
-            if self.is_paused:
-                self.is_paused = False
-                self.pause_button.icon = 'pause'
-                self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-        else:
+            # Arrêter l'enregistrement
+            self.is_recording = False
             self.record_button.icon = 'record'
             self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
             self.process_command_ui('stop')
+        else:
+            # Démarrer l'enregistrement
+            if self.start_recording_from_ui():
+                print("Recording started successfully")
+
+    def get_armed_track(self) -> Optional[int]:
+        """Retourne l'index de la piste armée, ou None si aucune piste n'est armée."""
+        for i, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+                return i
+        return None
 
     def loop_pressed(self, instance):
         # Si on désactive le looping pendant la lecture
@@ -1226,7 +1521,35 @@ class SequencerLayout(BoxLayout):
                     track_widget.record_mode_button.update_appearance()
 
     def update_playhead_display(self, instance, value):
-        self.playhead_label.text = f"Pos: { self.sequencer._format_beats_to_position(value)}"
+        """Met à jour l'affichage de la position et détecte le beat 1"""
+        current_position = self.sequencer._format_beats_to_position(value)
+        self.playhead_label.text = f"Pos: {current_position}"
+        
+        # Détecter le beat 1 pour l'animation
+        self._detect_beat_one_for_animation(current_position)
+
+    def _detect_beat_one_for_animation(self, position_str):
+        """Détecte si on arrive sur un beat 1 et déclenche l'animation"""
+        try:
+            measure, beat = map(int, position_str.split(':'))
+            
+            if beat == 1:
+                # Vérifier si c'est une NOUVELLE mesure
+                current_measure_key = measure  # Juste la mesure comme clé
+                
+                if not hasattr(self, '_current_measure') or self._current_measure != current_measure_key:
+                    # Nouvelle mesure détectée !
+                    self._current_measure = current_measure_key
+                    
+                    # Déclencher l'animation seulement si en lecture
+                    if self.is_playing and not self.is_paused:
+                        self.start_beat_pulse_animation()
+                        print(f"DEBUG: Animation beat 1 - Mesure {measure}")
+                        
+        except ValueError:
+            # Erreur de parsing, ignorer
+            pass
+
 
     def update_track_list(self):
         self.track_list_layout.clear_widgets()
@@ -1295,43 +1618,51 @@ class SequencerLayout(BoxLayout):
             # Analyser la position actuelle
             measure, beat = map(int, textinput.text.split(':'))
             step = 10 if 'shift' in modifiers else 1
+            beats_per_measure = self.sequencer.song.time_signature_numerator
             
             # Déterminer si le curseur est sur la mesure ou le beat
-            cursor_index = cursor_pos  # Position du curseur dans le texte
+            cursor_index = cursor_pos
             colon_index = textinput.text.find(':')
             
             if cursor_index <= colon_index:
-                # Curseur sur la mesure (avant ou sur le ':')
+                # Curseur sur la mesure
                 if direction == 'up':
                     measure += step
+                    # Le beat reste inchangé, mais on le limite à la signature rythmique
+                    beat = min(beat, beats_per_measure)
                 else:  # 'down'
-                    measure = max(1, measure - step)
-                # Le beat reste inchangé
+                    if measure > 1:
+                        measure = max(1, measure - step)
+                    # Si on est à la mesure 1, on ne change rien
+                    # Le beat reste inchangé
                 print(f"DEBUG: Adjusting measure only: {measure}:{beat}")
                 
             else:
-                # Curseur sur le beat (après le ':')
+                # Curseur sur le beat
                 if direction == 'up':
                     beat += step
-                    # Gérer le débordement
-                    if beat > 16:
+                    if beat > beats_per_measure:
                         measure += 1
                         beat = 1
                 else:  # 'down'
-                    beat -= step
-                    # Gérer le débordement négatif
-                    if beat < 1:
-                        measure -= 1
-                        beat = 16
+                    if beat > 1:
+                        beat -= step
+                    else:
+                        # Beat = 1, on veut descendre
+                        if measure > 1:
+                            measure -= 1
+                            beat = beats_per_measure
+                        # Si measure = 1 et beat = 1, on ne fait rien
                 print(f"DEBUG: Adjusting beat only: {measure}:{beat}")
-                    
-            measure = max(1, measure)  # Mesure minimum = 1
-            beat = max(1, beat)  # Beat minimum = 1
+            
+            # Contraintes finales
+            measure = max(1, measure)
+            beat = max(1, min(beat, beats_per_measure))  # Entre 1 et beats_per_measure
             
             new_position = f"{measure}:{beat}"
             textinput.text = new_position
             
-            # Restaurer la position approximative du curseur
+            # Restaurer la position du curseur
             self.restore_cursor_position(textinput, cursor_index, colon_index, new_position)
             
             print(f"DEBUG: Position changed to {new_position}")
@@ -1465,6 +1796,72 @@ class SequencerLayout(BoxLayout):
 
         if not should_continue:
             MDApp.get_running_app().stop()
+
+    def start_beat_pulse_animation(self):
+        """Animation combinée pulse + glow pour le beat 1"""
+        # Ne pas animer si on est en pause ou arrêté
+        if not self.is_playing or self.is_paused:
+            return
+            
+        # Arrêter toute animation existante
+        self.stop_beat_pulse_animation()
+        
+        self.pulse_phase = 0
+        self.original_width = self.play_button.width
+        self.original_height = self.play_button.height
+        self.beat_pulse_animation = Clock.schedule_interval(self._beat_pulse_glow, 0.1)
+        
+    def stop_beat_pulse_animation(self):
+        """Arrête l'animation et remet tout à la normale"""
+        if hasattr(self, 'beat_pulse_animation') and self.beat_pulse_animation is not None:
+            try:
+                self.beat_pulse_animation.cancel()
+            except:
+                pass  # Ignorer les erreurs si l'animation est déjà arrêtée
+            self.beat_pulse_animation = None
+        
+        # Remettre les valeurs originales
+        self.play_button.icon_color = [0, 0.7, 0.3, 1]
+        self.play_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+        if hasattr(self, 'original_width'):
+            self.play_button.width = self.original_width
+            self.play_button.height = self.original_height
+
+    def _beat_pulse_glow(self, dt):
+        """Animation de pulse avec effet glow"""
+        # Vérifier que l'animation est toujours valide
+        if not hasattr(self, 'beat_pulse_animation') or self.beat_pulse_animation is None:
+            return
+            
+        self.pulse_phase += 1
+        
+        if self.pulse_phase <= 5:  # Phase d'expansion (0.5 seconde)
+            # Effet de glow progressif
+            intensity = 0.3 + (self.pulse_phase * 0.14)  # 0.3 → 1.0
+            glow_color = [intensity, 0.3 + intensity * 0.7, 0.1 + intensity * 0.3, 1]
+            
+            self.play_button.icon_color = glow_color
+            
+            # Effet d'agrandissement subtil
+            scale = 1.0 + (self.pulse_phase * 0.03)
+            self.play_button.width = self.original_width * scale
+            self.play_button.height = self.original_height * scale
+            
+        else:
+            # Phase de contraction (0.5 seconde)
+            if self.pulse_phase <= 10:
+                intensity = 1.0 - ((self.pulse_phase - 5) * 0.14)  # 1.0 → 0.3
+                glow_color = [intensity, 0.3 + intensity * 0.7, 0.1 + intensity * 0.3, 1]
+                
+                self.play_button.icon_color = glow_color
+                
+                scale = 1.15 - ((self.pulse_phase - 5) * 0.03)
+                self.play_button.width = self.original_width * scale
+                self.play_button.height = self.original_height * scale
+            else:
+                # Fin de l'animation
+                self.stop_beat_pulse_animation()
+
 
 class SequencerApp(MDApp):
     def build(self):

@@ -629,6 +629,26 @@ class Sequencer(EventDispatcher):
         self.last_project_basename = None
         self._cached_song_length_beats: Optional[float] = None
         self.audio_track_duration_ms: Dict[str, int] = {}
+        
+        self.default_record_port: Optional[str] = None  # Port d'enregistrement par défaut        
+
+    def set_default_record_port(self, port_name: str) -> str:
+        """Définit le port MIDI d'entrée par défaut pour l'enregistrement"""
+        try:
+            # Vérifier que le port existe
+            input_ports = get_input_names()
+            if port_name not in input_ports:
+                return f"Error: MIDI input port '{port_name}' not found."
+            
+            self.default_record_port = port_name
+            self.is_dirty = True
+            return f"Default record port set to: {port_name}"
+        except Exception as e:
+            return f"Error setting record port: {e}"
+
+    def get_default_record_port(self) -> Optional[str]:
+        """Retourne le port d'enregistrement par défaut"""
+        return self.default_record_port
 
     def invalidate_song_length_cache(self):
         """Invalidates the cached song length."""
@@ -1864,6 +1884,13 @@ class Sequencer(EventDispatcher):
         if not isinstance(target_track, MidiTrack):
             print("Error: Recording is only supported for MIDI tracks.")
             return
+        
+        # Vérifier que la piste est armée
+        if target_track.record_mode == 'OFF':
+            print(f"Error: Track '{target_track.name}' is not armed for recording.")
+            return
+        
+        # Utiliser replace_notes passé en paramètre (déjà déterminé par le mode)
         if replace_notes:
             end_beat = float("inf") if num_beats_to_record is None else start_beat + num_beats_to_record
             events_to_keep = []
@@ -1878,28 +1905,138 @@ class Sequencer(EventDispatcher):
                     events_to_keep.append(event)
             target_track.events = events_to_keep
             print(f"Removed existing notes from beat {self._format_beats_to_position(start_beat)} onwards.")
+
         outport_name = target_track.output_port_name
         original_mute_state = target_track.is_muted
         if replace_notes:
             target_track.is_muted = True
+            
         self.is_recording = True
         self.recording_thread = threading.Thread(target=self._recording_thread_main, args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state, enable_thru))
         self.recording_thread.daemon = True
         self.recording_thread.start()
 
-    def record_track(self, track_idx: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
+    def record_track(self, track_idx: Optional[int] = None, start_beat: Optional[float] = None, num_beats_to_record: Optional[float] = None, inport_name: Optional[str] = None, replace_notes: Optional[bool] = None, enable_thru: bool = True):
+        """Démarre l'enregistrement sur une piste spécifique ou trouve la piste armée."""
+        
         if self.playback_state != "stopped":
             return "Error: Please stop playback before starting a new recording."
+        
+        # Si aucun track_idx n'est spécifié, trouver la piste armée
+        if track_idx is None:
+            armed_tracks = []
+            for i, track in enumerate(self.song.tracks):
+                if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+                    armed_tracks.append((i, track))
+            
+            if len(armed_tracks) == 0:
+                return "Error: No track is armed for recording. Please arm a MIDI track first."
+            elif len(armed_tracks) > 1:
+                track_list = ", ".join([f"'{track.name}' (index {i})" for i, track in armed_tracks])
+                return f"Error: Multiple tracks are armed: {track_list}. Please arm only one track."
+            
+            track_idx, target_track = armed_tracks[0]
+            print(f"DEBUG: Auto-selected armed track '{target_track.name}' (index {track_idx})")
+        
+        # Vérifications standard
         if not 0 <= track_idx < len(self.song.tracks):
             return "Error: Invalid track index."
+        
         target_track = self.song.tracks[track_idx]
         if not isinstance(target_track, MidiTrack):
             return "Error: Recording is only supported for MIDI tracks."
-
+        
+        # Vérifier que la piste est armée
+        if target_track.record_mode == 'OFF':
+            return f"Error: Track '{target_track.name}' is not armed for recording."
+        
+        # Déterminer le port d'entrée
+        if inport_name is None:
+            if self.default_record_port:
+                inport_name = self.default_record_port
+                print(f"DEBUG: Using default record port: {inport_name}")
+            else:
+                # Trouver un port d'entrée par défaut
+                input_ports = get_input_names()
+                if input_ports:
+                    inport_name = input_ports[0]
+                    print(f"DEBUG: Using first available port: {inport_name}")
+                else:
+                    return "Error: No MIDI input ports available and no default port set."        
+        # Déterminer les paramètres par défaut
+        if start_beat is None:
+            start_beat = 0.0
+        
+        if inport_name is None:
+            # Trouver un port d'entrée par défaut
+            input_ports = get_input_names()
+            if input_ports:
+                inport_name = input_ports[0]
+            else:
+                return "Error: No MIDI input ports available."
+        
+        # Déterminer si on remplace les notes existantes basé sur le mode
+        should_replace_notes = target_track.record_mode == 'OVERWRITE'
+        if replace_notes is not None:
+            should_replace_notes = replace_notes
+        
         self._stop_event.clear()
-        self.last_record_settings = {"track_index": track_idx, "start_beat": start_beat, "num_beats_to_record": num_beats_to_record, "inport_name": inport_name, "replace_notes": replace_notes, "enable_thru": enable_thru}
-        self._start_recording_internal(track_index=track_idx, start_beat=start_beat, num_beats_to_record=num_beats_to_record, inport_name=inport_name, replace_notes=replace_notes, enable_thru=enable_thru)
-        return "Recording started."
+        self.last_record_settings = {
+            "track_index": track_idx, 
+            "start_beat": start_beat, 
+            "num_beats_to_record": num_beats_to_record, 
+            "inport_name": inport_name, 
+            "replace_notes": should_replace_notes, 
+            "enable_thru": enable_thru
+        }
+        
+        self._start_recording_internal(
+            track_index=track_idx, 
+            start_beat=start_beat, 
+            num_beats_to_record=num_beats_to_record, 
+            inport_name=inport_name, 
+            replace_notes=should_replace_notes, 
+            enable_thru=enable_thru
+        )
+        
+        mode_text = "OVERWRITE" if should_replace_notes else "KEEP"
+        start_pos = self._format_beats_to_position(start_beat)
+        return f"Recording started on track '{target_track.name}' at {start_pos} in {mode_text} mode."
+
+    def set_record_mode(self, track_index: int, mode: str) -> str:
+        """Définit le mode d'enregistrement pour une piste MIDI."""
+        if not 0 <= track_index < len(self.song.tracks):
+            return "Error: Invalid track index."
+        
+        track = self.song.tracks[track_index]
+        if not isinstance(track, MidiTrack):
+            return "Error: Record mode can only be set for MIDI tracks."
+        
+        if mode not in ['OFF', 'OVERWRITE', 'KEEP']:
+            return "Error: Invalid record mode. Must be 'OFF', 'OVERWRITE', or 'KEEP'."
+        
+        # Sauvegarder l'ancien mode pour le log
+        old_mode = track.record_mode
+        
+        # Désactiver les autres pistes si on active celle-ci
+        if mode != 'OFF':
+            for i, other_track in enumerate(self.song.tracks):
+                if (isinstance(other_track, MidiTrack) and 
+                    i != track_index and 
+                    other_track.record_mode != 'OFF'):
+                    other_track.record_mode = 'OFF'
+                    print(f"DEBUG: Disabled track {i} '{other_track.name}' (was {other_track.record_mode})")
+        
+        track.record_mode = mode
+        self.is_dirty = True
+        
+        mode_descriptions = {
+            'OFF': 'Piste désactivée',
+            'OVERWRITE': 'Écrase les notes existantes', 
+            'KEEP': 'Conserve les notes existantes'
+        }
+        
+        return f"Track '{track.name}' record mode changed from {old_mode} to {mode}: {mode_descriptions[mode]}"
 
     def record_bis(self, replace_notes: bool):
         """Re-records using the last saved parameters."""
@@ -1909,12 +2046,21 @@ class Sequencer(EventDispatcher):
             return "Error: No previous recording settings found. Use 'record' first."
 
         settings = self.last_record_settings.copy()
-        settings['replace_notes'] = replace_notes
+            
+        # Vérifier le mode actuel de la piste
+        track_index = settings['track_index']
+        if 0 <= track_index < len(self.song.tracks):
+            target_track = self.song.tracks[track_index]
+            if isinstance(target_track, MidiTrack):
+                # Utiliser le mode actuel de la piste
+                settings['replace_notes'] = (target_track.record_mode == 'OVERWRITE')
+        
         if 'enable_thru' not in settings:
-            settings['enable_thru'] = True # Default to True if not in old settings
+            settings['enable_thru'] = True
+            
         self._stop_event.clear()
         self._start_recording_internal(**settings)
-        return "Re-recording with last used settings..."
+        return "Re-recording with last used settings..."        
 
     def _calculate_song_length_in_beats(self) -> float:
         """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""

@@ -1,3 +1,4 @@
+# Kivy UI components for the Sequencer application
 import kivy
 kivy.require('2.3.1')
 

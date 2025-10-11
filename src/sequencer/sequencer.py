@@ -2192,6 +2192,11 @@ class Sequencer(EventDispatcher):
         Resynchronizes all tracks to a specific beat. This is used when the audible
         state of tracks changes mid-playback (e.g., via solo/mute) to prevent timing drift.
         """
+        was_rolling = self.jack_manager.jack_client.transport_state == jack.ROLLING
+        if was_rolling:
+            self.jack_manager.jack_client.transport_stop()
+            time.sleep(0.05) # Give a moment for things to settle
+
         # 1. Sync the internal playhead and event indices for all tracks
         self.jack_manager._sync_playhead_to_beat(beat)
 
@@ -2235,6 +2240,9 @@ class Sequencer(EventDispatcher):
                         port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
                     except Exception as e:
                         print(f"Warning: Could not prime MIDI track '{track.name}': {e}", file=sys.stderr)
+
+        if was_rolling:
+            self.jack_manager.jack_client.transport_start()
 
 
     def play(self, start_beat: Optional[float] = None):

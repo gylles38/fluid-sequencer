@@ -559,8 +559,8 @@ class JackManager:
             self.last_beat = end_beat_of_block
             if self.sequencer.gui_mode:
                 self.sequencer.current_beat = self.last_beat
-            except Exception as e:
-                print(f"\nError in JACK process callback: {e}")
+        except Exception as e:
+            print(f"\nError in JACK process callback: {e}")
 
 
 class Sequencer(EventDispatcher):

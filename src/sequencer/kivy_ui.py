@@ -1223,12 +1223,12 @@ class SequencerLayout(BoxLayout):
         self.process_command_ui(command)
 
     def process_slider_command(self, command):
-        from main import process_command
+        from .main import process_command
         process_command(command, self.sequencer, api_mode=True, confirmation_handler=None)
 
     def process_command_ui(self, command):
         import json
-        from main import process_command
+        from .main import process_command
 
         self.current_command = command
 

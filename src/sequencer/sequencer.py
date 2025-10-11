@@ -410,23 +410,23 @@ class JackManager:
             self.seek_audio_to_beat(current_beat)
 
     def _process_callback(self, frames: int):
-        with self.sync_lock:
-            try:
+        try:
+            with self.sync_lock:
                 if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                     port = self.open_ports[self.sequencer.song.metronome_port_name]
-                for note_off_msg in self._metronome_notes_to_turn_off:
-                    port.send(note_off_msg)
-                self._metronome_notes_to_turn_off.clear()
+                    for note_off_msg in self._metronome_notes_to_turn_off:
+                        port.send(note_off_msg)
+                    self._metronome_notes_to_turn_off.clear()
 
-            if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
-                if self._active_notes:
-                    for (track_idx, pitch), end_beat in list(self._active_notes.items()):
-                        track = self.sequencer.song.tracks[track_idx]  # Corrigé: self.sequencer.song
-                        if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
-                            port = self.open_ports[track.output_port_name]
-                            port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
-                    self._active_notes.clear()
-                return
+                if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
+                    if self._active_notes:
+                        for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                            track = self.sequencer.song.tracks[track_idx]
+                            if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                                port = self.open_ports[track.output_port_name]
+                                port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                        self._active_notes.clear()
+                    return
 
             state, pos_struct = self.jack_client.transport_query_struct()
             pos = jack.position2dict(pos_struct)

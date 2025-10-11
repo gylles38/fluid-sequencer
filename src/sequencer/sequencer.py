@@ -79,6 +79,7 @@ class JackManager:
         self._metronome_notes_to_turn_off = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
+        self.sync_lock = threading.Lock()
         self._display_thread = None
         self._display_stop_event = threading.Event()
         self.automation_events = []
@@ -409,9 +410,10 @@ class JackManager:
             self.seek_audio_to_beat(current_beat)
 
     def _process_callback(self, frames: int):
-        try:
-            if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
-                port = self.open_ports[self.sequencer.song.metronome_port_name]
+        with self.sync_lock:
+            try:
+                if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
+                    port = self.open_ports[self.sequencer.song.metronome_port_name]
                 for note_off_msg in self._metronome_notes_to_turn_off:
                     port.send(note_off_msg)
                 self._metronome_notes_to_turn_off.clear()
@@ -557,8 +559,8 @@ class JackManager:
             self.last_beat = end_beat_of_block
             if self.sequencer.gui_mode:
                 self.sequencer.current_beat = self.last_beat
-        except Exception as e:
-            print(f"\nError in JACK process callback: {e}")
+            except Exception as e:
+                print(f"\nError in JACK process callback: {e}")
 
 
 class Sequencer(EventDispatcher):
@@ -2192,13 +2194,9 @@ class Sequencer(EventDispatcher):
         Resynchronizes all tracks to a specific beat. This is used when the audible
         state of tracks changes mid-playback (e.g., via solo/mute) to prevent timing drift.
         """
-        was_rolling = self.jack_manager.jack_client.transport_state == jack.ROLLING
-        if was_rolling:
-            self.jack_manager.jack_client.transport_stop()
-            time.sleep(0.05) # Give a moment for things to settle
-
-        # 1. Sync the internal playhead and event indices for all tracks
-        self.jack_manager._sync_playhead_to_beat(beat)
+        with self.jack_manager.sync_lock:
+            # 1. Sync the internal playhead and event indices for all tracks
+            self.jack_manager._sync_playhead_to_beat(beat)
 
         # Regenerate automation events to reflect the new solo/mute state
         self.jack_manager._prepare_automation_events()
@@ -2240,9 +2238,6 @@ class Sequencer(EventDispatcher):
                         port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
                     except Exception as e:
                         print(f"Warning: Could not prime MIDI track '{track.name}': {e}", file=sys.stderr)
-
-        if was_rolling:
-            self.jack_manager.jack_client.transport_start()
 
 
     def play(self, start_beat: Optional[float] = None):

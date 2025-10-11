@@ -49,7 +49,7 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, (Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint, MidiMapping)):
+        if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
             return d
@@ -58,26 +58,9 @@ class CustomSongEncoder(json.JSONEncoder):
 def song_decoder(d):
     if '__type__' in d:
         type_name = d.pop('__type__')
-        # Map the type name to the actual class.
-        # The values in 'd' have already been decoded into objects by the hook.
-        if type_name == 'Song':
-            return Song(**d)
-        elif type_name == 'MidiTrack':
-            return MidiTrack(**d)
-        elif type_name == 'AudioTrack':
-            return AudioTrack(**d)
-        elif type_name == 'AutomationTrack':
-            return AutomationTrack(**d)
-        elif type_name == 'Event':
-            return Event(**d)
-        elif type_name == 'Note':
-            return Note(**d)
-        elif type_name == 'CCMessage':
-            return CCMessage(**d)
-        elif type_name == 'AutomationPoint':
-            return AutomationPoint(**d)
-        elif type_name == 'MidiMapping':
-            return MidiMapping(**d)
+        cls = getattr(sys.modules[__name__], type_name, None)
+        if cls:
+            return cls(**d)
     return d
 
 
@@ -1564,7 +1547,6 @@ class Sequencer(EventDispatcher):
             return f"Project saved to '{project_filepath}'"
         except Exception as e:
             return f"Error saving project file: {e}"
-        
 
     def load_project(self, basename: str) -> str:
         project_filepath = f"{basename}.proj.json"

@@ -16,4 +16,9 @@ setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/example/sequencer", # Replace with actual URL
+    entry_points={
+        'console_scripts': [
+            'sequencer=sequencer.main:main',
+        ],
+    },
 )

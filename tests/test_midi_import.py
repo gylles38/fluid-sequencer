@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from src.sequencer.models import Song, Note, CCMessage
-from src.sequencer.midi_import import import_song
+from sequencer.models import Song, Note, CCMessage
+from sequencer.midi_import import import_song
 import mido
 
 class TestMidiImport(unittest.TestCase):

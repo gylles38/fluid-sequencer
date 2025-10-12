@@ -979,14 +979,18 @@ class SequencerLayout(BoxLayout):
             self.process_command_ui('loop off')
             
     def toggle_metronome(self, instance):
-        if instance.icon == 'metronome':
+        # Directly toggle the metronome state in the song object
+        # This avoids the heavy UI refresh caused by process_command_ui
+        new_state = not self.sequencer.song.metronome_enabled
+        self.sequencer.song.metronome_enabled = new_state
+
+        # Update the button's appearance
+        if new_state:
             instance.icon = 'metronome-tick'
             instance.md_bg_color = [0.5, 0.5, 0.5, 1]
-            self.process_command_ui('metronome on')
         else:
             instance.icon = 'metronome'
             instance.md_bg_color = [0.1, 0.1, 0.1, 1]
-            self.process_command_ui('metronome off')
 
     def update_track_record_buttons(self, track_index=None):
         """Met à jour l'apparence des boutons record des pistes"""

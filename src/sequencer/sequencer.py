@@ -188,21 +188,20 @@ class JackManager:
                 if sys.platform != "win32":
                     print("Waiting for audio player sockets...")
                     while (time.time() - start_time) < max_wait_time:
-                        if all(self._is_socket_connectable(s) for s in expected_sockets):
+                        if all(self._is_socket_responsive(s) for s in expected_sockets):
                             all_sockets_ready = True
-                            print("All audio player sockets are connectable.")
+                            print("All audio player sockets are responsive.")
                             break
                         time.sleep(0.1)
                 else:
-                    time.sleep(2.0) # Délai légèrement augmenté pour Windows
+                    # On Windows, we can't easily check for responsiveness in the same way.
+                    # A simple delay remains the most practical approach.
+                    time.sleep(2.0)
                     all_sockets_ready = True
 
                 if not all_sockets_ready:
-                    print("Warning: Timed out waiting for all audio players to create their IPC sockets.", file=sys.stderr)
+                    print("Warning: Timed out waiting for all audio players to become responsive.", file=sys.stderr)
                     print("Playback for some audio tracks may fail.", file=sys.stderr)
-                
-                # Ajout d'un court délai pour s'assurer que mpv est prêt à recevoir les commandes
-                time.sleep(0.2)
 
                 # --- Prime Audio Tracks Immediately After They Are Ready ---
                 print("Priming audio tracks with initial state...")
@@ -295,6 +294,47 @@ class JackManager:
         except Exception as e:
             print(f"Error sending IPC command to {socket_path}: {e}", file=sys.stderr)
             return False
+
+    def _query_ipc_command(self, socket_path, command_data, timeout=0.2):
+        """Sends a command and waits for a JSON response."""
+        try:
+            if sys.platform == "win32":
+                # For Windows, named pipes behave a bit differently and this simple read/write might not be sufficient.
+                # Given the bug report context (unix sockets), we'll focus on the unix implementation.
+                # A simple connect check is the fallback.
+                return {"error": "success"} if self._is_socket_connectable(socket_path) else None
+
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                s.connect(socket_path)
+                s.sendall(json.dumps(command_data).encode('utf-8') + b'\n')
+
+                # Read the response
+                response_data = b""
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break  # Connection closed
+                    response_data += chunk
+                    if b'\n' in response_data:
+                        break # Full response received
+
+                # There could be multiple JSON objects, we only care about the first
+                response_line = response_data.split(b'\n', 1)[0]
+                response_json = json.loads(response_line.decode('utf-8'))
+                return response_json
+
+        except (socket.timeout, ConnectionRefusedError, FileNotFoundError, BrokenPipeError, json.JSONDecodeError):
+            return None
+        except Exception:
+            # Silently fail, as this is just a check.
+            return None
+
+    def _is_socket_responsive(self, socket_path: str) -> bool:
+        """Checks if an mpv socket is not just connectable, but also responding to commands."""
+        command = {"command": ["get_property", "pid"]}
+        response = self._query_ipc_command(socket_path, command)
+        return response is not None and response.get("error") == "success"
 
     def _is_socket_connectable(self, socket_path: str) -> bool:
         if sys.platform == "win32":

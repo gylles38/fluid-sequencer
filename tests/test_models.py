@@ -1,5 +1,5 @@
 import unittest
-from src.sequencer.models import Note, CCMessage, Event, MidiTrack, AudioTrack, Song, AutomationPoint, AutomationTrack
+from sequencer.models import Note, CCMessage, Event, MidiTrack, AudioTrack, Song, AutomationPoint, AutomationTrack
 
 class TestModels(unittest.TestCase):
     """

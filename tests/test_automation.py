@@ -1,6 +1,6 @@
 import unittest
-from src.sequencer.sequencer import Sequencer
-from src.sequencer.models import Song, MidiTrack, AutomationTrack, AutomationPoint, Event, Note
+from sequencer.sequencer import Sequencer
+from sequencer.models import Song, MidiTrack, AutomationTrack, AutomationPoint, Event, Note
 
 class TestAutomation(unittest.TestCase):
 

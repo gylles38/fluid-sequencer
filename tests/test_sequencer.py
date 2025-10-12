@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import patch, MagicMock, mock_open, call
 import threading
 import time
-from src.sequencer.sequencer import Sequencer
-from src.sequencer.models import Song, MidiTrack, AudioTrack, Note, Event, CCMessage, AutomationTrack, AutomationPoint
+from sequencer.sequencer import Sequencer
+from sequencer.models import Song, MidiTrack, AudioTrack, Note, Event, CCMessage, AutomationTrack, AutomationPoint
 import json
 import mido
 
@@ -185,7 +185,7 @@ class TestSequencer(unittest.TestCase):
         result = self.sequencer.add_automation_point(track_index=0, position_str="1:1", parameter="vol", value=0.5, curve="step")
         self.assertEqual(result, "Error: Automation points can only be added to automation tracks.")
 
-    @patch('src.sequencer.sequencer.JackManager.start')
+    @patch('sequencer.sequencer.JackManager.start')
     def test_play_starts_jack_manager(self, mock_jack_start):
         """Test that the play command starts the JackManager."""
         self.sequencer.play()
@@ -263,7 +263,7 @@ class TestSequencer(unittest.TestCase):
             self.assertIsNone(self.sequencer.last_project_basename)
             mock_close_vp.assert_called_once()
 
-    @patch('src.sequencer.sequencer.threading.Thread')
+    @patch('sequencer.sequencer.threading.Thread')
     def test_overdub_does_not_mute(self, mock_thread):
         """Test that overdubbing does not mute the track."""
         self.sequencer.add_track(name="Test Track", track_type='midi')
@@ -276,7 +276,7 @@ class TestSequencer(unittest.TestCase):
         # Check that the track is not muted
         self.assertFalse(track.is_muted)
 
-    @patch('src.sequencer.sequencer.Sequencer.set_control_port')
+    @patch('sequencer.sequencer.Sequencer.set_control_port')
     def test_save_and_load_control_port(self, mock_set_control_port):
         """Test that the control port is saved and loaded with the project."""
         # Set a control port name
@@ -302,7 +302,7 @@ class TestSequencer(unittest.TestCase):
         mock_set_control_port.assert_called_with("MyTestControlPort")
 
     @patch('pydub.AudioSegment.from_file')
-    @patch('src.sequencer.sequencer.jack')
+    @patch('sequencer.sequencer.jack')
     def test_play_range_stops_audio(self, mock_jack, mock_from_file):
         """Test that reaching the end of a play range stops audio tracks and the transport."""
         # Setup
@@ -359,10 +359,11 @@ class TestRecording(unittest.TestCase):
         # Mock the jack client's transport state to be ROLLING
         self.sequencer.jack_manager.jack_client.transport_state = 2 # jack.ROLLING
 
-    @patch('src.sequencer.sequencer.threading.Thread')
+    @patch('sequencer.sequencer.threading.Thread')
     def test_record_replace_notes_only(self, mock_thread):
         """Test that recording with 'replace' only removes notes."""
         track = self.sequencer.song.tracks[0]
+        track.record_mode = 'OVERWRITE'
         track.add_event(Event(start_time=1.0, notes=[Note(pitch=60, velocity=100, duration=1.0)], cc_messages=[CCMessage(control=7, value=100)]))
 
         # Call the internal method directly to test the replacement logic
@@ -375,10 +376,11 @@ class TestRecording(unittest.TestCase):
         self.assertEqual(track.events[0].cc_messages[0].control, 7)
         mock_thread.assert_called_once()
 
-    @patch('src.sequencer.sequencer.threading.Thread')
+    @patch('sequencer.sequencer.threading.Thread')
     def test_overdub_does_not_mute(self, mock_thread):
         """Test that overdubbing does not mute the track."""
         track = self.sequencer.song.tracks[0]
+        track.record_mode = 'KEEP'
         track.is_muted = False
 
         # Call the internal method directly to test the logic
@@ -388,10 +390,11 @@ class TestRecording(unittest.TestCase):
         self.assertFalse(track.is_muted)
         mock_thread.assert_called_once()
 
-    @patch('src.sequencer.sequencer.Sequencer._start_recording_internal')
+    @patch('sequencer.sequencer.Sequencer._start_recording_internal')
     def test_record_track_flow(self, mock_start_recording):
         """Test the main record_track function flow."""
         self.sequencer.add_track(name="Track 2", track_type="midi")
+        self.sequencer.song.tracks[0].record_mode = 'OVERWRITE'
         # Add an existing note to trigger the replace/add prompt
         self.sequencer.song.tracks[0].add_event(Event(start_time=2.0, notes=[Note(pitch=1, velocity=1, duration=1)]))
 

@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import mido
-from src.sequencer.sequencer import Sequencer
-from src.sequencer.models import MidiMapping
+from sequencer.sequencer import Sequencer
+from sequencer.models import MidiMapping
 import time
 
 class TestMidiMapping(unittest.TestCase):
@@ -114,7 +114,7 @@ class TestMidiMapping(unittest.TestCase):
     def test_save_load_control_port(self, mock_open_input, mock_json_dump):
         """Test that the control port is saved and loaded with the project."""
         import json
-        from src.sequencer.sequencer import CustomSongEncoder
+        from sequencer.sequencer import CustomSongEncoder
 
         # Mock the listener thread so it doesn't actually start
         with patch('threading.Thread'):
@@ -144,7 +144,7 @@ class TestMidiMapping(unittest.TestCase):
                     new_seq.load_project("test_project_with_control_port")
                     mock_set_control_port.assert_called_once_with("my_control_port")
 
-    @patch('src.sequencer.sequencer.Sequencer._get_current_beat', return_value=5.0)
+    @patch('sequencer.sequencer.Sequencer._get_current_beat', return_value=5.0)
     @patch('mido.open_input')
     def test_record_automation(self, mock_open_input, mock_get_current_beat):
         """Test that CC messages are recorded as automation points when recording."""
@@ -177,7 +177,7 @@ class TestMidiMapping(unittest.TestCase):
         # Check that an automation track was created with the correct name
         self.assertEqual(len(self.seq.song.tracks), 2)
         auto_track = self.seq.song.tracks[1]
-        from src.sequencer.models import AutomationTrack
+        from sequencer.models import AutomationTrack
         self.assertIsInstance(auto_track, AutomationTrack)
         self.assertEqual(auto_track.target_track_index, 0)
         self.assertEqual(auto_track.name, "Test Track Volume Automation")

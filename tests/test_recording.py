@@ -4,8 +4,8 @@
 # import time
 
 # # It's good practice to import the specific classes you're testing
-# from src.sequencer.sequencer import Sequencer
-# from src.sequencer.models import MidiTrack, Song
+# from sequencer.sequencer import Sequencer
+# from sequencer.models import MidiTrack, Song
 
 # # This entire test class is disabled because the recording logic
 # # is tightly coupled with the old threading-based playback system.

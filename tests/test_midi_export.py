@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch, call, ANY
-from src.sequencer.models import Song, MidiTrack, AudioTrack, Note, CCMessage, Event
-from src.sequencer.midi_export import export_to_midi
+from sequencer.models import Song, MidiTrack, AudioTrack, Note, CCMessage, Event
+from sequencer.midi_export import export_to_midi
 import mido
 
 class TestMidiExport(unittest.TestCase):

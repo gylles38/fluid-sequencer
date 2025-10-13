@@ -1412,7 +1412,7 @@ class Sequencer(EventDispatcher):
         self.invalidate_song_length_cache()
         if self.playback_state != "stopped":
             current_beat = self._get_current_beat()
-            self._resync_all_at_beat(current_beat)
+            self._resync_all_at_beat(current_beat, perform_seek=False)
         return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 
     def toggle_solo(self, track_index: int):
@@ -1434,7 +1434,7 @@ class Sequencer(EventDispatcher):
         self.invalidate_song_length_cache()
         if self.playback_state != "stopped":
             current_beat = self._get_current_beat()
-            self._resync_all_at_beat(current_beat)
+            self._resync_all_at_beat(current_beat, perform_seek=False)
         output += f"Track '{target_track.name}' is now {status}."
         return {"status": "success", "message": output}
 
@@ -2224,20 +2224,20 @@ class Sequencer(EventDispatcher):
                 generated_events.append({"time": step_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": step_value})
         return generated_events
 
-    def _resync_all_at_beat(self, beat: float):
+    def _resync_all_at_beat(self, beat: float, perform_seek: bool = True):
         """
         Resynchronizes all tracks to a specific beat. This is used when the audible
         state of tracks changes mid-playback (e.g., via solo/mute) to prevent timing drift.
         """
-        with self.jack_manager.sync_lock:
-            # 1. Sync the internal playhead and event indices for all tracks
-            self.jack_manager._sync_playhead_to_beat(beat)
+        if perform_seek:
+            with self.jack_manager.sync_lock:
+                # 1. Sync the internal playhead and event indices for all tracks
+                self.jack_manager._sync_playhead_to_beat(beat)
+            # 2. Seek all audio players to the correct time
+            self.jack_manager.seek_audio_to_beat(beat)
 
         # Regenerate automation events to reflect the new solo/mute state
         self.jack_manager._prepare_automation_events()
-
-        # 2. Seek all audio players to the correct time
-        self.jack_manager.seek_audio_to_beat(beat)
 
         # 3. Prime all audible tracks with their correct state
         is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))

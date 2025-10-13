@@ -175,33 +175,28 @@ class JackManager:
                 self._prepare_automation_events()
 
                 # --- Wait for audio players to be ready ---
-                max_wait_time = 10.0 # Timeout augmenté à 10 secondes
-                start_time = time.time()
-                all_sockets_ready = False
-                
-                expected_sockets = []
-                with self.process_lock:
-                    for ap in self.active_audio_processes:
-                        if sys.platform != "win32":
-                            expected_sockets.append(ap.socket_path)
-
                 if sys.platform != "win32":
                     print("Waiting for audio player sockets...")
-                    while (time.time() - start_time) < max_wait_time:
-                        if all(self._is_socket_responsive(s) for s in expected_sockets):
-                            all_sockets_ready = True
-                            print("All audio player sockets are responsive.")
-                            break
-                        time.sleep(0.1)
-                else:
-                    # On Windows, we can't easily check for responsiveness in the same way.
-                    # A simple delay remains the most practical approach.
-                    time.sleep(2.0)
-                    all_sockets_ready = True
+                    with self.process_lock:
+                        audio_processes = list(self.active_audio_processes)
 
-                if not all_sockets_ready:
-                    print("Warning: Timed out waiting for all audio players to become responsive.", file=sys.stderr)
-                    print("Playback for some audio tracks may fail.", file=sys.stderr)
+                    for ap in audio_processes:
+                        track = self.sequencer.song.tracks[ap.track_index]
+                        max_wait_time = 5.0  # 5 secondes par socket
+                        start_time = time.time()
+                        is_ready = False
+                        while time.time() - start_time < max_wait_time:
+                            if self._is_socket_responsive(ap.socket_path):
+                                print(f"  - Socket for track '{track.name}' is responsive.")
+                                is_ready = True
+                                break
+                            time.sleep(0.1)
+
+                        if not is_ready:
+                            print(f"Warning: Timed out waiting for audio player for track '{track.name}'. Playback may fail for this track.", file=sys.stderr)
+                else:
+                    # On Windows, a simple delay is the most practical approach.
+                    time.sleep(2.0)
 
                 # --- Prime Audio Tracks Immediately After They Are Ready ---
                 print("Priming audio tracks with initial state...")

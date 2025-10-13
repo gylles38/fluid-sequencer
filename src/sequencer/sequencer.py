@@ -175,33 +175,28 @@ class JackManager:
                 self._prepare_automation_events()
 
                 # --- Wait for audio players to be ready ---
-                max_wait_time = 10.0 # Timeout augmenté à 10 secondes
-                start_time = time.time()
-                all_sockets_ready = False
-
-                expected_sockets = []
-                with self.process_lock:
-                    for ap in self.active_audio_processes:
-                        if sys.platform != "win32":
-                            expected_sockets.append(ap.socket_path)
-
                 if sys.platform != "win32":
                     print("Waiting for audio player sockets...")
-                    while (time.time() - start_time) < max_wait_time:
-                        if all(self._is_socket_responsive(s) for s in expected_sockets):
-                            all_sockets_ready = True
-                            print("All audio player sockets are responsive.")
-                            break
-                        time.sleep(0.1)
-                else:
-                    # On Windows, we can't easily check for responsiveness in the same way.
-                    # A simple delay remains the most practical approach.
-                    time.sleep(2.0)
-                    all_sockets_ready = True
+                    with self.process_lock:
+                        audio_processes = list(self.active_audio_processes)
 
-                if not all_sockets_ready:
-                    print("Warning: Timed out waiting for all audio players to become responsive.", file=sys.stderr)
-                    print("Playback for some audio tracks may fail.", file=sys.stderr)
+                    for ap in audio_processes:
+                        track = self.sequencer.song.tracks[ap.track_index]
+                        max_wait_time = 5.0  # 5 secondes par socket
+                        start_time = time.time()
+                        is_ready = False
+                        while time.time() - start_time < max_wait_time:
+                            if self._is_socket_responsive(ap.socket_path):
+                                print(f"  - Socket for track '{track.name}' is responsive.")
+                                is_ready = True
+                                break
+                            time.sleep(0.1)
+
+                        if not is_ready:
+                            print(f"Warning: Timed out waiting for audio player for track '{track.name}'. Playback may fail for this track.", file=sys.stderr)
+                else:
+                    # On Windows, a simple delay is the most practical approach.
+                    time.sleep(2.0)
 
                 # --- Prime Audio Tracks Immediately After They Are Ready ---
                 print("Priming audio tracks with initial state...")
@@ -1415,30 +1410,9 @@ class Sequencer(EventDispatcher):
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
         self.invalidate_song_length_cache()
-
         if self.playback_state != "stopped":
-            is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
-            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-
-            if isinstance(track, AudioTrack):
-                with self.jack_manager.process_lock:
-                    ap = next((p for p in self.jack_manager.active_audio_processes if p.track_index == track_index), None)
-                    if ap:
-                        self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
-
-            elif isinstance(track, MidiTrack):
-                port = self.jack_manager.open_ports.get(track.output_port_name)
-                if port:
-                    if not should_be_audible:
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
-                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
-                    else:
-                        # Prime the track with its current state
-                        midi_volume = int(track.volume * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-
-            self.jack_manager._prepare_automation_events()
-
+            current_beat = self._get_current_beat()
+            self._resync_all_at_beat(current_beat)
         return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 
     def toggle_solo(self, track_index: int):
@@ -1446,51 +1420,22 @@ class Sequencer(EventDispatcher):
             return {"status": "error", "message": "Error: Invalid track index."}
         target_track = self.song.tracks[track_index]
         is_being_soloed = not target_track.is_solo
-
-        # Determine which other tracks' audible state will change
-        tracks_to_update = []
+        target_track.is_solo = is_being_soloed
+        output = ""
         if is_being_soloed:
-            target_track.is_solo = True
             for i, other_track in enumerate(self.song.tracks):
                 if i == track_index:
-                    tracks_to_update.append(other_track)
                     continue
                 if hasattr(other_track, 'is_solo') and other_track.is_solo:
                     other_track.is_solo = False
-                    tracks_to_update.append(other_track)
-        else:
-            target_track.is_solo = False
-            tracks_to_update.append(target_track)
-
+                    output += f"Track '{other_track.name}' is now Un-soloed.\n"
+        status = "Solo" if target_track.is_solo else "Un-soloed"
         self.is_dirty = True
         self.invalidate_song_length_cache()
-
         if self.playback_state != "stopped":
-            is_any_track_soloed_after_change = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
-
-            for i, track in enumerate(self.song.tracks):
-                should_be_audible = (track.is_solo or not is_any_track_soloed_after_change) and not track.is_muted
-
-                if isinstance(track, AudioTrack):
-                    with self.jack_manager.process_lock:
-                        ap = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
-                        if ap:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
-
-                elif isinstance(track, MidiTrack):
-                    port = self.jack_manager.open_ports.get(track.output_port_name)
-                    if port:
-                        if not should_be_audible:
-                            port.send(mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume 0
-                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
-                        else:
-                            midi_volume = int(track.volume * 127)
-                            port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-
-            self.jack_manager._prepare_automation_events()
-
-        status = "Solo" if target_track.is_solo else "Un-soloed"
-        output = f"Track '{target_track.name}' is now {status}."
+            current_beat = self._get_current_beat()
+            self._resync_all_at_beat(current_beat)
+        output += f"Track '{target_track.name}' is now {status}."
         return {"status": "success", "message": output}
 
     def prime_all_tracks(self) -> str:

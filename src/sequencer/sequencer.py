@@ -72,6 +72,7 @@ class JackManager:
         self.jack_client = None
         self.is_running = False
         self.last_beat = 0.0
+        self.last_transport_state = jack.STOPPED
         self.open_ports = {}
         self.next_event_indices = []
         self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
@@ -397,54 +398,15 @@ class JackManager:
         beats_per_second = self.sequencer.song.tempo / 60.0
         if beats_per_second <= 0:
             return
-
-        active_processes = []
         with self.process_lock:
-            active_processes = list(self.active_audio_processes)
-
-        wait_events = []
-        for ap in active_processes:
-            track = self.sequencer.song.tracks[ap.track_index]
-            if isinstance(track, AudioTrack):
-                target_mpv_time = (beat_pos - track.start_time) / beats_per_second
-                if target_mpv_time < 0:
-                    target_mpv_time = 0.0
-
-                command = {"command": ["seek", target_mpv_time, "absolute"]}
-                if self._send_ipc_command(ap.socket_path, command):
-                    event = threading.Event()
-                    wait_events.append((ap, target_mpv_time, event))
-
-                    # Start a thread to poll for seek completion
-                    threading.Thread(target=self._wait_for_seek, args=(ap.socket_path, target_mpv_time, event)).start()
-
-        # Wait for all seek operations to complete, with a timeout
-        timeout = 2.0  # 2-second timeout for all seeks
-        start_time = time.time()
-        for _, _, event in wait_events:
-            remaining_time = timeout - (time.time() - start_time)
-            if remaining_time <= 0:
-                print("Warning: Timed out waiting for audio tracks to seek.", file=sys.stderr)
-                break
-            if not event.wait(timeout=remaining_time):
-                print("Warning: Timed out waiting for an audio track to seek.", file=sys.stderr)
-                break
-
-    def _wait_for_seek(self, socket_path: str, target_time: float, event: threading.Event):
-        """Polls mpv for its current playback time until it matches the target time."""
-        max_wait = 1.5
-        start_time = time.time()
-        while time.time() - start_time < max_wait:
-            response = self._query_ipc_command(socket_path, {"command": ["get_property", "time-pos"]})
-            if response and response.get("error") == "success":
-                current_time = response.get("data", -1.0)
-                if current_time is not None and math.isclose(current_time, target_time, abs_tol=0.1):
-                    event.set()
-                    return
-            time.sleep(0.02)
-
-        # If the loop finishes without success, set the event anyway to avoid blocking forever
-        event.set()
+            for ap in self.active_audio_processes:
+                track = self.sequencer.song.tracks[ap.track_index]
+                if isinstance(track, AudioTrack):
+                    mpv_time = (beat_pos - track.start_time) / beats_per_second
+                    if mpv_time < 0:
+                        mpv_time = 0.0
+                    command = {"command": ["seek", mpv_time, "absolute"]}
+                    self._send_ipc_command(ap.socket_path, command)
 
     def _sync_playhead_to_beat(self, beat_pos: float):
         self.last_beat = beat_pos
@@ -484,6 +446,14 @@ class JackManager:
 
     def _process_callback(self, frames: int):
         try:
+            current_transport_state = self.jack_client.transport_state
+            if current_transport_state != self.last_transport_state:
+                if current_transport_state == jack.ROLLING:
+                    self.set_all_audio_pause_state(False)
+                else: # STOPPED or other state
+                    self.set_all_audio_pause_state(True)
+                self.last_transport_state = current_transport_state
+
             with self.sync_lock:
                 if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
                     port = self.open_ports[self.sequencer.song.metronome_port_name]
@@ -2401,58 +2371,39 @@ class Sequencer(EventDispatcher):
     def play(self, start_beat: Optional[float] = None):
         if not self.jack_manager.is_running:
             self.jack_manager.start()
-            time.sleep(0.1)
+            time.sleep(0.2) # Give JACK time to start and connect
+
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
 
-        current_beat = self._get_current_beat() if start_beat is None else start_beat
+        # If a start beat is provided, reposition the transport
+        if start_beat is not None:
+            beats_per_second = self.song.tempo / 60.0
+            samplerate = self.jack_manager.jack_client.samplerate
+            if beats_per_second > 0 and samplerate > 0:
+                target_frame = int((start_beat / beats_per_second) * samplerate)
+                _ , pos = self.jack_manager.jack_client.transport_query_struct()
+                pos.frame = target_frame
+                self.jack_manager.jack_client.transport_reposition_struct(pos)
 
-        # Ensure transport is stopped before seeking
-        if self.jack_manager.jack_client.transport_state == jack.ROLLING:
-            self.jack_manager.jack_client.transport_stop()
-
-        # Always keep audio players paused during seek operations for accuracy
-        self.jack_manager.set_all_audio_pause_state(True)
-        time.sleep(0.05)
-
-        # Reposition master transport first
-        beats_per_second = self.song.tempo / 60.0
-        samplerate = self.jack_manager.jack_client.samplerate
-        if beats_per_second > 0 and samplerate > 0:
-            target_frame = int((current_beat / beats_per_second) * samplerate)
-            _ , pos = self.jack_manager.jack_client.transport_query_struct()
-            pos.frame = target_frame
-            self.jack_manager.jack_client.transport_reposition_struct(pos)
-
-        # Sync MIDI state
-        self.jack_manager._sync_playhead_to_beat(current_beat)
-
-        # Prime tracks with correct program, volume, etc.
+        # Always prime tracks before starting
         self.prime_all_tracks()
 
-        # Now, seek audio and wait for it to be ready
-        self.jack_manager.seek_audio_to_beat(current_beat)
-
-        # Start transport and unpause audio
-        self.jack_manager.jack_client.transport_start()
-        self.jack_manager.set_all_audio_pause_state(False)
-        self.playback_state = "playing"
+        # Simply tell JACK to start rolling
+        if self.jack_manager.jack_client.transport_state != jack.ROLLING:
+            self.jack_manager.jack_client.transport_start()
 
 
     def pause(self):
-        """Toggles the JACK transport state between rolling and stopped."""
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
-            print("JACK client not running. Please start playback first.")
             return
+
         try:
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                 self.jack_manager.jack_client.transport_stop()
-                self.jack_manager.set_all_audio_pause_state(True)
-                self.playback_state = "paused"
             else:
-                # Resuming should be as robust as starting fresh
-                self.play()
+                self.jack_manager.jack_client.transport_start()
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
 

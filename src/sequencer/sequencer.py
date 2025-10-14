@@ -1498,6 +1498,7 @@ class Sequencer(EventDispatcher):
                                 del self.jack_manager._active_notes[key]
 
                     # Resynchroniser complètement le playhead interne pour s'assurer que les pistes MIDI ne prennent pas de retard.
+                    current_beat = self._get_current_beat()
                     self.jack_manager._sync_playhead_to_beat(current_beat)
                     self.jack_manager.seek_audio_to_beat(current_beat)
 
@@ -2349,80 +2350,37 @@ class Sequencer(EventDispatcher):
             print(f"Error during resynchronization: {e}", file=sys.stderr)
 
     def play(self, start_beat: Optional[float] = None):
-        """
-        Starts or seeks the JACK transport.
-        If start_beat is provided, it seeks the transport to that position.
-        It then ensures the transport is rolling.
-        """
-        print(f"DEBUG PLAY: play called with start_beat={start_beat}")
-        print(f"DEBUG PLAY: loop_enabled={self.loop_enabled}, loop_start={self.loop_start_beat}, loop_end={self.loop_end_beat}")
-        print(f"DEBUG PLAY: playback_state={self.playback_state}")
-        if hasattr(self, 'jack_manager') and self.jack_manager.jack_client:
-            print(f"DEBUG PLAY: jack_transport state={self.jack_manager.jack_client.transport_state}")
-        
-        # 1. Ensure client is running.
         if not self.jack_manager.is_running:
-            print("JACK client not active. Starting...")
             self.jack_manager.start()
             time.sleep(0.1)
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
 
-        # 2. Prime tracks with their initial state (program, volume, pan, etc.)
+        current_beat = self._get_current_beat() if start_beat is None else start_beat
+        was_rolling = self.jack_manager.jack_client.transport_state == jack.ROLLING
+
+        if was_rolling:
+            self.jack_manager.jack_client.transport_stop()
+            self.jack_manager.set_all_audio_pause_state(True)
+            time.sleep(0.05)
+
         self.prime_all_tracks()
 
-        # 3. Prime audio tracks mute/solo state ONLY if we're starting fresh (not just unpausing)
-        if self.playback_state != "paused":
-            print("Priming audio tracks mute/solo state...")
-            is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
-            with self.jack_manager.process_lock:
-                for i, track in enumerate(self.song.tracks):
-                    if isinstance(track, AudioTrack):
-                        should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                        ap = next((p for p in self.jack_manager.active_audio_processes if p.track_index == i), None)
-                        if ap:
-                            self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
+        beats_per_second = self.song.tempo / 60.0
+        samplerate = self.jack_manager.jack_client.samplerate
+        if beats_per_second > 0 and samplerate > 0:
+            target_frame = int((current_beat / beats_per_second) * samplerate)
+            _ , pos = self.jack_manager.jack_client.transport_query_struct()
+            pos.frame = target_frame
+            self.jack_manager.jack_client.transport_reposition_struct(pos)
 
-        # 4. Determine target beat and reposition transport if necessary
-        current_beat = 0.0
-        try:
-            _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
-            pos_dict = jack.position2dict(pos_struct)
-
-            if start_beat is None:
-                frame = pos_dict.get('frame', 0)
-                samplerate = self.jack_manager.jack_client.samplerate
-                beats_per_second = self.song.tempo / 60.0
-                if samplerate > 0 and beats_per_second > 0:
-                    current_beat = (frame / samplerate) * beats_per_second
-            else:
-                current_beat = start_beat
-                beats_per_second = self.song.tempo / 60.0
-                samplerate = self.jack_manager.jack_client.samplerate
-                if beats_per_second > 0 and samplerate > 0:
-                    target_frame = int((current_beat / beats_per_second) * samplerate)
-                    pos_struct.frame = target_frame
-                    self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
-                    print(f"Seeking JACK transport to {self._format_beats_to_position(current_beat)}.")
-
-        except jack.JackError as e:
-            print(f"Error querying or seeking JACK transport: {e}")
-            return
-
-        # 5. Sync internal state and audio players to the determined beat
         self.jack_manager._sync_playhead_to_beat(current_beat)
         self.jack_manager.seek_audio_to_beat(current_beat)
+        time.sleep(0.05)
 
-        # 6. Start the transport rolling and un-pause audio.
-        try:
-            if self.jack_manager.jack_client.transport_state != jack.ROLLING:
-                self.jack_manager.jack_client.transport_start()
-            self.jack_manager.set_all_audio_pause_state(False)
-        except jack.JackError as e:
-            print(f"Error starting JACK transport: {e}")
-
-        # Finally, update our internal state to "playing"
+        self.jack_manager.jack_client.transport_start()
+        self.jack_manager.set_all_audio_pause_state(False)
         self.playback_state = "playing"
 
 

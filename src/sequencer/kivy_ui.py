@@ -1203,7 +1203,7 @@ class SequencerLayout(BoxLayout):
     def handle_tempo_arrows_in_textinput(self, textinput, direction, modifiers):
         """Gère les flèches pour le champ tempo"""
         try:
-            current_tempo = int(textinput.text)
+            current_tempo = int(float(textinput.text))
             step = 10 if 'shift' in modifiers else 1
             
             if direction == 'up':

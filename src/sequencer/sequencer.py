@@ -1443,6 +1443,7 @@ class Sequencer(EventDispatcher):
                 # Resynchroniser complètement le playhead interne pour s'assurer que les pistes MIDI ne prennent pas de retard.
                 current_beat = self._get_current_beat()
                 self.jack_manager._sync_playhead_to_beat(current_beat)
+                self.jack_manager.seek_audio_to_beat(current_beat)
 
             # Régénérer les événements d'automation pour toutes les pistes
             self.jack_manager._prepare_automation_events()
@@ -1498,6 +1499,7 @@ class Sequencer(EventDispatcher):
 
                     # Resynchroniser complètement le playhead interne pour s'assurer que les pistes MIDI ne prennent pas de retard.
                     self.jack_manager._sync_playhead_to_beat(current_beat)
+                    self.jack_manager.seek_audio_to_beat(current_beat)
 
             # Régénérer les événements d'automation
             self.jack_manager._prepare_automation_events()

@@ -1440,7 +1440,6 @@ class Sequencer(EventDispatcher):
                         for key in keys_to_remove:
                             del self.jack_manager._active_notes[key]
 
-                # Resynchroniser complètement le playhead interne pour s'assurer que les pistes MIDI ne prennent pas de retard.
                 current_beat = self._get_current_beat()
                 self.jack_manager._sync_playhead_to_beat(current_beat)
                 self.jack_manager.seek_audio_to_beat(current_beat)
@@ -1497,7 +1496,6 @@ class Sequencer(EventDispatcher):
                             for key in keys_to_remove:
                                 del self.jack_manager._active_notes[key]
 
-                    # Resynchroniser complètement le playhead interne pour s'assurer que les pistes MIDI ne prennent pas de retard.
                     current_beat = self._get_current_beat()
                     self.jack_manager._sync_playhead_to_beat(current_beat)
                     self.jack_manager.seek_audio_to_beat(current_beat)
@@ -2396,10 +2394,7 @@ class Sequencer(EventDispatcher):
                 print("JACK transport stopped.")
                 self.playback_state = "paused"
             else:
-                self.jack_manager.jack_client.transport_start()
-                self.jack_manager.set_all_audio_pause_state(False) # Un-pause audio
-                print("JACK transport started.")
-                self.playback_state = "playing"
+                self.play()
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
 

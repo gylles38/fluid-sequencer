@@ -251,26 +251,43 @@ class JackManager:
                 self.jack_client = None
 
     def stop(self):
-        if not self.is_running or not self.jack_client:
+        """Stops the JACK client, its threads, and all related processes."""
+        if not self.is_running:
             return
 
-        self._display_stop_event.set()
-        if self._display_thread:
+        # Stop the display thread if it's running
+        if self._display_thread and self._display_thread.is_alive():
+            self._display_stop_event.set()
             self._display_thread.join(timeout=1.0)
-        self._display_thread = None
+            self._display_thread = None
 
+        # Deactivate and close the JACK client
+        if self.jack_client:
+            try:
+                self.jack_client.deactivate()
+                self.jack_client.close()
+                print("JACK client deactivated and closed.")
+            except jack.JackError as e:
+                print(f"Error during JACK client shutdown: {e}", file=sys.stderr)
+            finally:
+                self.jack_client = None
+
+        # Shut down all external audio player processes
         self._shutdown_audio_processes()
-        self.jack_client.deactivate()
-        self.jack_client.close()
-        self.jack_client = None
-        self.is_running = False
+        print("Audio processes terminated.")
 
-        for port in self.open_ports.values():
-            is_virtual = any(vp.name == port.name for vp in self.sequencer.virtual_ports)
-            if not is_virtual and not port.closed:
-                port.close()
+        # Close all open MIDI ports
+        for name, port in self.open_ports.items():
+            try:
+                if not port.closed:
+                    port.close()
+            except Exception as e:
+                print(f"Error closing MIDI port '{name}': {e}", file=sys.stderr)
         self.open_ports.clear()
-        print("JACK client stopped.")
+
+        # Reset the state
+        self.is_running = False
+        self._active_notes.clear()
 
     def _send_ipc_command(self, socket_path, command_data) -> bool:
         try:
@@ -2408,26 +2425,54 @@ class Sequencer(EventDispatcher):
             print(f"Error controlling JACK transport: {e}")
 
     def stop(self):
-        if not self.is_recording and self.playback_state == "stopped":
-            print("Already stopped.")
-            return
+        """
+        Arrête la lecture du transport JACK et replace la tête de lecture
+        à sa dernière position de départ, sans détruire le client JACK.
+        """
+        # 1. Gérer l'arrêt de l'enregistrement s'il est en cours (logique correcte et conservée)
         if self.is_recording and self.recording_thread:
+            print("Stopping recording...")
             self._stop_event.set()
             self.recording_thread.join(timeout=1.0)
             self.is_recording = False
-        if self.jack_manager.is_running and self.jack_manager.jack_client:
-            try:
-                if self.jack_manager.jack_client.transport_state == jack.ROLLING:
-                    self.jack_manager.jack_client.transport_stop()
-                    print("JACK transport stopped.")
-                    time.sleep(0.1)
-            except jack.JackError as e:
-                print(f"Error stopping JACK transport: {e}")
-        print("Stopping JACK client...")
-        self.jack_manager.stop()
+
+        # 2. Vérifier si le client JACK est actif
+        if not self.jack_manager.is_running or not self.jack_manager.jack_client:
+            # Si on n'est pas en lecture, il n'y a rien à faire.
+            # On s'assure juste que l'état interne est correct.
+            self.playback_state = "stopped"
+            return
+
+        try:
+            # 3. Arrêter le transport s'il est en cours de lecture
+            if self.jack_manager.jack_client.transport_state == jack.ROLLING:
+                self.jack_manager.jack_client.transport_stop()
+                print("JACK transport stopped.")
+
+            # 4. (Optionnel mais recommandé) Remettre la tête de lecture au début.
+            #    Ceci distingue le "stop" (arrêt et retour au début) du "pause" (arrêt sur place).
+            beats_per_second = self.song.tempo / 60.0
+            samplerate = self.jack_manager.jack_client.samplerate
+            if beats_per_second > 0 and samplerate > 0:
+                # On utilise last_start_beat pour revenir au point de départ du dernier 'play'
+                target_frame = int((self.last_start_beat / beats_per_second) * samplerate)
+                _ , pos = self.jack_manager.jack_client.transport_query_struct()
+                pos.frame = target_frame
+                self.jack_manager.jack_client.transport_reposition_struct(pos)
+                # Synchroniser manuellement notre état interne
+                self.jack_manager._sync_playhead_to_beat(self.last_start_beat)
+                self.jack_manager.seek_audio_to_beat(self.last_start_beat)
+
+        except jack.JackError as e:
+            print(f"Error controlling JACK transport: {e}")
+
+        # 5. Mettre à jour l'état et couper toutes les notes MIDI par sécurité
         self.playback_state = "stopped"
         self._all_notes_off()
-        print("Session stopped.")
+        print("Sequencer stopped.")
+
+        # LA LIGNE SUIVANTE EST LA CAUSE DU PROBLÈME ET A ÉTÉ VOLONTAIREMENT SUPPRIMÉE :
+        # self.jack_manager.stop()
 
     def set_loop_range(self, start_pos_str: str, end_pos_str: str) -> str:
         """Sets the loop range without starting playback."""

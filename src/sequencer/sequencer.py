@@ -1432,53 +1432,100 @@ class Sequencer(EventDispatcher):
         return {"status": "success", "message": f"Velocity for track '{track.name}' set to {velocity:.2f}."}
 
     def toggle_mute(self, track_index: int):
+        """
+        Active/désactive le mute sur une piste.
+        Corrige la désynchronisation audio/MIDI en forçant une resynchronisation JACK complète
+        lors du unmute (équivalent à un mini pause/reprise).
+        """
+
         if not 0 <= track_index < len(self.song.tracks):
             return {"status": "error", "message": "Error: Invalid track index."}
+
         track = self.song.tracks[track_index]
         track.is_muted = not track.is_muted
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
         self.invalidate_song_length_cache()
 
-        # Mise à jour immédiate pendant la lecture
-        if self.jack_manager.is_running:
-            is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
-            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+        debug = getattr(self, "debug_enabled", True)
+        if debug:
+            print(f"[DEBUG] toggle_mute(): Track '{track.name}' → {status}")
 
-            if isinstance(track, AudioTrack):
-                # Pour les pistes audio : commande IPC directe
-                with self.jack_manager.process_lock:
-                    ap = next((p for p in self.jack_manager.active_audio_processes if p.track_index == track_index), None)
-                    if ap:
-                        success = self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
-                        if not success:
-                            print(f"Warning: Failed to update mute state for audio track '{track.name}'", file=sys.stderr)
+        if not self.jack_manager.is_running:
+            return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 
-            elif isinstance(track, MidiTrack):
-                # Pour les pistes MIDI : gérer les notes actives et resynchroniser
+        is_any_track_soloed = any(
+            t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo')
+        )
+        should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+
+        # === AUDIO TRACK ===
+        if isinstance(track, AudioTrack):
+            with self.jack_manager.process_lock:
+                ap = next((p for p in self.jack_manager.active_audio_processes if p.track_index == track_index), None)
+                if ap:
+                    success = self.jack_manager._send_ipc_command(
+                        ap.socket_path,
+                        {"command": ["set_property", "mute", not should_be_audible]}
+                    )
+                    if not success:
+                        print(f"[DEBUG] Warning: Failed to update mute state for audio track '{track.name}'", file=sys.stderr)
+
+        # === MIDI TRACK ===
+        elif isinstance(track, MidiTrack):
+            if track.output_port_name and track.output_port_name in self.jack_manager.open_ports:
+                port = self.jack_manager.open_ports[track.output_port_name]
+
                 if track.is_muted:
-                    # Couper toutes les notes actives de cette piste
-                    if track.output_port_name and track.output_port_name in self.jack_manager.open_ports:
-                        port = self.jack_manager.open_ports[track.output_port_name]
-                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
-                        # Supprimer les notes actives de cette piste du dictionnaire
-                        keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == track_index]
-                        for key in keys_to_remove:
-                            del self.jack_manager._active_notes[key]
+                    # Envoyer un All Notes Off
+                    for cc in (123, 120, 121):
+                        port.send(mido.Message('control_change', channel=track.channel, control=cc, value=0))
+                    # Supprimer notes actives
+                    keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == track_index]
+                    for key in keys_to_remove:
+                        del self.jack_manager._active_notes[key]
+                    if debug:
+                        print(f"[DEBUG] Active notes cleared for '{track.name}'")
 
-                # CORRECTION CRITIQUE : Resynchroniser next_event_indices pour cette piste
-                current_beat = self._get_current_beat()
-                if track_index < len(self.jack_manager.next_event_indices):
-                    # Trouver le prochain événement à partir de la position actuelle
-                    for j, event in enumerate(track.events):
-                        if event.start_time >= current_beat:
-                            self.jack_manager.next_event_indices[track_index] = j
-                            break
-                    else:
-                        self.jack_manager.next_event_indices[track_index] = len(track.events)
+        # --- Régénérer les automations ---
+        self.jack_manager._prepare_automation_events()
 
-            # Régénérer les événements d'automation pour toutes les pistes
-            self.jack_manager._prepare_automation_events()
+        # --- NOUVEAU : Forcer une resynchronisation globale (équivaut à pause/reprise) ---
+        if debug:
+            print("[DEBUG] Forcing JACK transport resync...")
+
+        try:
+            jc = self.jack_manager.jack_client
+            if jc:
+                # Lire position actuelle
+                state, pos_struct = jc.transport_query_struct()
+                pos_dict = jack.position2dict(pos_struct)
+                frame = pos_dict.get('frame', 0)
+                samplerate = jc.samplerate
+                beats_per_second = self.song.tempo / 60.0
+                current_beat = (frame / samplerate) * beats_per_second if samplerate > 0 and beats_per_second > 0 else self.jack_manager.last_beat
+
+                # 1️⃣ Stopper brièvement le transport (simule un "pause")
+                jc.transport_stop()
+                time.sleep(0.02)  # 20 ms suffit
+
+                # 2️⃣ Repositionner le playhead interne + pistes audio
+                self.jack_manager._sync_playhead_to_beat(current_beat)
+                self.jack_manager.seek_audio_to_beat(current_beat)
+                self.jack_manager.last_beat = current_beat
+
+                # 3️⃣ Relancer JACK
+                jc.transport_start()
+
+                if debug:
+                    print(f"[DEBUG] Transport resynced → beat={current_beat:.6f}")
+
+        except Exception as e:
+            print(f"[DEBUG] JACK resync failed: {e}", file=sys.stderr)
+
+        if debug:
+            print(f"[DEBUG] last_beat={self.jack_manager.last_beat:.6f}")
+            print(f"[DEBUG] next_event_indices={self.jack_manager.next_event_indices}")
 
         return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 

@@ -9,13 +9,17 @@ from kivy.properties import StringProperty
 class TooltipMDIconButton(MDIconButton):
     tooltip_text = StringProperty()
 
+    # NOUVEAU : État de classe pour suivre le dernier bouton survolé
+    # Ceci est critique pour la logique des boutons adjacents.
+    _active_instance = None
+
     def __init__(self, **kwargs):
         self.tooltip_text = kwargs.pop("tooltip_text", "")
         super().__init__(**kwargs)
         self.tooltip_delay = 0.2
         self.tooltip_label = None
         self._show_event = None
-        Window.bind(mouse_pos=self.on_mouse_pos)
+        # La liaison Window.bind est gérée dans on_parent
         self.bind(tooltip_text=self._on_tooltip_text_changed)
 
     def _on_tooltip_text_changed(self, instance, value):
@@ -30,13 +34,29 @@ class TooltipMDIconButton(MDIconButton):
 
     def on_mouse_pos(self, window, pos):
         collide = self.collide_point(*self.to_widget(*pos))
+        
         if collide:
+            # === LOGIQUE DE PRISE DE CONTRÔLE (RÈGLEMENT DU CONFLIT ENTRE BOUTONS) ===
+            # Si un autre bouton est actif, on le force à se masquer avant de continuer
+            if TooltipMDIconButton._active_instance and TooltipMDIconButton._active_instance is not self:
+                TooltipMDIconButton._active_instance._hide_tooltip()
+                
+            # Définir cette instance comme l'instance active
+            TooltipMDIconButton._active_instance = self
+            # =========================================================================
+
             self._ensure_tooltip()
             self._update_tooltip_position(pos)
             if not self._show_event:
                 self._show_event = Clock.schedule_once(self._do_show_tooltip, self.tooltip_delay)
         else:
-            self._hide_tooltip()
+            # Vérification essentielle : si le curseur n'est plus sur le bouton, mais qu'il est sur le tooltip
+            is_over_tooltip = False
+            if self.tooltip_label and self.tooltip_label.parent and self.tooltip_label.collide_point(*pos):
+                is_over_tooltip = True
+            
+            if not is_over_tooltip:
+                self._hide_tooltip()
 
     def _ensure_tooltip(self):
         if self.tooltip_label:
@@ -77,11 +97,29 @@ class TooltipMDIconButton(MDIconButton):
         if self._show_event:
             self._show_event.cancel()
             self._show_event = None
+            
         if self.tooltip_label and self.tooltip_label.parent:
             Window.remove_widget(self.tooltip_label)
+            
+        # NOUVEAU : Réinitialiser l'état global
+        if TooltipMDIconButton._active_instance is self:
+            TooltipMDIconButton._active_instance = None
+            
+    def on_release(self):
+        """Force le masquage du tooltip immédiatement après un clic (relâchement)."""
+        super().on_release()
+        self._hide_tooltip()  
 
     def on_parent(self, instance, parent):
         if parent is None:
             self._hide_tooltip()
+            # DÉLIER le suivi de la souris 
+            Window.unbind(mouse_pos=self.on_mouse_pos) 
+            # NOUVEAU : Réinitialiser l'état global si on retire le bouton
+            if TooltipMDIconButton._active_instance is self:
+                TooltipMDIconButton._active_instance = None
             if self.tooltip_label:
                 self.tooltip_label = None
+        else:
+            # RELIER le suivi de la souris (quand le bouton est ajouté)
+            Window.bind(mouse_pos=self.on_mouse_pos)

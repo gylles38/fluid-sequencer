@@ -397,6 +397,11 @@ class JackManager:
     def _shutdown_audio_processes(self):
         with self.process_lock:
             for ap in self.active_audio_processes:
+                
+                # CORRECTION : Tenter un arrêt propre via IPC ('quit') avant de forcer la terminaison
+                self._send_ipc_command(ap.socket_path, {"command": ["quit"]}) 
+                time.sleep(0.05) # Donner un petit délai à mpv pour se fermer proprement
+
                 try:
                     if ap.process.poll() is None:
                         ap.process.terminate()
@@ -1379,13 +1384,13 @@ class Sequencer(EventDispatcher):
         track.pan = pan
         self.is_dirty = True
 
+        # === UPDATE PISTE AUDIO (mpv IPC) ===
         if isinstance(track, AudioTrack):
             if self.jack_manager.is_running:
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
                             # Pan value from -1.0 (L) to 1.0 (R)
-                            # Gains for stereo panning that preserves stereo separation
                             gain_l = min(1.0, 1.0 - pan)
                             gain_r = min(1.0, 1.0 + pan)
                             # The filter string pans left and right channels independently
@@ -1393,13 +1398,54 @@ class Sequencer(EventDispatcher):
                             command = {"command": ["set_property", "af", pan_filter]}
                             self.jack_manager._send_ipc_command(ap.socket_path, command)
                             break
+        # === UPDATE PISTE MIDI (CC #10) ===
         elif isinstance(track, MidiTrack):
             if self.jack_manager.is_running and track.output_port_name:
                 port = self.jack_manager.open_ports.get(track.output_port_name)
                 if port:
+                    # Conversion de pan (-1.0 à 1.0) en valeur MIDI (0 à 127)
                     midi_pan = int((pan + 1.0) / 2.0 * 127)
                     port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
 
+        # ----------------------------------------------------------------------------------
+        # NOUVEAU BLOCK : FORCER LA RESYNCHRONISATION GLOBALE
+        # ----------------------------------------------------------------------------------
+        if self.jack_manager.is_running:
+            debug = getattr(self, "debug_enabled", True)
+            if debug:
+                print("[DEBUG] Forcing JACK transport resync after pan change...")
+
+            try:
+                import jack # S'assurer que 'jack' est bien importé dans le scope ou en tête de fichier
+                jc = self.jack_manager.jack_client
+                if jc:
+                    # 1. Lire la position actuelle
+                    state, pos_struct = jc.transport_query_struct()
+                    pos_dict = jack.position2dict(pos_struct)
+                    frame = pos_dict.get('frame', 0)
+                    samplerate = jc.samplerate
+                    beats_per_second = self.song.tempo / 60.0 
+                    current_beat = (frame / samplerate) * beats_per_second if samplerate > 0 and beats_per_second > 0 else self.jack_manager.last_beat
+
+                    # 2. Stopper brièvement le transport
+                    jc.transport_stop()
+                    time.sleep(0.02)
+
+                    # 3. Repositionner tout (playhead interne, pistes audio)
+                    self.jack_manager._sync_playhead_to_beat(current_beat)
+                    self.jack_manager.seek_audio_to_beat(current_beat) 
+                    self.jack_manager.last_beat = current_beat
+
+                    # 4. Relancer JACK
+                    jc.transport_start()
+
+                    if debug:
+                        print(f"[DEBUG] Transport resynced → beat={current_beat:.6f}")
+
+            except Exception as e:
+                print(f"[DEBUG] JACK resync failed during pan change: {e}", file=sys.stderr)
+        # ----------------------------------------------------------------------------------
+        
         return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
 
     def set_track_velocity(self, track_index: int, velocity_str: Optional[str] = None, api_mode: bool = False, confirmation_handler=None):
@@ -1532,10 +1578,12 @@ class Sequencer(EventDispatcher):
     def toggle_solo(self, track_index: int):
         if not 0 <= track_index < len(self.song.tracks):
             return {"status": "error", "message": "Error: Invalid track index."}
+        
         target_track = self.song.tracks[track_index]
         is_being_soloed = not target_track.is_solo
         target_track.is_solo = is_being_soloed
         output = ""
+        
         if is_being_soloed:
             for i, other_track in enumerate(self.song.tracks):
                 if i == track_index:
@@ -1543,15 +1591,21 @@ class Sequencer(EventDispatcher):
                 if hasattr(other_track, 'is_solo') and other_track.is_solo:
                     other_track.is_solo = False
                     output += f"Track '{other_track.name}' is now Un-soloed.\n"
+                    
         status = "Solo" if target_track.is_solo else "Un-soloed"
         self.is_dirty = True
         self.invalidate_song_length_cache()
 
+        # Récupération de l'état de debug pour les prints
+        debug = getattr(self, "debug_enabled", True) # AJOUTÉ pour cohérence avec toggle_mute
+
         # Mise à jour immédiate pendant la lecture
         if self.jack_manager.is_running:
             is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
-            current_beat = self._get_current_beat()
+            # current_beat = self._get_current_beat() # Non utilisé directement ici, mais le bloc de resync va le calculer
 
+            # ... (Logique de mute/unmute des pistes audio et MIDI existante) ...
+            
             # Mettre à jour TOUTES les pistes audio
             with self.jack_manager.process_lock:
                 for i, track in enumerate(self.song.tracks):
@@ -1561,7 +1615,9 @@ class Sequencer(EventDispatcher):
                         if ap:
                             self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
 
-            # Pour les pistes MIDI : couper les notes des pistes qui deviennent inaudibles ET resynchroniser
+            # Pour les pistes MIDI : couper les notes et resynchroniser next_event_indices
+            current_beat = self._get_current_beat() # Nécessaire pour la resynchro MIDI et audio
+
             for i, track in enumerate(self.song.tracks):
                 if isinstance(track, MidiTrack):
                     should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
@@ -1576,7 +1632,7 @@ class Sequencer(EventDispatcher):
                             for key in keys_to_remove:
                                 del self.jack_manager._active_notes[key]
 
-                    # CORRECTION CRITIQUE : Resynchroniser next_event_indices pour toutes les pistes MIDI
+                    # Resynchroniser next_event_indices pour toutes les pistes MIDI
                     if i < len(self.jack_manager.next_event_indices):
                         for j, event in enumerate(track.events):
                             if event.start_time >= current_beat:
@@ -1587,6 +1643,47 @@ class Sequencer(EventDispatcher):
 
             # Régénérer les événements d'automation
             self.jack_manager._prepare_automation_events()
+
+            # ----------------------------------------------------------------------------------
+            # NOUVEAU BLOCK : FORCER LA RESYNCHRONISATION GLOBALE (SOLUTION AU DÉCALAGE)
+            # ----------------------------------------------------------------------------------
+            if debug:
+                print("[DEBUG] Forcing JACK transport resync after solo/unsolo...")
+
+            try:
+                jc = self.jack_manager.jack_client
+                if jc:
+                    # Lire position actuelle depuis JACK (méthode la plus précise)
+                    state, pos_struct = jc.transport_query_struct()
+                    pos_dict = jack.position2dict(pos_struct)
+                    frame = pos_dict.get('frame', 0)
+                    samplerate = jc.samplerate
+                    beats_per_second = self.song.tempo / 60.0 
+                    # Recalculer le beat courant de manière robuste
+                    current_beat = (frame / samplerate) * beats_per_second if samplerate > 0 and beats_per_second > 0 else self.jack_manager.last_beat
+
+                    # 1️⃣ Stopper brièvement le transport (simule un "pause")
+                    jc.transport_stop()
+                    time.sleep(0.02)  # 20 ms suffit
+
+                    # 2️⃣ Repositionner le playhead interne + pistes audio
+                    self.jack_manager._sync_playhead_to_beat(current_beat)
+                    self.jack_manager.seek_audio_to_beat(current_beat) # ENVOIE LA COMMANDE 'SEEK' À TOUTES LES PISTES MPV
+                    self.jack_manager.last_beat = current_beat
+
+                    # 3️⃣ Relancer JACK
+                    jc.transport_start()
+
+                    if debug:
+                        print(f"[DEBUG] Transport resynced → beat={current_beat:.6f}")
+
+            except Exception as e:
+                print(f"[DEBUG] JACK resync failed during solo/unsolo: {e}", file=sys.stderr)
+            
+            if debug:
+                print(f"[DEBUG] last_beat={self.jack_manager.last_beat:.6f}")
+                print(f"[DEBUG] next_event_indices={self.jack_manager.next_event_indices}")
+            # ----------------------------------------------------------------------------------
 
         output += f"Track '{target_track.name}' is now {status}."
         return {"status": "success", "message": output}
@@ -1863,7 +1960,13 @@ class Sequencer(EventDispatcher):
             if not port.closed:
                 port.close()
         print("Virtual ports closed.")
-
+        """Assure la fermeture propre des processus audio mpv à la sortie du séquenceur."""
+        try:
+            self.jack_manager._shutdown_audio_processes()
+            print("✅ All mpv processes terminated.")
+        except Exception as e:
+            print(f"⚠️ Cleanup error: {e}")
+   
     def delete_virtual_port(self, name: str) -> str:
         port_to_delete = None
         for vp in self.virtual_ports:

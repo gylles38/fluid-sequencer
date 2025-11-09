@@ -1,13 +1,25 @@
 from . import *  # Importe tous les imports communs
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.properties import NumericProperty, ObjectProperty
+from kivy.uix.widget import Widget 
+from kivy.uix.label import Label 
+from kivy.metrics import dp
+from sequencer.ui_components.MeasureGrid import MeasureGrid
 
 class TrackWidget(BoxLayout):
+    # Propriétés de contrôle des dimensions de la grille
+    total_beats = NumericProperty(128.0) 
+    pixels_per_beat = NumericProperty(dp(100))
+    timeline_container = ObjectProperty(None)
+        
     def __init__(self, track, track_index, sequencer_layout, **kwargs):
         super(TrackWidget, self).__init__(**kwargs)
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
-        self.orientation = 'horizontal'
+        self.orientation = 'horizontal' # Conteneur principal: Nom | Timeline | Contrôles
         self.size_hint_y = None
         self.height = dp(56)  # Augmenté la hauteur pour plus d'espace
         self.spacing = dp(12)  # Espacement augmenté entre les éléments
@@ -24,24 +36,57 @@ class TrackWidget(BoxLayout):
 
         self.bind(pos=self._update_graphics, size=self._update_graphics)
 
-        # 1. Track Info (Index and Name) - Expands to fill space
-        name_label = Label(
+        # 1. Track Info (Index and Name)
+        self.name_label = Label(
             text=f"[{track_index}] {track.name}",
-            size_hint_x=0.8,  # Utiliser size_hint_x au lieu de size_hint_x=1
-            halign='left',
-            valign='middle',
-            shorten=True,
-            shorten_from='right',
-            text_size=(None, None),
+            size_hint_x=None, 
+            width=dp(150), # Largeur fixe pour le nom
+            halign='left', 
+            valign='middle', 
             color=[0.9, 0.9, 0.9, 1],
             font_size=dp(14),
-            bold=True
+            bold=True            
         )
-        name_label.bind(
-            size=lambda *x: setattr(name_label, 'text_size', (name_label.width, None)),
-            texture_size=lambda *x: setattr(name_label, 'height', name_label.texture_size[1])
+        self.add_widget(self.name_label)
+
+        # ScrollView pour le défilement horizontal de la timeline
+        self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False) # Prend tout l'espace restant
+        
+        # Conteneur interne : un Widget de taille variable (la largeur sera mise à jour dans update_timeline_size)
+        self.timeline_container = Widget(size_hint=(None, 1)) 
+        
+        # Grille de Mesures (en premier plan pour être en arrière-plan)
+        self.measure_grid = MeasureGrid(
+            size_hint=(1, 1), 
+            beat_per_measure=4, 
+            total_beats=self.total_beats,
+            pixels_per_beat=self.pixels_per_beat
         )
-        self.add_widget(name_label)
+        self.timeline_container.add_widget(self.measure_grid)
+
+        # Conteneur d'événements (où vos notes/clips seront dessinés PAR DESSUS la grille)
+        # Il doit aussi avoir size_hint=(1, 1) pour s'aligner avec measure_grid
+        self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
+        self.timeline_container.add_widget(self.event_container)
+       
+        # NOUVEAU : Tête de lecture (Playback Head)
+        self.playback_line = Widget(size_hint_x=None, width=dp(2), size_hint_y=1)
+        with self.playback_line.canvas:
+            Color(1, 0, 0, 0.8) # Rouge vif
+            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
+        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
+        
+        # Ajouter la ligne de lecture en DERNIER pour qu'elle soit au-dessus de tout
+        self.timeline_container.add_widget(self.playback_line)        
+        
+        self.timeline_scroll.add_widget(self.timeline_container)
+        self.add_widget(self.timeline_scroll) # Ajout au conteneur principal (TrackWidget)
+
+        # Lier les propriétés à la mise à jour de la taille du conteneur
+        self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
+        
+        # Mise à jour initiale
+        self.update_timeline_size()
 
         # 2. Track Type Icon avec fond
         type_icon_layout = BoxLayout(
@@ -301,6 +346,126 @@ class TrackWidget(BoxLayout):
         pan_layout.add_widget(self.pan_label)
         pan_layout.add_widget(self.pan_slider)
         self.add_widget(pan_layout)
+
+    def update_playback_rect(self, *args):
+        if self.playback_rect:
+            self.playback_rect.pos = self.playback_line.pos
+            self.playback_rect.size = self.playback_line.size
+
+    def update_timeline_size(self, *args):
+        # Met à jour la largeur du conteneur pour correspondre à la longueur du morceau et au zoom.
+        if not self.timeline_container: return
+
+        width = self.total_beats * self.pixels_per_beat
+        
+        scroll_view_width = self.timeline_scroll.width 
+        
+        # Calcul de la marge utilisée pour le centrage (la même que dans set_playback_position)
+        margin_x = scroll_view_width * 0.3 
+
+        # ⚠️ CORRECTION CRITIQUE ⚠️
+        # La largeur minimale du contenu doit inclure la ScrollView width PLUS la marge de fin
+        # pour permettre à la tête de lecture de se centrer sur le dernier beat du morceau.
+        min_width = scroll_view_width 
+        
+        EPSILON_PIXELS = dp(1)
+        # Largeur de la piste + une marge de fin pour que le dernier beat puisse être centré.
+        required_width = width + margin_x + EPSILON_PIXELS
+        
+        # La largeur finale doit être au moins la largeur de la ScrollView ou la largeur requise.
+        final_width = max(required_width, min_width)
+        
+        self.timeline_container.width = final_width
+        
+        # Assurez-vous que le MeasureGrid reçoit les paramètres de mise à jour.
+        self.measure_grid.total_beats = self.total_beats
+        self.measure_grid.pixels_per_beat = self.pixels_per_beat
+        
+        print(f"DEBUG: update_timeline_size width= {width}, margin_x={margin_x}, final_width= {final_width}")
+
+    def set_playback_position(self, current_beat: float):
+        """Met à jour la tête de lecture et force le défilement si nécessaire."""
+        
+        EPSILON_PIXELS = dp(1) 
+        pixels_per_beat = self.pixels_per_beat
+        
+        # timeline_width inclut maintenant la marge de fin
+        timeline_width = self.timeline_container.width 
+        scroll_view_width = self.timeline_scroll.width
+        
+        # 1. Mise à jour de la position du curseur
+        x_pos = current_beat * pixels_per_beat
+        if self.playback_line:
+            self.playback_line.x = x_pos 
+            
+        # Vérification des dimensions (si le contenu est plus petit que la ScrollView)
+        if timeline_width <= scroll_view_width + EPSILON_PIXELS:
+            self.timeline_scroll.scroll_x = 0.0
+            return
+                
+        margin_x = scroll_view_width * 0.3 
+        
+        # ⚠️ CORRECTION CRITIQUE DU DÉPLACEMENT MAXIMAL
+        # Nous ajoutons EPSILON_PIXELS pour s'assurer que le MAX_DISPLACEMENT_PHYSICAL
+        # n'est jamais trop petit à cause des erreurs de flottant, garantissant que scroll_x = 1.0 est atteignable
+        MAX_DISPLACEMENT_PHYSICAL = timeline_width - scroll_view_width + EPSILON_PIXELS
+        
+        # -----------------------------------------------------------
+        # CRITIQUE 1 : CORRECTION DU PINNAGE AU DÉPART 
+        if x_pos < margin_x: 
+            self.timeline_scroll.scroll_x = 0.0
+            return
+        # -----------------------------------------------------------
+
+        
+        # --- 2. Logique de Défilement Automatique ---
+
+        # current_scroll_x_pixels doit être calculé avec le nouveau MAX_DISPLACEMENT_PHYSICAL
+        current_scroll_x_pixels = self.timeline_scroll.scroll_x * MAX_DISPLACEMENT_PHYSICAL
+        new_scroll_x_pixels = -1
+
+        # Cas A: Défilement vers la DROITE 
+        if x_pos > current_scroll_x_pixels + scroll_view_width - margin_x:
+            new_scroll_x_pixels = x_pos - (scroll_view_width - margin_x)
+            
+        # Cas B: Défilement vers la GAUCHE 
+        elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > EPSILON_PIXELS:
+            new_scroll_x_pixels = x_pos - margin_x
+            
+        
+        if new_scroll_x_pixels == -1:
+            return
+
+        # -----------------------------------------------------------
+        # CRITIQUE 2 : LIMITE DE FIN DE PISTE
+        
+        # Plafonnement des pixels de défilement
+        new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, MAX_DISPLACEMENT_PHYSICAL))
+
+        # Normalisation L->R 
+        # ⚠️ Plafonner la division pour éviter l'erreur si MAX_DISPLACEMENT_PHYSICAL est nul ou très proche de zéro
+        if MAX_DISPLACEMENT_PHYSICAL < EPSILON_PIXELS:
+            normalized_scroll_value = 0.0
+        else:
+            normalized_scroll_value = new_scroll_x_pixels / MAX_DISPLACEMENT_PHYSICAL
+        
+        # Appliquer le défilement (doit être entre 0.0 et 1.0)
+        self.timeline_scroll.scroll_x = max(0.0, min(1.0, normalized_scroll_value))
+
+
+    def update_grid_parameters(self, total_beats: float, pixels_per_beat: float):
+        """Méthode appelée par SequencerApp pour mettre à jour les paramètres de la grille."""
+        self.total_beats = total_beats
+        self.pixels_per_beat = pixels_per_beat
+
+    def reset_timeline_view(self):
+        """Force la vue à se positionner à l'extrême gauche (beat 0) et le curseur à 0."""
+        # S'assurer que le curseur est à 0 (même si la lecture ne démarre pas à 0)
+        if self.playback_line:
+            self.playback_line.x = 0 
+        
+        # S'assurer que la ScrollView est à l'extrême gauche
+        self.timeline_scroll.scroll_x = 0.0
 
     def _update_graphics(self, *args):
         if hasattr(self, 'background_rect'):

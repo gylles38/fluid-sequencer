@@ -42,6 +42,7 @@ class SequencerLayout(BoxLayout):
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
         self.sequencer = Sequencer(gui_mode=True)
+        self._transport_update_event = None # Pour stocker l'événement Clock        
         self.current_command = ""
         self.end_pos_manual_override = False
         self.is_playing = False
@@ -50,6 +51,8 @@ class SequencerLayout(BoxLayout):
         self.is_looping = False
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
+        
+        self.track_widgets = [] # Initialisation de la liste des widgets de piste                
 
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
@@ -747,10 +750,6 @@ class SequencerLayout(BoxLayout):
                 command = 'loop'
             print(f"DEBUG: Sending loop command: {command}")
             self.process_command_ui(command)
-            
-            # Attendre un peu que le loop soit configuré puis lancer la lecture
-            from kivy.clock import Clock
-            Clock.schedule_once(lambda dt: self._start_playback(start_pos), 0.1)
         else:
             # Mode lecture normal - TOUJOURS spécifier une fin de lecture
             if end_pos:
@@ -761,6 +760,10 @@ class SequencerLayout(BoxLayout):
                 command = f'play "{start_pos}" "{end_of_song}"'
             print(f"DEBUG: Sending command: {command}")
             self.process_command_ui(command)
+
+        # Attendre un peu que le loop soit configuré puis lancer la lecture
+        from kivy.clock import Clock
+        Clock.schedule_once(lambda dt: self._start_playback(start_pos), 0.1)
         
         # Désactiver pause et record
         if self.is_paused:
@@ -776,7 +779,44 @@ class SequencerLayout(BoxLayout):
         """Démarre la lecture après configuration du loop"""
         command = f'play "{start_pos}"'
         print(f"DEBUG: Starting playback: {command}")
+        
+        # 1. Réinitialiser la vue de la timeline immédiatement
+        for track_widget in self.track_widgets: 
+            track_widget.reset_timeline_view()
+        
+
+        # 2. Démarrer le défilement AUTOMATIQUEMENT SANS DÉLAI
+        if self._transport_update_event is None:
+            self._transport_update_event = Clock.schedule_interval(self.update_playback_position, 1/60)
+
+        # 3. Exécuter la commande JACK
         self.process_command_ui(command)
+  
+    def update_playback_position(self, dt):
+        """Met à jour l'affichage, le défilement ET la taille de la timeline à chaque tick de l'horloge."""
+        
+        # 1. OBTENIR ET APPLIQUER LA LONGUEUR DU MORCEAU (DOIT ÊTRE INCONDITIONNEL)
+        # C'est rapide grâce au CACHE dans sequencer.py, donc aucun impact sur la performance.
+        new_total_beats = self.sequencer.get_song_length_in_beats()
+        
+        # 2. DÉTERMINER LA POSITION DE LECTURE
+        if self.sequencer.jack_manager.is_running:
+            current_beat = self.sequencer.jack_manager.get_current_beat()
+        else:
+            # Récupère la position de la tête de lecture lorsque la lecture est arrêtée
+            current_beat = self.sequencer.current_beat 
+
+        # 3. MISE À JOUR DES WIDGETS DE PISTE
+        for track_widget in self.track_widgets:
+            
+            # 3a. Mise à jour de la longueur totale de la grille
+            # Cette affectation déclenche TrackWidget.update_timeline_size() via le binding,
+            # corrigeant la taille de l'ascenseur, que la lecture soit démarrée ou non.
+            if track_widget.total_beats != new_total_beats:
+                track_widget.total_beats = new_total_beats
+                
+            # 3b. Mise à jour de la position de la tête de lecture
+            track_widget.set_playback_position(current_beat)
 
     def start_recording_from_ui(self):
         """Démarre l'enregistrement en utilisant les paramètres de l'interface"""
@@ -928,6 +968,11 @@ class SequencerLayout(BoxLayout):
         self.record_button.icon = 'record'
         self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
         self.process_command_ui('stop')
+        
+        # Arrêter le défilement automatique
+        if self._transport_update_event:
+            self._transport_update_event.cancel()
+            self._transport_update_event = None   
 
     def record_pressed(self, instance):
         if self.is_recording:
@@ -1039,12 +1084,24 @@ class SequencerLayout(BoxLayout):
 
     def update_track_list(self):
         self.track_list_layout.clear_widgets()
+        # ----------------------------------------------------
+        # ⚠️ NOUVEAU : FORCER L'INITIALISATION DE LA TAILLE (Critique)
+        # ----------------------------------------------------
+        
+        # 1. Obtient la longueur correcte du morceau (le cache peut être vide, donc cette première fois est la plus longue)
+        # Note: Cela déclenchera la lecture initiale du fichier audio, mais seulement UNE FOIS.
+        final_total_beats = self.sequencer.get_song_length_in_beats() 
+                
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.is_metronome:
                 continue
+            
+            # Affecter la propriété Kivy déclenche AUTOMATIQUEMENT update_timeline_size()
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
+            track_widget.total_beats = final_total_beats
+            self.track_widgets.append(track_widget)
             self.track_list_layout.add_widget(track_widget)
-
+            
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"

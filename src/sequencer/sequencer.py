@@ -289,6 +289,10 @@ class JackManager:
         self.is_running = False
         self._active_notes.clear()
 
+    def get_current_beat(self) -> float:
+        """Retourne la position actuelle du transport en beats."""
+        return self.last_beat
+
     def _send_ipc_command(self, socket_path, command_data) -> bool:
         try:
             if sys.platform == "win32":
@@ -631,6 +635,25 @@ class JackManager:
                 self.sequencer.current_beat = self.last_beat
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
+            
+    def get_measure_beats(self):
+        """Calcule la position de chaque barre de mesure en beats."""
+        if not self.song:
+            return []
+            
+        # Assumons une signature rythmique par défaut de 4/4 (4 temps par mesure)
+        beats_per_measure = 4 
+        
+        # Obtenir la longueur totale en beats (méthode existante dans Sequencer)
+        total_beats = self.get_song_length() 
+        
+        measure_beats = []
+        current_beat = 0
+        while current_beat < total_beats:
+            measure_beats.append(current_beat)
+            current_beat += beats_per_measure
+            
+        return measure_beats            
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
@@ -674,6 +697,19 @@ class Sequencer(EventDispatcher):
         self.audio_track_duration_ms: Dict[str, int] = {}
         
         self.default_record_port: Optional[str] = None  # Port d'enregistrement par défaut        
+        
+        # ⚠️ NOUVEAU : Cache pour éviter de recharger les fichiers audio
+        self._audio_duration_cache: Dict[str, float] = {} 
+        
+        # Cache pour la longueur totale du morceau (dépend de l'audio)
+        self._cached_song_length_beats: Optional[float] = None        
+
+    def invalidate_caches(self):
+            """Invalide tous les caches qui dépendent de la structure du morceau ou des données audio."""
+            self._audio_duration_cache.clear()
+            self._cached_song_length_beats = None
+            # N'oubliez pas d'appeler cette fonction chaque fois que le tempo, le chemin d'un fichier audio, 
+            # ou un événement de piste est modifié (ajout/suppression).
 
     def set_default_record_port(self, port_name: str) -> str:
         """Définit le port MIDI d'entrée par défaut pour l'enregistrement"""
@@ -697,14 +733,99 @@ class Sequencer(EventDispatcher):
         """Invalidates the cached song length."""
         self._cached_song_length_beats = None
 
+    def _get_audio_duration_in_beats(self, track: AudioTrack) -> float:
+        """
+        Calcule la durée du fichier audio en beats, en utilisant un cache pour éviter le lag.
+        """
+        
+        # 1. Clé de cache : filepath + tempo.
+        cache_key = f"{track.filepath}_{self.song.tempo}"
+        
+        if cache_key in self._audio_duration_cache:
+            return self._audio_duration_cache[cache_key]
+
+        if not track.filepath or not os.path.exists(track.filepath):
+            # ... (gestion des erreurs)
+            return self.song.time_signature_numerator * 4 
+
+        try:
+            audio = AudioSegment.from_file(track.filepath) 
+            duration_ms = len(audio)
+            
+            # ⚠️ FORMULE UTILISÉE : Conversion de ms en beats
+            # La formule (ms * BPM) / 60000 est mathématiquement correcte.
+            duration_beats = (duration_ms * self.song.tempo) / 60000.0
+            
+            # 🕵️ DIAGNOSTIC DE L'ERREUR NUMÉRIQUE (À VÉRIFIER)
+            print("--- DEBUG AUDIO CONVERSION ---")
+            print(f"  - Fichier: {os.path.basename(track.filepath)}")
+            print(f"  - Tempo du morceau (BPM): {self.song.tempo}")
+            print(f"  - Durée Audio (ms): {duration_ms}")
+            print(f"  - Durée Audio (sec): {duration_ms / 1000.0}")
+            print(f"  - Résultat (Beats): {duration_beats}")
+            print("------------------------------")
+            
+            # 2. Remplissage du cache
+            self._audio_duration_cache[cache_key] = duration_beats
+            
+            return duration_beats
+        except Exception as e:
+            print(f"Error loading or processing audio file {track.filepath}: {e}")
+            self._audio_duration_cache[cache_key] = 0.0 
+            return 0.0
+
     def get_song_length_in_beats(self) -> float:
-        """
-        Returns the cached song length in beats.
-        If the cache is invalid, it recalculates, caches, and returns the length.
-        """
-        if self._cached_song_length_beats is None:
-            self._cached_song_length_beats = self._calculate_song_length_in_beats()
-        return self._cached_song_length_beats
+        """Calcule la longueur totale du morceau en beats en fonction de l'événement le plus long, arrondie à la mesure supérieure."""
+        
+        # 1. Vérification du cache (MAINTENUE)
+        if self._cached_song_length_beats is not None:
+            return self._cached_song_length_beats
+
+        max_beat = 0.0
+        beats_per_measure = self.song.time_signature_numerator
+        
+        # 2. Trouver le point final maximum
+        for track in self.song.tracks:
+            
+            if isinstance(track, AudioTrack):
+                # Utilisation de la méthode mise en cache
+                duration_beats = self._get_audio_duration_in_beats(track)
+                end_beat = track.start_time + duration_beats
+                if end_beat > max_beat:
+                    max_beat = end_beat
+                    
+            # ... (Logique pour MidiTrack et AutomationTrack reste inchangée)
+            elif isinstance(track, MidiTrack):
+                if hasattr(track, 'events') and track.events:
+                    for event in track.events:
+                        end_beat = event.start_time + getattr(event, 'duration', 0.0) 
+                        if end_beat > max_beat:
+                            max_beat = end_beat
+            
+            elif isinstance(track, AutomationTrack):
+                if hasattr(track, 'points') and track.points:
+                    last_point_beat = track.points[-1].start_time
+                    if last_point_beat > max_beat:
+                        max_beat = last_point_beat
+                        
+        # 3. Arrondi et cache
+        min_length = beats_per_measure * 4 
+
+        if max_beat > 0.0:
+            rounded_length = math.ceil((max_beat + 0.0001) / beats_per_measure) * beats_per_measure
+        else:
+            rounded_length = min_length
+                
+        rounded_length = max(rounded_length, min_length)
+        
+        # 🕵️ DIAGNOSTIC CRITIQUE
+        print(f"DEBUG LONGUEUR: Max Beat trouvé: {max_beat}")
+        print(f"DEBUG LONGUEUR: Longueur finale arrondie: {rounded_length} beats")
+
+        # 💾 Enregistrement du résultat dans le cache
+        self._cached_song_length_beats = rounded_length 
+        
+        return rounded_length
 
     def _all_notes_off(self):
         for port in self.open_ports.values():

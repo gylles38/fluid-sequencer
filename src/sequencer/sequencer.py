@@ -2662,33 +2662,60 @@ class Sequencer(EventDispatcher):
             print(f"Error during resynchronization: {e}", file=sys.stderr)
 
     def play(self, start_beat: Optional[float] = None):
+        """
+        Starts or resumes playback, ensuring all audio and MIDI tracks are synchronized.
+        This is a robust method that temporarily stops the transport to seek all tracks
+        before restarting playback from the specified beat.
+        """
         if not self.jack_manager.is_running:
             self.jack_manager.start()
-            time.sleep(0.2) # Give JACK time to start and connect
+            time.sleep(0.2)  # Give JACK time to start and connect
 
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
 
-        # If a start beat is provided, reposition the transport
-        if start_beat is not None:
+        try:
+            # Stop the transport to ensure a clean state for seeking
+            if self.jack_manager.jack_client.transport_state == jack.ROLLING:
+                self.jack_manager.jack_client.transport_stop()
+                time.sleep(0.05)  # Give clients time to process the stop
+
+            # Determine the beat to start from. If none is provided, use the current position.
+            if start_beat is None:
+                start_beat = self._get_current_beat()
+            self.last_start_beat = start_beat
+
+            # Reposition the JACK transport. This should trigger the timebase callback for all clients.
             beats_per_second = self.song.tempo / 60.0
             samplerate = self.jack_manager.jack_client.samplerate
             if beats_per_second > 0 and samplerate > 0:
                 target_frame = int((start_beat / beats_per_second) * samplerate)
-                _ , pos = self.jack_manager.jack_client.transport_query_struct()
+                _, pos = self.jack_manager.jack_client.transport_query_struct()
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
 
-        # Always prime tracks before starting
-        self.prime_all_tracks()
+            # Manually sync our own state and players, as the callback can sometimes be unreliable.
+            # This is the core of the fix: ensuring audio is seeked *before* transport starts.
+            self.jack_manager._sync_playhead_to_beat(start_beat)
+            self.jack_manager.seek_audio_to_beat(start_beat)
 
-        # Simply tell JACK to start rolling
-        if self.jack_manager.jack_client.transport_state != jack.ROLLING:
+            # Now that everything is positioned, send initial MIDI states (program changes, etc.)
+            self.prime_all_tracks()
+
+            # Finally, start the transport
             self.jack_manager.jack_client.transport_start()
+
+        except jack.JackError as e:
+            print(f"Error during playback: {e}")
 
 
     def pause(self):
+        """
+        Toggles the playback state.
+        When pausing, it stops the JACK transport.
+        When un-pausing, it calls the robust `play()` method to ensure resynchronization.
+        """
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             return
 
@@ -2696,7 +2723,8 @@ class Sequencer(EventDispatcher):
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                 self.jack_manager.jack_client.transport_stop()
             else:
-                self.jack_manager.jack_client.transport_start()
+                # Call the robust play method to handle un-pausing and resynchronization
+                self.play()
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
 

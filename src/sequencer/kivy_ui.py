@@ -34,7 +34,7 @@ from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from typing import Optional
-import sys, os
+import sys, os, time
 
 class SequencerLayout(BoxLayout):
     
@@ -51,7 +51,10 @@ class SequencerLayout(BoxLayout):
         self.is_looping = False
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
-        
+
+        # Tête de lecture "lissée" (celle que l'utilisateur voit)
+        self.display_beat = 0.0
+                
         self.track_widgets = [] # Initialisation de la liste des widgets de piste                
 
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
@@ -417,7 +420,12 @@ class SequencerLayout(BoxLayout):
         # update_status_display() appelle update_track_list() qui utilise self.track_list_layout
         # donc il DOIT être appelé APRÈS la création de track_list_layout
         self.update_status_display()
-        self.sequencer.bind(current_beat=self.update_playhead_display)
+
+        # Horloge RAPIDE (60fps) pour le scrolling FLUIDE
+        Clock.schedule_interval(self.update_smooth_scroll, 1/60)
+        # Horloge LENTE (15fps) pour les labels et animations
+        Clock.schedule_interval(self.update_slow_ui, 1/15)
+
         # Vérifier toutes les secondes si la lecture est terminée
         Clock.schedule_interval(self.check_if_playback_finished, 1.0)        
         # Ajouter une variable pour stocker la position de fin pendant la pause
@@ -741,31 +749,40 @@ class SequencerLayout(BoxLayout):
         end_pos = self.end_pos_input.text
         
         if self.is_looping:
-            # Si le looping est activé, on veut jouer en boucle
+            # CAS 1: MODE LOOP
+            # 1. Envoyer la commande de configuration du loop
             if end_pos:
-                # Avec une fin spécifique
                 command = f'loop "{start_pos}" "{end_pos}"'
             else:
                 # Sans fin spécifique, juste activer le looping
                 command = 'loop'
             print(f"DEBUG: Sending loop command: {command}")
             self.process_command_ui(command)
+
+            # 2. Planifier le DÉMARRAGE de la lecture (qui reset aussi la UI)
+            from kivy.clock import Clock
+            Clock.schedule_once(lambda dt: self._start_playback(start_pos), 0.1)
+        
         else:
-            # Mode lecture normal - TOUJOURS spécifier une fin de lecture
+            # CAS 2: MODE LECTURE NORMALE
+            # Envoyer UN SEUL commandement
             if end_pos:
                 command = f'play "{start_pos}" "{end_pos}"'
             else:
                 # Si pas de fin spécifiée, utiliser la fin de la chanson
                 end_of_song = self.sequencer._format_beats_to_position(self.sequencer.get_song_length_in_beats())
                 command = f'play "{start_pos}" "{end_of_song}"'
+            
             print(f"DEBUG: Sending command: {command}")
-            self.process_command_ui(command)
 
-        # Attendre un peu que le loop soit configuré puis lancer la lecture
-        from kivy.clock import Clock
-        Clock.schedule_once(lambda dt: self._start_playback(start_pos), 0.1)
+            # 1. Réinitialiser la vue de la timeline (logique copiée de _start_playback)
+            for track_widget in self.track_widgets: 
+                track_widget.reset_timeline_view()
+
+            # 2. Envoyer la commande de lecture (UNE SEULE FOIS)
+            self.process_command_ui(command)
         
-        # Désactiver pause et record
+        # Logique commune : Désactiver pause et record
         if self.is_paused:
             self.is_paused = False
             self.pause_button.icon = 'pause'
@@ -784,40 +801,9 @@ class SequencerLayout(BoxLayout):
         for track_widget in self.track_widgets: 
             track_widget.reset_timeline_view()
         
-
-        # 2. Démarrer le défilement AUTOMATIQUEMENT SANS DÉLAI
-        if self._transport_update_event is None:
-            self._transport_update_event = Clock.schedule_interval(self.update_playback_position, 1/60)
-
-        # 3. Exécuter la commande JACK
+        # 2. Exécuter la commande JACK
         self.process_command_ui(command)
-  
-    def update_playback_position(self, dt):
-        """Met à jour l'affichage, le défilement ET la taille de la timeline à chaque tick de l'horloge."""
-        
-        # 1. OBTENIR ET APPLIQUER LA LONGUEUR DU MORCEAU (DOIT ÊTRE INCONDITIONNEL)
-        # C'est rapide grâce au CACHE dans sequencer.py, donc aucun impact sur la performance.
-        new_total_beats = self.sequencer.get_song_length_in_beats()
-        
-        # 2. DÉTERMINER LA POSITION DE LECTURE
-        if self.sequencer.jack_manager.is_running:
-            current_beat = self.sequencer.jack_manager.get_current_beat()
-        else:
-            # Récupère la position de la tête de lecture lorsque la lecture est arrêtée
-            current_beat = self.sequencer.current_beat 
-
-        # 3. MISE À JOUR DES WIDGETS DE PISTE
-        for track_widget in self.track_widgets:
-            
-            # 3a. Mise à jour de la longueur totale de la grille
-            # Cette affectation déclenche TrackWidget.update_timeline_size() via le binding,
-            # corrigeant la taille de l'ascenseur, que la lecture soit démarrée ou non.
-            if track_widget.total_beats != new_total_beats:
-                track_widget.total_beats = new_total_beats
-                
-            # 3b. Mise à jour de la position de la tête de lecture
-            track_widget.set_playback_position(current_beat)
-
+    
     def start_recording_from_ui(self):
         """Démarre l'enregistrement en utilisant les paramètres de l'interface"""
         # Vérifier qu'un port MIDI est configuré
@@ -914,6 +900,10 @@ class SequencerLayout(BoxLayout):
             self.pause_button.icon = 'pause-circle-outline'
             self.pause_button.md_bg_color = [0.9, 0.7, 0, 1]
             self.process_command_ui('pause')
+            
+            # Forcer l'UI à se caler sur la position de pause
+            Clock.schedule_once(lambda dt: self.snap_ui_to_jack(), 0.1)
+            
             # Arrêter le clignotement du play si actif
             if self.is_playing:
                 self.is_playing = False
@@ -969,10 +959,9 @@ class SequencerLayout(BoxLayout):
         self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
         self.process_command_ui('stop')
         
-        # Arrêter le défilement automatique
-        if self._transport_update_event:
-            self._transport_update_event.cancel()
-            self._transport_update_event = None   
+        # Forcer l'UI à se caler sur la position d'arrêt
+        Clock.schedule_once(lambda dt: self.snap_ui_to_jack(), 0.1)
+        # (On utilise Clock.schedule_once pour laisser le temps à 'stop' de s'exécuter)        
 
     def record_pressed(self, instance):
         if self.is_recording:
@@ -1051,13 +1040,85 @@ class SequencerLayout(BoxLayout):
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 
-    def update_playhead_display(self, instance, value):
-        """Met à jour l'affichage de la position et détecte le beat 1"""
-        current_position = self.sequencer._format_beats_to_position(value)
+    def update_smooth_scroll(self, dt):
+        """
+        Horloge RAPIDE (60fps).
+        Ne fait que le calcul de lissage et le défilement des pistes.
+        Doit être extrêmement légère.
+        """
+        
+        # 1. Lire la position "maître" de JACK (l'aimant)
+        jack_beat = self.sequencer.current_beat
+
+        # 2. Calculer la position d'affichage (le lissage)
+        if self.is_playing and not self.is_paused:
+            
+            # 2a. Prédiction plafonnée (évite les sauts)
+            safe_dt = min(dt, 1/30.0) 
+            beats_per_second = self.sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+                
+            # 2b. Calculer l'erreur
+            error = jack_beat - self.display_beat
+            
+            # 2c. Correction (LERP dépendant du 'dt')
+            correction_speed = 8.0 
+            
+            if abs(error) > 1.0 or dt > 0.2:
+                self.display_beat = jack_beat # Snap
+            else:
+                self.display_beat += (error * correction_speed * dt) # Lissage
+                
+        else:
+            # Pas de lecture : on se cale parfaitement sur JACK.
+            self.display_beat = jack_beat
+
+        # 3. Mettre à jour TOUS les widgets de piste (la seule tâche UI)
+        for track_widget in self.track_widgets:
+            track_widget.set_playback_position(self.display_beat)
+
+    def update_slow_ui(self, dt):
+        """
+        Horloge LENTE (15fps).
+        Met à jour les labels, animations, et autres éléments non-fluides.
+        """
+        # Note : On lit 'self.display_beat' (la valeur lissée) 
+        # pour que les labels correspondent au scrolling.
+        
+        # 1. Mettre à jour le label de position
+        current_position = self.sequencer._format_beats_to_position(self.display_beat)
         self.playhead_label.text = f"Pos: {current_position}"
         
-        # Détecter le beat 1 pour l'animation
+        # 2. Gérer l'animation du "beat 1"
         self._detect_beat_one_for_animation(current_position)
+        
+        # 3. Vérifier la longueur du morceau (facultatif, mais peu coûteux ici)
+        # Note : update_status_display() le fait déjà lors des grands changements.
+        new_total_beats = self.sequencer.get_song_length_in_beats()
+        
+        if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
+             for track_widget in self.track_widgets:
+                if track_widget.total_beats != new_total_beats:
+                    track_widget.total_beats = new_total_beats
+
+    def snap_ui_to_jack(self):
+        """
+        Force l'UI à se caler immédiatement sur la dernière position 
+        connue de JACK. (Utilisé pour 'stop' et 'pause').
+        """
+        # 1. Lire la position "maître"
+        jack_current_beat = self.sequencer.current_beat
+        
+        # 2. Forcer notre tête de lecture lissée à se caler
+        self.display_beat = jack_current_beat
+
+        # 3. Forcer les widgets de piste à se caler
+        for track_widget in self.track_widgets:
+            track_widget.set_playback_position(jack_current_beat)
+
+        # 4. Forcer la mise à jour des labels (boucle lente)
+        self.update_slow_ui(0)
 
     def _detect_beat_one_for_animation(self, position_str):
         """Détecte si on arrive sur un beat 1 et déclenche l'animation"""

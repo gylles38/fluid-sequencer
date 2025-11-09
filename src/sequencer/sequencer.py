@@ -469,6 +469,9 @@ class JackManager:
                 current_beat = (frame / samplerate) * beats_per_second
             self._sync_playhead_to_beat(current_beat)
             self.seek_audio_to_beat(current_beat)
+            if self.sequencer.gui_mode:
+                self.sequencer.current_beat = current_beat
+                self.sequencer.last_beat_update_time = time.perf_counter()            
 
     def _process_callback(self, frames: int):
         try:
@@ -633,6 +636,7 @@ class JackManager:
             self.last_beat = end_beat_of_block
             if self.sequencer.gui_mode:
                 self.sequencer.current_beat = self.last_beat
+                self.sequencer.last_beat_update_time = time.perf_counter()
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
             
@@ -657,6 +661,7 @@ class JackManager:
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
+    last_beat_update_time = NumericProperty(0)    
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):

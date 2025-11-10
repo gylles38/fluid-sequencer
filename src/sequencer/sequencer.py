@@ -293,6 +293,22 @@ class JackManager:
         """Retourne la position actuelle du transport en beats."""
         return self.last_beat
 
+    def silence_all_midi_notes(self):
+        """Sends note_off messages for all currently playing MIDI notes."""
+        if not self._active_notes:
+            return
+
+        for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+            if 0 <= track_idx < len(self.sequencer.song.tracks):
+                track = self.sequencer.song.tracks[track_idx]
+                if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                    port = self.open_ports[track.output_port_name]
+                    if port and not port.closed:
+                        note_off_msg = mido.Message('note_off', channel=track.channel, note=pitch, velocity=0)
+                        port.send(note_off_msg)
+
+        self._active_notes.clear()
+
     def _send_ipc_command(self, socket_path, command_data) -> bool:
         try:
             if sys.platform == "win32":
@@ -2758,7 +2774,7 @@ class Sequencer(EventDispatcher):
 
         # 5. Mettre à jour l'état et couper toutes les notes MIDI par sécurité
         self.playback_state = "stopped"
-        self._all_notes_off()
+        self.jack_manager.silence_all_midi_notes()
         print("Sequencer stopped.")
 
         # LA LIGNE SUIVANTE EST LA CAUSE DU PROBLÈME ET A ÉTÉ VOLONTAIREMENT SUPPRIMÉE :

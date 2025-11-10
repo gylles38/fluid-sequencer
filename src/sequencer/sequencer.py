@@ -507,14 +507,18 @@ class JackManager:
             beats_per_second = tempo / 60.0
 
             # --- CORRECTED TIMING LOGIC ---
-            # Get the precise start time from JACK for this block to prevent cumulative drift.
+            # The window for MIDI events must be contiguous. It starts from the end of the last block (`self.last_beat`).
+            start_beat_of_block = self.last_beat
+
+            # The end of the window is calculated authoritatively from JACK's current position plus the block duration.
+            # This prevents drift by re-synchronizing the end time on every block.
             current_frame = pos.get('frame', 0)
             if samplerate > 0 and beats_per_second > 0:
-                start_beat_of_block = (current_frame / samplerate) * beats_per_second
+                authoritative_beat_now = (current_frame / samplerate) * beats_per_second
             else:
-                start_beat_of_block = self.last_beat # Fallback if transport is not providing valid info
+                authoritative_beat_now = self.last_beat # Fallback
 
-            end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
+            end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                 if start_beat_of_block <= end_beat < end_beat_of_block:

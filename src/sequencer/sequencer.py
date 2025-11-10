@@ -505,7 +505,15 @@ class JackManager:
             samplerate = self.jack_client.samplerate
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0
-            start_beat_of_block = self.last_beat
+
+            # --- CORRECTED TIMING LOGIC ---
+            # Get the precise start time from JACK for this block to prevent cumulative drift.
+            current_frame = pos.get('frame', 0)
+            if samplerate > 0 and beats_per_second > 0:
+                start_beat_of_block = (current_frame / samplerate) * beats_per_second
+            else:
+                start_beat_of_block = self.last_beat # Fallback if transport is not providing valid info
+
             end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
@@ -635,7 +643,9 @@ class JackManager:
 
             self.last_beat = end_beat_of_block
             if self.sequencer.gui_mode:
-                self.sequencer.current_beat = self.last_beat
+                # --- CORRECTED TIMING FOR UI ---
+                # Update the UI with the beat at the START of this block, so it's in sync with the notes being played.
+                self.sequencer.current_beat = start_beat_of_block
                 self.sequencer.last_beat_update_time = time.perf_counter()
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")

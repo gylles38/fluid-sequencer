@@ -918,24 +918,7 @@ class SequencerLayout(BoxLayout):
             self.is_playing = True
             self.start_play_blink()
             
-            # Récupérer la position actuelle et la fin sauvegardée
-            current_pos = self.playhead_label.text.replace("Pos: ", "")
-            end_pos = self.saved_end_pos if self.saved_end_pos else self.end_pos_input.text
-            
-            if end_pos and not self.is_looping:
-                # Reprendre depuis la position actuelle avec la fin sauvegardée
-                command = f'play "{current_pos}" "{end_pos}"'
-                print(f"DEBUG: Resuming from {current_pos} to {end_pos}")
-            elif self.is_looping:
-                # Mode looping - reprendre normalement
-                command = 'play'
-                print("DEBUG: Resuming loop playback")
-            else:
-                # Reprendre normalement
-                command = 'play'
-                print("DEBUG: Resuming normal playback")
-                
-            self.process_command_ui(command)
+            self.process_command_ui('pause')
             # Réinitialiser la sauvegarde
             self.saved_end_pos = ""
 

@@ -1,6 +1,6 @@
 /home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/pydub/utils.py:170: RuntimeWarning: Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work
   warn("Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work", RuntimeWarning)
-[INFO   ] [Logger      ] Record log in /home/jules/.kivy/logs/kivy_25-11-10_1.txt
+[INFO   ] [Logger      ] Record log in /home/jules/.kivy/logs/kivy_25-11-10_4.txt
 [ERROR  ] [Core        ] option --gui not recognized
 Kivy Usage: main.py [KIVY OPTION...] [-- PROGRAM OPTIONS]::
 

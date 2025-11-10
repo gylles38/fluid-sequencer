@@ -421,8 +421,8 @@ class SequencerLayout(BoxLayout):
         # donc il DOIT être appelé APRÈS la création de track_list_layout
         self.update_status_display()
 
-        # NEW: Event-driven UI updates
-        self.sequencer.bind(current_beat=self.on_beat_change)
+        # Re-introducing a clock for smooth UI updates, but at a more reasonable rate
+        Clock.schedule_interval(self.update_playhead, 1/30.0)
 
         # Vérifier toutes les secondes si la lecture est terminée
         Clock.schedule_interval(self.check_if_playback_finished, 1.0)        
@@ -1038,24 +1038,46 @@ class SequencerLayout(BoxLayout):
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 
-    def on_beat_change(self, instance, beat):
+    def update_playhead(self, dt):
         """
-        This method is now triggered by the 'current_beat' property of the sequencer.
-        It handles all UI updates related to playback position.
+        Unified method to update the playhead, labels, and handle scrolling.
+        Called by a Clock schedule.
         """
-        # Update playhead position in all track widgets
+        # 1. Read the master position from the sequencer (driven by JACK)
+        jack_beat = self.sequencer.current_beat
+
+        # 2. Calculate the smoothed display beat for fluid scrolling
+        if self.is_playing and not self.is_paused:
+            # Predict next position based on tempo and delta-time
+            safe_dt = min(dt, 1/15.0) # Cap dt to avoid large jumps
+            beats_per_second = self.sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+
+            # Calculate error and apply correction (smoothing)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0 # Slower correction to reduce jitter
+
+            # Snap to master position if error is too large or on big time lags
+            if abs(error) > 0.5 or dt > 0.1:
+                self.display_beat = jack_beat
+            else:
+                self.display_beat += (error * correction_speed * dt)
+        else:
+            # When not playing, snap directly to the master beat
+            self.display_beat = jack_beat
+
+        # 3. Update all track widgets with the smoothed position
         for track_widget in self.track_widgets:
-            track_widget.set_playback_position(beat)
+            track_widget.set_playback_position(self.display_beat)
 
-        # Update the main playhead label
-        current_position = self.sequencer._format_beats_to_position(beat)
+        # 4. Update UI labels and animations with the smoothed position
+        current_position = self.sequencer._format_beats_to_position(self.display_beat)
         self.playhead_label.text = f"Pos: {current_position}"
-
-        # Handle the "beat 1" animation
         self._detect_beat_one_for_animation(current_position)
         
+        # 5. Check if song length has changed and update widgets if needed
         new_total_beats = self.sequencer.get_song_length_in_beats()
-        
         if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
              for track_widget in self.track_widgets:
                 if track_widget.total_beats != new_total_beats:
@@ -1074,7 +1096,7 @@ class SequencerLayout(BoxLayout):
             track_widget.set_playback_position(jack_current_beat)
 
         # 4. Forcer la mise à jour des labels (boucle lente)
-        self.on_beat_change(self.sequencer, jack_current_beat)
+        self.update_playhead(0)
 
     def _detect_beat_one_for_animation(self, position_str):
         """Détecte si on arrive sur un beat 1 et déclenche l'animation"""

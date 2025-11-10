@@ -1,0 +1,40 @@
+/home/jules/.pyenv/versions/3.12.12/lib/python3.12/site-packages/pydub/utils.py:170: RuntimeWarning: Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work
+  warn("Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work", RuntimeWarning)
+[INFO   ] [Logger      ] Record log in /home/jules/.kivy/logs/kivy_25-11-10_1.txt
+[ERROR  ] [Core        ] option --gui not recognized
+Kivy Usage: main.py [KIVY OPTION...] [-- PROGRAM OPTIONS]::
+
+            Options placed after a '-- ' separator, will not be touched by kivy,
+            and instead passed to your program.
+
+            Set KIVY_NO_ARGS=1 in your environment or before you import Kivy to
+            disable Kivy's argument parser.
+
+        -h, --help
+            Prints this help message.
+        -d, --debug
+            Shows debug log.
+        -a, --auto-fullscreen
+            Force 'auto' fullscreen mode (no resolution change).
+            Uses your display's resolution. This is most likely what you want.
+        -c, --config section:key[:value]
+            Set a custom [section] key=value in the configuration object.
+        -f, --fullscreen
+            Force running in fullscreen mode.
+        -k, --fake-fullscreen
+            Force 'fake' fullscreen mode (no window border/decoration).
+            Uses the resolution specified by width and height in your config.
+        -w, --windowed
+            Force running in a window.
+        -p, --provider id:provider[,options]
+            Add an input provider (eg: ccvtable1:tuio,192.168.0.1:3333).
+        -m mod, --module=mod
+            Activate a module (use "list" to get a list of available modules).
+        -r, --rotation
+            Rotate the window's contents (0, 90, 180, 270).
+        -s, --save
+            Save current Kivy configuration.
+        --size=640x480
+            Size of window geometry.
+        --dpi=96
+            Manually overload the Window DPI (for testing only.)

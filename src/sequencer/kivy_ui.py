@@ -421,10 +421,8 @@ class SequencerLayout(BoxLayout):
         # donc il DOIT être appelé APRÈS la création de track_list_layout
         self.update_status_display()
 
-        # Horloge RAPIDE (60fps) pour le scrolling FLUIDE
-        Clock.schedule_interval(self.update_smooth_scroll, 1/60)
-        # Horloge LENTE (15fps) pour les labels et animations
-        Clock.schedule_interval(self.update_slow_ui, 1/15)
+        # NEW: Event-driven UI updates
+        self.sequencer.bind(current_beat=self.on_beat_change)
 
         # Vérifier toutes les secondes si la lecture est terminée
         Clock.schedule_interval(self.check_if_playback_finished, 1.0)        
@@ -1040,61 +1038,22 @@ class SequencerLayout(BoxLayout):
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 
-    def update_smooth_scroll(self, dt):
+    def on_beat_change(self, instance, beat):
         """
-        Horloge RAPIDE (60fps).
-        Ne fait que le calcul de lissage et le défilement des pistes.
-        Doit être extrêmement légère.
+        This method is now triggered by the 'current_beat' property of the sequencer.
+        It handles all UI updates related to playback position.
         """
-        
-        # 1. Lire la position "maître" de JACK (l'aimant)
-        jack_beat = self.sequencer.current_beat
-
-        # 2. Calculer la position d'affichage (le lissage)
-        if self.is_playing and not self.is_paused:
-            
-            # 2a. Prédiction plafonnée (évite les sauts)
-            safe_dt = min(dt, 1/30.0) 
-            beats_per_second = self.sequencer.song.tempo / 60.0
-            if beats_per_second > 0:
-                self.display_beat += (beats_per_second * safe_dt)
-                
-            # 2b. Calculer l'erreur
-            error = jack_beat - self.display_beat
-            
-            # 2c. Correction (LERP dépendant du 'dt')
-            correction_speed = 8.0 
-            
-            if abs(error) > 1.0 or dt > 0.2:
-                self.display_beat = jack_beat # Snap
-            else:
-                self.display_beat += (error * correction_speed * dt) # Lissage
-                
-        else:
-            # Pas de lecture : on se cale parfaitement sur JACK.
-            self.display_beat = jack_beat
-
-        # 3. Mettre à jour TOUS les widgets de piste (la seule tâche UI)
+        # Update playhead position in all track widgets
         for track_widget in self.track_widgets:
-            track_widget.set_playback_position(self.display_beat)
+            track_widget.set_playback_position(beat)
 
-    def update_slow_ui(self, dt):
-        """
-        Horloge LENTE (15fps).
-        Met à jour les labels, animations, et autres éléments non-fluides.
-        """
-        # Note : On lit 'self.display_beat' (la valeur lissée) 
-        # pour que les labels correspondent au scrolling.
-        
-        # 1. Mettre à jour le label de position
-        current_position = self.sequencer._format_beats_to_position(self.display_beat)
+        # Update the main playhead label
+        current_position = self.sequencer._format_beats_to_position(beat)
         self.playhead_label.text = f"Pos: {current_position}"
-        
-        # 2. Gérer l'animation du "beat 1"
+
+        # Handle the "beat 1" animation
         self._detect_beat_one_for_animation(current_position)
         
-        # 3. Vérifier la longueur du morceau (facultatif, mais peu coûteux ici)
-        # Note : update_status_display() le fait déjà lors des grands changements.
         new_total_beats = self.sequencer.get_song_length_in_beats()
         
         if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
@@ -1109,16 +1068,13 @@ class SequencerLayout(BoxLayout):
         """
         # 1. Lire la position "maître"
         jack_current_beat = self.sequencer.current_beat
-        
-        # 2. Forcer notre tête de lecture lissée à se caler
-        self.display_beat = jack_current_beat
 
         # 3. Forcer les widgets de piste à se caler
         for track_widget in self.track_widgets:
             track_widget.set_playback_position(jack_current_beat)
 
         # 4. Forcer la mise à jour des labels (boucle lente)
-        self.update_slow_ui(0)
+        self.on_beat_change(self.sequencer, jack_current_beat)
 
     def _detect_beat_one_for_animation(self, position_str):
         """Détecte si on arrive sur un beat 1 et déclenche l'animation"""

@@ -1011,6 +1011,26 @@ class SequencerLayout(BoxLayout):
             instance.icon = 'metronome'
             instance.md_bg_color = [0.1, 0.1, 0.1, 1]
 
+    def toggle_track_mute(self, track_index):
+        """Toggles mute state for a track without a full UI refresh."""
+        # 1. Update the backend state
+        self.sequencer.toggle_mute(track_index)
+
+        # 2. Find the corresponding widget and update its appearance
+        if 0 <= track_index < len(self.track_widgets):
+            track_widget = self.track_widgets[track_index]
+            track_widget.update_mute_solo_appearance()
+
+    def toggle_track_solo(self, track_index):
+        """Toggles solo state for a track and updates others without a full UI refresh."""
+        # 1. Update the backend state
+        # The sequencer's toggle_solo method handles the logic of unsoloing other tracks
+        self.sequencer.toggle_solo(track_index)
+
+        # 2. Update all track widgets since soloing one can affect others
+        for widget in self.track_widgets:
+            widget.update_mute_solo_appearance()
+
     def update_track_record_buttons(self, track_index=None):
         """Met à jour l'apparence des boutons record des pistes"""
         if track_index is not None:

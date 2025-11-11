@@ -264,7 +264,7 @@ class TrackWidget(BoxLayout):
             pos_hint={'center_y': 0.5}
         )
         
-        mute_button = TooltipMDIconButton(
+        self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
             on_press=self.on_mute_toggle,
@@ -278,7 +278,7 @@ class TrackWidget(BoxLayout):
             theme_bg_color="Custom",
             md_bg_color=[0.3, 0.2, 0.1, 0.8] if not track.is_muted else [0.4, 0.2, 0.1, 0.8]
         )
-        volume_layout.add_widget(mute_button)
+        volume_layout.add_widget(self.mute_button)
         
         self.volume_label = Label(
             text=f"{int(track.volume * 100)}", 
@@ -491,12 +491,28 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout.process_slider_command(f'pan {self.track_index} {value}')
 
     def on_mute_toggle(self, instance):
-        self.sequencer_layout.process_command_ui(f'mute {self.track_index}')
-        # La mise à jour visuelle se fera via update_status_display
+        # Directly call a lightweight method on the main layout
+        self.sequencer_layout.toggle_track_mute(self.track_index)
 
     def on_solo_toggle(self, instance):
-        self.sequencer_layout.process_command_ui(f'solo {self.track_index}')
-        # La mise à jour visuelle se fera via update_status_display
+        # Directly call a lightweight method on the main layout
+        self.sequencer_layout.toggle_track_solo(self.track_index)
+
+    def update_mute_solo_appearance(self):
+        """Updates the visual state of mute and solo buttons."""
+        # Update Mute Button
+        is_muted = self.track.is_muted
+        self.mute_button.icon = 'volume-off' if is_muted else 'volume-high'
+        self.mute_button.tooltip_text = 'Unmute' if is_muted else 'Mute'
+        self.mute_button.icon_color = [0.8, 0.3, 0, 1] if is_muted else [1, 0.6, 0, 1]
+        self.mute_button.md_bg_color = [0.4, 0.2, 0.1, 0.8] if is_muted else [0.3, 0.2, 0.1, 0.8]
+
+        # Update Solo Button
+        is_solo = self.track.is_solo
+        self.solo_button.icon = 'alpha-s-box' if is_solo else 'alpha-s-box-outline'
+        self.solo_button.tooltip_text = 'Unsolo' if is_solo else 'Solo'
+        self.solo_button.icon_color = [1, 1, 0, 1] if is_solo else [0.6, 0.6, 0.6, 1]
+        self.solo_button.md_bg_color = [0.3, 0.3, 0.1, 0.8] if is_solo else [0.1, 0.1, 0.1, 0.8]
 
     def get_record_mode_tooltip(self, mode):
         """Retourne le texte du tooltip selon le mode"""

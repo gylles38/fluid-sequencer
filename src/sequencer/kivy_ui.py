@@ -773,9 +773,13 @@ class SequencerLayout(BoxLayout):
             
             print(f"DEBUG: Sending command: {command}")
 
-            # 1. Réinitialiser la vue de la timeline (logique copiée de _start_playback)
-            for track_widget in self.track_widgets: 
-                track_widget.reset_timeline_view()
+            # --- NEW PRE-SYNC LOGIC ---
+            start_beat = self.sequencer.parse_position_to_beats(start_pos)
+            if start_beat is not None:
+                self.display_beat = start_beat
+                for track_widget in self.track_widgets:
+                    track_widget.set_playback_position(start_beat)
+                self.playhead_label.text = f"Pos: {start_pos}"
 
             # 2. Envoyer la commande de lecture (UNE SEULE FOIS)
             self.process_command_ui(command)

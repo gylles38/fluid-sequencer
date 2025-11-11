@@ -2775,6 +2775,9 @@ class Sequencer(EventDispatcher):
                 # Synchroniser manuellement notre état interne
                 self.jack_manager._sync_playhead_to_beat(self.last_start_beat)
                 self.jack_manager.seek_audio_to_beat(self.last_start_beat)
+                # --- NOUVEAU : Forcer l'état de pause sur tous les lecteurs audio ---
+                self.jack_manager.set_all_audio_pause_state(True)
+
 
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")

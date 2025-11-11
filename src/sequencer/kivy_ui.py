@@ -1361,7 +1361,21 @@ class SequencerLayout(BoxLayout):
                 self.output_label.text += output + "\n"
             self.current_command = ""
 
-        self.update_status_display()
+        # --- Conditional UI Refresh ---
+        # Define commands that DON'T require a full UI rebuild
+        lightweight_commands = [
+            'play', 'pause', 'stop', 'loop', 'setloop', 'seek'
+        ]
+
+        # Check if the processed command starts with any of the lightweight commands
+        is_lightweight = any(command.startswith(cmd) for cmd in lightweight_commands)
+
+        if not is_lightweight:
+            print(f"DEBUG: Performing full UI refresh for command: {command}")
+            self.update_status_display()
+        else:
+            print(f"DEBUG: Skipping full UI refresh for lightweight command: {command}")
+
 
         if not should_continue:
             MDApp.get_running_app().stop()

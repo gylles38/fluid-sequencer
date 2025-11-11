@@ -6,3 +6,4 @@
 src/sequencer/__pycache__/
 
 venv/
+*.log

@@ -1704,14 +1704,15 @@ class Sequencer(EventDispatcher):
         # --- Régénérer les automations ---
         self.jack_manager._prepare_automation_events()
 
-        # --- NOUVEAU : Forcer une resynchronisation globale (équivaut à pause/reprise) ---
-        if debug:
-            print("[DEBUG] Forcing JACK transport resync...")
+        # --- Resync only if playback is active ---
+        was_rolling = self.jack_manager.jack_client and self.jack_manager.jack_client.transport_state == jack.ROLLING
+        if was_rolling:
+            if debug:
+                print("[DEBUG] Forcing JACK transport resync...")
 
-        try:
-            jc = self.jack_manager.jack_client
-            if jc:
-                # Lire position actuelle
+            try:
+                jc = self.jack_manager.jack_client
+                # Read current position
                 state, pos_struct = jc.transport_query_struct()
                 pos_dict = jack.position2dict(pos_struct)
                 frame = pos_dict.get('frame', 0)
@@ -1719,23 +1720,22 @@ class Sequencer(EventDispatcher):
                 beats_per_second = self.song.tempo / 60.0
                 current_beat = (frame / samplerate) * beats_per_second if samplerate > 0 and beats_per_second > 0 else self.jack_manager.last_beat
 
-                # 1️⃣ Stopper brièvement le transport (simule un "pause")
+                # 1. Briefly stop the transport
                 jc.transport_stop()
-                time.sleep(0.02)  # 20 ms suffit
+                time.sleep(0.02)
 
-                # 2️⃣ Repositionner le playhead interne + pistes audio
+                # 2. Reposition playhead and audio tracks
                 self.jack_manager._sync_playhead_to_beat(current_beat)
                 self.jack_manager.seek_audio_to_beat(current_beat)
                 self.jack_manager.last_beat = current_beat
 
-                # 3️⃣ Relancer JACK
+                # 3. Restart JACK
                 jc.transport_start()
 
                 if debug:
                     print(f"[DEBUG] Transport resynced → beat={current_beat:.6f}")
-
-        except Exception as e:
-            print(f"[DEBUG] JACK resync failed: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"[DEBUG] JACK resync failed: {e}", file=sys.stderr)
 
         if debug:
             print(f"[DEBUG] last_beat={self.jack_manager.last_beat:.6f}")
@@ -1812,41 +1812,38 @@ class Sequencer(EventDispatcher):
             # Régénérer les événements d'automation
             self.jack_manager._prepare_automation_events()
 
-            # ----------------------------------------------------------------------------------
-            # NOUVEAU BLOCK : FORCER LA RESYNCHRONISATION GLOBALE (SOLUTION AU DÉCALAGE)
-            # ----------------------------------------------------------------------------------
-            if debug:
-                print("[DEBUG] Forcing JACK transport resync after solo/unsolo...")
+            # --- Resync only if playback is active ---
+            was_rolling = self.jack_manager.jack_client and self.jack_manager.jack_client.transport_state == jack.ROLLING
+            if was_rolling:
+                if debug:
+                    print("[DEBUG] Forcing JACK transport resync after solo/unsolo...")
 
-            try:
-                jc = self.jack_manager.jack_client
-                if jc:
-                    # Lire position actuelle depuis JACK (méthode la plus précise)
+                try:
+                    jc = self.jack_manager.jack_client
+                    # Read current position from JACK
                     state, pos_struct = jc.transport_query_struct()
                     pos_dict = jack.position2dict(pos_struct)
                     frame = pos_dict.get('frame', 0)
                     samplerate = jc.samplerate
-                    beats_per_second = self.song.tempo / 60.0 
-                    # Recalculer le beat courant de manière robuste
+                    beats_per_second = self.song.tempo / 60.0
                     current_beat = (frame / samplerate) * beats_per_second if samplerate > 0 and beats_per_second > 0 else self.jack_manager.last_beat
 
-                    # 1️⃣ Stopper brièvement le transport (simule un "pause")
+                    # 1. Briefly stop the transport
                     jc.transport_stop()
-                    time.sleep(0.02)  # 20 ms suffit
+                    time.sleep(0.02)
 
-                    # 2️⃣ Repositionner le playhead interne + pistes audio
+                    # 2. Reposition playhead and audio tracks
                     self.jack_manager._sync_playhead_to_beat(current_beat)
-                    self.jack_manager.seek_audio_to_beat(current_beat) # ENVOIE LA COMMANDE 'SEEK' À TOUTES LES PISTES MPV
+                    self.jack_manager.seek_audio_to_beat(current_beat)
                     self.jack_manager.last_beat = current_beat
 
-                    # 3️⃣ Relancer JACK
+                    # 3. Restart JACK
                     jc.transport_start()
 
                     if debug:
                         print(f"[DEBUG] Transport resynced → beat={current_beat:.6f}")
-
-            except Exception as e:
-                print(f"[DEBUG] JACK resync failed during solo/unsolo: {e}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[DEBUG] JACK resync failed during solo/unsolo: {e}", file=sys.stderr)
             
             if debug:
                 print(f"[DEBUG] last_beat={self.jack_manager.last_beat:.6f}")

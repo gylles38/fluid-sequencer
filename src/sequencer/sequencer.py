@@ -450,6 +450,16 @@ class JackManager:
                     command = {"command": ["seek", mpv_time, "absolute"]}
                     self._send_ipc_command(ap.socket_path, command)
 
+    def update_audio_tracks_speed(self):
+        """Adjusts the playback speed of all audio tracks based on the current song tempo."""
+        with self.process_lock:
+            for ap in self.active_audio_processes:
+                track = self.sequencer.song.tracks[ap.track_index]
+                if isinstance(track, AudioTrack) and track.native_tempo is not None and track.native_tempo > 0:
+                    speed_factor = self.sequencer.song.tempo / track.native_tempo
+                    command = {"command": ["set_property", "speed", speed_factor]}
+                    self._send_ipc_command(ap.socket_path, command)
+
     def _sync_playhead_to_beat(self, beat_pos: float):
         self.last_beat = beat_pos
         num_tracks = len(self.sequencer.song.tracks)  # Corrigé: self.sequencer.song
@@ -906,6 +916,8 @@ class Sequencer(EventDispatcher):
         self.song.tempo = tempo
         self.is_dirty = True
         self.invalidate_song_length_cache()
+        if self.jack_manager.is_running:
+            self.jack_manager.update_audio_tracks_speed()
         return f"Tempo set to {self.song.tempo} BPM."
 
     def set_time_signature(self, numerator: int, denominator: int) -> str:
@@ -934,7 +946,7 @@ class Sequencer(EventDispatcher):
                 return {"status": "error", "message": f"Error: Audio file not found at '{filepath}'"}
             except Exception as e:
                 return {"status": "error", "message": f"Error opening audio file: {e}"}
-            track = AudioTrack(name=name, filepath=filepath)
+            track = AudioTrack(name=name, filepath=filepath, native_tempo=self.song.tempo)
             self.song.add_track(track)
             self.is_dirty = True
             self.invalidate_song_length_cache()

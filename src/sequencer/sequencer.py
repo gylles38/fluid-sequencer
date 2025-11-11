@@ -1659,7 +1659,6 @@ class Sequencer(EventDispatcher):
         track.is_muted = not track.is_muted
         status = "Muted" if track.is_muted else "Unmuted"
         self.is_dirty = True
-        self.invalidate_song_length_cache()
 
         debug = getattr(self, "debug_enabled", True)
         if debug:
@@ -1762,7 +1761,6 @@ class Sequencer(EventDispatcher):
                     
         status = "Solo" if target_track.is_solo else "Un-soloed"
         self.is_dirty = True
-        self.invalidate_song_length_cache()
 
         # Récupération de l'état de debug pour les prints
         debug = getattr(self, "debug_enabled", True) # AJOUTÉ pour cohérence avec toggle_mute

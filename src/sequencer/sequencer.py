@@ -632,6 +632,17 @@ class JackManager:
                 else:
                     self.next_automation_event_index += 1
 
+            # --- NOUVEAU : Gérer l'arrêt des pistes audio terminées ---
+            with self.process_lock:
+                for ap in self.active_audio_processes:
+                    track = self.sequencer.song.tracks[ap.track_index]
+                    if isinstance(track, AudioTrack):
+                        duration_beats = self.sequencer._get_audio_duration_in_beats(track)
+                        end_beat = track.start_time + duration_beats
+                        if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
+                            command = {"command": ["set_property", "pause", True]}
+                            self._send_ipc_command(ap.socket_path, command)
+
             if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
                 if start_beat_of_block < self.sequencer.play_range_end_beat:
                     self.jack_client.transport_stop()

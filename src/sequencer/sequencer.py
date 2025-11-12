@@ -398,6 +398,7 @@ class JackManager:
         command.extend([
             f"--input-ipc-server={socket_path}",
             "--pause",
+        "--loop-file=inf", # Loop the file to prevent mpv from exiting
             track.filepath
         ])
 

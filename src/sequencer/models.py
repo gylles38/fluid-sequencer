@@ -78,6 +78,7 @@ class AudioTrack(BaseTrack):
     pan: float = 0.0 # (-1.0 for left, 0.0 for center, 1.0 for right)
     channels: int = 0 # Number of audio channels, 0 for unknown
     native_tempo: Optional[float] = None
+    duration_beats: Optional[float] = None
 
 @dataclass
 class AutomationPoint:

@@ -618,8 +618,7 @@ class JackManager:
         song_length_beats = self.sequencer.get_song_length_in_beats()
         if not self.sequencer.loop_enabled and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
-                self.jack_client.transport_stop()
-                self.sequencer.playback_state = "stopped"
+                self.sequencer.stop()
 
     def _process_callback(self, frames: int):
         try:

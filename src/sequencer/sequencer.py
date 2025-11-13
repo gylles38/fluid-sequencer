@@ -597,13 +597,16 @@ class JackManager:
                 self._metronome_notes_to_turn_off.append(note_off)
                 beat_to_check += 1
 
-    def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
+    def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block) -> bool:
+        """
+        Checks for loop points and play range end.
+        Returns True if the transport was stopped, False otherwise.
+        """
         if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
             if start_beat_of_block < self.sequencer.play_range_end_beat:
-                self.jack_client.transport_stop()
-                self.set_all_audio_pause_state(True)
-                self.sequencer.play_range_enabled = False
-                self.sequencer.playback_state = "stopped"
+                self.sequencer.stop()
+                self.sequencer.play_range_enabled = False # Ensure this is reset
+                return True
 
         if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:
             if start_beat_of_block < self.sequencer.loop_end_beat:
@@ -614,12 +617,15 @@ class JackManager:
                     _ , pos = self.jack_client.transport_query_struct()
                     pos.frame = target_frame
                     self.jack_client.transport_reposition_struct(pos)
+                # A loop doesn't stop the transport, so we don't return True here.
 
         song_length_beats = self.sequencer.get_song_length_in_beats()
-        if not self.sequencer.loop_enabled and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
+        if not self.sequencer.loop_enabled and not self.sequencer.play_range_enabled and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
-                self.jack_client.transport_stop()
-                self.sequencer.playback_state = "stopped"
+                self.sequencer.stop()
+                return True
+
+        return False
 
     def _process_callback(self, frames: int):
         try:
@@ -686,7 +692,10 @@ class JackManager:
                             command = {"command": ["set_property", "pause", True]}
                             self._send_ipc_command(ap.socket_path, command)
 
-            self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
+            # Check for loop/end of song and stop processing if transport was stopped
+            transport_was_stopped = self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
+            if transport_was_stopped:
+                return # Exit immediately to prevent last_beat from being updated past the end
 
             self.last_beat = end_beat_of_block
             if self.sequencer.gui_mode:

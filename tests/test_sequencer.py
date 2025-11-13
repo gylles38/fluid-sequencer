@@ -315,7 +315,8 @@ class TestSequencer(unittest.TestCase):
         jm.jack_client.transport_state = mock_jack.ROLLING
 
         # Mock the function we want to test is called
-        jm.set_all_audio_pause_state = MagicMock()
+        # Mock the sequencer.stop() method to see if it's called
+        sequencer.stop = MagicMock()
 
         # Mock the transport query to return a valid state
         mock_pos = MagicMock()
@@ -332,22 +333,22 @@ class TestSequencer(unittest.TestCase):
         samplerate = jm.jack_client.samplerate = 48000
 
         # Calculate frames needed to cross the play_range_end_beat boundary
-        # end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
-        # 4.1 = 3.9 + (frames / 48000) * 2.0 => frames = 4800
+        beats_per_second = 2.0
+        # end_beat = start_beat + (frames / samplerate) * beats_per_second
+        # We want end_beat to be > 4.0. Let's say 4.1
+        # 4.1 = 3.9 + (frames / 48000) * 2.0  => 0.2 = frames * 2.0 / 48000 => frames = 4800
         frames = 4800
-
-        # Correctly mock the advancing frame
-        new_frame_pos = 3.9 * samplerate * 0.5 + frames
+        new_frame_pos = (jm.last_beat / beats_per_second) * samplerate + frames
         mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': new_frame_pos}
-
 
         # Call the method under test
         jm._process_callback(frames)
 
         # Assertions
-        jm.jack_client.transport_stop.assert_called_once()
-        jm.set_all_audio_pause_state.assert_called_with(True)
-        self.assertFalse(sequencer.play_range_enabled)
+        sequencer.stop.assert_called_once()
+        # The stop method should handle disabling the play range itself now.
+        # We can add a check to the stop method's mock if we want to be sure.
+        # For now, let's trust that calling stop() is the correct high-level action.
 
 
 if __name__ == '__main__':

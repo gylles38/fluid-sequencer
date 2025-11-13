@@ -714,16 +714,19 @@ class JackManager:
             
         return measure_beats            
 
+from kivy.properties import StringProperty
+
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
-    last_beat_update_time = NumericProperty(0)    
+    last_beat_update_time = NumericProperty(0)
+    playback_state = StringProperty("stopped")
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
         self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
-        self.playback_state = "stopped"
+        # self.playback_state is now a Kivy property
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
@@ -2672,6 +2675,7 @@ class Sequencer(EventDispatcher):
         # Simply tell JACK to start rolling
         if self.jack_manager.jack_client.transport_state != jack.ROLLING:
             self.jack_manager.jack_client.transport_start()
+            self.playback_state = "playing"
 
 
     def pause(self):
@@ -2732,7 +2736,7 @@ class Sequencer(EventDispatcher):
             print(f"Error controlling JACK transport: {e}")
 
         # 5. Mettre à jour l'état et couper toutes les notes MIDI par sécurité
-        self.playback_state = "stopped"
+        self.playback_state = "stopped" # This will now trigger the UI update
         self.jack_manager.silence_all_midi_notes()
         print("Sequencer stopped.")
 

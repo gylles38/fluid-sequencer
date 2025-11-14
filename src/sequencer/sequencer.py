@@ -1605,13 +1605,13 @@ class Sequencer(EventDispatcher):
                 with self.jack_manager.process_lock:
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
-                            # Pan value from -1.0 (L) to 1.0 (R)
-                            gain_l = min(1.0, 1.0 - pan)
-                            gain_r = min(1.0, 1.0 + pan)
-                            # The filter string pans left and right channels independently
-                            pan_filter = f"lavfi=[pan=stereo|FL={gain_l:.2f}*FL|FR={gain_r:.2f}*FR]"
-                            command = {"command": ["set_property", "af", pan_filter]}
-                            self.jack_manager._send_ipc_command(ap.socket_path, command)
+                            command = {"command": ["set_property", "balance", pan]}
+                            print(f"[DIAGNOSTIC] Sending command to track {track_index}: {command}")
+                            success = self.jack_manager._send_ipc_command(ap.socket_path, command)
+                            if success:
+                                print(f"[DIAGNOSTIC] Successfully sent pan command for track {track_index}.")
+                            else:
+                                print(f"[DIAGNOSTIC] FAILED to send pan command for track {track_index}.")
                             break
         # === UPDATE PISTE MIDI (CC #10) ===
         elif isinstance(track, MidiTrack):
@@ -1622,8 +1622,6 @@ class Sequencer(EventDispatcher):
                     midi_pan = int((pan + 1.0) / 2.0 * 127)
                     port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
 
-        self._resync_jack_transport()
-        
         return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
 
     def set_track_velocity(self, track_index: int, velocity_str: Optional[str] = None, api_mode: bool = False, confirmation_handler=None):

@@ -439,10 +439,52 @@ class JackManager:
                     print(f"Error removing socket file {ap.socket_path}: {e}", file=sys.stderr)
             self.active_audio_processes.clear()
 
-    def seek_audio_to_beat(self, beat_pos: float):
+    def _seek_audio_process_synchronously(self, ap: ActiveAudioProcess, target_time_sec: float, timeout=0.5):
+        """Sends a seek command to a single mpv process and waits for it to complete."""
+        request_id = int(time.time() * 1000)
+        command = {"command": ["seek", target_time_sec, "absolute"], "request_id": request_id}
+
+        # Send the initial seek command
+        if not self._send_ipc_command(ap.socket_path, command):
+            print(f"Warning: Failed to send seek command for track {ap.track_index}", file=sys.stderr)
+            return
+
+        start_time = time.time()
+        seek_confirmed = False
+
+        # Poll for confirmation
+        while time.time() - start_time < timeout:
+            # Query the 'seeking' property to see if the seek is finished
+            query_seeking = {"command": ["get_property", "seeking"]}
+            seeking_response = self._query_ipc_command(ap.socket_path, query_seeking)
+
+            if seeking_response and seeking_response.get("error") == "success" and seeking_response.get("data") == False:
+                 # To be absolutely sure, let's also check if playback-time is close to the target
+                query_time = {"command": ["get_property", "playback-time"]}
+                time_response = self._query_ipc_command(ap.socket_path, query_time, timeout=0.05)
+                if time_response and time_response.get("error") == "success":
+                    current_time = time_response.get("data", -1)
+                    if abs(current_time - target_time_sec) < 0.1: # Allow a 100ms tolerance
+                        seek_confirmed = True
+                        break
+
+            time.sleep(0.01) # Small delay to prevent busy-waiting
+
+        if not seek_confirmed:
+            track_name = self.sequencer.song.tracks[ap.track_index].name
+            print(f"Warning: Timed out waiting for seek confirmation on track '{track_name}'", file=sys.stderr)
+
+
+    def seek_audio_to_beat(self, beat_pos: float, synchronous=False):
+        """
+        Seeks all audio tracks to a specific beat.
+        If synchronous is True, it will block until all seeks are confirmed.
+        """
         beats_per_second = self.sequencer.song.tempo / 60.0
         if beats_per_second <= 0:
             return
+
+        threads = []
         with self.process_lock:
             for ap in self.active_audio_processes:
                 track = self.sequencer.song.tracks[ap.track_index]
@@ -450,8 +492,22 @@ class JackManager:
                     mpv_time = (beat_pos - track.start_time) / beats_per_second
                     if mpv_time < 0:
                         mpv_time = 0.0
-                    command = {"command": ["seek", mpv_time, "absolute"]}
-                    self._send_ipc_command(ap.socket_path, command)
+
+                    if synchronous:
+                        # Create and start a thread for each synchronous seek
+                        thread = threading.Thread(target=self._seek_audio_process_synchronously, args=(ap, mpv_time))
+                        threads.append(thread)
+                        thread.start()
+                    else:
+                        # Asynchronous seek (original behavior)
+                        command = {"command": ["seek", mpv_time, "absolute"]}
+                        self._send_ipc_command(ap.socket_path, command)
+
+        # If synchronous, wait for all seek threads to complete
+        if synchronous:
+            for thread in threads:
+                thread.join(timeout=1.0) # Add a timeout to prevent indefinite blocking
+
 
     def update_audio_tracks_speed(self):
         """Adjusts the playback speed of all audio tracks based on the current song tempo."""
@@ -654,15 +710,22 @@ class JackManager:
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0
 
+            # --- MODIFICATION ANTI-DÉRIVE ---
+            # Le début de notre fenêtre de traitement est LA FIN de la fenêtre précédente.
             start_beat_of_block = self.last_beat
 
+            # La fin de la fenêtre est calculée de manière "autoritaire" à partir de la position de JACK.
+            # Cela corrige toute dérive potentielle à chaque bloc.
             current_frame = pos.get('frame', 0)
             if samplerate > 0 and beats_per_second > 0:
+                 # Temps actuel en beats, selon JACK
                 authoritative_beat_now = (current_frame / samplerate) * beats_per_second
+                # La fin du bloc est ce temps + la durée du bloc en cours
+                end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
             else:
-                authoritative_beat_now = self.last_beat
-
-            end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
+                # Fallback si les infos de transport sont invalides
+                end_beat_of_block = self.last_beat
+            # ---------------------------------
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                 if start_beat_of_block <= end_beat < end_beat_of_block:
@@ -2622,7 +2685,8 @@ class Sequencer(EventDispatcher):
 
             # 4. Synchroniser notre état interne et les lecteurs externes avec la nouvelle position
             self.jack_manager._sync_playhead_to_beat(beat)
-            self.jack_manager.seek_audio_to_beat(beat)
+            # ICI LA MODIFICATION CRUCIALE: on attend que le seek audio soit terminé
+            self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
 
             # 5. Régénérer les événements d'automation pour refléter le nouvel état (solo/mute)
             self.jack_manager._prepare_automation_events()

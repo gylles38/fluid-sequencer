@@ -63,7 +63,7 @@ def song_decoder(d):
     return d
 
 
-from kivy.properties import NumericProperty
+from kivy.properties import NumericProperty, StringProperty
 from kivy.event import EventDispatcher
 
 class JackManager:
@@ -716,14 +716,14 @@ class JackManager:
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
-    last_beat_update_time = NumericProperty(0)    
+    last_beat_update_time = NumericProperty(0)
+    playback_state = StringProperty("stopped")
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
         self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
-        self.playback_state = "stopped"
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
@@ -1606,10 +1606,10 @@ class Sequencer(EventDispatcher):
                     for ap in self.jack_manager.active_audio_processes:
                         if ap.track_index == track_index:
                             # Pan value from -1.0 (L) to 1.0 (R)
+                            # Using lavfi pan filter. c0 is left, c1 is right.
                             gain_l = min(1.0, 1.0 - pan)
                             gain_r = min(1.0, 1.0 + pan)
-                            # The filter string pans left and right channels independently
-                            pan_filter = f"lavfi=[pan=stereo|FL={gain_l:.2f}*FL|FR={gain_r:.2f}*FR]"
+                            pan_filter = f"lavfi=[pan=stereo|c0={gain_l:.2f}*c0|c1={gain_r:.2f}*c1]"
                             command = {"command": ["set_property", "af", pan_filter]}
                             self.jack_manager._send_ipc_command(ap.socket_path, command)
                             break
@@ -1621,8 +1621,6 @@ class Sequencer(EventDispatcher):
                     # Conversion de pan (-1.0 à 1.0) en valeur MIDI (0 à 127)
                     midi_pan = int((pan + 1.0) / 2.0 * 127)
                     port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
-
-        self._resync_jack_transport()
         
         return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
 
@@ -2371,6 +2369,8 @@ class Sequencer(EventDispatcher):
             
             if self.playback_state != "stopped":
                 return "Error: Please stop playback before starting a new recording."
+
+            self.playback_state = "recording"
             
             # This is a new recording session initiated from the UI or command line
             if track_idx is not None:
@@ -2672,6 +2672,7 @@ class Sequencer(EventDispatcher):
         # Simply tell JACK to start rolling
         if self.jack_manager.jack_client.transport_state != jack.ROLLING:
             self.jack_manager.jack_client.transport_start()
+            self.playback_state = "playing"
 
 
     def pause(self):
@@ -2680,9 +2681,17 @@ class Sequencer(EventDispatcher):
 
         try:
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
+                # Get current beat BEFORE stopping
+                current_beat = self._get_current_beat()
                 self.jack_manager.jack_client.transport_stop()
-            else:
-                self.jack_manager.jack_client.transport_start()
+                self.playback_state = "paused"
+                # Store the precise beat for resume
+                self.last_start_beat = current_beat
+            elif self.playback_state == "paused":
+                # Resync all tracks to the last beat and resume
+                self._resync_all_at_beat(self.last_start_beat)
+                self.playback_state = "playing"
+
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
 

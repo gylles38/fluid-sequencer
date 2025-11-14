@@ -421,6 +421,9 @@ class SequencerLayout(BoxLayout):
         # donc il DOIT être appelé APRÈS la création de track_list_layout
         self.update_status_display()
 
+        # Bind to the sequencer's playback_state property
+        self.sequencer.bind(playback_state=self.on_playback_state_change)
+
         # Re-introducing a clock for smooth UI updates, but at a more reasonable rate
         Clock.schedule_interval(self.update_playhead, 1/30.0)
 
@@ -946,7 +949,19 @@ class SequencerLayout(BoxLayout):
         
         # Forcer l'UI à se caler sur la position d'arrêt
         Clock.schedule_once(lambda dt: self.snap_ui_to_jack(), 0.1)
-        # (On utilise Clock.schedule_once pour laisser le temps à 'stop' de s'exécuter)        
+        # (On utilise Clock.schedule_once pour laisser le temps à 'stop' de s'exécuter)
+
+    def on_playback_state_change(self, instance, state):
+        """Called when the sequencer's playback_state changes."""
+        if state == "stopped":
+            # Call the same logic as if the stop button was pressed
+            self.stop_pressed(None)
+        elif state == "playing":
+            # This can be used to update UI when playback starts from an external source
+            if not self.is_playing:
+                self.is_playing = True
+                self.play_button.icon = 'play-circle-outline'
+                self.start_play_blink()
 
     def record_pressed(self, instance):
         if self.is_recording:

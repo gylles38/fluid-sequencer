@@ -2598,18 +2598,27 @@ class Sequencer(EventDispatcher):
         the master JACK transport, ensuring all clients are perfectly aligned.
         If `force_play` is True, it will start the transport even if it wasn't rolling before.
         """
+        print(f"\n[DIAGNOSTIC] === _resync_all_at_beat START (target_beat={beat:.6f}) ===")
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
+            print("[DIAGNOSTIC] JACK not running, aborting resync.")
             return
 
         try:
             # 1. Mémoriser si le transport était en cours de lecture
             was_rolling = self.jack_manager.jack_client.transport_state == jack.ROLLING
+            print(f"[DIAGNOSTIC] was_rolling: {was_rolling}")
 
             # 2. Arrêter le transport pour garantir un état de base propre
             if was_rolling:
                 self.jack_manager.jack_client.transport_stop()
-                self.jack_manager.set_all_audio_pause_state(True)
-                time.sleep(0.05)  # Court délai pour permettre aux processus de réagir
+
+            # --- NOUVELLE LOGIQUE ---
+            # Forcer l'état de pause sur tous les lecteurs audio, peu importe leur état précédent.
+            # C'est la clé pour garantir qu'ils sont prêts à recevoir une commande de recherche (seek).
+            print("[DIAGNOSTIC] Forcing pause on all audio players to ensure a known state.")
+            self.jack_manager.set_all_audio_pause_state(True)
+            time.sleep(0.05)  # Un court délai crucial pour laisser aux processus mpv le temps de traiter la commande de pause.
+            # -------------------------
 
             # 3. Repositionner le transport JACK à la position exacte du beat
             beats_per_second = self.song.tempo / 60.0
@@ -2617,12 +2626,17 @@ class Sequencer(EventDispatcher):
             if beats_per_second > 0 and samplerate > 0:
                 target_frame = int((beat / beats_per_second) * samplerate)
                 _ , pos = self.jack_manager.jack_client.transport_query_struct()
+                original_frame = pos.frame
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
+                print(f"[DIAGNOSTIC] Repositioning JACK transport from frame {original_frame} to {target_frame} (beat {beat:.6f})")
 
             # 4. Synchroniser notre état interne et les lecteurs externes avec la nouvelle position
+            print("[DIAGNOSTIC] Syncing internal playhead...")
             self.jack_manager._sync_playhead_to_beat(beat)
-            self.jack_manager.seek_audio_to_beat(beat)
+            print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
+            self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
+            print("[DIAGNOSTIC] Audio track seek complete.")
 
             # 5. Régénérer les événements d'automation pour refléter le nouvel état (solo/mute)
             self.jack_manager._prepare_automation_events()
@@ -2642,11 +2656,15 @@ class Sequencer(EventDispatcher):
 
             # 8. Redémarrer le transport s'il était en cours de lecture ou si forcé
             if was_rolling or force_play:
+                print("[DIAGNOSTIC] Restarting transport...")
                 self.jack_manager.jack_client.transport_start()
                 self.jack_manager.set_all_audio_pause_state(False)
+                print("[DIAGNOSTIC] Transport restarted.")
 
         except jack.JackError as e:
             print(f"Error during resynchronization: {e}", file=sys.stderr)
+        finally:
+            print(f"[DIAGNOSTIC] === _resync_all_at_beat END ===\n")
 
     def play(self, start_beat: Optional[float] = None):
         if not self.jack_manager.is_running:
@@ -2684,11 +2702,13 @@ class Sequencer(EventDispatcher):
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                 # Get current beat BEFORE stopping
                 current_beat = self._get_current_beat()
+                print(f"\n[DIAGNOSTIC] --- PAUSING at beat {current_beat:.6f} ---")
                 self.jack_manager.jack_client.transport_stop()
                 self.playback_state = "paused"
                 # Store the precise beat for resume
                 self.last_start_beat = current_beat
             elif self.playback_state == "paused":
+                print(f"\n[DIAGNOSTIC] --- RESUMING from beat {self.last_start_beat:.6f} ---")
                 # Resync all tracks to the last beat and resume
                 self._resync_all_at_beat(self.last_start_beat, force_play=True)
                 self.playback_state = "playing"

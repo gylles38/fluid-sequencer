@@ -20,12 +20,8 @@ class TooltipMDIconButton(MDIconButton):
         super().__init__(**kwargs)
         self.tooltip_delay = 0.5  # Délai légèrement augmenté pour éviter les affichages accidentels
         self._show_event = None
-        # On active les événements on_enter/on_leave
-        Window.bind(mouse_pos=self.on_mouse_move)
-
-    def on_mouse_move(self, window, pos):
-        # Cette méthode est juste pour déclencher on_enter/on_leave, le contenu n'est pas nécessaire
-        pass
+        # Les événements on_enter/on_leave sont gérés nativement par Kivy
+        # Il n'est PAS nécessaire de binder manuellement mouse_pos.
 
     def on_enter(self, *args):
         """Appelé lorsque la souris entre dans la zone du widget."""

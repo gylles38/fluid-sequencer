@@ -9,117 +9,97 @@ from kivy.properties import StringProperty
 class TooltipMDIconButton(MDIconButton):
     tooltip_text = StringProperty()
 
-    # NOUVEAU : État de classe pour suivre le dernier bouton survolé
-    # Ceci est critique pour la logique des boutons adjacents.
-    _active_instance = None
+    # --- Optimisation XRun ---
+    # Un seul label partagé pour toutes les info-bulles afin d'éviter de créer/détruire des widgets en permanence.
+    _tooltip_label = None
+    _bg_rect = None
+    # Suivi de l'instance qui affiche actuellement l'info-bulle.
+    _active_tooltip_instance = None
 
     def __init__(self, **kwargs):
-        self.tooltip_text = kwargs.pop("tooltip_text", "")
         super().__init__(**kwargs)
-        self.tooltip_delay = 0.2
-        self.tooltip_label = None
+        self.tooltip_delay = 0.5  # Délai légèrement augmenté pour éviter les affichages accidentels
         self._show_event = None
-        # La liaison Window.bind est gérée dans on_parent
-        self.bind(tooltip_text=self._on_tooltip_text_changed)
+        # On active les événements on_enter/on_leave
+        Window.bind(mouse_pos=self.on_mouse_move)
 
-    def _on_tooltip_text_changed(self, instance, value):
-        if self.tooltip_label:
-            self.tooltip_label.text = value
-            self.tooltip_label.texture_update()
-            natural_size = self.tooltip_label.texture_size
-            new_size = (natural_size[0] + dp(20), dp(32)) if natural_size else (dp(120), dp(32))
-            self.tooltip_label.size = new_size
-            if hasattr(self, "_bg_rect"):
-                self._bg_rect.size = new_size
+    def on_mouse_move(self, window, pos):
+        # Cette méthode est juste pour déclencher on_enter/on_leave, le contenu n'est pas nécessaire
+        pass
 
-    def on_mouse_pos(self, window, pos):
-        collide = self.collide_point(*self.to_widget(*pos))
-        
-        if collide:
-            # === LOGIQUE DE PRISE DE CONTRÔLE (RÈGLEMENT DU CONFLIT ENTRE BOUTONS) ===
-            # Si un autre bouton est actif, on le force à se masquer avant de continuer
-            if TooltipMDIconButton._active_instance and TooltipMDIconButton._active_instance is not self:
-                TooltipMDIconButton._active_instance._hide_tooltip()
-                
-            # Définir cette instance comme l'instance active
-            TooltipMDIconButton._active_instance = self
-            # =========================================================================
+    def on_enter(self, *args):
+        """Appelé lorsque la souris entre dans la zone du widget."""
+        # Si une autre info-bulle est active, on la cache
+        if TooltipMDIconButton._active_tooltip_instance and TooltipMDIconButton._active_tooltip_instance != self:
+            TooltipMDIconButton._active_tooltip_instance._hide_tooltip()
 
-            self._ensure_tooltip()
-            self._update_tooltip_position(pos)
-            if not self._show_event:
-                self._show_event = Clock.schedule_once(self._do_show_tooltip, self.tooltip_delay)
-        else:
-            # Vérification essentielle : si le curseur n'est plus sur le bouton, mais qu'il est sur le tooltip
-            is_over_tooltip = False
-            if self.tooltip_label and self.tooltip_label.parent and self.tooltip_label.collide_point(*pos):
-                is_over_tooltip = True
+        TooltipMDIconButton._active_tooltip_instance = self
+        if not self._show_event:
+            self._show_event = Clock.schedule_once(self._show_tooltip, self.tooltip_delay)
+
+    def on_leave(self, *args):
+        """Appelé lorsque la souris quitte la zone du widget."""
+        self._hide_tooltip()
+        if TooltipMDIconButton._active_tooltip_instance == self:
+            TooltipMDIconButton._active_tooltip_instance = None
+
+    def _ensure_tooltip_label(self):
+        """S'assure que le label global unique existe."""
+        if TooltipMDIconButton._tooltip_label is None:
+            label = Label(
+                size_hint=(None, None),
+                color=(1, 1, 1, 1),
+                font_size=dp(14),
+                padding=(dp(10), dp(6))
+            )
+            with label.canvas.before:
+                Color(0, 0, 0, 0.85)
+                TooltipMDIconButton._bg_rect = Rectangle(pos=label.pos, size=label.size)
             
-            if not is_over_tooltip:
-                self._hide_tooltip()
+            def update_bg(instance, value):
+                TooltipMDIconButton._bg_rect.pos = instance.pos
+                TooltipMDIconButton._bg_rect.size = instance.size
 
-    def _ensure_tooltip(self):
-        if self.tooltip_label:
-            return
-        self.tooltip_label = Label(
-            text=self.tooltip_text,
-            size_hint=(None, None),
-            color=(1, 1, 1, 1),
-            font_size=dp(14),
-            padding=(dp(10), dp(6))
-        )
-        self.tooltip_label.texture_update()
-        natural_size = self.tooltip_label.texture_size
-        self.tooltip_label.size = (natural_size[0] + dp(20), dp(32)) if natural_size else (dp(120), dp(32))
-        with self.tooltip_label.canvas.before:
-            Color(0, 0, 0, 0.85)
-            self._bg_rect = Rectangle(pos=self.tooltip_label.pos, size=self.tooltip_label.size)
-        self.tooltip_label.bind(pos=self._update_bg, size=self._update_bg)
+            label.bind(pos=update_bg, size=update_bg)
+            TooltipMDIconButton._tooltip_label = label
 
-    def _update_bg(self, instance, value):
-        if hasattr(self, "_bg_rect"):
-            self._bg_rect.pos = instance.pos
-            self._bg_rect.size = instance.size
+    def _show_tooltip(self, dt):
+        """Affiche et configure l'info-bulle."""
+        self._ensure_tooltip_label()
+        label = TooltipMDIconButton._tooltip_label
 
-    def _do_show_tooltip(self, dt):
-        if self.tooltip_label and self.tooltip_label.parent is None:
-            Window.add_widget(self.tooltip_label)
+        label.text = self.tooltip_text
+        label.texture_update()
+        natural_size = label.texture_size
+        label.size = (natural_size[0] + dp(20), dp(32))
+
+        # Positionner l'info-bulle par rapport à la position actuelle de la souris
+        x, y = Window.mouse_pos
+        label.pos = (x + dp(15), y + dp(15))
+
+        if label.parent is None:
+            Window.add_widget(label)
+
         self._show_event = None
-
-    def _update_tooltip_position(self, mouse_pos):
-        if not self.tooltip_label:
-            return
-        x, y = mouse_pos
-        self.tooltip_label.pos = (x + dp(10), y + dp(10))
-        self._update_bg(self.tooltip_label, None)
 
     def _hide_tooltip(self):
+        """Cache l'info-bulle si elle est visible."""
         if self._show_event:
             self._show_event.cancel()
             self._show_event = None
-            
-        if self.tooltip_label and self.tooltip_label.parent:
-            Window.remove_widget(self.tooltip_label)
-            
-        # NOUVEAU : Réinitialiser l'état global
-        if TooltipMDIconButton._active_instance is self:
-            TooltipMDIconButton._active_instance = None
-            
+
+        label = TooltipMDIconButton._tooltip_label
+        if label and label.parent:
+            Window.remove_widget(label)
+
     def on_release(self):
-        """Force le masquage du tooltip immédiatement après un clic (relâchement)."""
+        """Force le masquage de l'info-bulle au clic."""
         super().on_release()
-        self._hide_tooltip()  
+        self._hide_tooltip()
 
     def on_parent(self, instance, parent):
+        """Nettoyage lorsque le widget est retiré de l'arbre graphique."""
         if parent is None:
             self._hide_tooltip()
-            # DÉLIER le suivi de la souris 
-            Window.unbind(mouse_pos=self.on_mouse_pos) 
-            # NOUVEAU : Réinitialiser l'état global si on retire le bouton
-            if TooltipMDIconButton._active_instance is self:
-                TooltipMDIconButton._active_instance = None
-            if self.tooltip_label:
-                self.tooltip_label = None
-        else:
-            # RELIER le suivi de la souris (quand le bouton est ajouté)
-            Window.bind(mouse_pos=self.on_mouse_pos)
+            if TooltipMDIconButton._active_tooltip_instance == self:
+                TooltipMDIconButton._active_tooltip_instance = None

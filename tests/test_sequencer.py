@@ -437,3 +437,34 @@ class TestRecording(unittest.TestCase):
         self.assertEqual(note.pitch, 60)
         self.assertEqual(note.velocity, 100)
         self.assertAlmostEqual(note.duration, 1.0)
+
+    @patch('mido.open_output')
+    def test_toggle_mute_sends_note_off(self, mock_open_output):
+        """Test that muting a MIDI track sends an 'all notes off' message."""
+        # Setup
+        mock_port = MagicMock()
+        mock_open_output.return_value = mock_port
+
+        sequencer = self.sequencer
+        jm = sequencer.jack_manager
+        jm.is_running = True # Simulate that JACK is running
+
+        # Add a MIDI track and 'open' its port
+        sequencer.add_track(name="Test MIDI", track_type='midi')
+        track = sequencer.song.tracks[0]
+        track.output_port_name = "test_port"
+        jm.open_ports["test_port"] = mock_port
+
+        # Mute the track
+        sequencer.toggle_mute(0)
+
+        # Assertion
+        self.assertTrue(track.is_muted)
+        # Check that a CC message with control=123 (All Notes Off) was sent
+        mock_port.send.assert_called_with(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
+        # Unmute the track
+        sequencer.toggle_mute(0)
+        self.assertFalse(track.is_muted)
+        # Ensure no new messages were sent on unmute
+        self.assertEqual(mock_port.send.call_count, 1)

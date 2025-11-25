@@ -1712,8 +1712,7 @@ class Sequencer(EventDispatcher):
     def toggle_mute(self, track_index: int):
         """
         Active/désactive le mute sur une piste.
-        Corrige la désynchronisation audio/MIDI en forçant une resynchronisation JACK complète
-        lors du unmute (équivalent à un mini pause/reprise).
+        Il s'agit d'une opération légère qui n'interrompt pas la lecture.
         """
 
         if not 0 <= track_index < len(self.song.tracks):
@@ -1754,25 +1753,14 @@ class Sequencer(EventDispatcher):
                 port = self.jack_manager.open_ports[track.output_port_name]
 
                 if track.is_muted:
-                    # Envoyer un All Notes Off
-                    for cc in (123, 120, 121):
-                        port.send(mido.Message('control_change', channel=track.channel, control=cc, value=0))
-                    # Supprimer notes actives
-                    keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == track_index]
-                    for key in keys_to_remove:
-                        del self.jack_manager._active_notes[key]
-                    if debug:
-                        print(f"[DEBUG] Active notes cleared for '{track.name}'")
+                    # Envoyer un "All Notes Off" pour couper immédiatement le son sur ce canal.
+                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
 
         # --- Régénérer les automations ---
         self.jack_manager._prepare_automation_events()
 
         # --- Resync only if playback is active ---
-        self._resync_jack_transport()
-
-        if debug:
-            print(f"[DEBUG] last_beat={self.jack_manager.last_beat:.6f}")
-            print(f"[DEBUG] next_event_indices={self.jack_manager.next_event_indices}")
+        # self._resync_jack_transport() # ❌ SUPPRIMÉ - C'est la cause principale du décalage.
 
         return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 

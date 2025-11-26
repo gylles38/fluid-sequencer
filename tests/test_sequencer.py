@@ -437,3 +437,73 @@ class TestRecording(unittest.TestCase):
         self.assertEqual(note.pitch, 60)
         self.assertEqual(note.velocity, 100)
         self.assertAlmostEqual(note.duration, 1.0)
+
+    @patch('mido.open_output')
+    def test_toggle_mute_sends_note_off(self, mock_open_output):
+        """Test that muting a MIDI track sends an 'all notes off' message."""
+        # Setup
+        mock_port = MagicMock()
+        mock_open_output.return_value = mock_port
+
+        sequencer = self.sequencer
+        jm = sequencer.jack_manager
+        jm.is_running = True # Simulate that JACK is running
+
+        # Add a MIDI track and 'open' its port
+        sequencer.add_track(name="Test MIDI", track_type='midi')
+        track = sequencer.song.tracks[0]
+        track.output_port_name = "test_port"
+        jm.open_ports["test_port"] = mock_port
+
+        # Mute the track
+        sequencer.toggle_mute(0)
+
+        # Assertion
+        self.assertTrue(track.is_muted)
+        # Check that a CC message with control=123 (All Notes Off) was sent
+        mock_port.send.assert_called_with(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
+        # Unmute the track
+        sequencer.toggle_mute(0)
+        self.assertFalse(track.is_muted)
+        # Ensure no new messages were sent on unmute
+        self.assertEqual(mock_port.send.call_count, 1)
+
+    def test_seek_confirmation_while_paused(self):
+        """
+        Test that _seek_audio_process_synchronously succeeds even if playback-time
+        is not updated, by relying solely on the 'seeking' property.
+        """
+        sequencer = self.sequencer
+        jm = sequencer.jack_manager
+
+        # Mock the ActiveAudioProcess
+        mock_ap = MagicMock()
+        mock_ap.socket_path = "dummy_socket"
+        mock_ap.track_index = 0
+        sequencer.song.add_track(AudioTrack(name="Test Audio", filepath="dummy.wav"))
+        jm.active_audio_processes.append(mock_ap)
+
+
+        # This is the crucial part: we simulate mpv's behavior when paused.
+        # 'seeking' becomes false, but 'playback-time' might not update to the target.
+        mock_responses = [
+            # First few calls, mpv is still seeking
+            {"error": "success", "data": True},
+            # Then, seeking becomes false
+            {"error": "success", "data": False},
+        ]
+
+        with patch.object(jm, '_query_ipc_command', side_effect=mock_responses) as mock_query:
+            # The function should complete without timing out.
+            # We pass a timeout shorter than the default to make the test faster.
+            jm._seek_audio_process_synchronously(mock_ap, target_time_sec=10.0, timeout=1.0)
+
+            # Assert that we queried for the 'seeking' property.
+            calls = [call(mock_ap.socket_path, {"command": ["get_property", "seeking"]}, timeout=0.1)]
+            mock_query.assert_has_calls(calls)
+
+            # Verify we did NOT query for 'playback-time', as that was the source of the bug.
+            for c in mock_query.call_args_list:
+                command = c.args[1]['command']
+                self.assertNotIn('playback-time', command)

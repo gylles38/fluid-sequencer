@@ -684,9 +684,8 @@ class JackManager:
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
-                    # Si _resync_all_at_beat a déjà géré la reprise, on l'ignore ici.
                     if self._resync_unpause_handled:
-                        self._resync_unpause_handled = False # On réinitialise pour la prochaine fois.
+                        self._resync_unpause_handled = False
                     else:
                         self.set_all_audio_pause_state(False)
                 else: # STOPPED or other state
@@ -2661,13 +2660,17 @@ class Sequencer(EventDispatcher):
 
             # 8. Redémarrer le transport s'il était en cours de lecture ou si forcé
             if was_rolling or force_play:
-                # On gère nous-même la reprise ici, donc on informe le callback de l'ignorer.
-                self.jack_manager.set_all_audio_pause_state(False)
-                self.jack_manager._resync_unpause_handled = True
+                # Ordre critique pour éviter le craquement : d'abord démarrer le maître,
+                # PUIS relancer les esclaves.
                 self.jack_manager.jack_client.transport_start()
+                self.jack_manager.set_all_audio_pause_state(False)
+                # Informer le callback qu'on a déjà géré la reprise.
+                self.jack_manager._resync_unpause_handled = True
 
         except jack.JackError as e:
             print(f"Error during resynchronization: {e}", file=sys.stderr)
+        finally:
+            print(f"[DIAGNOSTIC] === _resync_all_at_beat END ===\n")
 
     def play(self, start_beat: Optional[float] = None):
         if not self.jack_manager.is_running:

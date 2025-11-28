@@ -304,8 +304,11 @@ class TestSequencer(unittest.TestCase):
     @patch('pydub.AudioSegment.from_file')
     @patch('sequencer.sequencer.jack')
     def test_play_range_stops_audio(self, mock_jack, mock_from_file):
-        """Test that reaching the end of a play range stops audio tracks and the transport."""
-        # Setup
+        """
+        Test that _process_callback correctly stops the transport when the play range is exceeded.
+        This test is updated to work with the authoritative frame-based time calculation.
+        """
+        # --- Setup ---
         mock_from_file.return_value = MagicMock()
         sequencer = self.sequencer
         jm = sequencer.jack_manager
@@ -313,38 +316,38 @@ class TestSequencer(unittest.TestCase):
         # Mock the JACK client and its state
         jm.jack_client = MagicMock()
         jm.jack_client.transport_state = mock_jack.ROLLING
+        jm.set_all_audio_pause_state = MagicMock() # Mock the pause function
 
-        # Mock the function we want to test is called
-        jm.set_all_audio_pause_state = MagicMock()
-
-        # Mock the transport query to return a valid state
-        mock_pos = MagicMock()
-        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': 0}
-        jm.jack_client.transport_query_struct.return_value = (mock_jack.ROLLING, mock_pos)
-
-        # Set a play range
+        # --- Configuration ---
         sequencer.play_range_enabled = True
-        sequencer.play_range_end_beat = 4.0 # Stop at the end of the first measure
-
-        # Simulate the process callback just before the end of the play range
-        jm.last_beat = 3.9
+        sequencer.play_range_end_beat = 4.0  # Stop at the end of the first measure (4 beats)
         sequencer.song.tempo = 120.0
         samplerate = jm.jack_client.samplerate = 48000
+        beats_per_second = 2.0
 
-        # Calculate frames needed to cross the play_range_end_beat boundary
-        # end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
-        # 4.1 = 3.9 + (frames / 48000) * 2.0 => frames = 4800
-        frames = 4800
+        # --- Simulation ---
+        # We want to simulate a block that *crosses* the 4.0 beat boundary.
+        # Let's define the start of this block to be at beat 3.9.
+        start_beat = 3.9
+        jm.last_beat = start_beat # Set the internal state to match the simulation start
+        current_frame = int((start_beat / beats_per_second) * samplerate) # frame at the beginning of the block
 
-        # Correctly mock the advancing frame
-        new_frame_pos = 3.9 * samplerate * 0.5 + frames
-        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': new_frame_pos}
+        # Define a block size that will push the end_beat past 4.0
+        frames_in_block = 4096
+        # end_beat = ((current_frame + frames_in_block) / samplerate) * beats_per_second
+        # end_beat = ((93600 + 4096) / 48000) * 2.0 = 4.07, which is > 4.0
 
+        # Mock the transport query to return the calculated starting frame
+        mock_pos = MagicMock()
+        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': current_frame}
+        jm.jack_client.transport_query_struct.return_value = (mock_jack.ROLLING, mock_pos)
 
-        # Call the method under test
-        jm._process_callback(frames)
+        # --- Execution ---
+        # Call the method under test with our simulated block size
+        jm._process_callback(frames_in_block)
 
-        # Assertions
+        # --- Assertions ---
+        # The transport should have been stopped because end_beat_of_block > play_range_end_beat
         jm.jack_client.transport_stop.assert_called_once()
         jm.set_all_audio_pause_state.assert_called_with(True)
         self.assertFalse(sequencer.play_range_enabled)
@@ -437,3 +440,74 @@ class TestRecording(unittest.TestCase):
         self.assertEqual(note.pitch, 60)
         self.assertEqual(note.velocity, 100)
         self.assertAlmostEqual(note.duration, 1.0)
+
+    @patch('mido.open_output')
+    def test_toggle_mute_sends_note_off(self, mock_open_output):
+        """Test that muting a MIDI track sends an 'all notes off' message."""
+        # Setup
+        mock_port = MagicMock()
+        mock_open_output.return_value = mock_port
+
+        sequencer = self.sequencer
+        jm = sequencer.jack_manager
+        jm.is_running = True # Simulate that JACK is running
+
+        # Add a MIDI track and 'open' its port
+        sequencer.add_track(name="Test MIDI", track_type='midi')
+        track = sequencer.song.tracks[0]
+        track.output_port_name = "test_port"
+        jm.open_ports["test_port"] = mock_port
+
+        # Mute the track
+        sequencer.toggle_mute(0)
+
+        # Assertion
+        self.assertTrue(track.is_muted)
+        # Check that a CC message with control=123 (All Notes Off) was sent
+        mock_port.send.assert_called_with(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
+        # Unmute the track
+        sequencer.toggle_mute(0)
+        self.assertFalse(track.is_muted)
+        # Ensure no new messages were sent on unmute
+        self.assertEqual(mock_port.send.call_count, 1)
+
+    def test_seek_confirmation_while_paused(self):
+        """
+        Test that _seek_audio_process_synchronously succeeds even if playback-time
+        is not updated, by relying solely on the 'seeking' property.
+        """
+        # This test requires a real JackManager instance, not the mock from setUp.
+        sequencer = Sequencer()
+        jm = sequencer.jack_manager
+
+        # Mock the ActiveAudioProcess
+        mock_ap = MagicMock()
+        mock_ap.socket_path = "dummy_socket"
+        mock_ap.track_index = 0
+        sequencer.song.add_track(AudioTrack(name="Test Audio", filepath="dummy.wav"))
+        jm.active_audio_processes.append(mock_ap)
+
+        # This is the crucial part: we simulate mpv's behavior when paused.
+        # 'seeking' becomes false, but 'playback-time' might not update to the target.
+        mock_responses = [
+            # First call, mpv is still seeking
+            {"error": "success", "data": True},
+            # Then, seeking becomes false, which should terminate the loop
+            {"error": "success", "data": False},
+        ]
+
+        with patch.object(jm, '_send_ipc_command', return_value=True) as mock_send, \
+             patch.object(jm, '_query_ipc_command', side_effect=mock_responses) as mock_query:
+            # The function should complete without timing out.
+            jm._seek_audio_process_synchronously(mock_ap, target_time_sec=10.0, timeout=1.0)
+
+            # Assert that the initial seek command was sent.
+            mock_send.assert_called_once()
+            # Assert that we queried for the 'seeking' property at least once.
+            mock_query.assert_any_call(mock_ap.socket_path, {"command": ["get_property", "seeking"]}, timeout=0.1)
+
+            # Verify we did NOT query for 'playback-time', as that was the source of the bug.
+            for c in mock_query.call_args_list:
+                command = c.args[1]['command']
+                self.assertNotIn('playback-time', command)

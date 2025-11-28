@@ -681,12 +681,20 @@ class JackManager:
     def _process_callback(self, frames: int):
         try:
             current_transport_state = self.jack_client.transport_state
-            if current_transport_state != self.last_transport_state:
-                if current_transport_state == jack.ROLLING:
-                    self.set_all_audio_pause_state(False)
-                else: # STOPPED or other state
-                    self.set_all_audio_pause_state(True)
-                self.last_transport_state = current_transport_state
+
+            # --- State Machine for Audio Players ---
+            is_rolling = (current_transport_state == jack.ROLLING)
+            was_rolling = (self.last_transport_state == jack.ROLLING)
+
+            if is_rolling and not was_rolling:
+                # Transition: STOPPED -> ROLLING
+                self.set_all_audio_pause_state(False)
+            elif not is_rolling and was_rolling:
+                # Transition: ROLLING -> STOPPED
+                self.set_all_audio_pause_state(True)
+
+            self.last_transport_state = current_transport_state
+
 
             with self.sync_lock:
                 if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
@@ -2667,8 +2675,9 @@ class Sequencer(EventDispatcher):
             if was_rolling or force_play:
                 print("[DIAGNOSTIC] Restarting transport...")
                 self.jack_manager.jack_client.transport_start()
-                self.jack_manager.set_all_audio_pause_state(False)
-                print("[DIAGNOSTIC] Transport restarted.")
+                # La commande un-pause est maintenant gérée exclusivement par _process_callback
+                # self.jack_manager.set_all_audio_pause_state(False)
+                print("[DIAGNOSTIC] Transport command sent.")
 
         except jack.JackError as e:
             print(f"Error during resynchronization: {e}", file=sys.stderr)

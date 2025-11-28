@@ -86,105 +86,6 @@ class JackManager:
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
 
-        # --- Dynamic Audio Correction ---
-        self.CORRECTION_GAIN = 0.02
-        self.CORRECTION_THRESHOLD = 0.03 # 30ms
-        self._correction_thread = None
-        self._correction_stop_event = threading.Event()
-        self.last_applied_speeds = {}
-
-
-    def _audio_correction_loop(self):
-        """
-        A loop in a separate thread that periodically checks the audio playback position
-        against the master JACK transport and applies a speed correction if they drift.
-        This is a non-real-time loop to avoid blocking the JACK audio callback.
-        """
-        while not self._correction_stop_event.is_set():
-            try:
-                if (not self.jack_client or
-                        not self.is_running or
-                        self.jack_client.transport_state != jack.ROLLING):
-                    time.sleep(0.5)
-                    continue
-
-                # --- Get Master Time from JACK ---
-                state, pos_struct = self.jack_client.transport_query_struct()
-                pos_dict = jack.position2dict(pos_struct)
-                frame = pos_dict.get('frame', 0)
-                samplerate = self.jack_client.samplerate
-                if samplerate <= 0:
-                    time.sleep(0.5)
-                    continue
-
-                master_time_sec = frame / samplerate
-                beats_per_second = self.sequencer.song.tempo / 60.0
-                if beats_per_second <= 0:
-                    time.sleep(0.5)
-                    continue
-
-                # --- Compare each audio track to the master time ---
-                with self.process_lock:
-                    # Create a copy to avoid issues if the list changes during iteration
-                    audio_processes = list(self.active_audio_processes)
-
-                for ap in audio_processes:
-                    track = self.sequencer.song.tracks[ap.track_index]
-                    if not isinstance(track, AudioTrack):
-                        continue
-
-                    # Query mpv for its current playback time
-                    query_time = {"command": ["get_property", "playback-time"]}
-                    time_response = self._query_ipc_command(ap.socket_path, query_time, timeout=0.05)
-
-                    if not (time_response and time_response.get("error") == "success"):
-                        continue # Skip if we can't get the time
-
-                    current_mpv_time = time_response.get("data", 0.0)
-                    if current_mpv_time is None: continue
-
-                    # Calculate where mpv *should* be
-                    track_start_sec = (track.start_time / beats_per_second)
-                    expected_mpv_time = master_time_sec - track_start_sec
-
-                    if expected_mpv_time < 0:
-                        continue # This track hasn't started yet
-
-                    # --- Calculate Error and Apply Correction ---
-                    error_sec = expected_mpv_time - current_mpv_time
-
-                    base_speed = 1.0
-                    if track.native_tempo is not None and track.native_tempo > 0:
-                        base_speed = self.sequencer.song.tempo / track.native_tempo
-
-                    new_speed = base_speed
-
-                    if abs(error_sec) > self.CORRECTION_THRESHOLD:
-                        # Apply proportional correction
-                        speed_correction = 1.0 + (error_sec * self.CORRECTION_GAIN)
-                        # Clamp the correction to prevent extreme, audible speed changes
-                        speed_correction = max(0.95, min(1.05, speed_correction))
-                        new_speed = base_speed * speed_correction
-
-                    # Round to avoid floating point noise causing unnecessary IPC commands
-                    new_speed = round(new_speed, 5)
-
-                    last_speed = self.last_applied_speeds.get(ap.track_index)
-
-                    if last_speed is None or not math.isclose(last_speed, new_speed, rel_tol=1e-4):
-                        command = {"command": ["set_property", "speed", new_speed]}
-                        if self._send_ipc_command(ap.socket_path, command):
-                            self.last_applied_speeds[ap.track_index] = new_speed
-
-            except jack.JackError:
-                # This can happen during shutdown, it's safe to just exit the loop
-                break
-            except Exception as e:
-                print(f"\nError in audio correction loop: {e}", file=sys.stderr)
-
-            # The interval at which the correction is checked and applied
-            time.sleep(0.5)
-
     def _display_loop(self):
         """A loop in a separate thread to display the current transport position."""
         last_pos_str = ""
@@ -344,12 +245,6 @@ class JackManager:
                     self._display_thread.daemon = True
                     self._display_thread.start()
 
-                # --- Start the correction thread ---
-                self._correction_stop_event.clear()
-                self._correction_thread = threading.Thread(target=self._audio_correction_loop)
-                self._correction_thread.daemon = True
-                self._correction_thread.start()
-
                 print("JACK client started and activated.")
             except jack.JackError as e:
                 print(f"Error starting JACK client: {e}")
@@ -367,12 +262,6 @@ class JackManager:
             self._display_stop_event.set()
             self._display_thread.join(timeout=1.0)
             self._display_thread = None
-
-        # Stop the correction thread
-        if self._correction_thread and self._correction_thread.is_alive():
-            self._correction_stop_event.set()
-            self._correction_thread.join(timeout=1.0)
-            self._correction_thread = None
 
         # Deactivate and close the JACK client
         if self.jack_client:
@@ -562,17 +451,19 @@ class JackManager:
         seek_confirmed = False
 
         while time.time() - start_time < timeout:
-            # On se fie uniquement à la propriété 'seeking'.
-            # La propriété 'playback-time' n'est pas fiable lorsque le lecteur est en pause,
-            # ce qui peut causer une confirmation prématurée et des craquements au redémarrage.
+            # 1. Vérifier si l'opération de recherche est terminée
             query_seeking = {"command": ["get_property", "seeking"]}
             seeking_response = self._query_ipc_command(ap.socket_path, query_seeking)
 
             is_seeking = seeking_response.get("data", True) if seeking_response and seeking_response.get("error") == "success" else True
 
             if not is_seeking:
+                # NOTE : La vérification de 'playback-time' est volontairement omise car elle
+                # n'est pas fiable lorsque mpv est en pause, ce qui est le cas lors d'une
+                # resynchronisation. La propriété 'seeking' est la seule méthode de
+                # confirmation robuste dans ce contexte.
                 seek_confirmed = True
-                break  # Succès !
+                break # Succès !
 
             time.sleep(0.01)
 
@@ -880,7 +771,7 @@ class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
     last_beat_update_time = NumericProperty(0)
     playback_state = StringProperty("stopped")
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack --af=rubberband"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
@@ -2712,15 +2603,12 @@ class Sequencer(EventDispatcher):
         the master JACK transport, ensuring all clients are perfectly aligned.
         If `force_play` is True, it will start the transport even if it wasn't rolling before.
         """
-        print(f"\n[DIAGNOSTIC] === _resync_all_at_beat START (target_beat={beat:.6f}) ===")
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
-            print("[DIAGNOSTIC] JACK not running, aborting resync.")
             return
 
         try:
             # 1. Mémoriser si le transport était en cours de lecture
             was_rolling = self.jack_manager.jack_client.transport_state == jack.ROLLING
-            print(f"[DIAGNOSTIC] was_rolling: {was_rolling}")
 
             # 2. Arrêter le transport pour garantir un état de base propre
             if was_rolling:
@@ -2729,7 +2617,6 @@ class Sequencer(EventDispatcher):
             # --- NOUVELLE LOGIQUE ---
             # Forcer l'état de pause sur tous les lecteurs audio, peu importe leur état précédent.
             # C'est la clé pour garantir qu'ils sont prêts à recevoir une commande de recherche (seek).
-            print("[DIAGNOSTIC] Forcing pause on all audio players to ensure a known state.")
             self.jack_manager.set_all_audio_pause_state(True)
             time.sleep(0.05)  # Un court délai crucial pour laisser aux processus mpv le temps de traiter la commande de pause.
             # -------------------------
@@ -2740,17 +2627,12 @@ class Sequencer(EventDispatcher):
             if beats_per_second > 0 and samplerate > 0:
                 target_frame = int((beat / beats_per_second) * samplerate)
                 _ , pos = self.jack_manager.jack_client.transport_query_struct()
-                original_frame = pos.frame
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
-                print(f"[DIAGNOSTIC] Repositioning JACK transport from frame {original_frame} to {target_frame} (beat {beat:.6f})")
 
             # 4. Synchroniser notre état interne et les lecteurs externes avec la nouvelle position
-            print("[DIAGNOSTIC] Syncing internal playhead...")
             self.jack_manager._sync_playhead_to_beat(beat)
-            print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
             self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
-            print("[DIAGNOSTIC] Audio track seek complete.")
 
             # 5. Régénérer les événements d'automation pour refléter le nouvel état (solo/mute)
             self.jack_manager._prepare_automation_events()
@@ -2770,18 +2652,18 @@ class Sequencer(EventDispatcher):
 
             # 8. Redémarrer le transport s'il était en cours de lecture ou si forcé
             if was_rolling or force_play:
-                print("[DIAGNOSTIC] Restarting transport...")
+                # CORRECTION CRITIQUE : D'abord enlever la pause des lecteurs audio
+                self.jack_manager.set_all_audio_pause_state(False)
+                # TODO: Remplacer ce sleep par un mécanisme de confirmation/handshake avec mpv.
+                # Ce délai est une solution pragmatique pour une "race condition" où JACK
+                # pourrait démarrer avant que mpv ait traité la commande "un-pause",
+                # causant un craquement audio.
+                time.sleep(0.05)
+                # ENSUITE, démarrer le transport maître.
                 self.jack_manager.jack_client.transport_start()
-                # La reprise de la lecture audio est maintenant gérée de manière centralisée
-                # par le _process_callback, qui réagit au changement d'état du transport
-                # (de STOPPED à ROLLING). Supprimer l'appel direct ici élimine une
-                # condition de concurrence qui causait des craquements.
-                print("[DIAGNOSTIC] Transport restarted.")
 
         except jack.JackError as e:
             print(f"Error during resynchronization: {e}", file=sys.stderr)
-        finally:
-            print(f"[DIAGNOSTIC] === _resync_all_at_beat END ===\n")
 
     def play(self, start_beat: Optional[float] = None):
         if not self.jack_manager.is_running:
@@ -2852,15 +2734,6 @@ class Sequencer(EventDispatcher):
             self.playback_state = "stopped"
             return
 
-        # Correction du bug des "stuck notes" :
-        # Il faut d'abord envoyer les messages "note_off" PENDANT que la liste _active_notes est
-        # encore pleine. Si on arrête le transport JACK d'abord, le _process_callback se déclenche
-        # immédiatement, voit que le transport est arrêté, et vide _active_notes avant que
-        # silence_all_midi_notes() ait eu la chance d'être appelée.
-        if self.jack_manager.jack_client.transport_state == jack.ROLLING:
-            self.jack_manager.silence_all_midi_notes()
-            time.sleep(0.01) # Petit délai pour laisser les messages MIDI passer
-
         try:
             # 3. Arrêter le transport s'il est en cours de lecture
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
@@ -2889,8 +2762,6 @@ class Sequencer(EventDispatcher):
 
         # 5. Mettre à jour l'état et couper toutes les notes MIDI par sécurité
         self.playback_state = "stopped"
-        # L'appel principal a déjà été fait plus haut. Celui-ci sert de double sécurité
-        # au cas où le transport n'était pas en cours, mais des notes étaient quand même actives.
         self.jack_manager.silence_all_midi_notes()
         print("Sequencer stopped.")
 

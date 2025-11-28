@@ -454,21 +454,17 @@ class JackManager:
 
         # Poll for confirmation
         while time.time() - start_time < timeout:
-            # Query the 'seeking' property to see if the seek is finished
+            # According to mpv documentation, we only need to wait for 'seeking' to become false.
+            # The 'playback-time' property is not guaranteed to be updated while paused.
             query_seeking = {"command": ["get_property", "seeking"]}
-            seeking_response = self._query_ipc_command(ap.socket_path, query_seeking)
+            seeking_response = self._query_ipc_command(ap.socket_path, query_seeking, timeout=0.1)
 
-            if seeking_response and seeking_response.get("error") == "success" and seeking_response.get("data") == False:
-                 # To be absolutely sure, let's also check if playback-time is close to the target
-                query_time = {"command": ["get_property", "playback-time"]}
-                time_response = self._query_ipc_command(ap.socket_path, query_time, timeout=0.05)
-                if time_response and time_response.get("error") == "success":
-                    current_time = time_response.get("data", -1)
-                    if abs(current_time - target_time_sec) < 0.1: # Allow a 100ms tolerance
-                        seek_confirmed = True
-                        break
+            if seeking_response and seeking_response.get("error") == "success" and seeking_response.get("data") is False:
+                seek_confirmed = True
+                break  # Success! The seek is complete.
 
-            time.sleep(0.01) # Small delay to prevent busy-waiting
+            # Wait a moment before retrying.
+            time.sleep(0.02)
 
         if not seek_confirmed:
             track_name = self.sequencer.song.tracks[ap.track_index].name
@@ -710,15 +706,17 @@ class JackManager:
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0
 
-            start_beat_of_block = self.last_beat
-
             current_frame = pos.get('frame', 0)
             if samplerate > 0 and beats_per_second > 0:
-                authoritative_beat_now = (current_frame / samplerate) * beats_per_second
+                # Authoritative calculation for BOTH start and end of the processing window from JACK frames.
+                # This is the definitive fix to prevent cumulative drift.
+                start_beat_of_block = (current_frame / samplerate) * beats_per_second
+                end_beat_of_block = ((current_frame + frames) / samplerate) * beats_per_second
             else:
-                authoritative_beat_now = self.last_beat
+                # Fallback if transport is not providing valid data
+                start_beat_of_block = self.last_beat
+                end_beat_of_block = self.last_beat
 
-            end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                 if start_beat_of_block <= end_beat < end_beat_of_block:
@@ -744,6 +742,8 @@ class JackManager:
 
             self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
+            # Update last_beat for display purposes and as a fallback.
+            # The critical part is that the *next* block will recalculate its own start authoritatively.
             self.last_beat = end_beat_of_block
             if self.sequencer.gui_mode:
                 self.sequencer.current_beat = start_beat_of_block
@@ -1712,8 +1712,7 @@ class Sequencer(EventDispatcher):
     def toggle_mute(self, track_index: int):
         """
         Active/désactive le mute sur une piste.
-        Corrige la désynchronisation audio/MIDI en forçant une resynchronisation JACK complète
-        lors du unmute (équivalent à un mini pause/reprise).
+        Il s'agit d'une opération légère qui n'interrompt pas la lecture.
         """
 
         if not 0 <= track_index < len(self.song.tracks):
@@ -1754,25 +1753,14 @@ class Sequencer(EventDispatcher):
                 port = self.jack_manager.open_ports[track.output_port_name]
 
                 if track.is_muted:
-                    # Envoyer un All Notes Off
-                    for cc in (123, 120, 121):
-                        port.send(mido.Message('control_change', channel=track.channel, control=cc, value=0))
-                    # Supprimer notes actives
-                    keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == track_index]
-                    for key in keys_to_remove:
-                        del self.jack_manager._active_notes[key]
-                    if debug:
-                        print(f"[DEBUG] Active notes cleared for '{track.name}'")
+                    # Envoyer un "All Notes Off" pour couper immédiatement le son sur ce canal.
+                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
 
         # --- Régénérer les automations ---
         self.jack_manager._prepare_automation_events()
 
         # --- Resync only if playback is active ---
-        self._resync_jack_transport()
-
-        if debug:
-            print(f"[DEBUG] last_beat={self.jack_manager.last_beat:.6f}")
-            print(f"[DEBUG] next_event_indices={self.jack_manager.next_event_indices}")
+        # self._resync_jack_transport() # ❌ SUPPRIMÉ - C'est la cause principale du décalage.
 
         return {"status": "success", "message": f"Track '{track.name}' is now {status}."}
 

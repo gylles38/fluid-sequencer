@@ -86,6 +86,105 @@ class JackManager:
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
 
+        # --- Dynamic Audio Correction ---
+        self.CORRECTION_GAIN = 0.02
+        self.CORRECTION_THRESHOLD = 0.03 # 30ms
+        self._correction_thread = None
+        self._correction_stop_event = threading.Event()
+        self.last_applied_speeds = {}
+
+
+    def _audio_correction_loop(self):
+        """
+        A loop in a separate thread that periodically checks the audio playback position
+        against the master JACK transport and applies a speed correction if they drift.
+        This is a non-real-time loop to avoid blocking the JACK audio callback.
+        """
+        while not self._correction_stop_event.is_set():
+            try:
+                if (not self.jack_client or
+                        not self.is_running or
+                        self.jack_client.transport_state != jack.ROLLING):
+                    time.sleep(0.5)
+                    continue
+
+                # --- Get Master Time from JACK ---
+                state, pos_struct = self.jack_client.transport_query_struct()
+                pos_dict = jack.position2dict(pos_struct)
+                frame = pos_dict.get('frame', 0)
+                samplerate = self.jack_client.samplerate
+                if samplerate <= 0:
+                    time.sleep(0.5)
+                    continue
+
+                master_time_sec = frame / samplerate
+                beats_per_second = self.sequencer.song.tempo / 60.0
+                if beats_per_second <= 0:
+                    time.sleep(0.5)
+                    continue
+
+                # --- Compare each audio track to the master time ---
+                with self.process_lock:
+                    # Create a copy to avoid issues if the list changes during iteration
+                    audio_processes = list(self.active_audio_processes)
+
+                for ap in audio_processes:
+                    track = self.sequencer.song.tracks[ap.track_index]
+                    if not isinstance(track, AudioTrack):
+                        continue
+
+                    # Query mpv for its current playback time
+                    query_time = {"command": ["get_property", "playback-time"]}
+                    time_response = self._query_ipc_command(ap.socket_path, query_time, timeout=0.05)
+
+                    if not (time_response and time_response.get("error") == "success"):
+                        continue # Skip if we can't get the time
+
+                    current_mpv_time = time_response.get("data", 0.0)
+                    if current_mpv_time is None: continue
+
+                    # Calculate where mpv *should* be
+                    track_start_sec = (track.start_time / beats_per_second)
+                    expected_mpv_time = master_time_sec - track_start_sec
+
+                    if expected_mpv_time < 0:
+                        continue # This track hasn't started yet
+
+                    # --- Calculate Error and Apply Correction ---
+                    error_sec = expected_mpv_time - current_mpv_time
+
+                    base_speed = 1.0
+                    if track.native_tempo is not None and track.native_tempo > 0:
+                        base_speed = self.sequencer.song.tempo / track.native_tempo
+
+                    new_speed = base_speed
+
+                    if abs(error_sec) > self.CORRECTION_THRESHOLD:
+                        # Apply proportional correction
+                        speed_correction = 1.0 + (error_sec * self.CORRECTION_GAIN)
+                        # Clamp the correction to prevent extreme, audible speed changes
+                        speed_correction = max(0.95, min(1.05, speed_correction))
+                        new_speed = base_speed * speed_correction
+
+                    # Round to avoid floating point noise causing unnecessary IPC commands
+                    new_speed = round(new_speed, 5)
+
+                    last_speed = self.last_applied_speeds.get(ap.track_index)
+
+                    if last_speed is None or not math.isclose(last_speed, new_speed, rel_tol=1e-4):
+                        command = {"command": ["set_property", "speed", new_speed]}
+                        if self._send_ipc_command(ap.socket_path, command):
+                            self.last_applied_speeds[ap.track_index] = new_speed
+
+            except jack.JackError:
+                # This can happen during shutdown, it's safe to just exit the loop
+                break
+            except Exception as e:
+                print(f"\nError in audio correction loop: {e}", file=sys.stderr)
+
+            # The interval at which the correction is checked and applied
+            time.sleep(0.5)
+
     def _display_loop(self):
         """A loop in a separate thread to display the current transport position."""
         last_pos_str = ""
@@ -245,6 +344,12 @@ class JackManager:
                     self._display_thread.daemon = True
                     self._display_thread.start()
 
+                # --- Start the correction thread ---
+                self._correction_stop_event.clear()
+                self._correction_thread = threading.Thread(target=self._audio_correction_loop)
+                self._correction_thread.daemon = True
+                self._correction_thread.start()
+
                 print("JACK client started and activated.")
             except jack.JackError as e:
                 print(f"Error starting JACK client: {e}")
@@ -262,6 +367,12 @@ class JackManager:
             self._display_stop_event.set()
             self._display_thread.join(timeout=1.0)
             self._display_thread = None
+
+        # Stop the correction thread
+        if self._correction_thread and self._correction_thread.is_alive():
+            self._correction_stop_event.set()
+            self._correction_thread.join(timeout=1.0)
+            self._correction_thread = None
 
         # Deactivate and close the JACK client
         if self.jack_client:
@@ -2744,6 +2855,15 @@ class Sequencer(EventDispatcher):
             self.playback_state = "stopped"
             return
 
+        # Correction du bug des "stuck notes" :
+        # Il faut d'abord envoyer les messages "note_off" PENDANT que la liste _active_notes est
+        # encore pleine. Si on arrête le transport JACK d'abord, le _process_callback se déclenche
+        # immédiatement, voit que le transport est arrêté, et vide _active_notes avant que
+        # silence_all_midi_notes() ait eu la chance d'être appelée.
+        if self.jack_manager.jack_client.transport_state == jack.ROLLING:
+            self.jack_manager.silence_all_midi_notes()
+            time.sleep(0.01) # Petit délai pour laisser les messages MIDI passer
+
         try:
             # 3. Arrêter le transport s'il est en cours de lecture
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
@@ -2772,6 +2892,8 @@ class Sequencer(EventDispatcher):
 
         # 5. Mettre à jour l'état et couper toutes les notes MIDI par sécurité
         self.playback_state = "stopped"
+        # L'appel principal a déjà été fait plus haut. Celui-ci sert de double sécurité
+        # au cas où le transport n'était pas en cours, mais des notes étaient quand même actives.
         self.jack_manager.silence_all_midi_notes()
         print("Sequencer stopped.")
 

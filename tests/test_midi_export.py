@@ -17,8 +17,8 @@ class TestMidiExport(unittest.TestCase):
         self.song.add_track(self.midi_track)
         self.song.add_track(self.audio_track)
 
-    @patch('src.sequencer.midi_export.mido.MidiTrack')
-    @patch('src.sequencer.midi_export.mido.MidiFile')
+    @patch('sequencer.midi_export.mido.MidiTrack')
+    @patch('sequencer.midi_export.mido.MidiFile')
     def test_export_simple_song(self, mock_midi_file_constructor, mock_midi_track_constructor):
         """Tests exporting a basic song with one MIDI track."""
         # Arrange
@@ -55,8 +55,8 @@ class TestMidiExport(unittest.TestCase):
         # Check that the file was saved
         mock_mid.save.assert_called_once_with("simple_export.mid")
 
-    @patch('src.sequencer.midi_export.mido.MidiTrack')
-    @patch('src.sequencer.midi_export.mido.MidiFile')
+    @patch('sequencer.midi_export.mido.MidiTrack')
+    @patch('sequencer.midi_export.mido.MidiFile')
     def test_export_skips_audio_tracks(self, mock_midi_file_constructor, mock_midi_track_constructor):
         """Tests that audio tracks are ignored during export."""
         # Arrange
@@ -77,8 +77,8 @@ class TestMidiExport(unittest.TestCase):
         # Should be 2 tracks appended: 1 tempo track + 1 MIDI track. Audio track is skipped.
         self.assertEqual(mock_mid.tracks.append.call_count, 2)
 
-    @patch('src.sequencer.midi_export.mido.MidiTrack')
-    @patch('src.sequencer.midi_export.mido.MidiFile')
+    @patch('sequencer.midi_export.mido.MidiTrack')
+    @patch('sequencer.midi_export.mido.MidiFile')
     def test_export_with_cc_message(self, mock_midi_file_constructor, mock_midi_track_constructor):
         """Tests that CC messages are exported correctly."""
         # Arrange
@@ -98,8 +98,8 @@ class TestMidiExport(unittest.TestCase):
         cc_call = call(mido.Message('control_change', channel=0, control=7, value=120, time=240))
         mock_midi_track.append.assert_has_calls([cc_call])
 
-    @patch('src.sequencer.midi_export.mido.MidiTrack')
-    @patch('src.sequencer.midi_export.mido.MidiFile')
+    @patch('sequencer.midi_export.mido.MidiTrack')
+    @patch('sequencer.midi_export.mido.MidiFile')
     def test_track_velocity_multiplier(self, mock_midi_file_constructor, mock_midi_track_constructor):
         """Tests that the track's velocity multiplier is applied."""
         # Arrange
@@ -121,8 +121,8 @@ class TestMidiExport(unittest.TestCase):
         note_on_call = call(mido.Message('note_on', channel=0, note=60, velocity=50, time=480))
         mock_midi_track.append.assert_has_calls([note_on_call])
 
-    @patch('src.sequencer.midi_export.mido.MidiTrack')
-    @patch('src.sequencer.midi_export.mido.MidiFile')
+    @patch('sequencer.midi_export.mido.MidiTrack')
+    @patch('sequencer.midi_export.mido.MidiFile')
     def test_event_ordering(self, mock_midi_file_constructor, mock_midi_track_constructor):
         """Tests that events are sorted correctly before export."""
         # Arrange

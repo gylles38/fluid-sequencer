@@ -16,7 +16,7 @@ class TestMidiImport(unittest.TestCase):
         mock_mid.tracks = tracks
         return mock_mid
 
-    @patch('src.sequencer.midi_import.mido.MidiFile')
+    @patch('sequencer.midi_import.mido.MidiFile')
     def test_import_simple_song(self, mock_midi_file_constructor):
         """Tests importing a basic MIDI file with one track and one note."""
         # Arrange
@@ -51,7 +51,7 @@ class TestMidiImport(unittest.TestCase):
         self.assertEqual(note.velocity, 100)
         self.assertAlmostEqual(note.duration, 200 / 480)
 
-    @patch('src.sequencer.midi_import.mido.MidiFile')
+    @patch('sequencer.midi_import.mido.MidiFile')
     def test_import_with_cc_messages(self, mock_midi_file_constructor):
         """Tests that CC messages are correctly imported."""
         # Arrange
@@ -83,7 +83,7 @@ class TestMidiImport(unittest.TestCase):
         self.assertAlmostEqual(note_event.start_time, 100 / 480)
         self.assertEqual(len(note_event.notes), 1)
 
-    @patch('src.sequencer.midi_import.mido.MidiFile')
+    @patch('sequencer.midi_import.mido.MidiFile')
     def test_import_multiple_tracks(self, mock_midi_file_constructor):
         """Tests importing a file with multiple tracks."""
         # Arrange
@@ -107,7 +107,7 @@ class TestMidiImport(unittest.TestCase):
         self.assertEqual(len(song.tracks[0].events), 1)
         self.assertEqual(len(song.tracks[1].events), 1)
 
-    @patch('src.sequencer.midi_import.mido.MidiFile')
+    @patch('sequencer.midi_import.mido.MidiFile')
     def test_import_metadata_only_track(self, mock_midi_file_constructor):
         """Tests that tracks with only metadata are skipped."""
         # Arrange
@@ -126,7 +126,7 @@ class TestMidiImport(unittest.TestCase):
         self.assertEqual(len(song.tracks), 1, "Should skip the metadata-only track")
         self.assertEqual(len(song.tracks[0].events), 1)
 
-    @patch('src.sequencer.midi_import.mido.MidiFile')
+    @patch('sequencer.midi_import.mido.MidiFile')
     def test_import_unclosed_note(self, mock_midi_file_constructor):
         """Tests that a note_on without a corresponding note_off is ignored."""
         # Arrange

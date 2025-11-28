@@ -147,7 +147,7 @@ class JackManager:
                 return
 
             try:
-                self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
+                self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer-{os.getpid()}")
                 tracks = self.sequencer.song.tracks
 
                 # --- MIDI Port Setup ---
@@ -456,17 +456,13 @@ class JackManager:
         while time.time() - start_time < timeout:
             # Query the 'seeking' property to see if the seek is finished
             query_seeking = {"command": ["get_property", "seeking"]}
-            seeking_response = self._query_ipc_command(ap.socket_path, query_seeking)
+            seeking_response = self._query_ipc_command(ap.socket_path, query_seeking, timeout=0.1)
 
-            if seeking_response and seeking_response.get("error") == "success" and seeking_response.get("data") == False:
-                 # To be absolutely sure, let's also check if playback-time is close to the target
-                query_time = {"command": ["get_property", "playback-time"]}
-                time_response = self._query_ipc_command(ap.socket_path, query_time, timeout=0.05)
-                if time_response and time_response.get("error") == "success":
-                    current_time = time_response.get("data", -1)
-                    if abs(current_time - target_time_sec) < 0.1: # Allow a 100ms tolerance
-                        seek_confirmed = True
-                        break
+            # According to mpv documentation, once 'seeking' is false, the seek is complete.
+            # Relying on 'playback-time' can fail when the player is paused.
+            if seeking_response and seeking_response.get("error") == "success" and seeking_response.get("data") is False:
+                seek_confirmed = True
+                break
 
             time.sleep(0.01) # Small delay to prevent busy-waiting
 
@@ -710,15 +706,23 @@ class JackManager:
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0
 
-            start_beat_of_block = self.last_beat
-
             current_frame = pos.get('frame', 0)
             if samplerate > 0 and beats_per_second > 0:
-                authoritative_beat_now = (current_frame / samplerate) * beats_per_second
-            else:
-                authoritative_beat_now = self.last_beat
+                # Hybrid approach: Start from the last known beat to not miss events,
+                # but calculate the end authoritatively from JACK to prevent drift.
+                start_beat_of_block = self.last_beat
+                end_beat_of_block = ((current_frame + frames) / samplerate) * beats_per_second
 
-            end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
+                # Sanity check for transport repositioning. If JACK's frame time is drastically
+                # different from our internal beat counter, trust JACK to prevent processing a huge,
+                # incorrect time slice. This is critical to handle seeks.
+                authoritative_start_beat = (current_frame / samplerate) * beats_per_second
+                if abs(authoritative_start_beat - start_beat_of_block) > 1.0:
+                    start_beat_of_block = authoritative_start_beat
+            else:
+                # Fallback if transport is not providing valid data
+                start_beat_of_block = self.last_beat
+                end_beat_of_block = self.last_beat
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                 if start_beat_of_block <= end_beat < end_beat_of_block:
@@ -745,6 +749,7 @@ class JackManager:
             self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
             self.last_beat = end_beat_of_block
+
             if self.sequencer.gui_mode:
                 self.sequencer.current_beat = start_beat_of_block
                 self.sequencer.last_beat_update_time = time.perf_counter()

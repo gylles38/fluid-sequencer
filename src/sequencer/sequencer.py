@@ -85,6 +85,7 @@ class JackManager:
         self.automation_events = []
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
+        self._resync_unpause_handled = False
 
     def _display_loop(self):
         """A loop in a separate thread to display the current transport position."""
@@ -683,7 +684,11 @@ class JackManager:
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
-                    self.set_all_audio_pause_state(False)
+                    # Si _resync_all_at_beat a déjà géré la reprise, on l'ignore ici.
+                    if self._resync_unpause_handled:
+                        self._resync_unpause_handled = False # On réinitialise pour la prochaine fois.
+                    else:
+                        self.set_all_audio_pause_state(False)
                 else: # STOPPED or other state
                     self.set_all_audio_pause_state(True)
                 self.last_transport_state = current_transport_state
@@ -2607,15 +2612,12 @@ class Sequencer(EventDispatcher):
         the master JACK transport, ensuring all clients are perfectly aligned.
         If `force_play` is True, it will start the transport even if it wasn't rolling before.
         """
-        print(f"\n[DIAGNOSTIC] === _resync_all_at_beat START (target_beat={beat:.6f}) ===")
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
-            print("[DIAGNOSTIC] JACK not running, aborting resync.")
             return
 
         try:
             # 1. Mémoriser si le transport était en cours de lecture
             was_rolling = self.jack_manager.jack_client.transport_state == jack.ROLLING
-            print(f"[DIAGNOSTIC] was_rolling: {was_rolling}")
 
             # 2. Arrêter le transport pour garantir un état de base propre
             if was_rolling:
@@ -2624,7 +2626,6 @@ class Sequencer(EventDispatcher):
             # --- NOUVELLE LOGIQUE ---
             # Forcer l'état de pause sur tous les lecteurs audio, peu importe leur état précédent.
             # C'est la clé pour garantir qu'ils sont prêts à recevoir une commande de recherche (seek).
-            print("[DIAGNOSTIC] Forcing pause on all audio players to ensure a known state.")
             self.jack_manager.set_all_audio_pause_state(True)
             time.sleep(0.05)  # Un court délai crucial pour laisser aux processus mpv le temps de traiter la commande de pause.
             # -------------------------
@@ -2635,17 +2636,12 @@ class Sequencer(EventDispatcher):
             if beats_per_second > 0 and samplerate > 0:
                 target_frame = int((beat / beats_per_second) * samplerate)
                 _ , pos = self.jack_manager.jack_client.transport_query_struct()
-                original_frame = pos.frame
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
-                print(f"[DIAGNOSTIC] Repositioning JACK transport from frame {original_frame} to {target_frame} (beat {beat:.6f})")
 
             # 4. Synchroniser notre état interne et les lecteurs externes avec la nouvelle position
-            print("[DIAGNOSTIC] Syncing internal playhead...")
             self.jack_manager._sync_playhead_to_beat(beat)
-            print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
             self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
-            print("[DIAGNOSTIC] Audio track seek complete.")
 
             # 5. Régénérer les événements d'automation pour refléter le nouvel état (solo/mute)
             self.jack_manager._prepare_automation_events()
@@ -2665,15 +2661,13 @@ class Sequencer(EventDispatcher):
 
             # 8. Redémarrer le transport s'il était en cours de lecture ou si forcé
             if was_rolling or force_play:
-                print("[DIAGNOSTIC] Restarting transport...")
-                self.jack_manager.jack_client.transport_start()
+                # On gère nous-même la reprise ici, donc on informe le callback de l'ignorer.
                 self.jack_manager.set_all_audio_pause_state(False)
-                print("[DIAGNOSTIC] Transport restarted.")
+                self.jack_manager._resync_unpause_handled = True
+                self.jack_manager.jack_client.transport_start()
 
         except jack.JackError as e:
             print(f"Error during resynchronization: {e}", file=sys.stderr)
-        finally:
-            print(f"[DIAGNOSTIC] === _resync_all_at_beat END ===\n")
 
     def play(self, start_beat: Optional[float] = None):
         if not self.jack_manager.is_running:

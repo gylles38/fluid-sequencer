@@ -41,7 +41,7 @@ class SequencerLayout(BoxLayout):
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
-        self.sequencer = Sequencer(gui_mode=True, ui_layout=self)
+        self.sequencer = Sequencer(gui_mode=True)
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self._transport_update_event = None # Pour stocker l'événement Clock        
         self.current_command = ""

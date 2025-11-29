@@ -65,6 +65,7 @@ def song_decoder(d):
 
 from kivy.properties import NumericProperty, StringProperty
 from kivy.event import EventDispatcher
+from kivy.clock import Clock
 
 class JackManager:
     def __init__(self, sequencer: 'Sequencer'):
@@ -888,10 +889,9 @@ class Sequencer(EventDispatcher):
     playback_state = StringProperty("stopped")
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
-    def __init__(self, tempo: int = 120, gui_mode=False, ui_layout=None):
+    def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
         self.gui_mode = gui_mode
-        self.ui_layout = ui_layout
         self.song = Song(name="New Song", tempo=tempo)
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
@@ -946,27 +946,26 @@ class Sequencer(EventDispatcher):
         """
         A dedicated thread that listens for transport control MIDI messages (play, stop, record).
         """
-        from kivy.clock import Clock
         try:
             with mido.open_input(port_name) as inport:
                 while not self._transport_control_stop_event.is_set():
                     for msg in inport.iter_pending():
-                        # Transport controls are CC messages with value 127
                         if msg.type == 'control_change' and msg.value == 127:
-                            if msg.control == 118:  # Play
-                                if self.ui_layout:
-                                    Clock.schedule_once(lambda dt: self.ui_layout.play_pressed(None))
+                            if msg.control == 118:  # Play/Pause
+                                if self.playback_state == "playing":
+                                    Clock.schedule_once(lambda dt: self.pause())
+                                else:
+                                    Clock.schedule_once(lambda dt: self.play())
                             elif msg.control == 117:  # Stop
-                                if self.ui_layout:
-                                    Clock.schedule_once(lambda dt: self.ui_layout.stop_pressed(None))
+                                Clock.schedule_once(lambda dt: self.stop())
                             elif msg.control == 119:  # Record
-                                if self.ui_layout:
-                                    Clock.schedule_once(lambda dt: self.ui_layout.record_pressed(None))
+                                if self.is_recording:
+                                    Clock.schedule_once(lambda dt: self.stop())
+                                else:
+                                    Clock.schedule_once(lambda dt: self.start_midi_recording())
                     time.sleep(0.01)
         except Exception as e:
-            # Use logger if available, otherwise print
-            log_func = getattr(self.ui_layout.logger, 'error', print) if hasattr(self, 'ui_layout') and self.ui_layout else print
-            log_func(f"\nError in transport control listener for port '{port_name}': {e}")
+            print(f"\nError in transport control listener for port '{port_name}': {e}")
 
 
     def set_default_record_port(self, port_name: str) -> str:
@@ -999,6 +998,35 @@ class Sequencer(EventDispatcher):
             return f"Default record and transport control port set to: {port_name}"
         except Exception as e:
             return f"Error setting record port: {e}"
+
+    def start_midi_recording(self):
+        """
+        Starts a recording from a MIDI command. Finds the armed track and starts recording.
+        """
+        if not self.default_record_port:
+            print("Error: No MIDI input port selected for recording.")
+            return
+
+        armed_track_index = None
+        for i, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+                if armed_track_index is not None:
+                    print("Error: Multiple tracks are armed for recording. Please arm only one.")
+                    return
+                armed_track_index = i
+
+        if armed_track_index is None:
+            print("Error: No track is armed for recording.")
+            return
+
+        # Use the current playhead position as the starting point for the recording
+        start_beat = self._get_current_beat()
+
+        self.record_track(
+            track_idx=armed_track_index,
+            start_beat=start_beat,
+            inport_name=self.default_record_port
+        )
 
     def get_default_record_port(self) -> Optional[str]:
         """Retourne le port d'enregistrement par défaut"""

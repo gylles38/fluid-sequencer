@@ -888,13 +888,16 @@ class Sequencer(EventDispatcher):
     playback_state = StringProperty("stopped")
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
-    def __init__(self, tempo: int = 120, gui_mode=False):
+    def __init__(self, tempo: int = 120, gui_mode=False, ui_layout=None):
         super().__init__()
         self.gui_mode = gui_mode
+        self.ui_layout = ui_layout
         self.song = Song(name="New Song", tempo=tempo)
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
+        self._transport_control_thread = None
+        self._transport_control_stop_event = threading.Event()
         self.control_port_name: Optional[str] = None
         self.open_ports = {}
         self.virtual_ports = []
@@ -939,17 +942,61 @@ class Sequencer(EventDispatcher):
             # N'oubliez pas d'appeler cette fonction chaque fois que le tempo, le chemin d'un fichier audio, 
             # ou un événement de piste est modifié (ajout/suppression).
 
-    def set_default_record_port(self, port_name: str) -> str:
-        """Définit le port MIDI d'entrée par défaut pour l'enregistrement"""
+    def _transport_control_listener_loop(self, port_name: str):
+        """
+        A dedicated thread that listens for transport control MIDI messages (play, stop, record).
+        """
+        from kivy.clock import Clock
         try:
-            # Vérifier que le port existe
+            with mido.open_input(port_name) as inport:
+                while not self._transport_control_stop_event.is_set():
+                    for msg in inport.iter_pending():
+                        # Transport controls are CC messages with value 127
+                        if msg.type == 'control_change' and msg.value == 127:
+                            if msg.control == 118:  # Play
+                                if self.ui_layout:
+                                    Clock.schedule_once(lambda dt: self.ui_layout.play_pressed(None))
+                            elif msg.control == 117:  # Stop
+                                if self.ui_layout:
+                                    Clock.schedule_once(lambda dt: self.ui_layout.stop_pressed(None))
+                            elif msg.control == 119:  # Record
+                                if self.ui_layout:
+                                    Clock.schedule_once(lambda dt: self.ui_layout.record_pressed(None))
+                    time.sleep(0.01)
+        except Exception as e:
+            # Use logger if available, otherwise print
+            log_func = getattr(self.ui_layout.logger, 'error', print) if hasattr(self, 'ui_layout') and self.ui_layout else print
+            log_func(f"\nError in transport control listener for port '{port_name}': {e}")
+
+
+    def set_default_record_port(self, port_name: str) -> str:
+        """
+        Sets the default MIDI input port for recording and transport controls.
+        Manages the lifecycle of the transport control listener thread.
+        """
+        try:
             input_ports = get_input_names()
             if port_name not in input_ports:
                 return f"Error: MIDI input port '{port_name}' not found."
-            
+
+            # Stop any existing listener before starting a new one
+            if self._transport_control_thread and self._transport_control_thread.is_alive():
+                self._transport_control_stop_event.set()
+                self._transport_control_thread.join(timeout=1.0)
+
             self.default_record_port = port_name
             self.is_dirty = True
-            return f"Default record port set to: {port_name}"
+
+            # Start the new listener thread
+            self._transport_control_stop_event.clear()
+            self._transport_control_thread = threading.Thread(
+                target=self._transport_control_listener_loop,
+                args=(port_name,),
+                daemon=True
+            )
+            self._transport_control_thread.start()
+
+            return f"Default record and transport control port set to: {port_name}"
         except Exception as e:
             return f"Error setting record port: {e}"
 

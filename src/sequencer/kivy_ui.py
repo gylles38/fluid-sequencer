@@ -41,7 +41,7 @@ class SequencerLayout(BoxLayout):
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
-        self.sequencer = Sequencer(gui_mode=True)
+        self.sequencer = Sequencer(gui_mode=True, ui_layout=self)
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self._transport_update_event = None # Pour stocker l'événement Clock        
         self.current_command = ""
@@ -424,6 +424,10 @@ class SequencerLayout(BoxLayout):
 
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
+
+        # Show MIDI input selection on startup if not already set
+        if not self.sequencer.default_record_port:
+            Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
 
     def on_playback_state_change(self, instance, value):
         """Callback for sequencer's playback_state changes."""

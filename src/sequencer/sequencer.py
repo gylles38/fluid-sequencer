@@ -886,7 +886,7 @@ class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
     last_beat_update_time = NumericProperty(0)
     playback_state = StringProperty("stopped")
-    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --audio-device=jack"
+    DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()

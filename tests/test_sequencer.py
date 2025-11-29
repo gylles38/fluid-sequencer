@@ -312,7 +312,6 @@ class TestSequencer(unittest.TestCase):
 
         # Mock the JACK client and its state
         jm.jack_client = MagicMock()
-        mock_jack.ROLLING = 'rolling' # Use a string for clarity in the mock
         jm.jack_client.transport_state = mock_jack.ROLLING
 
         # Mock the function we want to test is called
@@ -336,6 +335,11 @@ class TestSequencer(unittest.TestCase):
         # end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
         # 4.1 = 3.9 + (frames / 48000) * 2.0 => frames = 4800
         frames = 4800
+
+        # Correctly mock the advancing frame
+        new_frame_pos = 3.9 * samplerate * 0.5 + frames
+        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': new_frame_pos}
+
 
         # Call the method under test
         jm._process_callback(frames)

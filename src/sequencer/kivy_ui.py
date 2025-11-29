@@ -34,7 +34,7 @@ from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from typing import Optional
-import sys, os
+import sys, os, time
 
 class SequencerLayout(BoxLayout):
     
@@ -42,14 +42,18 @@ class SequencerLayout(BoxLayout):
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
         self.sequencer = Sequencer(gui_mode=True)
+        self.sequencer.bind(playback_state=self.on_playback_state_change)
+        self._transport_update_event = None # Pour stocker l'événement Clock        
         self.current_command = ""
         self.end_pos_manual_override = False
-        self.is_playing = False
-        self.is_paused = False
-        self.is_recording = False
         self.is_looping = False
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
+
+        # Tête de lecture "lissée" (celle que l'utilisateur voit)
+        self.display_beat = 0.0
+                
+        self.track_widgets = [] # Initialisation de la liste des widgets de piste                
 
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
@@ -414,11 +418,51 @@ class SequencerLayout(BoxLayout):
         # update_status_display() appelle update_track_list() qui utilise self.track_list_layout
         # donc il DOIT être appelé APRÈS la création de track_list_layout
         self.update_status_display()
-        self.sequencer.bind(current_beat=self.update_playhead_display)
-        # Vérifier toutes les secondes si la lecture est terminée
-        Clock.schedule_interval(self.check_if_playback_finished, 1.0)        
+
+        # Re-introducing a clock for smooth UI updates, but at a more reasonable rate
+        Clock.schedule_interval(self.update_playhead, 1/30.0)
+
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
+
+    def on_playback_state_change(self, instance, value):
+        """Callback for sequencer's playback_state changes."""
+        Logger.info(f"UI: Playback state changed to '{value}'")
+        state = value
+        is_playing = (state == "playing")
+        is_paused = (state == "paused")
+        is_recording = (state == "recording")
+
+        # --- Update Play/Blink Button ---
+        if is_playing or is_recording:
+            if not self.blink_animation:
+                self.start_play_blink()
+            self.play_button.icon = 'play-circle-outline'
+        else:
+            self.stop_play_blink()
+            self.play_button.icon = 'play'
+
+        # --- Update Pause Button ---
+        if is_paused:
+            self.pause_button.icon = 'pause-circle-outline'
+            self.pause_button.md_bg_color = [0.9, 0.7, 0, 1]
+        else:
+            self.pause_button.icon = 'pause'
+            self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+
+        # --- Update Record Button ---
+        if is_recording:
+            self.record_button.icon = 'record-circle-outline'
+            self.record_button.md_bg_color = [0.8, 0, 0, 1]
+        else:
+            self.record_button.icon = 'record'
+            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+
+        # --- Final UI sync on stop ---
+        if state == "stopped":
+            self.stop_beat_pulse_animation()
+            # Force the UI to snap to the final JACK position
+            Clock.schedule_once(lambda dt: self.snap_ui_to_jack(), 0.05)
 
     def update_menu_lines(self, instance, value):
         """Met à jour toutes les lignes des menus"""
@@ -428,25 +472,6 @@ class SequencerLayout(BoxLayout):
             self.edit_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'settings_line'):
             self.settings_line.points = [0, -1, instance.width, -1]
-
-    def check_if_playback_finished(self, dt):
-        """Vérifie si la lecture est terminée et arrête le clignotement si besoin"""
-        if self.is_playing and not self.is_looping:
-            # Vérifier si on a dépassé la position de fin
-            current_beat = getattr(self.sequencer, 'current_beat', 0)
-            end_pos_text = self.end_pos_input.text
-            
-            if end_pos_text:
-                try:
-                    end_beat = self.sequencer.parse_position_to_beats(end_pos_text)
-                    if current_beat >= end_beat:
-                        # La lecture est terminée
-                        self.is_playing = False
-                        self.play_button.icon = 'play'
-                        self.stop_play_blink()
-                        print("DEBUG: Playback finished, stopping blink")
-                except:
-                    pass
 
 
     def show_audio_settings(self):
@@ -719,65 +744,49 @@ class SequencerLayout(BoxLayout):
         self.play_button.icon_color = [0, 0.7, 0.3, 1]
 
     def play_pressed(self, instance):
-        print(f"DEBUG play_pressed: play called with is_playing={self.is_playing}, is_paused={self.is_paused}, is_looping={self.is_looping}")
-        
-        # Ne rien faire si déjà en lecture ET pas en pause
-        if self.is_playing and not self.is_paused:
-            print("DEBUG: Already playing and not paused, ignoring play press")
+        # If already playing, do nothing. If paused, resume via the pause button.
+        if self.sequencer.playback_state == "playing":
             return
-        
-        # Si on est en pause, c'est le bouton pause qui doit gérer la reprise
-        if self.is_paused:
-            print("DEBUG: Currently paused, use pause button to resume")
+        if self.sequencer.playback_state == "paused":
+            # Let the pause button handle resume
+            self.pause_pressed(instance)
             return
-        
-        self.is_playing = True
-        self.play_button.icon = 'play-circle-outline'
-        self.start_play_blink()
+
+        # --- Start new playback ---
         start_pos = self.start_pos_input.text or "1:1"
         end_pos = self.end_pos_input.text
         
+        start_beat = self.sequencer.parse_position_to_beats(start_pos)
+        if start_beat is None: return
+
+        # Pre-sync the UI to the start beat for a smoother start
+        self.display_beat = start_beat
+        for track_widget in self.track_widgets:
+            track_widget.set_playback_position(start_beat)
+        self.playhead_label.text = f"Pos: {start_pos}"
+
         if self.is_looping:
-            # Si le looping est activé, on veut jouer en boucle
-            if end_pos:
-                # Avec une fin spécifique
-                command = f'loop "{start_pos}" "{end_pos}"'
-            else:
-                # Sans fin spécifique, juste activer le looping
-                command = 'loop'
-            print(f"DEBUG: Sending loop command: {command}")
-            self.process_command_ui(command)
-            
-            # Attendre un peu que le loop soit configuré puis lancer la lecture
-            from kivy.clock import Clock
-            Clock.schedule_once(lambda dt: self._start_playback(start_pos), 0.1)
+            self.sequencer.set_loop_range(start_pos, end_pos)
+            self.sequencer.play(start_beat=start_beat)
         else:
-            # Mode lecture normal - TOUJOURS spécifier une fin de lecture
-            if end_pos:
-                command = f'play "{start_pos}" "{end_pos}"'
-            else:
-                # Si pas de fin spécifiée, utiliser la fin de la chanson
-                end_of_song = self.sequencer._format_beats_to_position(self.sequencer.get_song_length_in_beats())
-                command = f'play "{start_pos}" "{end_of_song}"'
-            print(f"DEBUG: Sending command: {command}")
-            self.process_command_ui(command)
-        
-        # Désactiver pause et record
-        if self.is_paused:
-            self.is_paused = False
-            self.pause_button.icon = 'pause'
-            self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-        if self.is_recording:
-            self.is_recording = False
-            self.record_button.icon = 'record'
-            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+            end_beat = self.sequencer.parse_position_to_beats(end_pos)
+            self.sequencer.play_range_enabled = True
+            self.sequencer.play_range_start_beat = start_beat
+            self.sequencer.play_range_end_beat = end_beat if end_beat is not None else self.sequencer.get_song_length_in_beats()
+            self.sequencer.play(start_beat=start_beat)
 
     def _start_playback(self, start_pos):
         """Démarre la lecture après configuration du loop"""
         command = f'play "{start_pos}"'
         print(f"DEBUG: Starting playback: {command}")
+        
+        # 1. Réinitialiser la vue de la timeline immédiatement
+        for track_widget in self.track_widgets: 
+            track_widget.reset_timeline_view()
+        
+        # 2. Exécuter la commande JACK
         self.process_command_ui(command)
-
+    
     def start_recording_from_ui(self):
         """Démarre l'enregistrement en utilisant les paramètres de l'interface"""
         # Vérifier qu'un port MIDI est configuré
@@ -824,21 +833,6 @@ class SequencerLayout(BoxLayout):
                 self.show_error_popup("Recording Error", result)
                 return False
                 
-            # Mettre à jour l'interface
-            self.is_recording = True
-            self.record_button.icon = 'record-circle-outline'
-            self.record_button.md_bg_color = [0.8, 0, 0, 1]
-            
-            # Arrêter la lecture si active
-            if self.is_playing:
-                self.is_playing = False
-                self.play_button.icon = 'play'
-                self.stop_play_blink()
-            if self.is_paused:
-                self.is_paused = False
-                self.pause_button.icon = 'pause'
-                self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-                
             return True
             
         except Exception as e:
@@ -846,100 +840,18 @@ class SequencerLayout(BoxLayout):
             return False
 
     def pause_pressed(self, instance):
-        # Vérifier si une lecture est en cours OU si on est en pause
-        if not self.is_playing and not self.is_paused:
-            print("DEBUG: No playback in progress, ignoring pause")
-            return
-        
-        # Vérifier si la lecture est déjà terminée (seulement si en cours de lecture)
-        if self.is_playing and not self.is_paused:
-            current_beat = getattr(self.sequencer, 'current_beat', 0)
-            end_pos_text = self.end_pos_input.text
-            
-            if end_pos_text and not self.is_looping:
-                try:
-                    end_beat = self.sequencer.parse_position_to_beats(end_pos_text)
-                    if current_beat >= end_beat:
-                        # La lecture est déjà terminée, ne rien faire
-                        print("DEBUG: Playback already finished, ignoring pause")
-                        return
-                except:
-                    pass
-        
-        self.is_paused = not self.is_paused
-        if self.is_paused:
-            # Sauvegarder la position de fin actuelle
-            self.saved_end_pos = self.end_pos_input.text
-            
-            self.pause_button.icon = 'pause-circle-outline'
-            self.pause_button.md_bg_color = [0.9, 0.7, 0, 1]
-            self.process_command_ui('pause')
-            # Arrêter le clignotement du play si actif
-            if self.is_playing:
-                self.is_playing = False
-                self.play_button.icon = 'play'
-                self.stop_play_blink()
-            if self.is_recording:
-                self.is_recording = False
-                self.record_button.icon = 'record'
-                self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-        else:
-            self.pause_button.icon = 'pause'
-            self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-            # Mettre à jour l'état de lecture et démarrer le clignotement
-            self.is_playing = True
-            self.start_play_blink()
-            
-            # Récupérer la position actuelle et la fin sauvegardée
-            current_pos = self.playhead_label.text.replace("Pos: ", "")
-            end_pos = self.saved_end_pos if self.saved_end_pos else self.end_pos_input.text
-            
-            if end_pos and not self.is_looping:
-                # Reprendre depuis la position actuelle avec la fin sauvegardée
-                command = f'play "{current_pos}" "{end_pos}"'
-                print(f"DEBUG: Resuming from {current_pos} to {end_pos}")
-            elif self.is_looping:
-                # Mode looping - reprendre normalement
-                command = 'play'
-                print("DEBUG: Resuming loop playback")
-            else:
-                # Reprendre normalement
-                command = 'play'
-                print("DEBUG: Resuming normal playback")
-                
-            self.process_command_ui(command)
-            # Réinitialiser la sauvegarde
-            self.saved_end_pos = ""
+        self.sequencer.pause()
 
     def stop_pressed(self, instance):
-        self.is_playing = False
-        self.is_paused = False
-        self.is_recording = False
-        
-        # Arrêter l'animation du beat 1 si active
-        self.stop_beat_pulse_animation()
-        
-        # Arrêter aussi l'animation de clignotement play
-        self.stop_play_blink()
-        
-        self.play_button.icon = 'play'
-        self.pause_button.icon = 'pause'
-        self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-        self.record_button.icon = 'record'
-        self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-        self.process_command_ui('stop')
+        self.sequencer.stop()
 
     def record_pressed(self, instance):
-        if self.is_recording:
-            # Arrêter l'enregistrement
-            self.is_recording = False
-            self.record_button.icon = 'record'
-            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-            self.process_command_ui('stop')
+        if self.sequencer.is_recording:
+            # Stop recording is handled by the stop button/sequencer logic
+            self.sequencer.stop()
         else:
-            # Démarrer l'enregistrement
-            if self.start_recording_from_ui():
-                print("Recording started successfully")
+            # Start recording
+            self.start_recording_from_ui()
 
     def get_armed_track(self) -> Optional[int]:
         """Retourne l'index de la piste armée, ou None si aucune piste n'est armée."""
@@ -950,7 +862,7 @@ class SequencerLayout(BoxLayout):
 
     def loop_pressed(self, instance):
         # Si on désactive le looping pendant la lecture
-        if self.is_looping and self.is_playing:
+        if self.is_looping and self.sequencer.playback_state == 'playing':
             # Récupérer la position de fin actuelle du loop
             end_pos = self.end_pos_input.text
             if end_pos:
@@ -979,14 +891,38 @@ class SequencerLayout(BoxLayout):
             self.process_command_ui('loop off')
             
     def toggle_metronome(self, instance):
-        if instance.icon == 'metronome':
+        # Directly toggle the metronome state in the song object
+        # This avoids the heavy UI refresh caused by process_command_ui
+        new_state = not self.sequencer.song.metronome_enabled
+        self.sequencer.song.metronome_enabled = new_state
+
+        # Update the button's appearance
+        if new_state:
             instance.icon = 'metronome-tick'
             instance.md_bg_color = [0.5, 0.5, 0.5, 1]
-            self.process_command_ui('metronome on')
         else:
             instance.icon = 'metronome'
             instance.md_bg_color = [0.1, 0.1, 0.1, 1]
-            self.process_command_ui('metronome off')
+
+    def toggle_track_mute(self, track_index):
+        """Toggles mute state for a track without a full UI refresh."""
+        # 1. Update the backend state
+        self.sequencer.toggle_mute(track_index)
+
+        # 2. Find the corresponding widget and update its appearance
+        if 0 <= track_index < len(self.track_widgets):
+            track_widget = self.track_widgets[track_index]
+            track_widget.update_mute_solo_appearance()
+
+    def toggle_track_solo(self, track_index):
+        """Toggles solo state for a track and updates others without a full UI refresh."""
+        # 1. Update the backend state
+        # The sequencer's toggle_solo method handles the logic of unsoloing other tracks
+        self.sequencer.toggle_solo(track_index)
+
+        # 2. Update all track widgets since soloing one can affect others
+        for widget in self.track_widgets:
+            widget.update_mute_solo_appearance()
 
     def update_track_record_buttons(self, track_index=None):
         """Met à jour l'apparence des boutons record des pistes"""
@@ -1002,13 +938,65 @@ class SequencerLayout(BoxLayout):
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 
-    def update_playhead_display(self, instance, value):
-        """Met à jour l'affichage de la position et détecte le beat 1"""
-        current_position = self.sequencer._format_beats_to_position(value)
+    def update_playhead(self, dt):
+        """
+        Unified method to update the playhead, labels, and handle scrolling.
+        Called by a Clock schedule.
+        """
+        # 1. Read the master position from the sequencer (driven by JACK)
+        jack_beat = self.sequencer.current_beat
+
+        # 2. Calculate the smoothed display beat for fluid scrolling
+        if self.sequencer.playback_state == "playing":
+            # Predict next position based on tempo and delta-time
+            safe_dt = min(dt, 1/15.0) # Cap dt to avoid large jumps
+            beats_per_second = self.sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+
+            # Calculate error and apply correction (smoothing)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0 # Slower correction to reduce jitter
+
+            # Snap to master position if error is too large or on big time lags
+            if abs(error) > 0.5 or dt > 0.1:
+                self.display_beat = jack_beat
+            else:
+                self.display_beat += (error * correction_speed * dt)
+        else:
+            # When not playing, snap directly to the master beat
+            self.display_beat = jack_beat
+
+        # 3. Update all track widgets with the smoothed position
+        for track_widget in self.track_widgets:
+            track_widget.set_playback_position(self.display_beat)
+
+        # 4. Update UI labels and animations with the smoothed position
+        current_position = self.sequencer._format_beats_to_position(self.display_beat)
         self.playhead_label.text = f"Pos: {current_position}"
-        
-        # Détecter le beat 1 pour l'animation
         self._detect_beat_one_for_animation(current_position)
+        
+        # 5. Check if song length has changed and update widgets if needed
+        new_total_beats = self.sequencer.get_song_length_in_beats()
+        if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
+             for track_widget in self.track_widgets:
+                if track_widget.total_beats != new_total_beats:
+                    track_widget.total_beats = new_total_beats
+
+    def snap_ui_to_jack(self):
+        """
+        Force l'UI à se caler immédiatement sur la dernière position 
+        connue de JACK. (Utilisé pour 'stop' et 'pause').
+        """
+        # 1. Lire la position "maître"
+        jack_current_beat = self.sequencer.current_beat
+
+        # 3. Forcer les widgets de piste à se caler
+        for track_widget in self.track_widgets:
+            track_widget.set_playback_position(jack_current_beat)
+
+        # 4. Forcer la mise à jour des labels (boucle lente)
+        self.update_playhead(0)
 
     def _detect_beat_one_for_animation(self, position_str):
         """Détecte si on arrive sur un beat 1 et déclenche l'animation"""
@@ -1024,7 +1012,7 @@ class SequencerLayout(BoxLayout):
                     self._current_measure = current_measure_key
                     
                     # Déclencher l'animation seulement si en lecture
-                    if self.is_playing and not self.is_paused:
+                    if self.sequencer.playback_state == "playing":
                         self.start_beat_pulse_animation()
                         print(f"DEBUG: Animation beat 1 - Mesure {measure}")
                         
@@ -1035,12 +1023,25 @@ class SequencerLayout(BoxLayout):
 
     def update_track_list(self):
         self.track_list_layout.clear_widgets()
+        self.track_widgets.clear() # Clear the list of widget references
+        # ----------------------------------------------------
+        # ⚠️ NOUVEAU : FORCER L'INITIALISATION DE LA TAILLE (Critique)
+        # ----------------------------------------------------
+        
+        # 1. Obtient la longueur correcte du morceau (le cache peut être vide, donc cette première fois est la plus longue)
+        # Note: Cela déclenchera la lecture initiale du fichier audio, mais seulement UNE FOIS.
+        final_total_beats = self.sequencer.get_song_length_in_beats() 
+                
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.is_metronome:
                 continue
+            
+            # Affecter la propriété Kivy déclenche AUTOMATIQUEMENT update_timeline_size()
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
+            track_widget.total_beats = final_total_beats
+            self.track_widgets.append(track_widget)
             self.track_list_layout.add_widget(track_widget)
-
+            
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"
@@ -1199,7 +1200,7 @@ class SequencerLayout(BoxLayout):
     def handle_tempo_arrows_in_textinput(self, textinput, direction, modifiers):
         """Gère les flèches pour le champ tempo"""
         try:
-            current_tempo = int(textinput.text)
+            current_tempo = int(float(textinput.text))
             step = 10 if 'shift' in modifiers else 1
             
             if direction == 'up':
@@ -1274,7 +1275,21 @@ class SequencerLayout(BoxLayout):
                 self.output_label.text += output + "\n"
             self.current_command = ""
 
-        self.update_status_display()
+        # --- Conditional UI Refresh ---
+        # Define commands that DON'T require a full UI rebuild
+        lightweight_commands = [
+            'play', 'pause', 'stop', 'loop', 'setloop', 'seek'
+        ]
+
+        # Check if the processed command starts with any of the lightweight commands
+        is_lightweight = any(command.startswith(cmd) for cmd in lightweight_commands)
+
+        if not is_lightweight:
+            print(f"DEBUG: Performing full UI refresh for command: {command}")
+            self.update_status_display()
+        else:
+            print(f"DEBUG: Skipping full UI refresh for lightweight command: {command}")
+
 
         if not should_continue:
             MDApp.get_running_app().stop()
@@ -1282,7 +1297,7 @@ class SequencerLayout(BoxLayout):
     def start_beat_pulse_animation(self):
         """Animation combinée pulse + glow pour le beat 1"""
         # Ne pas animer si on est en pause ou arrêté
-        if not self.is_playing or self.is_paused:
+        if self.sequencer.playback_state != "playing":
             return
             
         # Arrêter toute animation existante

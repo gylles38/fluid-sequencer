@@ -769,10 +769,9 @@ class JackManager:
     def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
         if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
             if start_beat_of_block < self.sequencer.play_range_end_beat:
-                self.jack_client.transport_stop()
-                self.set_all_audio_pause_state(True)
-                self.sequencer.play_range_enabled = False
-                self.sequencer.playback_state = "stopped"
+                # Schedule the stop command to be executed on the main thread
+                Clock.schedule_once(lambda dt: self.sequencer.stop())
+                self.sequencer.play_range_enabled = False # Prevent re-triggering
 
         if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:
             if start_beat_of_block < self.sequencer.loop_end_beat:

@@ -303,8 +303,12 @@ class TestSequencer(unittest.TestCase):
 
     @patch('pydub.AudioSegment.from_file')
     @patch('sequencer.sequencer.jack')
-    def test_play_range_stops_audio(self, mock_jack, mock_from_file):
-        """Test that reaching the end of a play range stops audio tracks and the transport."""
+    @patch('sequencer.sequencer.Clock.schedule_once')
+    def test_play_range_stops_audio(self, mock_schedule_once, mock_jack, mock_from_file):
+        """Test that reaching the end of a play range schedules a stop command."""
+        # Make the mock immediately execute the callback passed to it
+        mock_schedule_once.side_effect = lambda func, *args, **kwargs: func(0)
+
         # Setup
         mock_from_file.return_value = MagicMock()
         sequencer = self.sequencer
@@ -314,13 +318,12 @@ class TestSequencer(unittest.TestCase):
         jm.jack_client = MagicMock()
         jm.jack_client.transport_state = mock_jack.ROLLING
 
-        # Mock the function we want to test is called
-        jm.set_all_audio_pause_state = MagicMock()
-
         # Mock the transport query to return a valid state
         mock_pos = MagicMock()
-        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': 0}
         jm.jack_client.transport_query_struct.return_value = (mock_jack.ROLLING, mock_pos)
+
+        # Patch the sequencer's stop method to check if it's called
+        sequencer.stop = MagicMock()
 
         # Set a play range
         sequencer.play_range_enabled = True
@@ -332,21 +335,18 @@ class TestSequencer(unittest.TestCase):
         samplerate = jm.jack_client.samplerate = 48000
 
         # Calculate frames needed to cross the play_range_end_beat boundary
-        # end_beat_of_block = start_beat_of_block + (frames / samplerate) * beats_per_second
-        # 4.1 = 3.9 + (frames / 48000) * 2.0 => frames = 4800
         frames = 4800
-
-        # Correctly mock the advancing frame
-        new_frame_pos = 3.9 * samplerate * 0.5 + frames
-        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': new_frame_pos}
+        beats_per_second = sequencer.song.tempo / 60.0
+        # This frame position ensures authoritative_beat_now is also 3.9
+        current_frame = 3.9 * (samplerate / beats_per_second)
+        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': current_frame}
 
 
         # Call the method under test
         jm._process_callback(frames)
 
         # Assertions
-        jm.jack_client.transport_stop.assert_called_once()
-        jm.set_all_audio_pause_state.assert_called_with(True)
+        sequencer.stop.assert_called_once()
         self.assertFalse(sequencer.play_range_enabled)
 
 

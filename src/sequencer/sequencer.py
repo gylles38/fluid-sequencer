@@ -998,13 +998,26 @@ class Sequencer(EventDispatcher):
             with mido.open_input(port_name) as inport:
                 while not self._transport_control_stop_event.is_set():
                     for msg in inport.iter_pending():
-                        if msg.type == 'control_change' and msg.value == 127:
-                            if msg.control == 118:  # Play/Pause
-                                Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
-                            elif msg.control == 117:  # Stop
-                                Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
-                            elif msg.control == 119:  # Record
-                                Clock.schedule_once(lambda dt: self.process_transport_command("record"))
+                        if msg.type == 'control_change':
+                            # Transport controls with a value of 127
+                            if msg.value == 127:
+                                if msg.control == 118:  # Play/Pause
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
+                                elif msg.control == 117:  # Stop
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
+                                elif msg.control == 119:  # Record
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("record"))
+
+                            # Volume sliders (CC 70-77) for any value
+                            if 70 <= msg.control <= 77:
+                                track_index = msg.control - 70
+                                # Check if the track exists
+                                if 0 <= track_index < len(self.song.tracks):
+                                    # Normalize volume from 0-127 to 0.0-1.0
+                                    volume_value = msg.value / 127.0
+                                    # Schedule the volume change on the main Kivy thread for safety
+                                    # The lambda captures the current track_index and volume_value
+                                    Clock.schedule_once(lambda dt, ti=track_index, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
                     time.sleep(0.01)
         except Exception as e:
             print(f"\nError in transport control listener for port '{port_name}': {e}")

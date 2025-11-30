@@ -1,0 +1,17 @@
+{
+    "transport": {
+        "stop": 117,
+        "play_pause": 118,
+        "record_arm": 119
+    },
+    "volume_sliders": [
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77
+    ]
+}

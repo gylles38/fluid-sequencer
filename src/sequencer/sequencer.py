@@ -1017,7 +1017,7 @@ class Sequencer(EventDispatcher):
                                     volume_value = msg.value / 127.0
                                     # Schedule the volume change on the main Kivy thread for safety
                                     # The lambda captures the current track_index and volume_value
-                                    Clock.schedule_once(lambda dt, ti=track_index, vol=volume_value: self.set_track_volume(ti, str(vol), api_mode=True))
+                                    Clock.schedule_once(lambda dt, ti=track_index, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
                     time.sleep(0.01)
         except Exception as e:
             print(f"\nError in transport control listener for port '{port_name}': {e}")

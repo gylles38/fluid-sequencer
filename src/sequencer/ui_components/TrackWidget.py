@@ -299,6 +299,15 @@ class TrackWidget(BoxLayout):
         )
         self.volume_slider.bind(value=self.on_volume_change)
         
+        # --- NOUVELLE LIAISON BIDIRECTIONNELLE ---
+        # Lie la propriété 'volume' de la piste à la valeur du slider
+        self.track.bind(volume=self.on_track_volume_changed)
+
+    def on_track_volume_changed(self, instance, value):
+        """Mise à jour du slider lorsque le volume de la piste change."""
+        if self.volume_slider.value != value:
+            self.volume_slider.value = value
+
         volume_layout.add_widget(self.volume_label)
         volume_layout.add_widget(self.volume_slider)
         self.add_widget(volume_layout)

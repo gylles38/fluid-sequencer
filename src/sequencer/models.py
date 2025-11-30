@@ -45,40 +45,74 @@ class BaseTrack:
     name: str
     # is_muted and is_solo moved to child classes to solve non-default argument error
 
-@dataclass
-class MidiTrack(BaseTrack):
+from kivy.properties import NumericProperty
+from kivy.event import EventDispatcher
+
+
+# Note: This class inherits from EventDispatcher to support Kivy's property-binding
+# system. This allows the UI to automatically react to changes in track properties like 'volume'.
+# The @dataclass decorator was removed as it is not compatible with this pattern.
+class MidiTrack(BaseTrack, EventDispatcher):
     """Represents a MIDI track, which is a sequence of musical events."""
-    is_muted: bool = False
-    is_solo: bool = False
-    is_metronome: bool = False
-    channel: int = 0  # MIDI channel (0-15)
-    volume: float = 0.8 # Default volume (0.0 to 1.0, maps to 0-127)
-    pan: float = 0.0  # Pan (-1.0 left to 1.0 right, maps to 0-127)
-    velocity: float = 1.0 # Velocity multiplier (0.0 to 2.0+)
-    events: List[Event] = field(default_factory=list)
-    instrument: int = 0  # MIDI program number (0-127)
-    bank_msb: Optional[int] = None  # Bank Select MSB (CC#0)
-    bank_lsb: Optional[int] = None  # Bank Select LSB (CC#32)
-    output_port_name: Optional[str] = None
-    record_mode: str = 'OFF'  # NOUVEAU: 'OFF', 'OVERWRITE', 'KEEP'
+    volume = NumericProperty(0.8)
+
+    def __init__(self, name: str, is_muted: bool = False, is_solo: bool = False, is_metronome: bool = False,
+                 channel: int = 0, volume: float = 0.8, pan: float = 0.0, velocity: float = 1.0,
+                 events: List[Event] = None, instrument: int = 0, bank_msb: Optional[int] = None,
+                 bank_lsb: Optional[int] = None, output_port_name: Optional[str] = None,
+                 record_mode: str = 'OFF', **kwargs):
+        BaseTrack.__init__(self, name=name)
+        EventDispatcher.__init__(self, **kwargs)
+        self.is_muted = is_muted
+        self.is_solo = is_solo
+        self.is_metronome = is_metronome
+        self.channel = channel
+        self.volume = volume
+        self.pan = pan
+        self.velocity = velocity
+        self.events = events if events is not None else []
+        self.instrument = instrument
+        self.bank_msb = bank_msb
+        self.bank_lsb = bank_lsb
+        self.output_port_name = output_port_name
+        self.record_mode = record_mode
     
     def add_event(self, event: Event):
         """Adds a MIDI event to the track and keeps the event list sorted by start time."""
         self.events.append(event)
         self.events.sort(key=lambda e: e.start_time)
 
-@dataclass
-class AudioTrack(BaseTrack):
+    def __repr__(self):
+        return (f"MidiTrack(name='{self.name}', channel={self.channel}, "
+                f"instrument={self.instrument}, volume={self.volume}, pan={self.pan}, "
+                f"events=[...{len(self.events)} items...])")
+
+# Note: This class inherits from EventDispatcher to support Kivy's property-binding
+# system. This allows the UI to automatically react to changes in track properties like 'volume'.
+# The @dataclass decorator was removed as it is not compatible with this pattern.
+class AudioTrack(BaseTrack, EventDispatcher):
     """Represents an audio track, which is a single audio file."""
-    filepath: str
-    is_muted: bool = False
-    is_solo: bool = False
-    start_time: float = 0.0 # Start time in beats from the beginning of the track
-    volume: float = 0.5 # (0.0 to 1.0)
-    pan: float = 0.0 # (-1.0 for left, 0.0 for center, 1.0 for right)
-    channels: int = 0 # Number of audio channels, 0 for unknown
-    native_tempo: Optional[float] = None
-    duration_beats: Optional[float] = None
+    volume = NumericProperty(0.5)
+
+    def __init__(self, name: str, filepath: str, is_muted: bool = False, is_solo: bool = False,
+                 start_time: float = 0.0, volume: float = 0.5, pan: float = 0.0,
+                 channels: int = 0, native_tempo: Optional[float] = None,
+                 duration_beats: Optional[float] = None, **kwargs):
+        BaseTrack.__init__(self, name=name)
+        EventDispatcher.__init__(self, **kwargs)
+        self.filepath = filepath
+        self.is_muted = is_muted
+        self.is_solo = is_solo
+        self.start_time = start_time
+        self.volume = volume
+        self.pan = pan
+        self.channels = channels
+        self.native_tempo = native_tempo
+        self.duration_beats = duration_beats
+
+    def __repr__(self):
+        return (f"AudioTrack(name='{self.name}', filepath='{self.filepath}', "
+                f"volume={self.volume}, pan={self.pan})")
 
 @dataclass
 class AutomationPoint:

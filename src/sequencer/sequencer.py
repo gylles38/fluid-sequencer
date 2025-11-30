@@ -908,7 +908,8 @@ class Sequencer(EventDispatcher):
         self.ui_start_pos_str = "1:1"
         self.ui_end_pos_str = ""
 
-        self.last_start_beat = 0.0
+        self.pause_beat = 0.0
+        self.rewind_beat = 0.0
         self.recording_thread = None
         self.is_recording = False
         self._stop_event = threading.Event()
@@ -961,6 +962,8 @@ class Sequencer(EventDispatcher):
             if start_beat is None:
                 print(f"Error: Invalid start position for playback: {start_pos}")
                 return
+
+            self.rewind_beat = start_beat
 
             if self.loop_enabled:
                 self.set_loop_range(start_pos, end_pos)
@@ -2941,11 +2944,11 @@ class Sequencer(EventDispatcher):
                 self.jack_manager.jack_client.transport_stop()
                 self.playback_state = "paused"
                 # Store the precise beat for resume
-                self.last_start_beat = current_beat
+                self.pause_beat = current_beat
             elif self.playback_state == "paused":
-                print(f"\n[DIAGNOSTIC] --- RESUMING from beat {self.last_start_beat:.6f} ---")
+                print(f"\n[DIAGNOSTIC] --- RESUMING from beat {self.pause_beat:.6f} ---")
                 # Resync all tracks to the last beat and resume
-                self._resync_all_at_beat(self.last_start_beat, force_play=True)
+                self._resync_all_at_beat(self.pause_beat, force_play=True)
                 self.playback_state = "playing"
 
         except jack.JackError as e:
@@ -2990,14 +2993,14 @@ class Sequencer(EventDispatcher):
             beats_per_second = self.song.tempo / 60.0
             samplerate = self.jack_manager.jack_client.samplerate
             if beats_per_second > 0 and samplerate > 0:
-                # On utilise last_start_beat pour revenir au point de départ du dernier 'play'
-                target_frame = int((self.last_start_beat / beats_per_second) * samplerate)
+                # On utilise rewind_beat pour revenir au point de départ du dernier 'play'
+                target_frame = int((self.rewind_beat / beats_per_second) * samplerate)
                 _ , pos = self.jack_manager.jack_client.transport_query_struct()
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
                 # Synchroniser manuellement notre état interne
-                self.jack_manager._sync_playhead_to_beat(self.last_start_beat)
-                self.jack_manager.seek_audio_to_beat(self.last_start_beat)
+                self.jack_manager._sync_playhead_to_beat(self.rewind_beat)
+                self.jack_manager.seek_audio_to_beat(self.rewind_beat)
                 # --- NOUVEAU : Forcer l'état de pause sur tous les lecteurs audio ---
                 self.jack_manager.set_all_audio_pause_state(True)
 
@@ -3013,7 +3016,7 @@ class Sequencer(EventDispatcher):
 
         # Manually update the current_beat property to reflect the rewind
         if self.gui_mode:
-            self.current_beat = self.last_start_beat
+            self.current_beat = self.rewind_beat
 
         print("Sequencer stopped.")
 

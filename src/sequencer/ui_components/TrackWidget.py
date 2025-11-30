@@ -299,6 +299,9 @@ class TrackWidget(BoxLayout):
         )
         self.volume_slider.bind(value=self.on_volume_change)
         
+        # Bind the track's volume property (from the backend model) to a UI-updating callback.
+        self.track.bind(volume=self.on_track_volume_changed)
+
         volume_layout.add_widget(self.volume_label)
         volume_layout.add_widget(self.volume_slider)
         self.add_widget(volume_layout)
@@ -481,6 +484,19 @@ class TrackWidget(BoxLayout):
         if hasattr(self, 'type_border_rect'):
             self.type_border_rect.rectangle = [self.children[-1].x, self.children[-1].y, 
                                              self.children[-1].width, self.children[-1].height]
+
+    def on_track_volume_changed(self, instance, value):
+        """
+        Callback for when the track's volume property changes from the backend.
+        This updates the UI to reflect the new state.
+        """
+        # Always update the text label to ensure it's in sync.
+        self.volume_label.text = f"{int(value * 100)}"
+
+        # Update the slider's position only if it has changed significantly,
+        # to prevent a feedback loop (backend -> UI -> backend -> ...).
+        if abs(self.volume_slider.value - value) > 0.001:
+            self.volume_slider.value = value
 
     def on_volume_change(self, instance, value):
         self.volume_label.text = f"{int(value * 100)}"

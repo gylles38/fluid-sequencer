@@ -904,6 +904,10 @@ class Sequencer(EventDispatcher):
         self.temporary_ports = []
         self.audio_player_command: str = self.DEFAULT_AUDIO_PLAYER_COMMAND
 
+        # New properties to hold the start/end positions from the UI
+        self.ui_start_pos_str = "1:1"
+        self.ui_end_pos_str = ""
+
         self.last_start_beat = 0.0
         self.recording_thread = None
         self.is_recording = False
@@ -933,7 +937,49 @@ class Sequencer(EventDispatcher):
         self._audio_duration_cache: Dict[str, float] = {} 
         
         # Cache pour la longueur totale du morceau (dépend de l'audio)
-        self._cached_song_length_beats: Optional[float] = None        
+        self._cached_song_length_beats: Optional[float] = None
+
+    def process_transport_command(self, command: str):
+        """
+        Centralized method to handle all transport commands (play, pause, stop, record)
+        from both the UI and MIDI controllers to ensure consistent behavior.
+        """
+        if command == "play_pause":
+            # If already playing, do nothing. If paused, resume.
+            if self.playback_state == "playing":
+                self.pause()
+                return
+            if self.playback_state == "paused":
+                self.pause() # The pause method handles both pause and resume
+                return
+
+            # --- Start new playback ---
+            start_pos = self.ui_start_pos_str or "1:1"
+            end_pos = self.ui_end_pos_str
+
+            start_beat = self.parse_position_to_beats(start_pos)
+            if start_beat is None:
+                print(f"Error: Invalid start position for playback: {start_pos}")
+                return
+
+            if self.loop_enabled:
+                self.set_loop_range(start_pos, end_pos)
+                self.play(start_beat=start_beat)
+            else:
+                end_beat = self.parse_position_to_beats(end_pos) if end_pos else None
+                self.play_range_enabled = True
+                self.play_range_start_beat = start_beat
+                self.play_range_end_beat = end_beat if end_beat is not None else self.get_song_length_in_beats()
+                self.play(start_beat=start_beat)
+
+        elif command == "stop":
+            self.stop()
+
+        elif command == "record":
+            if self.is_recording:
+                self.stop()
+            else:
+                self.start_midi_recording() # Assumes a track is armed
 
     def invalidate_caches(self):
             """Invalide tous les caches qui dépendent de la structure du morceau ou des données audio."""
@@ -952,17 +998,11 @@ class Sequencer(EventDispatcher):
                     for msg in inport.iter_pending():
                         if msg.type == 'control_change' and msg.value == 127:
                             if msg.control == 118:  # Play/Pause
-                                if self.playback_state == "playing":
-                                    Clock.schedule_once(lambda dt: self.pause())
-                                else:
-                                    Clock.schedule_once(lambda dt: self.play())
+                                Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
                             elif msg.control == 117:  # Stop
-                                Clock.schedule_once(lambda dt: self.stop())
+                                Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
                             elif msg.control == 119:  # Record
-                                if self.is_recording:
-                                    Clock.schedule_once(lambda dt: self.stop())
-                                else:
-                                    Clock.schedule_once(lambda dt: self.start_midi_recording())
+                                Clock.schedule_once(lambda dt: self.process_transport_command("record"))
                     time.sleep(0.01)
         except Exception as e:
             print(f"\nError in transport control listener for port '{port_name}': {e}")

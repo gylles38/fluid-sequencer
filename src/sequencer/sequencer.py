@@ -3010,6 +3010,11 @@ class Sequencer(EventDispatcher):
         # L'appel principal a déjà été fait plus haut. Celui-ci sert de double sécurité
         # au cas où le transport n'était pas en cours, mais des notes étaient quand même actives.
         self.jack_manager.silence_all_midi_notes()
+
+        # Manually update the current_beat property to reflect the rewind
+        if self.gui_mode:
+            self.current_beat = self.last_start_beat
+
         print("Sequencer stopped.")
 
         # LA LIGNE SUIVANTE EST LA CAUSE DU PROBLÈME ET A ÉTÉ VOLONTAIREMENT SUPPRIMÉE :

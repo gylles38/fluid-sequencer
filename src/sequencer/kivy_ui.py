@@ -299,8 +299,8 @@ class SequencerLayout(BoxLayout):
 
         # Variable pour suivre le champ focus
         #self.focused_input = None
-        self.start_pos_input.bind(on_text_validate=self.on_start_position_validate)
-        self.end_pos_input.bind(on_text_validate=self.on_end_position_validate)
+        self.start_pos_input.bind(on_text_validate=self.on_start_position_validate, text=self.on_start_pos_text_change)
+        self.end_pos_input.bind(on_text_validate=self.on_end_position_validate, text=self.on_end_pos_text_change)
    
         
         # Séparateur
@@ -424,6 +424,10 @@ class SequencerLayout(BoxLayout):
 
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
+
+        # Show MIDI input selection on startup if not already set
+        if not self.sequencer.default_record_port:
+            Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
 
     def on_playback_state_change(self, instance, value):
         """Callback for sequencer's playback_state changes."""
@@ -745,35 +749,18 @@ class SequencerLayout(BoxLayout):
 
     def play_pressed(self, instance):
         # If already playing, do nothing. If paused, resume via the pause button.
-        if self.sequencer.playback_state == "playing":
-            return
-        if self.sequencer.playback_state == "paused":
-            # Let the pause button handle resume
-            self.pause_pressed(instance)
-            return
+        if self.sequencer.playback_state == "stopped":
+            # Pre-sync the UI to the start beat for a smoother start
+            start_pos = self.start_pos_input.text or "1:1"
+            start_beat = self.sequencer.parse_position_to_beats(start_pos)
+            if start_beat is not None:
+                self.display_beat = start_beat
+                for track_widget in self.track_widgets:
+                    track_widget.set_playback_position(start_beat)
+                self.playhead_label.text = f"Pos: {start_pos}"
 
-        # --- Start new playback ---
-        start_pos = self.start_pos_input.text or "1:1"
-        end_pos = self.end_pos_input.text
-        
-        start_beat = self.sequencer.parse_position_to_beats(start_pos)
-        if start_beat is None: return
-
-        # Pre-sync the UI to the start beat for a smoother start
-        self.display_beat = start_beat
-        for track_widget in self.track_widgets:
-            track_widget.set_playback_position(start_beat)
-        self.playhead_label.text = f"Pos: {start_pos}"
-
-        if self.is_looping:
-            self.sequencer.set_loop_range(start_pos, end_pos)
-            self.sequencer.play(start_beat=start_beat)
-        else:
-            end_beat = self.sequencer.parse_position_to_beats(end_pos)
-            self.sequencer.play_range_enabled = True
-            self.sequencer.play_range_start_beat = start_beat
-            self.sequencer.play_range_end_beat = end_beat if end_beat is not None else self.sequencer.get_song_length_in_beats()
-            self.sequencer.play(start_beat=start_beat)
+        # Centralized logic call
+        self.sequencer.process_transport_command("play_pause")
 
     def _start_playback(self, start_pos):
         """Démarre la lecture après configuration du loop"""
@@ -840,18 +827,13 @@ class SequencerLayout(BoxLayout):
             return False
 
     def pause_pressed(self, instance):
-        self.sequencer.pause()
+        self.sequencer.process_transport_command("play_pause")
 
     def stop_pressed(self, instance):
-        self.sequencer.stop()
+        self.sequencer.process_transport_command("stop")
 
     def record_pressed(self, instance):
-        if self.sequencer.is_recording:
-            # Stop recording is handled by the stop button/sequencer logic
-            self.sequencer.stop()
-        else:
-            # Start recording
-            self.start_recording_from_ui()
+        self.sequencer.process_transport_command("record")
 
     def get_armed_track(self) -> Optional[int]:
         """Retourne l'index de la piste armée, ou None si aucune piste n'est armée."""
@@ -1052,6 +1034,11 @@ class SequencerLayout(BoxLayout):
         if not self.end_pos_manual_override:
             end_of_song_beats = self.sequencer.get_song_length_in_beats()
             self.end_pos_input.text = self.sequencer._format_beats_to_position(end_of_song_beats)
+
+        # Ensure the sequencer object is aware of the UI's start/end positions
+        self.sequencer.ui_start_pos_str = self.start_pos_input.text
+        self.sequencer.ui_end_pos_str = self.end_pos_input.text
+
         self.update_track_list()
         
 ####
@@ -1079,11 +1066,18 @@ class SequencerLayout(BoxLayout):
     def on_end_position_validate(self, instance=None):
         """Valide la position de fin"""
         position = self.end_pos_input.text
+        self.sequencer.ui_end_pos_str = position
         print(f"End position validated: {position}")
         self.end_pos_manual_override = True
         # Ici vous pouvez ajouter la logique pour traiter la nouvelle position de fin
         # Par exemple :
         # self.process_command_ui(f'endpos "{position}"')
+
+    def on_start_pos_text_change(self, instance, value):
+        self.sequencer.ui_start_pos_str = value
+
+    def on_end_pos_text_change(self, instance, value):
+        self.sequencer.ui_end_pos_str = value
 
     # Méthodes de gestion des flèches
     def handle_textinput_arrows(self, textinput, direction, modifiers, cursor_pos):

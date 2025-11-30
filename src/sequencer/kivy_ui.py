@@ -752,18 +752,17 @@ class SequencerLayout(BoxLayout):
             self.pause_pressed(instance)
             return
 
-        # --- Start new playback ---
-        start_pos = self.start_pos_input.text or "1:1"
-        end_pos = self.end_pos_input.text
-        
-        start_beat = self.sequencer.parse_position_to_beats(start_pos)
-        if start_beat is None: return
+        # Ensure the sequencer's internal start/end beats are updated
+        # from the UI text fields *before* starting playback. This fixes
+        # the regression where the UI value was ignored.
+        self.on_start_position_validate(self.start_pos_input)
+        self.on_end_position_validate(self.end_pos_input)
 
-        # Pre-sync the UI to the start beat for a smoother start
-        self.display_beat = start_beat
-        for track_widget in self.track_widgets:
-            track_widget.set_playback_position(start_beat)
-        self.playhead_label.text = f"Pos: {start_pos}"
+        # The sequencer's internal state (loop_enabled, play_range_enabled)
+        # is now managed by their respective buttons. The play button
+        # simply initiates playback, and the sequencer determines the
+        # correct start beat based on its current state.
+        self.sequencer.play()
 
         if self.is_looping:
             self.sequencer.set_loop_range(start_pos, end_pos)

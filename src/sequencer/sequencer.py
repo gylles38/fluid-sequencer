@@ -65,6 +65,7 @@ def song_decoder(d):
 
 from kivy.properties import NumericProperty, StringProperty
 from kivy.event import EventDispatcher
+from kivy.clock import Clock
 
 class JackManager:
     def __init__(self, sequencer: 'Sequencer'):
@@ -895,6 +896,8 @@ class Sequencer(EventDispatcher):
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
+        self._transport_control_thread = None
+        self._transport_control_stop_event = threading.Event()
         self.control_port_name: Optional[str] = None
         self.open_ports = {}
         self.virtual_ports = []
@@ -902,6 +905,8 @@ class Sequencer(EventDispatcher):
         self.audio_player_command: str = self.DEFAULT_AUDIO_PLAYER_COMMAND
 
         self.last_start_beat = 0.0
+        self._pause_beat = 0.0
+        self._default_start_beat = 0.0
         self.recording_thread = None
         self.is_recording = False
         self._stop_event = threading.Event()
@@ -913,6 +918,7 @@ class Sequencer(EventDispatcher):
         self.play_range_enabled = False
         self.play_range_start_beat = 0.0
         self.play_range_end_beat = 0.0
+        self.sequencer_play_range_enabled = False
 
         self.metronome_channel = 9
         self.metronome_pitch_downbeat = 76
@@ -939,19 +945,91 @@ class Sequencer(EventDispatcher):
             # N'oubliez pas d'appeler cette fonction chaque fois que le tempo, le chemin d'un fichier audio, 
             # ou un événement de piste est modifié (ajout/suppression).
 
-    def set_default_record_port(self, port_name: str) -> str:
-        """Définit le port MIDI d'entrée par défaut pour l'enregistrement"""
+    def _transport_control_listener_loop(self, port_name: str):
+        """
+        A dedicated thread that listens for transport control MIDI messages (play, stop, record).
+        """
         try:
-            # Vérifier que le port existe
+            with mido.open_input(port_name) as inport:
+                while not self._transport_control_stop_event.is_set():
+                    for msg in inport.iter_pending():
+                        if msg.type == 'control_change' and msg.value == 127:
+                            if msg.control == 118:  # Play/Pause
+                                if self.playback_state == "playing" or self.playback_state == "paused":
+                                    Clock.schedule_once(lambda dt: self.pause())
+                                else:
+                                    Clock.schedule_once(lambda dt: self.play())
+                            elif msg.control == 117:  # Stop
+                                Clock.schedule_once(lambda dt: self.stop())
+                            elif msg.control == 119:  # Record
+                                if self.is_recording:
+                                    Clock.schedule_once(lambda dt: self.stop())
+                                else:
+                                    Clock.schedule_once(lambda dt: self.start_midi_recording())
+                    time.sleep(0.01)
+        except Exception as e:
+            print(f"\nError in transport control listener for port '{port_name}': {e}")
+
+
+    def set_default_record_port(self, port_name: str) -> str:
+        """
+        Sets the default MIDI input port for recording and transport controls.
+        Manages the lifecycle of the transport control listener thread.
+        """
+        try:
             input_ports = get_input_names()
             if port_name not in input_ports:
                 return f"Error: MIDI input port '{port_name}' not found."
-            
+
+            # Stop any existing listener before starting a new one
+            if self._transport_control_thread and self._transport_control_thread.is_alive():
+                self._transport_control_stop_event.set()
+                self._transport_control_thread.join(timeout=1.0)
+
             self.default_record_port = port_name
             self.is_dirty = True
-            return f"Default record port set to: {port_name}"
+
+            # Start the new listener thread
+            self._transport_control_stop_event.clear()
+            self._transport_control_thread = threading.Thread(
+                target=self._transport_control_listener_loop,
+                args=(port_name,),
+                daemon=True
+            )
+            self._transport_control_thread.start()
+
+            return f"Default record and transport control port set to: {port_name}"
         except Exception as e:
             return f"Error setting record port: {e}"
+
+    def start_midi_recording(self):
+        """
+        Starts a recording from a MIDI command. Finds the armed track and starts recording.
+        """
+        if not self.default_record_port:
+            print("Error: No MIDI input port selected for recording.")
+            return
+
+        armed_track_index = None
+        for i, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+                if armed_track_index is not None:
+                    print("Error: Multiple tracks are armed for recording. Please arm only one.")
+                    return
+                armed_track_index = i
+
+        if armed_track_index is None:
+            print("Error: No track is armed for recording.")
+            return
+
+        # Use the default start beat for the recording
+        start_beat = self._default_start_beat
+
+        self.record_track(
+            track_idx=armed_track_index,
+            start_beat=start_beat,
+            inport_name=self.default_record_port
+        )
 
     def get_default_record_port(self) -> Optional[str]:
         """Retourne le port d'enregistrement par défaut"""
@@ -1083,6 +1161,12 @@ class Sequencer(EventDispatcher):
         measure = int(beats / beats_per_measure) + 1
         beat = int(beats % beats_per_measure) + 1
         return f"{measure}:{beat}"
+
+    def set_default_start_beat(self, beat: float):
+        """Sets the default start position for playback."""
+        if beat >= 0:
+            self._default_start_beat = beat
+            print(f"[SEQUENCER] Default start beat set to {beat}")
 
     def set_tempo(self, tempo: int) -> str:
         if tempo <= 0:
@@ -2786,32 +2870,38 @@ class Sequencer(EventDispatcher):
         finally:
             print(f"[DIAGNOSTIC] === _resync_all_at_beat END ===\n")
 
-    def play(self, start_beat: Optional[float] = None):
+    def play(self):
         if not self.jack_manager.is_running:
             self.jack_manager.start()
-            time.sleep(0.2) # Give JACK time to start and connect
+            time.sleep(0.2)
 
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
 
-        # If a start beat is provided, reposition the transport
-        if start_beat is not None:
-            beats_per_second = self.song.tempo / 60.0
-            samplerate = self.jack_manager.jack_client.samplerate
-            if beats_per_second > 0 and samplerate > 0:
-                target_frame = int((start_beat / beats_per_second) * samplerate)
-                _ , pos = self.jack_manager.jack_client.transport_query_struct()
-                pos.frame = target_frame
-                self.jack_manager.jack_client.transport_reposition_struct(pos)
+        # If paused, the pause method will handle resume.
+        if self.playback_state == "paused":
+            self.pause()
+            return
 
-        # Always prime tracks before starting
-        self.prime_all_tracks()
+        # Unified Play Logic
+        if self.loop_enabled:
+            self.play_range_enabled = False
+            reposition_beat = self.loop_start_beat
+            print(f"\n[DIAGNOSTIC] --- PLAYING from loop start beat {reposition_beat:.6f} ---")
+        elif self.sequencer_play_range_enabled:
+            self.play_range_enabled = True
+            reposition_beat = self.play_range_start_beat
+            print(f"\n[DIAGNOSTIC] --- PLAYING from range start beat {reposition_beat:.6f} ---")
+        else:
+            self.play_range_enabled = False
+            reposition_beat = self._default_start_beat
+            print(f"\n[DIAGNOSTIC] --- PLAYING from default start beat {reposition_beat:.6f} ---")
 
-        # Simply tell JACK to start rolling
-        if self.jack_manager.jack_client.transport_state != jack.ROLLING:
-            self.jack_manager.jack_client.transport_start()
-            self.playback_state = "playing"
+        self.last_start_beat = reposition_beat
+        self._pause_beat = reposition_beat
+        self._resync_all_at_beat(reposition_beat, force_play=True)
+        self.playback_state = "playing"
 
 
     def pause(self):
@@ -2819,18 +2909,19 @@ class Sequencer(EventDispatcher):
             return
 
         try:
+            # Cas 1: Le séquenceur joue -> on met en pause
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
-                # Get current beat BEFORE stopping
                 current_beat = self._get_current_beat()
                 print(f"\n[DIAGNOSTIC] --- PAUSING at beat {current_beat:.6f} ---")
                 self.jack_manager.jack_client.transport_stop()
                 self.playback_state = "paused"
-                # Store the precise beat for resume
-                self.last_start_beat = current_beat
+                # On stocke la position de pause
+                self._pause_beat = current_beat
+
+            # Cas 2: Le séquenceur est en pause -> on reprend la lecture
             elif self.playback_state == "paused":
-                print(f"\n[DIAGNOSTIC] --- RESUMING from beat {self.last_start_beat:.6f} ---")
-                # Resync all tracks to the last beat and resume
-                self._resync_all_at_beat(self.last_start_beat, force_play=True)
+                print(f"\n[DIAGNOSTIC] --- RESUMING from beat {self._pause_beat:.6f} ---")
+                self._resync_all_at_beat(self._pause_beat, force_play=True)
                 self.playback_state = "playing"
 
         except jack.JackError as e:
@@ -2838,63 +2929,52 @@ class Sequencer(EventDispatcher):
 
     def stop(self):
         """
-        Arrête la lecture du transport JACK et replace la tête de lecture
-        à sa dernière position de départ, sans détruire le client JACK.
+        Stops JACK transport and rewinds the playhead to the default start position.
         """
-        # 1. Gérer l'arrêt de l'enregistrement s'il est en cours (logique correcte et conservée)
         if self.is_recording and self.recording_thread:
             print("Stopping recording...")
             self._stop_event.set()
             self.recording_thread.join(timeout=1.0)
             self.is_recording = False
 
-        # 2. Vérifier si le client JACK est actif
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
-            # Si on n'est pas en lecture, il n'y a rien à faire.
-            # On s'assure juste que l'état interne est correct.
             self.playback_state = "stopped"
             return
 
-        # Correction du bug des "stuck notes" :
-        # Il faut d'abord envoyer les messages "note_off" PENDANT que la liste _active_notes est
-        # encore pleine. Si on arrête le transport JACK d'abord, le _process_callback se déclenche
-        # immédiatement, voit que le transport est arrêté, et vide _active_notes avant que
-        # silence_all_midi_notes() ait eu la chance d'être appelée.
         if self.jack_manager.jack_client.transport_state == jack.ROLLING:
             self.jack_manager.silence_all_midi_notes()
-            time.sleep(0.01) # Petit délai pour laisser les messages MIDI passer
+            time.sleep(0.01)
 
         try:
-            # 3. Arrêter le transport s'il est en cours de lecture
-            if self.jack_manager.jack_client.transport_state == jack.ROLLING:
+            # --- CORRECTED LOGIC ---
+            # 1. Stop the transport if it's running.
+            if self.jack_manager.jack_client.transport_state != jack.STOPPED:
                 self.jack_manager.jack_client.transport_stop()
                 print("JACK transport stopped.")
 
-            # 4. (Optionnel mais recommandé) Remettre la tête de lecture au début.
-            #    Ceci distingue le "stop" (arrêt et retour au début) du "pause" (arrêt sur place).
+            # 2. Reposition to the default start beat.
+            rewind_beat = self._default_start_beat
             beats_per_second = self.song.tempo / 60.0
             samplerate = self.jack_manager.jack_client.samplerate
             if beats_per_second > 0 and samplerate > 0:
-                # On utilise last_start_beat pour revenir au point de départ du dernier 'play'
-                target_frame = int((self.last_start_beat / beats_per_second) * samplerate)
+                target_frame = int((rewind_beat / beats_per_second) * samplerate)
                 _ , pos = self.jack_manager.jack_client.transport_query_struct()
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
-                # Synchroniser manuellement notre état interne
-                self.jack_manager._sync_playhead_to_beat(self.last_start_beat)
-                self.jack_manager.seek_audio_to_beat(self.last_start_beat)
-                # --- NOUVEAU : Forcer l'état de pause sur tous les lecteurs audio ---
-                self.jack_manager.set_all_audio_pause_state(True)
 
+            # 3. Manually sync internal state and external players.
+            self.jack_manager._sync_playhead_to_beat(rewind_beat)
+            self.jack_manager.seek_audio_to_beat(rewind_beat)
+            self.jack_manager.set_all_audio_pause_state(True) # Ensure audio players are paused
+            print(f"\n[DIAGNOSTIC] --- STOPPED and rewound to beat {rewind_beat:.6f} ---")
 
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
 
-        # 5. Mettre à jour l'état et couper toutes les notes MIDI par sécurité
         self.playback_state = "stopped"
-        # L'appel principal a déjà été fait plus haut. Celui-ci sert de double sécurité
-        # au cas où le transport n'était pas en cours, mais des notes étaient quand même actives.
-        self.jack_manager.silence_all_midi_notes()
+        self._pause_beat = self._default_start_beat
+        self.last_start_beat = self._default_start_beat
+        self.jack_manager.silence_all_midi_notes() # Final safety net for stuck notes
         print("Sequencer stopped.")
 
         # LA LIGNE SUIVANTE EST LA CAUSE DU PROBLÈME ET A ÉTÉ VOLONTAIREMENT SUPPRIMÉE :
@@ -2921,6 +3001,12 @@ class Sequencer(EventDispatcher):
         start_pos = self._format_beats_to_position(start_beat)
         end_pos = self._format_beats_to_position(end_beat)
         return f"Loop range set from {start_pos} to {end_pos}. Use 'play' to start playback."
+
+    def set_play_range(self, start_beat: float, end_beat: float):
+        """Sets the play range for the sequencer."""
+        self.play_range_start_beat = start_beat
+        self.play_range_end_beat = end_beat
+        self.sequencer_play_range_enabled = True
 
     def restart(self):
         """Restarts playback from the beginning."""

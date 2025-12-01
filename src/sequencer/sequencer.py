@@ -2056,7 +2056,6 @@ class Sequencer(EventDispatcher):
                 if i != track_index and hasattr(other_track, 'is_solo') and other_track.is_solo:
                     other_track.is_solo = False
                     output += f"Track '{other_track.name}' is now Un-soloed.\n"
-
         status = "Solo" if target_track.is_solo else "Un-soloed"
 
         # --- Real-time update if JACK is running ---

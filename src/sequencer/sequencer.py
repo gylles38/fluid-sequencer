@@ -1002,6 +1002,7 @@ class Sequencer(EventDispatcher):
                     # Fetch current mappings on each iteration to support hot-reloading in the future
                     transport_mappings = self.midi_config.mappings.get("transport", {})
                     volume_mappings = self.midi_config.mappings.get("volume_sliders", [])
+                    solo_mappings = self.midi_config.mappings.get("track_solo_buttons", [])
 
                     # Create a reverse mapping for faster lookups
                     cc_to_transport_action = {v: k for k, v in transport_mappings.items()}
@@ -1031,6 +1032,23 @@ class Sequencer(EventDispatcher):
                                         Clock.schedule_once(lambda dt, ti=track_index, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
                                 except ValueError:
                                     pass  # Should not happen
+
+                            # --- Handle Solo Buttons ---
+                            if control in solo_mappings:
+                                try:
+                                    track_index = solo_mappings.index(control)
+                                    if 0 <= track_index < len(self.song.tracks):
+                                        track = self.song.tracks[track_index]
+                                        is_solo = getattr(track, 'is_solo', False)
+
+                                        # Activate solo if value is 127 and track is not already solo
+                                        if value == 127 and not is_solo:
+                                            Clock.schedule_once(lambda dt, ti=track_index: self.toggle_solo(ti))
+                                        # Deactivate solo if value is 0 and track is currently solo
+                                        elif value == 0 and is_solo:
+                                            Clock.schedule_once(lambda dt, ti=track_index: self.toggle_solo(ti))
+                                except ValueError:
+                                    pass # CC is in the list, so this won't be reached.
 
                     time.sleep(0.01)
         except Exception as e:

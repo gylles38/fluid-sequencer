@@ -4,11 +4,15 @@ kivy.require('2.3.1')
 
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
+from kivymd.uix.card import MDCard
 from kivy.uix.filechooser import FileChooserListView
 from kivymd.uix.slider import MDSlider
+from kivy.uix.scrollview import ScrollView
+from kivymd.uix.label import MDLabel
 from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
@@ -138,6 +142,30 @@ class SequencerLayout(BoxLayout):
         )
         settings_button.bind(on_release=lambda x: self.settings_menu.open())
         menu_bar.add_widget(settings_button)
+
+        help_button = MDButton(
+            MDButtonText(text="Help"),
+            style="text",
+            pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
+        )
+
+        with help_button.canvas.before:
+            Color(0.5, 0.5, 0.5, 1)
+            self.help_line = Line(points=[0, -1, help_button.width, -1], width=1)
+
+        help_items = [
+            {"leading_icon": "information", "text": "About", "on_release": lambda: self.menu_action(self.show_about_popup)},
+            {"leading_icon": "help-circle", "text": "Commands Help", "on_release": lambda: self.menu_action(self.show_help_popup)},
+        ]
+
+        self.help_menu = MDDropdownMenu(
+            caller=help_button,
+            items=help_items,
+        )
+        help_button.bind(on_release=lambda x: self.help_menu.open())
+        menu_bar.add_widget(help_button)
+
 
         # Lier la mise à jour des lignes
         menu_bar.bind(size=self.update_menu_lines)
@@ -396,11 +424,35 @@ class SequencerLayout(BoxLayout):
 
         # Ajouter un espacement entre la ligne de statut et les pistes
         self.add_widget(Widget(size_hint_y=None, height=dp(15)))
+
+        # Layout principal pour la barre d'outils et la liste des pistes
+        main_content_layout = BoxLayout(orientation='horizontal')
         
+        # Barre d'outils à gauche
+        toolbar = BoxLayout(
+            orientation='vertical',
+            size_hint_x=None,
+            width=dp(50),
+            spacing=dp(5),
+            padding=(dp(5), 0)
+        )
+
+        # Bouton pour ajouter une piste MIDI
+        add_midi_track_button = TooltipMDIconButton(
+            icon="note-plus",
+            tooltip_text="Ajouter une piste MIDI",
+            on_release=lambda x: self.add_midi_track_popup()
+        )
+        toolbar.add_widget(add_midi_track_button)
+
+        main_content_layout.add_widget(toolbar)
+
         # Liste des pistes - DOIT être créé AVANT update_status_display()
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
-        self.add_widget(self.track_list_layout)
+
+        main_content_layout.add_widget(self.track_list_layout)
+        self.add_widget(main_content_layout)
 
         bottom_layout = BoxLayout(orientation='vertical', size_hint_y=0.3)
         self.output_label = Label(size_hint_y=0.1, text="Welcome!")
@@ -476,6 +528,8 @@ class SequencerLayout(BoxLayout):
             self.edit_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'settings_line'):
             self.settings_line.points = [0, -1, instance.width, -1]
+        if hasattr(self, 'help_line'):
+            self.help_line.points = [0, -1, instance.width, -1]
 
 
     def show_audio_settings(self):
@@ -654,9 +708,116 @@ class SequencerLayout(BoxLayout):
         ok_button.bind(on_press=popup.dismiss)
         popup.open()
 
+    def show_about_popup(self):
+        """Affiche la popup 'About'."""
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+
+        # Placeholder pour le logo
+        logo_placeholder = MDCard(
+            size_hint=(None, None),
+            size=(dp(100), dp(100)),
+            pos_hint={'center_x': 0.5},
+            md_bg_color=(0.2, 0.2, 0.2, 1) # Gris foncé
+        )
+        logo_placeholder.add_widget(Label(text="[LOGO]", font_size='20sp'))
+
+        # Informations de version
+        version_label = Label(
+            text="Sequencer\nVersion 0.1.0\n\nDeveloped by Jules",
+            halign='center',
+            size_hint_y=None,
+            height=dp(80)
+        )
+
+        # Bouton OK
+        ok_button = MDButton(
+            MDButtonText(text="OK"),
+            pos_hint={'center_x': 0.5}
+        )
+
+        content.add_widget(logo_placeholder)
+        content.add_widget(version_label)
+        content.add_widget(ok_button)
+
+        popup = Popup(
+            title="About Sequencer",
+            content=content,
+            size_hint=(None, None),
+            size=(dp(350), dp(350)),
+            auto_dismiss=True
+        )
+        ok_button.bind(on_press=popup.dismiss)
+        popup.open()
+
+    def show_help_popup(self):
+        """Affiche la popup d'aide des commandes."""
+        from sequencer.help_text import COMMANDS_HELP, MIDI_MAPPING_HELP
+
+        # Conteneur principal
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+
+        # ScrollView pour le contenu
+        scroll_view = ScrollView(size_hint=(1, 1))
+
+        # Layout principal dans le ScrollView
+        scroll_content = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(15))
+        scroll_content.bind(minimum_height=scroll_content.setter('height'))
+
+        # Grille pour les commandes générales
+        commands_grid = GridLayout(
+            cols=2,
+            size_hint_y=None,
+            spacing=dp(10)
+        )
+        commands_grid.bind(minimum_height=commands_grid.setter('height'))
+
+        # Grille pour les commandes MIDI
+        midi_grid = GridLayout(
+            cols=2,
+            size_hint_y=None,
+            spacing=dp(10)
+        )
+        midi_grid.bind(minimum_height=midi_grid.setter('height'))
+
+        # Populate grids
+        for command, description in COMMANDS_HELP:
+            commands_grid.add_widget(MDLabel(text=f"[b]{command}[/b]", markup=True, size_hint_y=None, height=dp(30)))
+            commands_grid.add_widget(MDLabel(text=description, size_hint_y=None, height=dp(30)))
+
+        for command, description in MIDI_MAPPING_HELP:
+            midi_grid.add_widget(MDLabel(text=f"[b]{command}[/b]", markup=True, size_hint_y=None, height=dp(30)))
+            midi_grid.add_widget(MDLabel(text=description, size_hint_y=None, height=dp(30)))
+
+        scroll_content.add_widget(MDLabel(text="[b]Sequencer CLI Commands[/b]", markup=True, size_hint_y=None, height=dp(30)))
+        scroll_content.add_widget(commands_grid)
+        scroll_content.add_widget(Widget(size_hint_y=None, height=dp(20))) # Spacer
+        scroll_content.add_widget(MDLabel(text="[b]MIDI Mapping[/b]", markup=True, size_hint_y=None, height=dp(30)))
+        scroll_content.add_widget(midi_grid)
+
+        scroll_view.add_widget(scroll_content)
+
+        # Bouton OK
+        ok_button = MDButton(
+            MDButtonText(text="OK"),
+            size_hint=(1, None),
+            height=dp(40)
+        )
+
+        content.add_widget(scroll_view)
+        content.add_widget(ok_button)
+
+        popup = Popup(
+            title="Commands Help",
+            content=content,
+            size_hint=(0.8, 0.8), # 80% de la fenêtre
+            auto_dismiss=True
+        )
+        ok_button.bind(on_press=popup.dismiss)
+        popup.open()
+
     def close_all_menus(self):
         """Ferme tous les menus ouverts"""
-        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu']
+        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu', 'help_menu']
         for menu_name in menus_to_close:
             if hasattr(self, menu_name) and getattr(self, menu_name):
                 try:
@@ -715,6 +876,71 @@ class SequencerLayout(BoxLayout):
                 basename = os.path.basename(filepath).removesuffix('.proj.json')
                 self.process_command_ui(f'saveproject "{basename}"')
         popup = SaveProjectAsPopup(sequencer=self.sequencer, callback=callback)
+        popup.open()
+
+    def add_midi_track_popup(self):
+        """Affiche un popup pour ajouter une nouvelle piste MIDI."""
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+
+        # Champ pour le nom de la piste
+        track_name_input = TextInput(
+            hint_text="Nom de la piste",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        content.add_widget(track_name_input)
+
+        # Champ pour le programme MIDI (instrument)
+        program_input = TextInput(
+            hint_text="Programme MIDI (optionnel, 1-128)",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        content.add_widget(program_input)
+
+        # Boutons
+        buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        ok_button = MDButton(MDButtonText(text="OK"))
+        cancel_button = MDButton(MDButtonText(text="Annuler"))
+        buttons_layout.add_widget(ok_button)
+        buttons_layout.add_widget(cancel_button)
+        content.add_widget(buttons_layout)
+
+        popup = Popup(
+            title="Ajouter une piste MIDI",
+            content=content,
+            size_hint=(0.6, None),
+            height=dp(250),
+            auto_dismiss=False
+        )
+
+        def on_ok(instance):
+            track_name = track_name_input.text.strip()
+            if not track_name:
+                self.show_error_popup("Erreur", "Le nom de la piste ne peut pas être vide.")
+                return
+
+            program_str = program_input.text.strip()
+            command = f'add "{track_name}"'
+
+            if program_str:
+                try:
+                    program_num = int(program_str)
+                    if not 1 <= program_num <= 128:
+                        self.show_error_popup("Erreur", "Le programme MIDI doit être entre 1 et 128.")
+                        return
+                    command += f' {program_num}'
+                except ValueError:
+                    self.show_error_popup("Erreur", "Le programme MIDI doit être un nombre.")
+                    return
+
+            self.process_command_ui(command)
+            popup.dismiss()
+
+        ok_button.bind(on_press=on_ok)
+        cancel_button.bind(on_press=popup.dismiss)
+
         popup.open()
 
     def start_play_blink(self):
@@ -1023,6 +1249,9 @@ class SequencerLayout(BoxLayout):
             track_widget.total_beats = final_total_beats
             self.track_widgets.append(track_widget)
             self.track_list_layout.add_widget(track_widget)
+
+        # Inverser l'ordre des enfants pour que la piste 0 soit en haut
+        self.track_list_layout.children = self.track_list_layout.children[::-1]
             
     def update_status_display(self):
         song = self.sequencer.song

@@ -7,8 +7,11 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
+from kivymd.uix.card import MDCard
 from kivy.uix.filechooser import FileChooserListView
 from kivymd.uix.slider import MDSlider
+from kivy.uix.scrollview import ScrollView
+from kivymd.uix.label import MDLabel
 from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
@@ -138,6 +141,30 @@ class SequencerLayout(BoxLayout):
         )
         settings_button.bind(on_release=lambda x: self.settings_menu.open())
         menu_bar.add_widget(settings_button)
+
+        help_button = MDButton(
+            MDButtonText(text="Help"),
+            style="text",
+            pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
+        )
+
+        with help_button.canvas.before:
+            Color(0.5, 0.5, 0.5, 1)
+            self.help_line = Line(points=[0, -1, help_button.width, -1], width=1)
+
+        help_items = [
+            {"leading_icon": "information", "text": "About", "on_release": lambda: self.menu_action(self.show_about_popup)},
+            {"leading_icon": "help-circle", "text": "Commands Help", "on_release": lambda: self.menu_action(self.show_help_popup)},
+        ]
+
+        self.help_menu = MDDropdownMenu(
+            caller=help_button,
+            items=help_items,
+        )
+        help_button.bind(on_release=lambda x: self.help_menu.open())
+        menu_bar.add_widget(help_button)
+
 
         # Lier la mise à jour des lignes
         menu_bar.bind(size=self.update_menu_lines)
@@ -476,6 +503,8 @@ class SequencerLayout(BoxLayout):
             self.edit_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'settings_line'):
             self.settings_line.points = [0, -1, instance.width, -1]
+        if hasattr(self, 'help_line'):
+            self.help_line.points = [0, -1, instance.width, -1]
 
 
     def show_audio_settings(self):
@@ -654,9 +683,90 @@ class SequencerLayout(BoxLayout):
         ok_button.bind(on_press=popup.dismiss)
         popup.open()
 
+    def show_about_popup(self):
+        """Affiche la popup 'About'."""
+        content = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+
+        # Placeholder pour le logo
+        logo_placeholder = MDCard(
+            size_hint=(None, None),
+            size=(dp(100), dp(100)),
+            pos_hint={'center_x': 0.5},
+            md_bg_color=(0.2, 0.2, 0.2, 1) # Gris foncé
+        )
+        logo_placeholder.add_widget(Label(text="[LOGO]", font_size='20sp'))
+
+        # Informations de version
+        version_label = Label(
+            text="Sequencer\nVersion 0.1.0\n\nDeveloped by Jules",
+            halign='center',
+            size_hint_y=None,
+            height=dp(80)
+        )
+
+        # Bouton OK
+        ok_button = MDButton(
+            MDButtonText(text="OK"),
+            pos_hint={'center_x': 0.5}
+        )
+
+        content.add_widget(logo_placeholder)
+        content.add_widget(version_label)
+        content.add_widget(ok_button)
+
+        popup = Popup(
+            title="About Sequencer",
+            content=content,
+            size_hint=(None, None),
+            size=(dp(350), dp(350)),
+            auto_dismiss=True
+        )
+        ok_button.bind(on_press=popup.dismiss)
+        popup.open()
+
+    def show_help_popup(self):
+        """Affiche la popup d'aide des commandes."""
+        from sequencer.help_text import HELP_TEXT
+
+        # Conteneur principal
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+
+        # ScrollView pour le texte
+        scroll_view = ScrollView(size_hint=(1, 1))
+
+        # Label avec support Markdown pour un meilleur formatage
+        help_label = MDLabel(
+            text=HELP_TEXT,
+            size_hint_y=None,
+            padding=(dp(10), dp(10)),
+            markup=True
+        )
+        help_label.bind(texture_size=help_label.setter('size'))
+
+        scroll_view.add_widget(help_label)
+
+        # Bouton OK
+        ok_button = MDButton(
+            MDButtonText(text="OK"),
+            size_hint=(1, None),
+            height=dp(40)
+        )
+
+        content.add_widget(scroll_view)
+        content.add_widget(ok_button)
+
+        popup = Popup(
+            title="Commands Help",
+            content=content,
+            size_hint=(0.8, 0.8), # 80% de la fenêtre
+            auto_dismiss=True
+        )
+        ok_button.bind(on_press=popup.dismiss)
+        popup.open()
+
     def close_all_menus(self):
         """Ferme tous les menus ouverts"""
-        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu']
+        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu', 'help_menu']
         for menu_name in menus_to_close:
             if hasattr(self, menu_name) and getattr(self, menu_name):
                 try:

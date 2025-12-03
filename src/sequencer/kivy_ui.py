@@ -4,6 +4,7 @@ kivy.require('2.3.1')
 
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
@@ -726,24 +727,50 @@ class SequencerLayout(BoxLayout):
 
     def show_help_popup(self):
         """Affiche la popup d'aide des commandes."""
-        from sequencer.help_text import HELP_TEXT
+        from sequencer.help_text import COMMANDS_HELP, MIDI_MAPPING_HELP
 
         # Conteneur principal
         content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
 
-        # ScrollView pour le texte
+        # ScrollView pour le contenu
         scroll_view = ScrollView(size_hint=(1, 1))
 
-        # Label avec support Markdown pour un meilleur formatage
-        help_label = MDLabel(
-            text=HELP_TEXT,
-            size_hint_y=None,
-            padding=(dp(10), dp(10)),
-            markup=True
-        )
-        help_label.bind(texture_size=help_label.setter('size'))
+        # Layout principal dans le ScrollView
+        scroll_content = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(15))
+        scroll_content.bind(minimum_height=scroll_content.setter('height'))
 
-        scroll_view.add_widget(help_label)
+        # Grille pour les commandes générales
+        commands_grid = GridLayout(
+            cols=2,
+            size_hint_y=None,
+            spacing=dp(10)
+        )
+        commands_grid.bind(minimum_height=commands_grid.setter('height'))
+
+        # Grille pour les commandes MIDI
+        midi_grid = GridLayout(
+            cols=2,
+            size_hint_y=None,
+            spacing=dp(10)
+        )
+        midi_grid.bind(minimum_height=midi_grid.setter('height'))
+
+        # Populate grids
+        for command, description in COMMANDS_HELP:
+            commands_grid.add_widget(MDLabel(text=f"[b]{command}[/b]", markup=True, size_hint_y=None, height=dp(30)))
+            commands_grid.add_widget(MDLabel(text=description, size_hint_y=None, height=dp(30)))
+
+        for command, description in MIDI_MAPPING_HELP:
+            midi_grid.add_widget(MDLabel(text=f"[b]{command}[/b]", markup=True, size_hint_y=None, height=dp(30)))
+            midi_grid.add_widget(MDLabel(text=description, size_hint_y=None, height=dp(30)))
+
+        scroll_content.add_widget(MDLabel(text="Sequencer CLI Commands", font_style="H6", size_hint_y=None, height=dp(30)))
+        scroll_content.add_widget(commands_grid)
+        scroll_content.add_widget(Widget(size_hint_y=None, height=dp(20))) # Spacer
+        scroll_content.add_widget(MDLabel(text="MIDI Mapping", font_style="H6", size_hint_y=None, height=dp(30)))
+        scroll_content.add_widget(midi_grid)
+
+        scroll_view.add_widget(scroll_content)
 
         # Bouton OK
         ok_button = MDButton(

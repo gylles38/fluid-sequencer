@@ -1,56 +1,56 @@
-HELP_TEXT = """
-Sequencer CLI Commands:
-  help                    - Shows this help message.
-  add <name> [prog]       - Adds a new MIDI track. `prog` is an optional program number (1-128).
-  addaudio <name> <path>  - Adds a new Audio track with the audio file at <path>.
-  addauto <name> <target_idx> - Adds an automation track targeting another track.
-  addap <track> <pos> <p> <val> [curve] - Adds an automation point. Curves: none, linear, ease-in, ease-out, ease-in-out, sine.
-  addcc <track> <pos> <cc> <val> - Adds a CC event to a track at a 'measure:beat' position.
-  load <filepath>         - Loads a song from a MIDI file.
-  loadproject <basename>  - Loads a full project (MIDI, vports, assignments).
-  newproject <name>       - Creates a new, empty project.
-  list                    - Shows all tracks in the current song.
-  ports                   - Lists available MIDI input and output ports.
-  vport <name>            - Creates a virtual MIDI output port.
-  delvport                - Deletes an existing virtual port.
-  assign <track_index>    - Assigns a track to an output port from a list of choices.
-  assignmetro             - Assigns an output port for the metronome click.
-  unassign <track_index>  - Un-assigns a track from its output port.
-  setaudiocmd <cmd...>    - Sets the command for the external audio player (e.g., mpv --audio-device=jack).
-  setbank <track> <msb> [lsb] - Sets the MIDI bank for a track (MSB=CC0, LSB=CC32).
-  setch <track> <ch>      - Sets the MIDI channel (1-16) for a track.
-  setmetrotrack <track>   - Designates a MIDI track to be the metronome track (hides it from UI).
-  setprog <track> <prog>  - Sets the MIDI program (1-128) for a track.
-  volume <track_index>    - Sets the volume for an audio or MIDI track (0.0 to 1.0).
-  pan <track_index>       - Sets the pan for an audio or MIDI track (-1.0 to 1.0).
-  velocity <track_index>  - Sets the velocity multiplier for a MIDI track (e.g., 1.0).
-  mute <track_index>      - Toggles mute for a track.
-  solo <track_index>      - Toggles solo for a track.
-  rename <index> <new_name> - Renames a track.
-  copy <track_index>      - Copies a section of a track using 'measure:beat' positions.
-  move <track_index>      - Moves a section of a track using 'measure:beat' positions.
-  transpose <track_index> - Transposes a section of a track using 'measure:beat' positions.
-  record <track_index>    - Records MIDI to a track, with 'measure:beat' precision.
-  bis                     - Re-records with the last used 'record' settings.
-  delete <track_index>    - Deletes a track after confirmation.
-  erase <track_index>     - Erases notes from a track using 'measure:beat' positions.
-  tempo <bpm>             - Sets the song tempo in beats per minute.
-  timesig <num> <den>     - Sets the song time signature (e.g., 4 4).
-  save <filepath>         - Saves only the song to a MIDI file.
-  saveproject <basename>  - Saves the full project (MIDI, vports, assignments).
-  prime                   - Sends current program/bank state to all assigned ports.
-  cc                      - Sends a single MIDI CC message to a port.
-  play [pos]              - Seeks to 'measure:beat' position and plays, or just plays.
-  pause                   - Toggles play/pause on the JACK transport (spacebar shortcut).
-  loop [start] [end]      - Sets a playback loop ('measure:beat') or toggles if no args.
-  stop                    - Stops the sequencer and disconnects from JACK.
-  metronome <on|off>      - Enables or disables the metronome.
-  quit                    - Exits the sequencer.
+COMMANDS_HELP = [
+    ("help", "Shows this help message."),
+    ("add <name> [prog]", "Adds a new MIDI track. `prog` is an optional program number (1-128)."),
+    ("addaudio <name> <path>", "Adds a new Audio track with the audio file at <path>."),
+    ("addauto <name> <target_idx>", "Adds an automation track targeting another track."),
+    ("addap <track> <pos> <p> <val> [curve]", "Adds an automation point. Curves: none, linear, ease-in, ease-out, ease-in-out, sine."),
+    ("addcc <track> <pos> <cc> <val>", "Adds a CC event to a track at a 'measure:beat' position."),
+    ("load <filepath>", "Loads a song from a MIDI file."),
+    ("loadproject <basename>", "Loads a full project (MIDI, vports, assignments)."),
+    ("newproject <name>", "Creates a new, empty project."),
+    ("list", "Shows all tracks in the current song."),
+    ("ports", "Lists available MIDI input and output ports."),
+    ("vport <name>", "Creates a virtual MIDI output port."),
+    ("delvport", "Deletes an existing virtual port."),
+    ("assign <track_index>", "Assigns a track to an output port from a list of choices."),
+    ("assignmetro", "Assigns an output port for the metronome click."),
+    ("unassign <track_index>", "Un-assigns a track from its output port."),
+    ("setaudiocmd <cmd...>", "Sets the command for the external audio player (e.g., mpv --audio-device=jack)."),
+    ("setbank <track> <msb> [lsb]", "Sets the MIDI bank for a track (MSB=CC0, LSB=CC32)."),
+    ("setch <track> <ch>", "Sets the MIDI channel (1-16) for a track."),
+    ("setmetrotrack <track>", "Designates a MIDI track to be the metronome track (hides it from UI)."),
+    ("setprog <track> <prog>", "Sets the MIDI program (1-128) for a track."),
+    ("volume <track_index>", "Sets the volume for an audio or MIDI track (0.0 to 1.0)."),
+    ("pan <track_index>", "Sets the pan for an audio or MIDI track (-1.0 to 1.0)."),
+    ("velocity <track_index>", "Sets the velocity multiplier for a MIDI track (e.g., 1.0)."),
+    ("mute <track_index>", "Toggles mute for a track."),
+    ("solo <track_index>", "Toggles solo for a track."),
+    ("rename <index> <new_name>", "Renames a track."),
+    ("copy <track_index>", "Copies a section of a track using 'measure:beat' positions."),
+    ("move <track_index>", "Moves a section of a track using 'measure:beat' positions."),
+    ("transpose <track_index>", "Transposes a section of a track using 'measure:beat' positions."),
+    ("record <track_index>", "Records MIDI to a track, with 'measure:beat' precision."),
+    ("bis", "Re-records with the last used 'record' settings."),
+    ("delete <track_index>", "Deletes a track after confirmation."),
+    ("erase <track_index>", "Erases notes from a track using 'measure:beat' positions."),
+    ("tempo <bpm>", "Sets the song tempo in beats per minute."),
+    ("timesig <num> <den>", "Sets the song time signature (e.g., 4 4)."),
+    ("save <filepath>", "Saves only the song to a MIDI file."),
+    ("saveproject <basename>", "Saves the full project (MIDI, vports, assignments)."),
+    ("prime", "Sends current program/bank state to all assigned ports."),
+    ("cc", "Sends a single MIDI CC message to a port."),
+    ("play [pos]", "Seeks to 'measure:beat' position and plays, or just plays."),
+    ("pause", "Toggles play/pause on the JACK transport (spacebar shortcut)."),
+    ("loop [start] [end]", "Sets a playback loop ('measure:beat') or toggles if no args."),
+    ("stop", "Stops the sequencer and disconnects from JACK."),
+    ("metronome <on|off>", "Enables or disables the metronome."),
+    ("quit", "Exits the sequencer."),
+]
 
-MIDI Mapping:
-  setcontrolport <port>   - Sets the MIDI input port for control messages.
-  unsetcontrolport        - Unsets the MIDI control port.
-  map <chan> <cc> <track> <action> - Maps a MIDI CC to an action (volume, pan, program).
-  unmap <chan> <cc>       - Removes a MIDI CC mapping.
-  listmaps                - Lists all active MIDI CC mappings.
-"""
+MIDI_MAPPING_HELP = [
+    ("setcontrolport <port>", "Sets the MIDI input port for control messages."),
+    ("unsetcontrolport", "Unsets the MIDI control port."),
+    ("map <chan> <cc> <track> <action>", "Maps a MIDI CC to an action (volume, pan, program)."),
+    ("unmap <chan> <cc>", "Removes a MIDI CC mapping."),
+    ("listmaps", "Lists all active MIDI CC mappings."),
+]

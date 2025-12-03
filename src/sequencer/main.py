@@ -47,11 +47,19 @@ except ImportError:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
 
-from sequencer.help_text import HELP_TEXT
+from sequencer.help_text import COMMANDS_HELP, MIDI_MAPPING_HELP
 
 def get_help_text():
-    """Prints the help message with available commands."""
-    return HELP_TEXT
+    """Formats the help message with available commands for the CLI."""
+    output = "Sequencer CLI Commands:\n"
+    for command, description in COMMANDS_HELP:
+        output += f"  {command:<23} - {description}\n"
+
+    output += "\nMIDI Mapping:\n"
+    for command, description in MIDI_MAPPING_HELP:
+        output += f"  {command:<23} - {description}\n"
+
+    return output
 
 def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
     if not user_input:

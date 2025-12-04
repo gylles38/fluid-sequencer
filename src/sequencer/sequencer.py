@@ -1,6 +1,7 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
 from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
+from .config import MidiConfig
 from .terminal_input import cancellable_input, UserInputCancelled
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
@@ -892,6 +893,7 @@ class Sequencer(EventDispatcher):
         super().__init__()
         self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
+        self.midi_config = MidiConfig("config/midi_mappings.json")
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
@@ -992,36 +994,55 @@ class Sequencer(EventDispatcher):
 
     def _transport_control_listener_loop(self, port_name: str):
         """
-        A dedicated thread that listens for transport control MIDI messages (play, stop, record).
+        A dedicated thread that listens for transport control MIDI messages based on the loaded configuration.
         """
         try:
             with mido.open_input(port_name) as inport:
                 while not self._transport_control_stop_event.is_set():
                     for msg in inport.iter_pending():
                         if msg.type == 'control_change':
-                            # Transport controls with a value of 127
-                            if msg.value == 127:
-                                if msg.control == 118:  # Play/Pause
+                            control = msg.control
+                            value = msg.value
+
+                            # --- Handle Transport Controls ---
+                            if value == 127:
+                                if control == self.midi_config.get_transport_cc("play_pause"):
                                     Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
-                                elif msg.control == 117:  # Stop
+                                elif control == self.midi_config.get_transport_cc("stop"):
                                     Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
-                                elif msg.control == 119:  # Record
+                                elif control == self.midi_config.get_transport_cc("record_arm"):
                                     Clock.schedule_once(lambda dt: self.process_transport_command("record"))
 
-                            # Volume sliders (CC 70-77) for any value
-                            if 70 <= msg.control <= 77:
-                                track_index = msg.control - 70
-                                # Check if the track exists
-                                if 0 <= track_index < len(self.song.tracks):
-                                    # Normalize volume from 0-127 to 0.0-1.0
-                                    volume_value = msg.value / 127.0
-                                    # Schedule the volume change on the main Kivy thread for safety
-                                    # The lambda captures the current track_index and volume_value
-                                    Clock.schedule_once(lambda dt, ti=track_index, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
+                            # --- Handle Volume Sliders & Solo Buttons ---
+                            for i in range(len(self.song.tracks)):
+                                # Volume
+                                if control == self.midi_config.get_volume_slider_cc(i):
+                                    volume_value = value / 127.0
+                                    Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
+                                    break # Found a match, no need to check other tracks for this CC
+
+                                # Solo
+                                if control == self.midi_config.get_track_solo_button_cc(i):
+                                    track = self.song.tracks[i]
+                                    is_solo = getattr(track, 'is_solo', False)
+                                    if (value == 127 and not is_solo) or (value == 0 and is_solo):
+                                        Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
+                                    break # Found a match
+
                     time.sleep(0.01)
         except Exception as e:
             print(f"\nError in transport control listener for port '{port_name}': {e}")
 
+    def reload_midi_mappings(self, filepath: str) -> str:
+        """Loads a new MIDI mapping file and restarts the listener if necessary."""
+        self.midi_config.load_mappings(filepath)
+
+        # If a transport control port is active, restart it to apply the new mappings
+        if self.default_record_port and self._transport_control_thread and self._transport_control_thread.is_alive():
+            print("Restarting MIDI transport control listener to apply new mappings...")
+            return self.set_default_record_port(self.default_record_port)
+
+        return f"MIDI mappings loaded from {filepath}. No transport listener was active."
 
     def set_default_record_port(self, port_name: str) -> str:
         """
@@ -2014,7 +2035,6 @@ class Sequencer(EventDispatcher):
                 if i != track_index and hasattr(other_track, 'is_solo') and other_track.is_solo:
                     other_track.is_solo = False
                     output += f"Track '{other_track.name}' is now Un-soloed.\n"
-
         status = "Solo" if target_track.is_solo else "Un-soloed"
 
         # --- Real-time update if JACK is running ---

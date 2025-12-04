@@ -350,6 +350,13 @@ class TrackWidget(BoxLayout):
         pan_layout.add_widget(self.pan_slider)
         self.add_widget(pan_layout)
 
+        # Bind UI updates to property changes
+        self.track.bind(is_solo=self.on_solo_changed)
+
+    def on_solo_changed(self, instance, value):
+        """Callback for when the track's solo property changes from the backend."""
+        self.update_mute_solo_appearance()
+
     def update_playback_rect(self, *args):
         if self.playback_rect:
             self.playback_rect.pos = self.playback_line.pos

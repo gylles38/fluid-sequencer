@@ -9,53 +9,45 @@ from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
 
 class TrackWidget(BoxLayout):
-    # Propriétés de contrôle des dimensions de la grille
     total_beats = NumericProperty(128.0) 
     pixels_per_beat = NumericProperty(dp(100))
     timeline_container = ObjectProperty(None)
+    info_width = NumericProperty(dp(150))
+    controls_width = NumericProperty(dp(792))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs):
         super(TrackWidget, self).__init__(**kwargs)
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
-        self.orientation = 'horizontal' # Conteneur principal: Nom | Timeline | Contrôles
+        self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(56)  # Augmenté la hauteur pour plus d'espace
-        self.spacing = dp(12)  # Espacement augmenté entre les éléments
-        self.padding = [dp(12), dp(6), dp(12), dp(6)]  # Padding augmenté
+        self.height = dp(56)
+        self.spacing = dp(12)
+        self.padding = [dp(12), dp(6), dp(12), dp(6)]
 
-        # Ajouter un fond coloré pour mieux distinguer les pistes
         with self.canvas.before:
-            # Fond alterné pour mieux séparer les lignes
             Color(0.15, 0.15, 0.15, 1) if track_index % 2 == 0 else Color(0.12, 0.12, 0.12, 1)
             self.background_rect = Rectangle(pos=self.pos, size=self.size)
-            # Bordure fine en bas pour séparer les pistes
             Color(0.3, 0.3, 0.3, 0.5)
             self.border_line = Line(points=[self.x, self.y, self.x + self.width, self.y], width=0.5)
 
         self.bind(pos=self._update_graphics, size=self._update_graphics)
 
-        # 1. Track Info (Index and Name)
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width)
         self.name_label = Label(
             text=f"[{track_index}] {track.name}",
-            size_hint_x=None, 
-            width=dp(150), # Largeur fixe pour le nom
             halign='left', 
             valign='middle', 
             color=[0.9, 0.9, 0.9, 1],
             font_size=dp(14),
             bold=True            
         )
-        self.add_widget(self.name_label)
+        self.info_section.add_widget(self.name_label)
+        self.add_widget(self.info_section)
 
-        # ScrollView pour le défilement horizontal de la timeline
-        self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False) # Prend tout l'espace restant
-        
-        # Conteneur interne : un Widget de taille variable (la largeur sera mise à jour dans update_timeline_size)
+        self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.timeline_container = Widget(size_hint=(None, 1)) 
-        
-        # Grille de Mesures (en premier plan pour être en arrière-plan)
         self.measure_grid = MeasureGrid(
             size_hint=(1, 1), 
             beat_per_measure=4, 
@@ -63,37 +55,25 @@ class TrackWidget(BoxLayout):
             pixels_per_beat=self.pixels_per_beat
         )
         self.timeline_container.add_widget(self.measure_grid)
-
-        # Conteneur d'événements (où vos notes/clips seront dessinés PAR DESSUS la grille)
-        # Il doit aussi avoir size_hint=(1, 1) pour s'aligner avec measure_grid
         self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
         self.timeline_container.add_widget(self.event_container)
-       
-        # NOUVEAU : Tête de lecture (Playback Head)
         self.playback_line = Widget(size_hint_x=None, width=dp(2), size_hint_y=1)
         with self.playback_line.canvas:
-            Color(1, 0, 0, 0.8) # Rouge vif
+            Color(1, 0, 0, 0.8)
             self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
         self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
-        
-        # Ajouter la ligne de lecture en DERNIER pour qu'elle soit au-dessus de tout
         self.timeline_container.add_widget(self.playback_line)        
-        
         self.timeline_scroll.add_widget(self.timeline_container)
-        self.add_widget(self.timeline_scroll) # Ajout au conteneur principal (TrackWidget)
+        self.add_widget(self.timeline_scroll)
 
-        # Lier les propriétés à la mise à jour de la taille du conteneur
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
-        
-        # Mise à jour initiale
         self.update_timeline_size()
 
-        # 2. Track Type Icon avec fond
+        self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
+
         type_icon_layout = BoxLayout(
             size_hint_x=None,
             width=dp(44),
-            size_hint_y=None,
-            height=dp(44),
             pos_hint={'center_y': 0.5},
             padding=dp(4)
         )
@@ -124,154 +104,70 @@ class TrackWidget(BoxLayout):
 
         type_icon_layout.bind(pos=self._update_type_icon_bg, size=self._update_type_icon_bg)
 
-       # 3. BOUTON RECORD MODE (MODIFIÉ)
         if isinstance(track, MidiTrack):
             self.record_mode_button = ThreeStateRecordButton(
                 track=track,
-                track_index=track_index,  # NOUVEAU
-                sequencer_layout=sequencer_layout,  # NOUVEAU
+                track_index=track_index,
+                sequencer_layout=sequencer_layout,
                 callback=self.on_record_mode_change
             )
-            self.add_widget(self.record_mode_button)
+            self.controls_section.add_widget(self.record_mode_button)
         else:
-            # Pour les pistes non-MIDI, ajouter un espaceur de même largeur
-            self.add_widget(Widget(size_hint_x=None, width=dp(44)))
+            self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
 
         type_icon = MDIcon(
             icon=track_type_icon,
             theme_text_color="Custom",
             text_color=track_type_color,
-            size_hint_x=None,
-            size_hint_y=None,
-            width=dp(36),
-            height=dp(36),
-            pos_hint={'center_y': 0.5},
+            pos_hint={'center_x': 0.5, 'center_y': 0.5},
             font_size=dp(20)
         )
         type_icon_layout.add_widget(type_icon)
-        self.add_widget(type_icon_layout)
+        self.controls_section.add_widget(type_icon_layout)
 
-        # 3. Solo Button avec style amélioré
         self.solo_button = TooltipMDIconButton(
             icon='alpha-s-box' if track.is_solo else 'alpha-s-box-outline',
             tooltip_text='Solo' if not track.is_solo else 'Unsolo',
             on_press=self.on_solo_toggle,
-            size_hint_x=None,
-            width=dp(44),
-            size_hint_y=None,
-            height=dp(44),
             pos_hint={'center_y': 0.5},
             theme_icon_color="Custom",
             icon_color=[1, 1, 0, 1] if track.is_solo else [0.6, 0.6, 0.6, 1],
             theme_bg_color="Custom",
             md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8]
         )
-        self.add_widget(self.solo_button)
+        self.controls_section.add_widget(self.solo_button)
 
-        # 4. MIDI Controls (or a spacer of the same size)
         midi_controls_layout = BoxLayout(
             size_hint_x=None, 
-            width=dp(260),  # 125 + 4 + 125 + marge = ~260
+            width=dp(260),
             spacing=dp(8),
-            size_hint_y=None, 
-            height=dp(44),
             pos_hint={'center_y': 0.5}
         )
 
         if isinstance(track, MidiTrack):
-            # Channel
-            channel_container = BoxLayout(
-                size_hint_x=None,
-                width=dp(125),
-                orientation='horizontal',
-                spacing=dp(4),
-                size_hint_y=None,
-                height=dp(44),
-                pos_hint={'center_y': 0.5}
-            )
-            
-            channel_label = Label(
-                text='Channel:',
-                size_hint_x=None,
-                width=dp(42),
-                size_hint_y=None,
-                height=dp(44),
-                halign='right',
-                valign='middle',
-                color=[0.9, 0.9, 0.9, 1],
-                font_size=dp(13),
-            )
+            channel_container = BoxLayout(orientation='horizontal', spacing=dp(4))
+            channel_label = Label(text='Channel:', size_hint_x=None, width=dp(42), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             channel_container.add_widget(channel_label)
-            
-            channel_spinner = ValueSpinner(
-                min_val=1,
-                max_val=16,
-                initial_value=track.channel + 1,
-                callback=self.on_channel_change
-            )
-            channel_spinner.height = dp(32)
+            channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change, height=dp(32))
             channel_container.add_widget(channel_spinner)
             midi_controls_layout.add_widget(channel_container)
 
-            # RÉDUIRE FORTEMENT l'espace entre Channel et Program
-            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(4)))  # Espace très réduit
-
-            # Program
-            program_container = BoxLayout(
-                size_hint_x=None,
-                width=dp(125),
-                orientation='horizontal',
-                spacing=dp(4),
-                size_hint_y=None,
-                height=dp(44),
-                pos_hint={'center_y': 0.5}
-            )
-            
-            program_label = Label(
-                text='Program:',
-                size_hint_x=None,
-                width=dp(42),
-                size_hint_y=None,
-                height=dp(44),
-                halign='right',
-                valign='middle',
-                color=[0.9, 0.9, 0.9, 1],
-                font_size=dp(13),
-            )
+            program_container = BoxLayout(orientation='horizontal', spacing=dp(4))
+            program_label = Label(text='Program:', size_hint_x=None, width=dp(42), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             program_container.add_widget(program_label)
-            
-            program_spinner = ValueSpinner(
-                min_val=1,
-                max_val=128,
-                initial_value=track.instrument + 1,
-                callback=self.on_program_change
-            )
-            program_spinner.height = dp(32)
+            program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change, height=dp(32))
             program_container.add_widget(program_spinner)
             midi_controls_layout.add_widget(program_container)
-
         else:
-            # Pour les pistes non-MIDI, on garde la même largeur
-            midi_controls_layout.add_widget(Widget(size_hint_x=None, width=dp(300)))
+            midi_controls_layout.add_widget(Widget())
             
-        self.add_widget(midi_controls_layout)
+        self.controls_section.add_widget(midi_controls_layout)
         
-        # 5. Volume Slider avec Label - layout amélioré
-        volume_layout = BoxLayout(
-            size_hint_x=None, 
-            width=dp(200), 
-            spacing=dp(8), 
-            pos_hint={'center_y': 0.5}
-        )
-        
+        volume_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(8), pos_hint={'center_y': 0.5})
         self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
             on_press=self.on_mute_toggle,
-            size_hint_x=None,
-            width=dp(32),
-            size_hint_y=None,
-            height=dp(32),
             pos_hint={'center_y': 0.5},
             theme_icon_color="Custom",
             icon_color=[1, 0.6, 0, 1] if not track.is_muted else [0.8, 0.3, 0, 1],
@@ -279,76 +175,25 @@ class TrackWidget(BoxLayout):
             md_bg_color=[0.3, 0.2, 0.1, 0.8] if not track.is_muted else [0.4, 0.2, 0.1, 0.8]
         )
         volume_layout.add_widget(self.mute_button)
-        
-        self.volume_label = Label(
-            text=f"{int(track.volume * 100)}", 
-            size_hint_x=None, 
-            width=dp(35),
-            color=[0.9, 0.9, 0.9, 1],
-            font_size=dp(12),
-            halign='center'
-        )
-        
-        self.volume_slider = MDSlider(
-            min=0, 
-            max=1, 
-            value=track.volume,
-            size_hint_x=1,
-            height=dp(20),
-            pos_hint={'center_y': 0.5}
-        )
+        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=dp(35), color=[0.9, 0.9, 0.9, 1], font_size=dp(12), halign='center')
+        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, size_hint_x=1, pos_hint={'center_y': 0.5})
         self.volume_slider.bind(value=self.on_volume_change)
-        
-        # Bind the track's volume property (from the backend model) to a UI-updating callback.
         self.track.bind(volume=self.on_track_volume_changed)
-
         volume_layout.add_widget(self.volume_label)
         volume_layout.add_widget(self.volume_slider)
-        self.add_widget(volume_layout)
+        self.controls_section.add_widget(volume_layout)
 
-        # 6. Pan Slider avec Label - layout amélioré
-        pan_layout = BoxLayout(
-            size_hint_x=None, 
-            width=dp(200), 
-            spacing=dp(8), 
-            pos_hint={'center_y': 0.5}
-        )
-        
-        pan_icon = MDIcon(
-            icon='swap-horizontal',
-            theme_text_color='Custom',
-            text_color=[0.6, 0.6, 1, 1],
-            size_hint_x=None,
-            size_hint_y=None,
-            width=dp(32),
-            height=dp(32),
-            pos_hint={'center_y': 0.5},
-            font_size=dp(18)
-        )
+        pan_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(8), pos_hint={'center_y': 0.5})
+        pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_y': 0.5}, font_size=dp(18))
         pan_layout.add_widget(pan_icon)
-
-        self.pan_label = Label(
-            text=f"{track.pan:+.1f}",  # Format avec signe +
-            size_hint_x=None, 
-            width=dp(35),
-            color=[0.9, 0.9, 0.9, 1],
-            font_size=dp(12),
-            halign='center'
-        )
-        
-        self.pan_slider = MDSlider(
-            min=-1, 
-            max=1, 
-            value=track.pan,
-            size_hint_x=1,
-            height=dp(20),
-            pos_hint={'center_y': 0.5}
-        )
+        self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_x=None, width=dp(35), color=[0.9, 0.9, 0.9, 1], font_size=dp(12), halign='center')
+        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, size_hint_x=1, pos_hint={'center_y': 0.5})
         self.pan_slider.bind(value=self.on_pan_change)
-        
         pan_layout.add_widget(self.pan_label)
         pan_layout.add_widget(self.pan_slider)
-        self.add_widget(pan_layout)
+        self.controls_section.add_widget(pan_layout)
+
+        self.add_widget(self.controls_section)
 
         # Bind UI updates to property changes
         self.track.bind(is_solo=self.on_solo_changed)

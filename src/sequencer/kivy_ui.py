@@ -184,12 +184,18 @@ class SequencerLayout(BoxLayout):
         common_height = dp(32)
 
         # Ligne combinée: status + transport
-        combined_layout = BoxLayout(
-            size_hint_y=None, 
-            height=common_height + dp(4),  # Juste un tout petit peu plus
-            spacing=8, 
-            padding=[10, 2, 10, 2]  # Padding vertical réduit
+        transport_card_container = BoxLayout(
+            padding=dp(5),
+            size_hint_y=None,
+            height=dp(60)
         )
+        transport_card = MDCard(
+            orientation='horizontal',
+            padding=(dp(10), 0),
+            spacing=dp(8),
+            elevation=2,
+        )
+        transport_card_container.add_widget(transport_card)
         
         # Info du morceau
         self.song_name_label = Label(
@@ -202,7 +208,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(150, None)
         )
-        combined_layout.add_widget(self.song_name_label)
+        transport_card.add_widget(self.song_name_label)
 
         self.tempo_label = Label(
             text="Tempo:", 
@@ -214,7 +220,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(80, None)
         )
-        combined_layout.add_widget(self.tempo_label)        
+        transport_card.add_widget(self.tempo_label)
 
         self.tempo_input = CustomTextInput(
             text='120', 
@@ -226,7 +232,7 @@ class SequencerLayout(BoxLayout):
             field_type='tempo',
             callback=self.handle_textinput_arrows
         )
-        combined_layout.add_widget(self.tempo_input)
+        transport_card.add_widget(self.tempo_input)
                 
         self.timesig_label = Label(
             text="TS: 4/4", 
@@ -238,7 +244,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(60, None)
         )
-        combined_layout.add_widget(self.timesig_label)
+        transport_card.add_widget(self.timesig_label)
 
         self.metronome_button = TooltipMDIconButton(
             icon='metronome',
@@ -254,10 +260,10 @@ class SequencerLayout(BoxLayout):
             theme_bg_color="Custom",
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
-        combined_layout.add_widget(self.metronome_button)
+        transport_card.add_widget(self.metronome_button)
 
         # Séparateur visuel
-        combined_layout.add_widget(Widget(
+        transport_card.add_widget(Widget(
             size_hint_x=None, 
             width=dp(10),
             size_hint_y=None,
@@ -274,7 +280,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(80, None)
         )
-        combined_layout.add_widget(self.playhead_label)
+        transport_card.add_widget(self.playhead_label)
 
         # Start/End avec hauteur synchronisée
         start_label = Label(
@@ -287,7 +293,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(40, None)
         )
-        combined_layout.add_widget(start_label)
+        transport_card.add_widget(start_label)
 
         self.start_pos_input = CustomTextInput(
             text='1:1', 
@@ -299,7 +305,7 @@ class SequencerLayout(BoxLayout):
             field_type='position',
             callback=self.handle_textinput_arrows
         )
-        combined_layout.add_widget(self.start_pos_input)
+        transport_card.add_widget(self.start_pos_input)
 
         end_label = Label(
             text='End:', 
@@ -311,7 +317,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(35, None)
         )
-        combined_layout.add_widget(end_label)
+        transport_card.add_widget(end_label)
 
         self.end_pos_input = CustomTextInput(
             text='', 
@@ -323,7 +329,7 @@ class SequencerLayout(BoxLayout):
             field_type='position', 
             callback=self.handle_textinput_arrows
         )
-        combined_layout.add_widget(self.end_pos_input)
+        transport_card.add_widget(self.end_pos_input)
 
         # Variable pour suivre le champ focus
         #self.focused_input = None
@@ -332,7 +338,7 @@ class SequencerLayout(BoxLayout):
    
         
         # Séparateur
-        combined_layout.add_widget(Widget(size_hint_x=None, width=dp(15)))
+        transport_card.add_widget(Widget(size_hint_x=None, width=dp(15)))
         
         # Boutons de transport
         self.play_button = TooltipMDIconButton(
@@ -405,11 +411,11 @@ class SequencerLayout(BoxLayout):
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
 
-        combined_layout.add_widget(self.play_button)
-        combined_layout.add_widget(self.loop_button)
-        combined_layout.add_widget(self.pause_button)
-        combined_layout.add_widget(self.stop_button)
-        combined_layout.add_widget(self.record_button)
+        transport_card.add_widget(self.play_button)
+        transport_card.add_widget(self.loop_button)
+        transport_card.add_widget(self.pause_button)
+        transport_card.add_widget(self.stop_button)
+        transport_card.add_widget(self.record_button)
 
         self.play_button.bind(on_press=self.play_pressed)
         self.loop_button.bind(on_press=self.loop_pressed)
@@ -418,37 +424,54 @@ class SequencerLayout(BoxLayout):
         self.record_button.bind(on_press=self.record_pressed)
         
         # Espace flexible à droite
-        combined_layout.add_widget(Widget(size_hint_x=1))
+        transport_card.add_widget(Widget(size_hint_x=1))
         
-        self.add_widget(combined_layout)
+        self.add_widget(transport_card_container)
 
         # Ajouter un espacement entre la ligne de statut et les pistes
         self.add_widget(Widget(size_hint_y=None, height=dp(15)))
 
         # Layout principal pour la barre d'outils et la liste des pistes
-        main_content_layout = BoxLayout(orientation='horizontal')
-        
-        # Barre d'outils à gauche
-        toolbar = BoxLayout(
+        main_content_layout = BoxLayout(orientation='horizontal', spacing=dp(5), padding=dp(5))
+
+        # Cadre pour la barre d'outils
+        toolbar_card = MDCard(
             orientation='vertical',
             size_hint_x=None,
-            width=dp(50),
-            spacing=dp(5),
-            padding=(dp(5), 0)
+            width=dp(55),
+            padding=(dp(5)),
+            spacing=dp(10),
+            elevation=2,
         )
 
         # Bouton pour ajouter une piste MIDI
         add_midi_track_button = TooltipMDIconButton(
-            icon="note-plus",
+            icon="midi-port",
             tooltip_text="Ajouter une piste MIDI",
             on_release=lambda x: self.add_midi_track_popup()
         )
-        toolbar.add_widget(add_midi_track_button)
+        toolbar_card.add_widget(add_midi_track_button)
 
-        # Ajouter un widget d'espacement pour pousser le bouton vers le haut
-        toolbar.add_widget(Widget())
+        # Bouton pour ajouter une piste AUDIO
+        add_audio_track_button = TooltipMDIconButton(
+            icon="waveform",
+            tooltip_text="Ajouter une piste audio",
+            on_release=lambda x: self.add_audio_track_popup()
+        )
+        toolbar_card.add_widget(add_audio_track_button)
 
-        main_content_layout.add_widget(toolbar)
+        # Bouton pour supprimer une piste
+        delete_track_button = TooltipMDIconButton(
+            icon="playlist-minus",
+            tooltip_text="Supprimer une piste",
+            on_release=lambda x: self.delete_track_popup()
+        )
+        toolbar_card.add_widget(delete_track_button)
+
+        # Ajouter un widget d'espacement pour pousser les boutons vers le haut
+        toolbar_card.add_widget(Widget())
+
+        main_content_layout.add_widget(toolbar_card)
 
         # Liste des pistes dans un ScrollView
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
@@ -947,6 +970,80 @@ class SequencerLayout(BoxLayout):
         ok_button.bind(on_press=on_ok)
         cancel_button.bind(on_press=popup.dismiss)
 
+        popup.open()
+
+    def add_audio_track_popup(self):
+        """Affiche un popup pour le nom de la piste audio, puis le file chooser."""
+
+        def on_name_confirm(track_name):
+            if not track_name:
+                self.show_error_popup("Erreur", "Le nom de la piste ne peut pas être vide.")
+                return
+
+            def file_chooser_callback(filepath):
+                if filepath:
+                    self.process_command_ui(f'addaudio "{track_name}" "{filepath}"')
+
+            file_popup = FileChooserPopup(
+                callback=file_chooser_callback,
+                title="Sélectionner un fichier audio",
+                filters=['*.wav', '*.mp3', '*.aiff', '*.ogg']
+            )
+            file_popup.open()
+
+        name_popup = ConfirmationPopup(
+            prompt_text="Entrez le nom de la nouvelle piste audio:",
+            callback=on_name_confirm
+        )
+        name_popup.open()
+
+    def delete_track_popup(self):
+        """Affiche une liste de pistes à supprimer."""
+        tracks = self.sequencer.song.tracks
+        if not tracks:
+            self.show_info_popup("Info", "Il n'y a aucune piste à supprimer.")
+            return
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        scroll_view = ScrollView()
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
+        grid.bind(minimum_height=grid.setter('height'))
+
+        for i, track in enumerate(tracks):
+            btn = MDButton(
+                MDButtonText(text=f"{i}: {track.name}"),
+                size_hint_y=None,
+                height=dp(40)
+            )
+            btn.bind(on_release=lambda x, track_index=i: self.confirm_delete_track(track_index))
+            grid.add_widget(btn)
+
+        scroll_view.add_widget(grid)
+        content.add_widget(scroll_view)
+
+        popup = Popup(
+            title="Sélectionner une piste à supprimer",
+            content=content,
+            size_hint=(0.7, 0.8)
+        )
+        self.delete_popup = popup # Store reference to dismiss it later
+        popup.open()
+
+    def confirm_delete_track(self, track_index):
+        """Affiche une confirmation avant de supprimer la piste."""
+        if hasattr(self, 'delete_popup'):
+            self.delete_popup.dismiss()
+
+        track_name = self.sequencer.song.tracks[track_index].name
+
+        def on_confirm(choice):
+            if choice and choice.lower() == 'y':
+                self.process_command_ui(f'delete {track_index} y')
+
+        popup = YesNoPopup(
+            prompt_text=f"Êtes-vous sûr de vouloir supprimer la piste '{track_name}'?",
+            callback=on_confirm
+        )
         popup.open()
 
     def start_play_blink(self):

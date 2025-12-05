@@ -426,29 +426,46 @@ class SequencerLayout(BoxLayout):
         self.add_widget(Widget(size_hint_y=None, height=dp(15)))
 
         # Layout principal pour la barre d'outils et la liste des pistes
-        main_content_layout = BoxLayout(orientation='horizontal')
-        
-        # Barre d'outils à gauche
-        toolbar = BoxLayout(
+        main_content_layout = BoxLayout(orientation='horizontal', spacing=dp(5), padding=dp(5))
+
+        # Cadre pour la barre d'outils
+        toolbar_card = MDCard(
             orientation='vertical',
             size_hint_x=None,
-            width=dp(50),
-            spacing=dp(5),
-            padding=(dp(5), 0)
+            width=dp(55),
+            padding=(dp(5)),
+            spacing=dp(10),
+            elevation=2,
         )
 
         # Bouton pour ajouter une piste MIDI
         add_midi_track_button = TooltipMDIconButton(
-            icon="note-plus",
+            icon="midi-port",
             tooltip_text="Ajouter une piste MIDI",
             on_release=lambda x: self.add_midi_track_popup()
         )
-        toolbar.add_widget(add_midi_track_button)
+        toolbar_card.add_widget(add_midi_track_button)
 
-        # Ajouter un widget d'espacement pour pousser le bouton vers le haut
-        toolbar.add_widget(Widget())
+        # Bouton pour ajouter une piste AUDIO
+        add_audio_track_button = TooltipMDIconButton(
+            icon="waveform",
+            tooltip_text="Ajouter une piste audio",
+            on_release=lambda x: self.add_audio_track_popup()
+        )
+        toolbar_card.add_widget(add_audio_track_button)
 
-        main_content_layout.add_widget(toolbar)
+        # Bouton pour supprimer une piste
+        delete_track_button = TooltipMDIconButton(
+            icon="playlist-minus",
+            tooltip_text="Supprimer une piste",
+            on_release=lambda x: self.delete_track_popup()
+        )
+        toolbar_card.add_widget(delete_track_button)
+
+        # Ajouter un widget d'espacement pour pousser les boutons vers le haut
+        toolbar_card.add_widget(Widget())
+
+        main_content_layout.add_widget(toolbar_card)
 
         # Liste des pistes dans un ScrollView
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
@@ -947,6 +964,80 @@ class SequencerLayout(BoxLayout):
         ok_button.bind(on_press=on_ok)
         cancel_button.bind(on_press=popup.dismiss)
 
+        popup.open()
+
+    def add_audio_track_popup(self):
+        """Affiche un popup pour le nom de la piste audio, puis le file chooser."""
+
+        def on_name_confirm(track_name):
+            if not track_name:
+                self.show_error_popup("Erreur", "Le nom de la piste ne peut pas être vide.")
+                return
+
+            def file_chooser_callback(filepath):
+                if filepath:
+                    self.process_command_ui(f'addaudio "{track_name}" "{filepath}"')
+
+            file_popup = FileChooserPopup(
+                callback=file_chooser_callback,
+                title="Sélectionner un fichier audio",
+                filters=['*.wav', '*.mp3', '*.aiff', '*.ogg']
+            )
+            file_popup.open()
+
+        name_popup = ConfirmationPopup(
+            prompt_text="Entrez le nom de la nouvelle piste audio:",
+            callback=on_name_confirm
+        )
+        name_popup.open()
+
+    def delete_track_popup(self):
+        """Affiche une liste de pistes à supprimer."""
+        tracks = self.sequencer.song.tracks
+        if not tracks:
+            self.show_info_popup("Info", "Il n'y a aucune piste à supprimer.")
+            return
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        scroll_view = ScrollView()
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
+        grid.bind(minimum_height=grid.setter('height'))
+
+        for i, track in enumerate(tracks):
+            btn = MDButton(
+                MDButtonText(text=f"{i}: {track.name}"),
+                size_hint_y=None,
+                height=dp(40)
+            )
+            btn.bind(on_release=lambda x, track_index=i: self.confirm_delete_track(track_index))
+            grid.add_widget(btn)
+
+        scroll_view.add_widget(grid)
+        content.add_widget(scroll_view)
+
+        popup = Popup(
+            title="Sélectionner une piste à supprimer",
+            content=content,
+            size_hint=(0.7, 0.8)
+        )
+        self.delete_popup = popup # Store reference to dismiss it later
+        popup.open()
+
+    def confirm_delete_track(self, track_index):
+        """Affiche une confirmation avant de supprimer la piste."""
+        if hasattr(self, 'delete_popup'):
+            self.delete_popup.dismiss()
+
+        track_name = self.sequencer.song.tracks[track_index].name
+
+        def on_confirm(choice):
+            if choice and choice.lower() == 'y':
+                self.process_command_ui(f'delete {track_index} y')
+
+        popup = YesNoPopup(
+            prompt_text=f"Êtes-vous sûr de vouloir supprimer la piste '{track_name}'?",
+            callback=on_confirm
+        )
         popup.open()
 
     def start_play_blink(self):

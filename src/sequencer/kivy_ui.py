@@ -33,6 +33,7 @@ from sequencer.ui_components.SaveProjectAsPopup import SaveProjectAsPopup
 from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 from sequencer.ui_components.YesNoPopup import YesNoPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
+from sequencer.ui_components.Ruler import Ruler
 # ============================================
 
 from sequencer.sequencer import Sequencer
@@ -426,38 +427,77 @@ class SequencerLayout(BoxLayout):
         self.add_widget(Widget(size_hint_y=None, height=dp(15)))
 
         # Layout principal pour la barre d'outils et la liste des pistes
-        main_content_layout = BoxLayout(orientation='horizontal')
-        
-        # Barre d'outils à gauche
-        toolbar = BoxLayout(
+        main_content_layout = BoxLayout(orientation='horizontal', spacing=dp(5), padding=dp(5))
+
+        # Cadre pour la barre d'outils
+        toolbar_card = MDCard(
             orientation='vertical',
             size_hint_x=None,
-            width=dp(50),
-            spacing=dp(5),
-            padding=(dp(5), 0)
+            width=dp(55),
+            padding=(dp(5)),
+            spacing=dp(10),
+            elevation=2,
         )
 
         # Bouton pour ajouter une piste MIDI
         add_midi_track_button = TooltipMDIconButton(
-            icon="note-plus",
+            icon="midi-port",
             tooltip_text="Ajouter une piste MIDI",
             on_release=lambda x: self.add_midi_track_popup()
         )
-        toolbar.add_widget(add_midi_track_button)
+        toolbar_card.add_widget(add_midi_track_button)
 
-        # Ajouter un widget d'espacement pour pousser le bouton vers le haut
-        toolbar.add_widget(Widget())
+        # Bouton pour ajouter une piste AUDIO
+        add_audio_track_button = TooltipMDIconButton(
+            icon="waveform",
+            tooltip_text="Ajouter une piste audio",
+            on_release=lambda x: self.add_audio_track_popup()
+        )
+        toolbar_card.add_widget(add_audio_track_button)
 
-        main_content_layout.add_widget(toolbar)
+        # Bouton pour supprimer une piste
+        delete_track_button = TooltipMDIconButton(
+            icon="playlist-minus",
+            tooltip_text="Supprimer une piste",
+            on_release=lambda x: self.delete_track_popup()
+        )
+        toolbar_card.add_widget(delete_track_button)
 
-        # Liste des pistes dans un ScrollView
+        # Ajouter un widget d'espacement pour pousser les boutons vers le haut
+        toolbar_card.add_widget(Widget())
+
+        main_content_layout.add_widget(toolbar_card)
+
+        # Cadre pour la liste des pistes et la règle
+        track_area_card = MDCard(
+            orientation='vertical',
+            padding=dp(5),
+            elevation=2,
+        )
+
+        # Container vertical pour la règle et les pistes
+        ruler_and_tracks_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        ruler_and_tracks_layout.bind(minimum_height=ruler_and_tracks_layout.setter('height'))
+
+        # Règle des mesures
+        self.ruler = Ruler(
+            sequencer_layout=self,
+            size_hint_y=None,
+            height=dp(20),
+        )
+        ruler_and_tracks_layout.add_widget(self.ruler)
+
+        # Liste des pistes (sans son propre ScrollView)
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
+        ruler_and_tracks_layout.add_widget(self.track_list_layout)
 
-        scroll_view = ScrollView(size_hint=(1, 1))
-        scroll_view.add_widget(self.track_list_layout)
+        # Le ScrollView principal qui contient à la fois la règle et les pistes
+        self.track_list_scroll_view = ScrollView(size_hint=(1, 1))
+        self.track_list_scroll_view.add_widget(ruler_and_tracks_layout)
 
-        main_content_layout.add_widget(scroll_view)
+        track_area_card.add_widget(self.track_list_scroll_view)
+        main_content_layout.add_widget(track_area_card)
         self.add_widget(main_content_layout)
 
         bottom_layout = BoxLayout(orientation='vertical', size_hint_y=0.3)
@@ -486,6 +526,31 @@ class SequencerLayout(BoxLayout):
         # Show MIDI input selection on startup if not already set
         if not self.sequencer.default_record_port:
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
+
+    def handle_ruler_click(self, touch):
+        if not self.track_widgets:
+            return
+
+        ruler_content = self.ruler.ruler_content
+        track_widget = self.track_widgets[0]
+
+        # Calculate the click position relative to the start of the ruler content area
+        relative_click_x = touch.x - ruler_content.x
+
+        # Convert the relative pixel position to a beat
+        pixels_per_beat = track_widget.pixels_per_beat
+        if pixels_per_beat == 0:
+            return
+
+        clicked_beat = relative_click_x / pixels_per_beat
+
+        # Snap to the beginning of the clicked measure
+        beats_per_measure = self.sequencer.song.time_signature_numerator
+        measure = int(clicked_beat / beats_per_measure) + 1
+
+        # Format and send seek command
+        seek_position = f"{measure}:1"
+        self.process_command_ui(f"seek {seek_position}")
 
     def on_playback_state_change(self, instance, value):
         """Callback for sequencer's playback_state changes."""
@@ -1237,24 +1302,27 @@ class SequencerLayout(BoxLayout):
 
     def update_track_list(self):
         self.track_list_layout.clear_widgets()
-        self.track_widgets.clear() # Clear the list of widget references
-        # ----------------------------------------------------
-        # ⚠️ NOUVEAU : FORCER L'INITIALISATION DE LA TAILLE (Critique)
-        # ----------------------------------------------------
-        
-        # 1. Obtient la longueur correcte du morceau (le cache peut être vide, donc cette première fois est la plus longue)
-        # Note: Cela déclenchera la lecture initiale du fichier audio, mais seulement UNE FOIS.
-        final_total_beats = self.sequencer.get_song_length_in_beats() 
-                
+        self.track_widgets.clear()
+
+        final_total_beats = self.sequencer.get_song_length_in_beats()
+
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.is_metronome:
                 continue
-            
-            # Affecter la propriété Kivy déclenche AUTOMATIQUEMENT update_timeline_size()
+
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
             track_widget.total_beats = final_total_beats
             self.track_widgets.append(track_widget)
             self.track_list_layout.add_widget(track_widget)
+
+        # Bind ruler spacer widths and scroll views for synchronized scrolling
+        if self.track_widgets:
+            first_track_widget = self.track_widgets[0]
+            self.ruler.left_spacer.width = first_track_widget.info_width
+            self.ruler.right_spacer.width = first_track_widget.controls_width
+
+            first_track_widget.fbind('info_width', lambda instance, value: setattr(self.ruler.left_spacer, 'width', value))
+            first_track_widget.fbind('controls_width', lambda instance, value: setattr(self.ruler.right_spacer, 'width', value))
 
             
     def update_status_display(self):
@@ -1514,6 +1582,9 @@ class SequencerLayout(BoxLayout):
         if not is_lightweight:
             print(f"DEBUG: Performing full UI refresh for command: {command}")
             self.update_status_display()
+            # Redraw the ruler only after a full UI refresh
+            if hasattr(self, 'ruler'):
+                self.ruler.redraw()
         else:
             print(f"DEBUG: Skipping full UI refresh for lightweight command: {command}")
 

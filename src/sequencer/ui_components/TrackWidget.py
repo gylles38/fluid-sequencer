@@ -186,7 +186,7 @@ class TrackWidget(BoxLayout):
             icon_color=[1, 0.6, 0, 1] if not track.is_muted else [0.8, 0.3, 0, 1]
         )
         self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=dp(35))
-        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, hint=False)
+        self.volume_slider = MDSlider(min=0, max=1, value=track.volume)
         self.volume_slider.bind(value=self.on_volume_change)
         self.track.bind(volume=self.on_track_volume_changed)
         layout.add_widget(self.mute_button)
@@ -197,7 +197,7 @@ class TrackWidget(BoxLayout):
     def _create_pan_layout(self, track):
         layout = BoxLayout(size_hint_x=None, width=dp(180), spacing=dp(8), pos_hint={'center_y': 0.5})
         self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_x=None, width=dp(35))
-        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, hint=False)
+        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan)
         self.pan_slider.bind(value=self.on_pan_change)
         layout.add_widget(MDIcon(icon='swap-horizontal', pos_hint={'center_y': 0.5}))
         layout.add_widget(self.pan_label)

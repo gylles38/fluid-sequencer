@@ -15,7 +15,7 @@ from kivy.uix.scrollview import ScrollView
 from kivymd.uix.label import MDLabel
 from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
-from kivymd.uix.button import MDIconButton, MDTextButton
+from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.menu import MDDropdownMenu
 from kivy.metrics import dp
 from kivy.core.window import Window
@@ -63,9 +63,11 @@ class SequencerLayout(BoxLayout):
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
         # Bouton File avec ligne en dessous
-        file_button = MDTextButton(
-            text="File",
+        file_button = MDButton(
+            MDButtonText(text="File"),
+            style="text",
             pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],  # Fond transparent
         )
 
         with file_button.canvas.before:
@@ -94,9 +96,11 @@ class SequencerLayout(BoxLayout):
         menu_bar.add_widget(file_button)
 
         # Bouton Edit avec ligne en dessous
-        edit_button = MDTextButton(
-            text="Edit",
+        edit_button = MDButton(
+            MDButtonText(text="Edit"),
+            style="text",
             pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],  # Fond transparent
         )
 
         with edit_button.canvas.before:
@@ -117,9 +121,11 @@ class SequencerLayout(BoxLayout):
         edit_button.bind(on_release=lambda x: self.edit_menu.open())
         menu_bar.add_widget(edit_button)
 
-        settings_button = MDTextButton(
-            text="Settings",
+        settings_button = MDButton(
+            MDButtonText(text="Settings"),
+            style="text",
             pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
         )
 
         with settings_button.canvas.before:
@@ -138,9 +144,11 @@ class SequencerLayout(BoxLayout):
         settings_button.bind(on_release=lambda x: self.settings_menu.open())
         menu_bar.add_widget(settings_button)
 
-        help_button = MDTextButton(
-            text="Help",
+        help_button = MDButton(
+            MDButtonText(text="Help"),
+            style="text",
             pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
         )
 
         with help_button.canvas.before:
@@ -777,8 +785,8 @@ class SequencerLayout(BoxLayout):
         )
 
         # Bouton OK
-        ok_button = MDTextButton(
-            text="OK",
+        ok_button = MDButton(
+            MDButtonText(text="OK"),
             pos_hint={'center_x': 0.5}
         )
 
@@ -844,8 +852,8 @@ class SequencerLayout(BoxLayout):
         scroll_view.add_widget(scroll_content)
 
         # Bouton OK
-        ok_button = MDTextButton(
-            text="OK",
+        ok_button = MDButton(
+            MDButtonText(text="OK"),
             size_hint=(1, None),
             height=dp(40)
         )
@@ -948,8 +956,8 @@ class SequencerLayout(BoxLayout):
 
         # Boutons
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        ok_button = MDTextButton(text="OK")
-        cancel_button = MDTextButton(text="Annuler")
+        ok_button = MDButton(MDButtonText(text="OK"))
+        cancel_button = MDButton(MDButtonText(text="Annuler"))
         buttons_layout.add_widget(ok_button)
         buttons_layout.add_widget(cancel_button)
         content.add_widget(buttons_layout)
@@ -1028,8 +1036,8 @@ class SequencerLayout(BoxLayout):
         grid.bind(minimum_height=grid.setter('height'))
 
         for i, track in enumerate(tracks):
-            btn = MDTextButton(
-                text=f"{i}: {track.name}",
+            btn = MDButton(
+                MDButtonText(text=f"{i}: {track.name}"),
                 size_hint_y=None,
                 height=dp(40)
             )

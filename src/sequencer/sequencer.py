@@ -956,18 +956,21 @@ class Sequencer(EventDispatcher):
                 return
 
             # --- Start new playback ---
-            start_pos = self.ui_start_pos_str or "1:1"
+            # Set the rewind position from the UI, but don't use it for starting playback yet.
+            start_pos_for_rewind = self.ui_start_pos_str or "1:1"
+            rewind_beat = self.parse_position_to_beats(start_pos_for_rewind)
+            if rewind_beat is not None:
+                self.rewind_beat = rewind_beat
+            else:
+                print(f"Warning: Invalid rewind position '{start_pos_for_rewind}', defaulting to 0.")
+                self.rewind_beat = 0.0
+
+            # Use the *current* playhead position as the starting point.
+            start_beat = self.jack_manager.get_current_beat()
+
             end_pos = self.ui_end_pos_str
-
-            start_beat = self.parse_position_to_beats(start_pos)
-            if start_beat is None:
-                print(f"Error: Invalid start position for playback: {start_pos}")
-                return
-
-            self.rewind_beat = start_beat
-
             if self.loop_enabled:
-                self.set_loop_range(start_pos, end_pos)
+                self.set_loop_range(self.ui_start_pos_str, end_pos)
                 self.play(start_beat=start_beat)
             else:
                 end_beat = self.parse_position_to_beats(end_pos) if end_pos else None

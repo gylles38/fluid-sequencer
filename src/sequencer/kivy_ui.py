@@ -1128,17 +1128,6 @@ class SequencerLayout(BoxLayout):
         self.play_button.icon_color = [0, 0.7, 0.3, 1]
 
     def play_pressed(self, instance):
-        # If already playing, do nothing. If paused, resume via the pause button.
-        if self.sequencer.playback_state == "stopped":
-            # Pre-sync the UI to the start beat for a smoother start
-            start_pos = self.start_pos_input.text or "1:1"
-            start_beat = self.sequencer.parse_position_to_beats(start_pos)
-            if start_beat is not None:
-                self.display_beat = start_beat
-                for track_widget in self.track_widgets:
-                    track_widget.set_playback_position(start_beat)
-                self.playhead_label.text = f"Pos: {start_pos}"
-
         # Centralized logic call
         self.sequencer.process_transport_command("play_pause")
 

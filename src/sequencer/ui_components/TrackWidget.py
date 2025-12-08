@@ -48,7 +48,7 @@ class TrackWidget(BoxLayout):
 
         # The timeline_container is now a RelativeLayout that acts as a viewport.
         # It fills the available space and clips its content.
-        self.timeline_container = RelativeLayout(size_hint_x=1)
+        self.timeline_container = RelativeLayout(size_hint_x=None)
 
         # The timeline_content is the scrollable part inside the viewport.
         self.timeline_content = Widget(size_hint=(None, 1))
@@ -210,6 +210,7 @@ class TrackWidget(BoxLayout):
         if not self.timeline_content: return
 
         new_width = self.total_beats * self.pixels_per_beat
+        self.timeline_container.width = new_width
         self.timeline_content.width = new_width
         self.measure_grid.width = new_width
         self.event_container.width = new_width

@@ -481,7 +481,7 @@ class SequencerLayout(BoxLayout):
 
         # This GridLayout will hold both the ruler and the track list,
         # ensuring they share the same scrolling context.
-        scroll_content_layout = GridLayout(cols=1, size_hint_y=None)
+        scroll_content_layout = GridLayout(cols=1, size_hint=(None, None))
         scroll_content_layout.bind(minimum_height=scroll_content_layout.setter('height'))
 
         # Ruler
@@ -489,7 +489,7 @@ class SequencerLayout(BoxLayout):
         scroll_content_layout.add_widget(self.ruler)
 
         # Track list
-        self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.track_list_layout = BoxLayout(orientation='vertical', size_hint=(None, None))
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
         scroll_content_layout.add_widget(self.track_list_layout)
 
@@ -1459,7 +1459,8 @@ class SequencerLayout(BoxLayout):
             # Total width of the track list content
             total_content_width = info_width + timeline_width + controls_width + spacing
             self.track_list_layout.width = total_content_width
-            self.track_list_layout.parent.width = total_content_width
+            if self.track_list_layout.parent:
+                self.track_list_layout.parent.width = total_content_width
 
             # Bind ruler spacer widths to the first track widget's components for alignment
             first_track_widget = self.track_widgets[0]

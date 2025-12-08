@@ -66,22 +66,21 @@ class RulerContent(Widget):
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            if self.sequencer_layout.sequencer.playback_state == "stopped":
-                local_x, _ = self.to_local(*touch.pos)
-                if not self.sequencer_layout.track_widgets: return True
+            local_x, _ = self.to_local(*touch.pos)
+            if not self.sequencer_layout.track_widgets: return True
 
-                track_widget = self.sequencer_layout.track_widgets[0]
-                if track_widget.total_beats <= 0: return True
+            track_widget = self.sequencer_layout.track_widgets[0]
+            if track_widget.total_beats <= 0: return True
 
-                pixels_per_beat = self.width / track_widget.total_beats
-                if pixels_per_beat <= 0: return True
+            pixels_per_beat = self.width / track_widget.total_beats
+            if pixels_per_beat <= 0: return True
 
-                clicked_beat = local_x / pixels_per_beat
-                beats_per_measure = self.sequencer_layout.sequencer.song.time_signature_numerator
-                measure = int(clicked_beat / beats_per_measure) + 1
-                seek_position = f"{measure}:1"
-                self.sequencer_layout.process_command_ui(f"seek {seek_position}")
-                return True
+            clicked_beat = local_x / pixels_per_beat
+
+            # Appeler directement la méthode de resynchronisation du séquenceur
+            self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
+
+            return True
         return super().on_touch_down(touch)
 
 class Ruler(BoxLayout):

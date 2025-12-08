@@ -52,6 +52,7 @@ class SequencerLayout(BoxLayout):
         self.current_command = ""
         self.end_pos_manual_override = False
         self.is_looping = False
+        self._is_scrolling = False # For scroll synchronization
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
 
@@ -481,26 +482,19 @@ class SequencerLayout(BoxLayout):
             elevation=2,
         )
 
-        # New container for both ruler and track list
-        scroll_content = BoxLayout(orientation='vertical', size_hint_y=None)
-        scroll_content.bind(minimum_height=scroll_content.setter('height'))
-
         # Règle des mesures
         self.ruler = Ruler(
             sequencer_layout=self,
-            size_hint=(None, None),  # Let the parent layout manage the size
-            height=dp(20),
+            size_hint_y=None,
+            height=dp(30), # Increased height for better visibility
         )
-        scroll_content.add_widget(self.ruler)
+        track_area_card.add_widget(self.ruler)
 
-        # Liste des pistes
+        # Conteneur pour la liste des pistes avec défilement
+        self.scroll_view = ScrollView(size_hint=(1, 1))
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
-        scroll_content.add_widget(self.track_list_layout)
-
-        # ScrollView now contains the combined layout
-        self.scroll_view = ScrollView(size_hint=(1, 1))
-        self.scroll_view.add_widget(scroll_content)
+        self.scroll_view.add_widget(self.track_list_layout)
 
         track_area_card.add_widget(self.scroll_view)
         main_content_layout.add_widget(track_area_card)
@@ -1404,16 +1398,23 @@ class SequencerLayout(BoxLayout):
             self.track_widgets.append(track_widget)
             self.track_list_layout.add_widget(track_widget)
 
-        # Bind ruler spacer widths to the first track widget's components
+        # Bind ruler spacer widths and timeline width
         if self.track_widgets:
             first_track_widget = self.track_widgets[0]
-            self.ruler.left_spacer.width = first_track_widget.info_width
-            self.ruler.right_spacer.width = first_track_widget.controls_width
-
-            first_track_widget.fbind('info_width', lambda instance, value: setattr(self.ruler.left_spacer, 'width', value))
-            first_track_widget.fbind('controls_width', lambda instance, value: setattr(self.ruler.right_spacer, 'width', value))
-
+            self.ruler.info_width = first_track_widget.info_width
+            self.ruler.controls_width = first_track_widget.controls_width
             
+            # Ensure ruler content has the same width as track timelines
+            self.ruler.ruler_content.width = first_track_widget.timeline_container.width
+
+            first_track_widget.fbind('info_width', lambda i, v: setattr(self.ruler, 'info_width', v))
+            first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
+            first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
+
+        # --- Bind scroll views for synchronization ---
+        scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]
+        for sv in scroll_views:
+            sv.fbind('scroll_x', lambda instance, value: self._synchronize_scroll(instance, value))
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"
@@ -1745,6 +1746,21 @@ class SequencerLayout(BoxLayout):
             else:
                 # Fin de l'animation
                 self.stop_beat_pulse_animation()
+
+    def _synchronize_scroll(self, source_scroll_view, scroll_x_value):
+        if self._is_scrolling:
+            return
+        self._is_scrolling = True
+
+        scrollable_widgets = [self.ruler.scroll_view] + [
+            track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
+        ]
+
+        for scroll_widget in scrollable_widgets:
+            if scroll_widget is not source_scroll_view:
+                scroll_widget.scroll_x = scroll_x_value
+
+        self._is_scrolling = False
 
 
 class SequencerApp(MDApp):

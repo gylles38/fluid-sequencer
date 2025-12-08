@@ -93,6 +93,9 @@ class Ruler(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
+        # Match TrackWidget's horizontal spacing and padding for perfect alignment
+        self.spacing = dp(12)
+        self.padding = [dp(12), 0, dp(12), 0]
 
         self.left_spacer = Widget(size_hint_x=None)
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)

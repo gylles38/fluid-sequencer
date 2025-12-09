@@ -556,10 +556,10 @@ class SequencerLayout(BoxLayout):
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
-        key_name = keycode[1]
-        if key_name in ('+', 'numpadadd'):
+        # The 'keyboard' argument is the integer keycode
+        if keyboard in (43, 270):  # Keycode for '+' and 'numpadadd'
             self.zoom(1.2)
-        elif key_name in ('-', 'numpadsubtract'):
+        elif keyboard in (45, 274): # Keycode for '-' and 'numpadsubtract'
             self.zoom(0.8)
 
     def handle_ruler_click(self, touch):

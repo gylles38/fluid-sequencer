@@ -6,6 +6,7 @@ from kivy.properties import NumericProperty, ObjectProperty
 from kivy.uix.widget import Widget 
 from kivy.uix.label import Label 
 from kivy.metrics import dp
+from kivy.clock import Clock
 from sequencer.ui_components.MeasureGrid import MeasureGrid
 from .PianoRoll import PianoRoll
 

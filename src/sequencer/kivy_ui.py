@@ -559,7 +559,7 @@ class SequencerLayout(BoxLayout):
         # The 'keyboard' argument is the integer keycode
         if keyboard in (43, 270):  # Keycode for '+' and 'numpadadd'
             self.zoom(1.2)
-        elif keyboard in (45, 274): # Keycode for '-' and 'numpadsubtract'
+        elif keyboard in (45, 269): # Keycode for '-' and 'numpadsubtract'
             self.zoom(0.8)
 
     def handle_ruler_click(self, touch):

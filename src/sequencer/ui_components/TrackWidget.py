@@ -63,20 +63,15 @@ class TrackWidget(BoxLayout):
         self.timeline_container.add_widget(self.measure_grid)
 
         if isinstance(track, MidiTrack):
-            piano_roll_scroll = ScrollView(
-                size_hint=(1, 1),
-                do_scroll_x=False,
-                do_scroll_y=True
-            )
             self.piano_roll = PianoRoll(
                 track=track,
-                size_hint_x=None,
+                size_hint=(1, 1),
+                pos_hint={'x': 0, 'y': 0}
             )
-            piano_roll_scroll.add_widget(self.piano_roll)
-            self.timeline_container.add_widget(piano_roll_scroll)
+            self.timeline_container.add_widget(self.piano_roll)
 
             def set_default_scroll(*args):
-                piano_roll_scroll.scroll_y = 0.5
+                self.piano_roll.scroll_y = 0.5
             Clock.schedule_once(set_default_scroll, 0.1)
 
         self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
@@ -93,6 +88,8 @@ class TrackWidget(BoxLayout):
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
         if isinstance(track, MidiTrack):
             self.bind(pixels_per_beat=lambda instance, value: setattr(self.piano_roll, 'pixels_per_beat', value))
+            self.bind(total_beats=lambda instance, value: setattr(self.piano_roll.content, 'width', value * self.piano_roll.pixels_per_beat))
+            self.bind(pixels_per_beat=lambda instance, value: setattr(self.piano_roll.content, 'width', self.total_beats * value))
         self.update_timeline_size()
 
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
@@ -257,8 +254,6 @@ class TrackWidget(BoxLayout):
         final_width = max(required_width, min_width)
         
         self.timeline_container.width = final_width
-        if hasattr(self, 'piano_roll'):
-            self.piano_roll.width = final_width
         
         # Assurez-vous que le MeasureGrid reçoit les paramètres de mise à jour.
         self.measure_grid.total_beats = self.total_beats

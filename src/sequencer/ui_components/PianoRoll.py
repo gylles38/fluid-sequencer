@@ -1,17 +1,23 @@
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
 from kivy.graphics import Color, Rectangle
 from kivy.uix.label import Label
 from kivy.properties import ObjectProperty, NumericProperty
 from kivy.metrics import dp
 
-class PianoRoll(FloatLayout):
+class PianoRoll(ScrollView):
     track = ObjectProperty(None)
     pixels_per_beat = NumericProperty(100)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.size_hint_y = None
-        self.height = dp(1280)
+        self.do_scroll_x = False
+        self.do_scroll_y = True
+
+        self.content = FloatLayout(size_hint_y=None)
+        self.content.height = dp(1280)
+        self.add_widget(self.content)
+
         self.bind(
             track=self.update_notes,
             pixels_per_beat=self.update_notes,
@@ -20,9 +26,9 @@ class PianoRoll(FloatLayout):
         )
 
     def update_notes(self, *args):
-        self.canvas.clear()
+        self.content.canvas.clear()
         if self.track:
-            with self.canvas:
+            with self.content.canvas:
                 for event in self.track.events:
                     for note in event.notes:
                         self._draw_note(note, event.start_time)

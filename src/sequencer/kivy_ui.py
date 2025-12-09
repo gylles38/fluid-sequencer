@@ -1755,45 +1755,7 @@ class SequencerLayout(BoxLayout):
 
     def _on_scroll_stop(self, scroll_view, *args):
         """Called when a user stops scrolling one of the timelines."""
-        if self._is_seeking_on_scroll:
-            return
-        self._is_seeking_on_scroll = True
-
-        # This feature should only be active when playback is stopped or paused
-        if self.sequencer.playback_state == "playing":
-            self._is_seeking_on_scroll = False
-            return
-
-        if not self.track_widgets:
-            self._is_seeking_on_scroll = False
-            return
-
-        # --- Calculate the beat at the center of the viewport ---
-        first_track = self.track_widgets[0]
-        timeline_width = first_track.timeline_container.width
-        viewport_width = scroll_view.width
-
-        if timeline_width <= viewport_width:
-            self._is_seeking_on_scroll = False
-            return # Nothing to scroll
-
-        # The center of the visible area in scroll_x terms (0.0 to 1.0)
-        # scroll_x is the left edge, so we add half the viewport width (in scroll_x terms)
-        center_scroll_x = scroll_view.scroll_x + (viewport_width / 2) / timeline_width
-
-        # Convert the scroll position to an absolute pixel position
-        center_pixel_pos = center_scroll_x * timeline_width
-
-        # Convert the pixel position to a beat
-        pixels_per_beat = timeline_width / first_track.total_beats
-        if pixels_per_beat > 0:
-            center_beat = center_pixel_pos / pixels_per_beat
-
-            # Reposition the playhead
-            self.sequencer._resync_all_at_beat(center_beat)
-
-        # Use a short delay before resetting the flag to debounce
-        Clock.schedule_once(lambda dt: setattr(self, '_is_seeking_on_scroll', False), 0.1)
+        pass
 
 
 class SequencerApp(MDApp):

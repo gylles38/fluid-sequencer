@@ -111,6 +111,7 @@ class Ruler(BoxLayout):
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.right_spacer, 'width', v))
+        self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
 
     def redraw(self, *args):
         if self.sequencer_layout and self.sequencer_layout.track_widgets:

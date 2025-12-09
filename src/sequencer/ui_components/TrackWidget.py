@@ -253,59 +253,62 @@ class TrackWidget(BoxLayout):
         if self.playback_line:
             self.playback_line.x = x_pos 
             
-        # Vérification des dimensions (si le contenu est plus petit que la ScrollView)
-        if timeline_width <= scroll_view_width + EPSILON_PIXELS:
-            self.timeline_scroll.scroll_x = 0.0
-            return
-                
-        margin_x = scroll_view_width * 0.3 
-        
-        # ⚠️ CORRECTION CRITIQUE DU DÉPLACEMENT MAXIMAL
-        # Nous ajoutons EPSILON_PIXELS pour s'assurer que le MAX_DISPLACEMENT_PHYSICAL
-        # n'est jamais trop petit à cause des erreurs de flottant, garantissant que scroll_x = 1.0 est atteignable
-        MAX_DISPLACEMENT_PHYSICAL = timeline_width - scroll_view_width + EPSILON_PIXELS
-        
-        # -----------------------------------------------------------
-        # CRITIQUE 1 : CORRECTION DU PINNAGE AU DÉPART 
-        if x_pos < margin_x: 
-            self.timeline_scroll.scroll_x = 0.0
-            return
-        # -----------------------------------------------------------
+        # --- Auto-scroll logic ---
+        # Only perform if currently playing or recording
+        if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
+            # Vérification des dimensions (si le contenu est plus petit que la ScrollView)
+            if timeline_width <= scroll_view_width + EPSILON_PIXELS:
+                self.timeline_scroll.scroll_x = 0.0
+                return
 
-        
-        # --- 2. Logique de Défilement Automatique ---
+            margin_x = scroll_view_width * 0.3
 
-        # current_scroll_x_pixels doit être calculé avec le nouveau MAX_DISPLACEMENT_PHYSICAL
-        current_scroll_x_pixels = self.timeline_scroll.scroll_x * MAX_DISPLACEMENT_PHYSICAL
-        new_scroll_x_pixels = -1
+            # ⚠️ CORRECTION CRITIQUE DU DÉPLACEMENT MAXIMAL
+            # Nous ajoutons EPSILON_PIXELS pour s'assurer que le MAX_DISPLACEMENT_PHYSICAL
+            # n'est jamais trop petit à cause des erreurs de flottant, garantissant que scroll_x = 1.0 est atteignable
+            MAX_DISPLACEMENT_PHYSICAL = timeline_width - scroll_view_width + EPSILON_PIXELS
 
-        # Cas A: Défilement vers la DROITE 
-        if x_pos > current_scroll_x_pixels + scroll_view_width - margin_x:
-            new_scroll_x_pixels = x_pos - (scroll_view_width - margin_x)
+            # -----------------------------------------------------------
+            # CRITIQUE 1 : CORRECTION DU PINNAGE AU DÉPART
+            if x_pos < margin_x:
+                self.timeline_scroll.scroll_x = 0.0
+                return
+            # -----------------------------------------------------------
+
+
+            # --- 2. Logique de Défilement Automatique ---
+
+            # current_scroll_x_pixels doit être calculé avec le nouveau MAX_DISPLACEMENT_PHYSICAL
+            current_scroll_x_pixels = self.timeline_scroll.scroll_x * MAX_DISPLACEMENT_PHYSICAL
+            new_scroll_x_pixels = -1
+
+            # Cas A: Défilement vers la DROITE
+            if x_pos > current_scroll_x_pixels + scroll_view_width - margin_x:
+                new_scroll_x_pixels = x_pos - (scroll_view_width - margin_x)
+
+            # Cas B: Défilement vers la GAUCHE
+            elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > EPSILON_PIXELS:
+                new_scroll_x_pixels = x_pos - margin_x
+
             
-        # Cas B: Défilement vers la GAUCHE 
-        elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > EPSILON_PIXELS:
-            new_scroll_x_pixels = x_pos - margin_x
-            
-        
-        if new_scroll_x_pixels == -1:
-            return
+            if new_scroll_x_pixels == -1:
+                return
 
-        # -----------------------------------------------------------
-        # CRITIQUE 2 : LIMITE DE FIN DE PISTE
-        
-        # Plafonnement des pixels de défilement
-        new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, MAX_DISPLACEMENT_PHYSICAL))
+            # -----------------------------------------------------------
+            # CRITIQUE 2 : LIMITE DE FIN DE PISTE
 
-        # Normalisation L->R 
-        # ⚠️ Plafonner la division pour éviter l'erreur si MAX_DISPLACEMENT_PHYSICAL est nul ou très proche de zéro
-        if MAX_DISPLACEMENT_PHYSICAL < EPSILON_PIXELS:
-            normalized_scroll_value = 0.0
-        else:
-            normalized_scroll_value = new_scroll_x_pixels / MAX_DISPLACEMENT_PHYSICAL
-        
-        # Appliquer le défilement (doit être entre 0.0 et 1.0)
-        self.timeline_scroll.scroll_x = max(0.0, min(1.0, normalized_scroll_value))
+            # Plafonnement des pixels de défilement
+            new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, MAX_DISPLACEMENT_PHYSICAL))
+
+            # Normalisation L->R
+            # ⚠️ Plafonner la division pour éviter l'erreur si MAX_DISPLACEMENT_PHYSICAL est nul ou très proche de zéro
+            if MAX_DISPLACEMENT_PHYSICAL < EPSILON_PIXELS:
+                normalized_scroll_value = 0.0
+            else:
+                normalized_scroll_value = new_scroll_x_pixels / MAX_DISPLACEMENT_PHYSICAL
+
+            # Appliquer le défilement (doit être entre 0.0 et 1.0)
+            self.timeline_scroll.scroll_x = max(0.0, min(1.0, normalized_scroll_value))
 
 
     def update_grid_parameters(self, total_beats: float, pixels_per_beat: float):

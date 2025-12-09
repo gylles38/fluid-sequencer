@@ -55,7 +55,8 @@ class SequencerLayout(BoxLayout):
         self._is_scrolling = False # For scroll synchronization
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
-        self._is_seeking_on_scroll = False        
+        self._is_seeking_on_scroll = False
+        self.pixels_per_beat = dp(100)
 
         # Tête de lecture "lissée" (celle que l'utilisateur voit)
         self.display_beat = 0.0
@@ -471,6 +472,21 @@ class SequencerLayout(BoxLayout):
         )
         toolbar_card.add_widget(delete_track_button)
 
+        # Boutons de zoom
+        zoom_in_button = TooltipMDIconButton(
+            icon="magnify-plus-outline",
+            tooltip_text="Zoom In (+)",
+            on_release=lambda x: self.zoom(1.2)  # Placeholder action
+        )
+        toolbar_card.add_widget(zoom_in_button)
+
+        zoom_out_button = TooltipMDIconButton(
+            icon="magnify-minus-outline",
+            tooltip_text="Zoom Out (-)",
+            on_release=lambda x: self.zoom(0.8)  # Placeholder action
+        )
+        toolbar_card.add_widget(zoom_out_button)
+
         # Ajouter un widget d'espacement pour pousser les boutons vers le haut
         toolbar_card.add_widget(Widget())
 
@@ -488,6 +504,7 @@ class SequencerLayout(BoxLayout):
             sequencer_layout=self,
             size_hint_y=None,
             height=dp(30), # Increased height for better visibility
+            pixels_per_beat=self.pixels_per_beat,
         )
         track_area_card.add_widget(self.ruler)
 
@@ -527,6 +544,15 @@ class SequencerLayout(BoxLayout):
         # Show MIDI input selection on startup if not already set
         if not self.sequencer.default_record_port:
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
+
+        Window.bind(on_key_down=self._on_keyboard_down)
+
+    def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
+        """Callback for keyboard events."""
+        if text == '+':
+            self.zoom(1.2)
+        elif text == '-':
+            self.zoom(0.8)
 
     def handle_ruler_click(self, touch):
         if not self.track_widgets:
@@ -1756,6 +1782,80 @@ class SequencerLayout(BoxLayout):
     def _on_scroll_stop(self, scroll_view, *args):
         """Called when a user stops scrolling one of the timelines."""
         pass
+
+    def zoom(self, factor):
+        """Zooms the timeline view in or out, keeping the center of the view constant."""
+        if not self.track_widgets:
+            return
+
+        # --- 1. Get the reference ScrollView and its properties ---
+        scroll_view = self.track_widgets[0].timeline_scroll
+        timeline_width = self.track_widgets[0].timeline_container.width
+        viewport_width = scroll_view.width
+
+        if timeline_width <= viewport_width:
+            return # Nothing to scroll/zoom into
+
+        # --- 2. Calculate the beat at the center of the current view ---
+        # The center of the visible area in scroll_x terms (0.0 to 1.0)
+        center_scroll_x = scroll_view.scroll_x + (viewport_width / 2) / (timeline_width - viewport_width)
+        center_pixel_pos = center_scroll_x * (timeline_width - viewport_width)
+
+        current_pixels_per_beat = self.pixels_per_beat
+        if current_pixels_per_beat == 0:
+            return
+
+        center_beat = center_pixel_pos / current_pixels_per_beat
+
+        # --- 3. Apply the new zoom level ---
+        new_pixels_per_beat = max(dp(10), self.pixels_per_beat * factor)  # Set a minimum zoom level
+        self.pixels_per_beat = new_pixels_per_beat
+
+        # Update all relevant widgets with the new zoom level
+        for track_widget in self.track_widgets:
+            track_widget.update_grid_parameters(track_widget.total_beats, new_pixels_per_beat)
+        self.ruler.pixels_per_beat = new_pixels_per_beat
+        self.ruler.redraw()
+
+
+        # --- 4. Calculate the new scroll position to keep the center_beat in the middle ---
+        # Allow Kivy to update widget sizes before calculating the new scroll position
+        Clock.schedule_once(lambda dt: self._recenter_on_zoom(center_beat), 0)
+
+    def _recenter_on_zoom(self, center_beat):
+        """Callback to adjust scroll after zoom has been applied and widgets resized."""
+        if not self.track_widgets:
+            return
+
+        new_pixels_per_beat = self.pixels_per_beat
+
+        # --- Recalculate dimensions based on the new zoom level ---
+        new_timeline_width = self.track_widgets[0].timeline_container.width
+        scroll_view = self.track_widgets[0].timeline_scroll
+        viewport_width = scroll_view.width
+
+        if new_timeline_width <= viewport_width:
+            return
+
+        # Calculate the new pixel position of the center beat
+        new_center_pixel_pos = center_beat * new_pixels_per_beat
+
+        # Calculate the required scroll_x to place this pixel position at the center of the view
+        new_scroll_x_pixels = new_center_pixel_pos - (viewport_width / 2)
+
+        # Clamp the value to be within valid scroll range
+        max_scroll_pixels = new_timeline_width - viewport_width
+        new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, max_scroll_pixels))
+
+        # Normalize to get the final scroll_x value (0.0 to 1.0)
+        if max_scroll_pixels > 0:
+            final_scroll_x = new_scroll_x_pixels / max_scroll_pixels
+        else:
+            final_scroll_x = 0
+
+        # --- 5. Apply the new scroll position to all ScrollViews ---
+        # Use the synchronization method to update all timelines at once
+        self._synchronize_scroll(self.scroll_view, final_scroll_x)
 
 
 class SequencerApp(MDApp):

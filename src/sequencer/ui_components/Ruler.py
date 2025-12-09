@@ -8,6 +8,7 @@ from kivy.graphics import Color, Rectangle, Line
 
 class RulerContent(Widget):
     sequencer_layout = ObjectProperty(None)
+    pixels_per_beat = NumericProperty(dp(100))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -34,10 +35,8 @@ class RulerContent(Widget):
 
         if total_beats <= 0:
             return
-        if self.width <= 0:
-            return
 
-        pixels_per_beat = self.width / total_beats
+        pixels_per_beat = self.pixels_per_beat
         num_measures = int(total_beats / beats_per_measure)
 
         with self.canvas.after:
@@ -72,10 +71,9 @@ class RulerContent(Widget):
             track_widget = self.sequencer_layout.track_widgets[0]
             if track_widget.total_beats <= 0: return True
 
-            pixels_per_beat = self.width / track_widget.total_beats
-            if pixels_per_beat <= 0: return True
+            if self.pixels_per_beat <= 0: return True
 
-            clicked_beat = local_x / pixels_per_beat
+            clicked_beat = local_x / self.pixels_per_beat
 
             # Appeler directement la méthode de resynchronisation du séquenceur
             self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
@@ -88,6 +86,7 @@ class Ruler(BoxLayout):
     scroll_view = ObjectProperty(None)
     info_width = NumericProperty(0)
     controls_width = NumericProperty(0)
+    pixels_per_beat = NumericProperty(dp(100))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -100,6 +99,7 @@ class Ruler(BoxLayout):
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
+            pixels_per_beat=self.pixels_per_beat,
             size_hint=(None, 1)
         )
         self.scroll_view.add_widget(self.ruler_content)

@@ -38,7 +38,7 @@ class PianoRoll(FloatLayout):
 
         # Position and size
         x = start_time * self.pixels_per_beat
-        y = note.pitch * note_height
+        y = self.y + note.pitch * note_height
         width = note.duration * self.pixels_per_beat
 
         Color(*color)

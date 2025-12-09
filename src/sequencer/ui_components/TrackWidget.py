@@ -7,6 +7,7 @@ from kivy.uix.widget import Widget
 from kivy.uix.label import Label 
 from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
+from .PianoRoll import PianoRoll
 
 class TrackWidget(BoxLayout):
     total_beats = NumericProperty(128.0) 
@@ -48,6 +49,7 @@ class TrackWidget(BoxLayout):
 
         self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.timeline_container = Widget(size_hint=(None, 1)) 
+
         self.measure_grid = MeasureGrid(
             size_hint=(1, 1), 
             beat_per_measure=4, 
@@ -55,6 +57,15 @@ class TrackWidget(BoxLayout):
             pixels_per_beat=self.pixels_per_beat
         )
         self.timeline_container.add_widget(self.measure_grid)
+
+        if isinstance(track, MidiTrack):
+            self.piano_roll = PianoRoll(
+                track=track,
+                size_hint=(1, 1),
+                pos_hint={'x': 0, 'y': 0}
+            )
+            self.timeline_container.add_widget(self.piano_roll)
+
         self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
         self.timeline_container.add_widget(self.event_container)
         self.playback_line = Widget(size_hint_x=None, width=dp(2), size_hint_y=1)
@@ -67,6 +78,8 @@ class TrackWidget(BoxLayout):
         self.add_widget(self.timeline_scroll)
 
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
+        if isinstance(track, MidiTrack):
+            self.bind(pixels_per_beat=lambda instance, value: setattr(self.piano_roll, 'pixels_per_beat', value))
         self.update_timeline_size()
 
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))

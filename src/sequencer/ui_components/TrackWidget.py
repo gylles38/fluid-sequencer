@@ -88,8 +88,6 @@ class TrackWidget(BoxLayout):
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
         if isinstance(track, MidiTrack):
             self.bind(pixels_per_beat=lambda instance, value: setattr(self.piano_roll, 'pixels_per_beat', value))
-            self.bind(total_beats=lambda instance, value: setattr(self.piano_roll.content, 'width', value * self.piano_roll.pixels_per_beat))
-            self.bind(pixels_per_beat=lambda instance, value: setattr(self.piano_roll.content, 'width', self.total_beats * value))
         self.update_timeline_size()
 
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
@@ -254,6 +252,8 @@ class TrackWidget(BoxLayout):
         final_width = max(required_width, min_width)
         
         self.timeline_container.width = final_width
+        if hasattr(self, 'piano_roll'):
+            self.piano_roll.set_content_width(final_width)
         
         # Assurez-vous que le MeasureGrid reçoit les paramètres de mise à jour.
         self.measure_grid.total_beats = self.total_beats

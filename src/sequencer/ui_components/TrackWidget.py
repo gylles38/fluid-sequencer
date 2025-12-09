@@ -23,7 +23,10 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout = sequencer_layout
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(56)
+        if isinstance(track, MidiTrack):
+            self.height = dp(128)
+        else:
+            self.height = dp(56)
         self.spacing = dp(12)
         self.padding = [dp(12), dp(6), dp(12), dp(6)]
 
@@ -59,12 +62,17 @@ class TrackWidget(BoxLayout):
         self.timeline_container.add_widget(self.measure_grid)
 
         if isinstance(track, MidiTrack):
+            piano_roll_scroll = ScrollView(
+                size_hint=(1, 1),
+                do_scroll_x=False,
+                do_scroll_y=True
+            )
             self.piano_roll = PianoRoll(
                 track=track,
-                size_hint=(1, 1),
                 pos_hint={'x': 0, 'y': 0}
             )
-            self.timeline_container.add_widget(self.piano_roll)
+            piano_roll_scroll.add_widget(self.piano_roll)
+            self.timeline_container.add_widget(piano_roll_scroll)
 
         self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
         self.timeline_container.add_widget(self.event_container)

@@ -3,12 +3,16 @@ from kivy.graphics import Color, Rectangle
 from kivy.uix.label import Label
 from kivy.properties import ObjectProperty, NumericProperty
 
+from kivy.metrics import dp
+
 class PianoRoll(FloatLayout):
     track = ObjectProperty(None)
     pixels_per_beat = NumericProperty(100)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.size_hint_y = None
+        self.height = dp(1280)
         self.bind(
             track=self.update_notes,
             pixels_per_beat=self.update_notes,
@@ -29,8 +33,7 @@ class PianoRoll(FloatLayout):
             return
 
         MAX_VELOCITY = 127.0
-        TOTAL_PITCHES = 128.0
-        note_height = self.height / TOTAL_PITCHES
+        note_height = 10  # 128 pitches * 10 pixels = 1280px total height
 
         # Velocity to color (blue tint)
         velocity_normalized = note.velocity / MAX_VELOCITY

@@ -49,13 +49,6 @@ class TrackWidget(BoxLayout):
 
         self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.timeline_container = Widget(size_hint=(None, 1)) 
-        if isinstance(track, MidiTrack):
-            self.piano_roll = PianoRoll(
-                track=track,
-                size_hint=(1, 1),
-                pos_hint={'x': 0, 'y': 0}
-            )
-            self.timeline_container.add_widget(self.piano_roll)
 
         self.measure_grid = MeasureGrid(
             size_hint=(1, 1), 
@@ -64,6 +57,15 @@ class TrackWidget(BoxLayout):
             pixels_per_beat=self.pixels_per_beat
         )
         self.timeline_container.add_widget(self.measure_grid)
+
+        if isinstance(track, MidiTrack):
+            self.piano_roll = PianoRoll(
+                track=track,
+                size_hint=(1, 1),
+                pos_hint={'x': 0, 'y': 0}
+            )
+            self.timeline_container.add_widget(self.piano_roll)
+
         self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
         self.timeline_container.add_widget(self.event_container)
         self.playback_line = Widget(size_hint_x=None, width=dp(2), size_hint_y=1)

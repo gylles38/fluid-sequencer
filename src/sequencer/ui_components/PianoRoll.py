@@ -9,7 +9,12 @@ class PianoRoll(FloatLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(track=self.update_notes, pixels_per_beat=self.update_notes)
+        self.bind(
+            track=self.update_notes,
+            pixels_per_beat=self.update_notes,
+            size=self.update_notes,
+            pos=self.update_notes
+        )
 
     def update_notes(self, *args):
         self.canvas.clear()
@@ -20,9 +25,12 @@ class PianoRoll(FloatLayout):
                         self._draw_note(note, event.start_time)
 
     def _draw_note(self, note, start_time):
-        # Constants for drawing
-        NOTE_HEIGHT = 10
+        if self.height <= 0:
+            return
+
         MAX_VELOCITY = 127.0
+        TOTAL_PITCHES = 128.0
+        note_height = self.height / TOTAL_PITCHES
 
         # Velocity to color (blue tint)
         velocity_normalized = note.velocity / MAX_VELOCITY
@@ -30,11 +38,11 @@ class PianoRoll(FloatLayout):
 
         # Position and size
         x = start_time * self.pixels_per_beat
-        y = note.pitch * NOTE_HEIGHT
+        y = note.pitch * note_height
         width = note.duration * self.pixels_per_beat
 
         Color(*color)
-        Rectangle(pos=(x, y), size=(width, NOTE_HEIGHT))
+        Rectangle(pos=(x, y), size=(width, note_height))
 
         # Add note name
         note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -43,8 +51,8 @@ class PianoRoll(FloatLayout):
         label = Label(
             text=note_name,
             pos=(x, y),
-            size=(width, NOTE_HEIGHT),
-            font_size='9sp',
+            size=(width, note_height),
+            font_size='8sp',
             halign='center',
             valign='middle'
         )

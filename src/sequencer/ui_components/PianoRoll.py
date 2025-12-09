@@ -12,7 +12,6 @@ class PianoRoll(FloatLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
-        self.size_hint_x = None
         self.height = dp(1280)
         self.bind(
             track=self.update_notes,

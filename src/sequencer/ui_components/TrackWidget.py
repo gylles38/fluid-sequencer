@@ -253,8 +253,6 @@ class TrackWidget(BoxLayout):
         final_width = max(required_width, min_width)
         
         self.timeline_container.width = final_width
-        if hasattr(self, 'piano_roll'):
-            self.piano_roll.width = final_width
         
         # Assurez-vous que le MeasureGrid reçoit les paramètres de mise à jour.
         self.measure_grid.total_beats = self.total_beats

@@ -2,7 +2,6 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.graphics import Color, Rectangle
 from kivy.uix.label import Label
 from kivy.properties import ObjectProperty, NumericProperty
-
 from kivy.metrics import dp
 
 class PianoRoll(FloatLayout):
@@ -29,11 +28,8 @@ class PianoRoll(FloatLayout):
                         self._draw_note(note, event.start_time)
 
     def _draw_note(self, note, start_time):
-        if self.height <= 0:
-            return
-
-        MAX_VELOCITY = 127.0
         note_height = 10  # 128 pitches * 10 pixels = 1280px total height
+        MAX_VELOCITY = 127.0
 
         # Velocity to color (blue tint)
         velocity_normalized = note.velocity / MAX_VELOCITY

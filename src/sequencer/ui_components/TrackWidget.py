@@ -70,10 +70,14 @@ class TrackWidget(BoxLayout):
             )
             self.piano_roll = PianoRoll(
                 track=track,
-                pos_hint={'x': 0, 'y': 0}
+                size_hint_x=None,
             )
             piano_roll_scroll.add_widget(self.piano_roll)
             self.timeline_container.add_widget(piano_roll_scroll)
+
+            def set_default_scroll(*args):
+                piano_roll_scroll.scroll_y = 0.5
+            Clock.schedule_once(set_default_scroll, 0.1)
 
         self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
         self.timeline_container.add_widget(self.event_container)
@@ -253,6 +257,8 @@ class TrackWidget(BoxLayout):
         final_width = max(required_width, min_width)
         
         self.timeline_container.width = final_width
+        if hasattr(self, 'piano_roll'):
+            self.piano_roll.width = final_width
         
         # Assurez-vous que le MeasureGrid reçoit les paramètres de mise à jour.
         self.measure_grid.total_beats = self.total_beats

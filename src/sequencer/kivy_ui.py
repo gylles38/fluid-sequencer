@@ -483,9 +483,16 @@ class SequencerLayout(BoxLayout):
         zoom_out_button = TooltipMDIconButton(
             icon="magnify-minus-outline",
             tooltip_text="Zoom Out (-)",
-            on_release=lambda x: self.zoom(0.8)  # Placeholder action
+            on_release=lambda x: self.zoom(0.8)
         )
         toolbar_card.add_widget(zoom_out_button)
+
+        reset_zoom_button = TooltipMDIconButton(
+            icon="magnify-scan",
+            tooltip_text="Reset Zoom",
+            on_release=lambda x: self.reset_zoom()
+        )
+        toolbar_card.add_widget(reset_zoom_button)
 
         # Ajouter un widget d'espacement pour pousser les boutons vers le haut
         toolbar_card.add_widget(Widget())
@@ -549,9 +556,10 @@ class SequencerLayout(BoxLayout):
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
-        if text == '+':
+        key_name = keycode[1]
+        if key_name in ('+', 'numpadadd'):
             self.zoom(1.2)
-        elif text == '-':
+        elif key_name in ('-', 'numpadsubtract'):
             self.zoom(0.8)
 
     def handle_ruler_click(self, touch):
@@ -1821,6 +1829,16 @@ class SequencerLayout(BoxLayout):
         # --- 4. Calculate the new scroll position to keep the center_beat in the middle ---
         # Allow Kivy to update widget sizes before calculating the new scroll position
         Clock.schedule_once(lambda dt: self._recenter_on_zoom(center_beat), 0)
+
+    def reset_zoom(self):
+        """Resets the zoom level to the default value."""
+        default_zoom = dp(100)
+        current_zoom = self.pixels_per_beat
+        if current_zoom == default_zoom:
+            return
+
+        factor = default_zoom / current_zoom
+        self.zoom(factor)
 
     def _recenter_on_zoom(self, center_beat):
         """Callback to adjust scroll after zoom has been applied and widgets resized."""

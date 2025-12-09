@@ -33,6 +33,7 @@ from sequencer.ui_components.SaveProjectAsPopup import SaveProjectAsPopup
 from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 from sequencer.ui_components.YesNoPopup import YesNoPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
+from sequencer.ui_components.Ruler import Ruler
 # ============================================
 
 from sequencer.sequencer import Sequencer
@@ -51,8 +52,11 @@ class SequencerLayout(BoxLayout):
         self.current_command = ""
         self.end_pos_manual_override = False
         self.is_looping = False
+        self._is_scrolling = False # For scroll synchronization
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
+        self._is_seeking_on_scroll = False
+        self.pixels_per_beat = dp(100)
 
         # Tête de lecture "lissée" (celle que l'utilisateur voit)
         self.display_beat = 0.0
@@ -184,12 +188,18 @@ class SequencerLayout(BoxLayout):
         common_height = dp(32)
 
         # Ligne combinée: status + transport
-        combined_layout = BoxLayout(
-            size_hint_y=None, 
-            height=common_height + dp(4),  # Juste un tout petit peu plus
-            spacing=8, 
-            padding=[10, 2, 10, 2]  # Padding vertical réduit
+        transport_card_container = BoxLayout(
+            padding=dp(5),
+            size_hint_y=None,
+            height=dp(60)
         )
+        transport_card = MDCard(
+            orientation='horizontal',
+            padding=(dp(10), 0),
+            spacing=dp(8),
+            elevation=2,
+        )
+        transport_card_container.add_widget(transport_card)
         
         # Info du morceau
         self.song_name_label = Label(
@@ -202,7 +212,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(150, None)
         )
-        combined_layout.add_widget(self.song_name_label)
+        transport_card.add_widget(self.song_name_label)
 
         self.tempo_label = Label(
             text="Tempo:", 
@@ -214,7 +224,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(80, None)
         )
-        combined_layout.add_widget(self.tempo_label)        
+        transport_card.add_widget(self.tempo_label)
 
         self.tempo_input = CustomTextInput(
             text='120', 
@@ -226,7 +236,7 @@ class SequencerLayout(BoxLayout):
             field_type='tempo',
             callback=self.handle_textinput_arrows
         )
-        combined_layout.add_widget(self.tempo_input)
+        transport_card.add_widget(self.tempo_input)
                 
         self.timesig_label = Label(
             text="TS: 4/4", 
@@ -238,7 +248,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(60, None)
         )
-        combined_layout.add_widget(self.timesig_label)
+        transport_card.add_widget(self.timesig_label)
 
         self.metronome_button = TooltipMDIconButton(
             icon='metronome',
@@ -254,10 +264,10 @@ class SequencerLayout(BoxLayout):
             theme_bg_color="Custom",
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
-        combined_layout.add_widget(self.metronome_button)
+        transport_card.add_widget(self.metronome_button)
 
         # Séparateur visuel
-        combined_layout.add_widget(Widget(
+        transport_card.add_widget(Widget(
             size_hint_x=None, 
             width=dp(10),
             size_hint_y=None,
@@ -274,7 +284,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(80, None)
         )
-        combined_layout.add_widget(self.playhead_label)
+        transport_card.add_widget(self.playhead_label)
 
         # Start/End avec hauteur synchronisée
         start_label = Label(
@@ -287,7 +297,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(40, None)
         )
-        combined_layout.add_widget(start_label)
+        transport_card.add_widget(start_label)
 
         self.start_pos_input = CustomTextInput(
             text='1:1', 
@@ -299,7 +309,7 @@ class SequencerLayout(BoxLayout):
             field_type='position',
             callback=self.handle_textinput_arrows
         )
-        combined_layout.add_widget(self.start_pos_input)
+        transport_card.add_widget(self.start_pos_input)
 
         end_label = Label(
             text='End:', 
@@ -311,7 +321,7 @@ class SequencerLayout(BoxLayout):
             valign='middle',
             text_size=(35, None)
         )
-        combined_layout.add_widget(end_label)
+        transport_card.add_widget(end_label)
 
         self.end_pos_input = CustomTextInput(
             text='', 
@@ -323,7 +333,7 @@ class SequencerLayout(BoxLayout):
             field_type='position', 
             callback=self.handle_textinput_arrows
         )
-        combined_layout.add_widget(self.end_pos_input)
+        transport_card.add_widget(self.end_pos_input)
 
         # Variable pour suivre le champ focus
         #self.focused_input = None
@@ -332,7 +342,7 @@ class SequencerLayout(BoxLayout):
    
         
         # Séparateur
-        combined_layout.add_widget(Widget(size_hint_x=None, width=dp(15)))
+        transport_card.add_widget(Widget(size_hint_x=None, width=dp(15)))
         
         # Boutons de transport
         self.play_button = TooltipMDIconButton(
@@ -405,11 +415,11 @@ class SequencerLayout(BoxLayout):
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
 
-        combined_layout.add_widget(self.play_button)
-        combined_layout.add_widget(self.loop_button)
-        combined_layout.add_widget(self.pause_button)
-        combined_layout.add_widget(self.stop_button)
-        combined_layout.add_widget(self.record_button)
+        transport_card.add_widget(self.play_button)
+        transport_card.add_widget(self.loop_button)
+        transport_card.add_widget(self.pause_button)
+        transport_card.add_widget(self.stop_button)
+        transport_card.add_widget(self.record_button)
 
         self.play_button.bind(on_press=self.play_pressed)
         self.loop_button.bind(on_press=self.loop_pressed)
@@ -418,46 +428,101 @@ class SequencerLayout(BoxLayout):
         self.record_button.bind(on_press=self.record_pressed)
         
         # Espace flexible à droite
-        combined_layout.add_widget(Widget(size_hint_x=1))
+        transport_card.add_widget(Widget(size_hint_x=1))
         
-        self.add_widget(combined_layout)
+        self.add_widget(transport_card_container)
 
         # Ajouter un espacement entre la ligne de statut et les pistes
         self.add_widget(Widget(size_hint_y=None, height=dp(15)))
 
         # Layout principal pour la barre d'outils et la liste des pistes
-        main_content_layout = BoxLayout(orientation='horizontal')
-        
-        # Barre d'outils à gauche
-        toolbar = BoxLayout(
+        main_content_layout = BoxLayout(orientation='horizontal', spacing=dp(5), padding=dp(5))
+
+        # Cadre pour la barre d'outils
+        toolbar_card = MDCard(
             orientation='vertical',
             size_hint_x=None,
-            width=dp(50),
-            spacing=dp(5),
-            padding=(dp(5), 0)
+            width=dp(55),
+            padding=(dp(5)),
+            spacing=dp(10),
+            elevation=2,
         )
 
         # Bouton pour ajouter une piste MIDI
         add_midi_track_button = TooltipMDIconButton(
-            icon="note-plus",
+            icon="midi-port",
             tooltip_text="Ajouter une piste MIDI",
             on_release=lambda x: self.add_midi_track_popup()
         )
-        toolbar.add_widget(add_midi_track_button)
+        toolbar_card.add_widget(add_midi_track_button)
 
-        # Ajouter un widget d'espacement pour pousser le bouton vers le haut
-        toolbar.add_widget(Widget())
+        # Bouton pour ajouter une piste AUDIO
+        add_audio_track_button = TooltipMDIconButton(
+            icon="waveform",
+            tooltip_text="Ajouter une piste audio",
+            on_release=lambda x: self.add_audio_track_popup()
+        )
+        toolbar_card.add_widget(add_audio_track_button)
 
-        main_content_layout.add_widget(toolbar)
+        # Bouton pour supprimer une piste
+        delete_track_button = TooltipMDIconButton(
+            icon="playlist-minus",
+            tooltip_text="Supprimer une piste",
+            on_release=lambda x: self.delete_track_popup()
+        )
+        toolbar_card.add_widget(delete_track_button)
 
-        # Liste des pistes dans un ScrollView
+        # Boutons de zoom
+        zoom_in_button = TooltipMDIconButton(
+            icon="magnify-plus-outline",
+            tooltip_text="Zoom In (+)",
+            on_release=lambda x: self.zoom(1.2)  # Placeholder action
+        )
+        toolbar_card.add_widget(zoom_in_button)
+
+        zoom_out_button = TooltipMDIconButton(
+            icon="magnify-minus-outline",
+            tooltip_text="Zoom Out (-)",
+            on_release=lambda x: self.zoom(0.8)
+        )
+        toolbar_card.add_widget(zoom_out_button)
+
+        reset_zoom_button = TooltipMDIconButton(
+            icon="magnify-scan",
+            tooltip_text="Reset Zoom",
+            on_release=lambda x: self.reset_zoom()
+        )
+        toolbar_card.add_widget(reset_zoom_button)
+
+        # Ajouter un widget d'espacement pour pousser les boutons vers le haut
+        toolbar_card.add_widget(Widget())
+
+        main_content_layout.add_widget(toolbar_card)
+
+        # Cadre pour la liste des pistes et la règle
+        track_area_card = MDCard(
+            orientation='vertical',
+            padding=dp(5),
+            elevation=2,
+        )
+
+        # Règle des mesures
+        self.ruler = Ruler(
+            sequencer_layout=self,
+            size_hint_y=None,
+            height=dp(30), # Increased height for better visibility
+            pixels_per_beat=self.pixels_per_beat,
+        )
+        track_area_card.add_widget(self.ruler)
+
+        # Conteneur pour la liste des pistes avec défilement
+        self.scroll_view = ScrollView(size_hint=(1, 1))
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None)
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
+        self.scroll_view.add_widget(self.track_list_layout)
 
-        scroll_view = ScrollView(size_hint=(1, 1))
-        scroll_view.add_widget(self.track_list_layout)
-
-        main_content_layout.add_widget(scroll_view)
+        track_area_card.add_widget(self.scroll_view)
+        main_content_layout.add_widget(track_area_card)
         self.add_widget(main_content_layout)
 
         bottom_layout = BoxLayout(orientation='vertical', size_hint_y=0.3)
@@ -486,6 +551,50 @@ class SequencerLayout(BoxLayout):
         # Show MIDI input selection on startup if not already set
         if not self.sequencer.default_record_port:
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
+
+        Window.bind(on_key_down=self._on_keyboard_down)
+
+    def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
+        """Callback for keyboard events."""
+        # The 'keyboard' argument is the integer keycode
+        if keyboard in (43, 270):  # Keycode for '+' and 'numpadadd'
+            self.zoom(1.2)
+        elif keyboard in (45, 269): # Keycode for '-' and 'numpadsubtract'
+            self.zoom(0.8)
+
+    def handle_ruler_click(self, touch):
+        if not self.track_widgets:
+            return
+
+        ruler_content = self.ruler.ruler_content
+        track_widget = self.track_widgets[0]
+
+        # Use the direct reference to the ScrollView
+        scroll_view = self.scroll_view
+
+        # Calculate the scroll offset in pixels
+        scroll_offset_x = scroll_view.scroll_x * (track_widget.timeline_container.width - scroll_view.width)
+
+        # Calculate the click position relative to the start of the ruler content area
+        relative_click_x = touch.x - ruler_content.x
+
+        # Calculate the absolute position in the scrolling content
+        absolute_click_x = relative_click_x + scroll_offset_x
+
+        # Convert the absolute pixel position to a beat
+        pixels_per_beat = ruler_content.width / track_widget.total_beats
+        if pixels_per_beat == 0:
+            return
+
+        clicked_beat = absolute_click_x / pixels_per_beat
+
+        # Snap to the beginning of the clicked measure
+        beats_per_measure = self.sequencer.song.time_signature_numerator
+        measure = int(clicked_beat / beats_per_measure) + 1
+
+        # Format and send seek command
+        seek_position = f"{measure}:1"
+        self.process_command_ui(f"seek {seek_position}")
 
     def on_playback_state_change(self, instance, value):
         """Callback for sequencer's playback_state changes."""
@@ -949,6 +1058,80 @@ class SequencerLayout(BoxLayout):
 
         popup.open()
 
+    def add_audio_track_popup(self):
+        """Affiche un popup pour le nom de la piste audio, puis le file chooser."""
+
+        def on_name_confirm(track_name):
+            if not track_name:
+                self.show_error_popup("Erreur", "Le nom de la piste ne peut pas être vide.")
+                return
+
+            def file_chooser_callback(filepath):
+                if filepath:
+                    self.process_command_ui(f'addaudio "{track_name}" "{filepath}"')
+
+            file_popup = FileChooserPopup(
+                callback=file_chooser_callback,
+                title="Sélectionner un fichier audio",
+                filters=['*.wav', '*.mp3', '*.aiff', '*.ogg']
+            )
+            file_popup.open()
+
+        name_popup = ConfirmationPopup(
+            prompt_text="Entrez le nom de la nouvelle piste audio:",
+            callback=on_name_confirm
+        )
+        name_popup.open()
+
+    def delete_track_popup(self):
+        """Affiche une liste de pistes à supprimer."""
+        tracks = self.sequencer.song.tracks
+        if not tracks:
+            self.show_info_popup("Info", "Il n'y a aucune piste à supprimer.")
+            return
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        scroll_view = ScrollView()
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
+        grid.bind(minimum_height=grid.setter('height'))
+
+        for i, track in enumerate(tracks):
+            btn = MDButton(
+                MDButtonText(text=f"{i}: {track.name}"),
+                size_hint_y=None,
+                height=dp(40)
+            )
+            btn.bind(on_release=lambda x, track_index=i: self.confirm_delete_track(track_index))
+            grid.add_widget(btn)
+
+        scroll_view.add_widget(grid)
+        content.add_widget(scroll_view)
+
+        popup = Popup(
+            title="Sélectionner une piste à supprimer",
+            content=content,
+            size_hint=(0.7, 0.8)
+        )
+        self.delete_popup = popup # Store reference to dismiss it later
+        popup.open()
+
+    def confirm_delete_track(self, track_index):
+        """Affiche une confirmation avant de supprimer la piste."""
+        if hasattr(self, 'delete_popup'):
+            self.delete_popup.dismiss()
+
+        track_name = self.sequencer.song.tracks[track_index].name
+
+        def on_confirm(choice):
+            if choice and choice.lower() == 'y':
+                self.process_command_ui(f'delete {track_index} y')
+
+        popup = YesNoPopup(
+            prompt_text=f"Êtes-vous sûr de vouloir supprimer la piste '{track_name}'?",
+            callback=on_confirm
+        )
+        popup.open()
+
     def start_play_blink(self):
         """Démarre l'animation de clignotement du bouton play"""
         if self.blink_animation:
@@ -980,17 +1163,6 @@ class SequencerLayout(BoxLayout):
         self.play_button.icon_color = [0, 0.7, 0.3, 1]
 
     def play_pressed(self, instance):
-        # If already playing, do nothing. If paused, resume via the pause button.
-        if self.sequencer.playback_state == "stopped":
-            # Pre-sync the UI to the start beat for a smoother start
-            start_pos = self.start_pos_input.text or "1:1"
-            start_beat = self.sequencer.parse_position_to_beats(start_pos)
-            if start_beat is not None:
-                self.display_beat = start_beat
-                for track_widget in self.track_widgets:
-                    track_widget.set_playback_position(start_beat)
-                self.playhead_label.text = f"Pos: {start_pos}"
-
         # Centralized logic call
         self.sequencer.process_transport_command("play_pause")
 
@@ -1237,26 +1409,37 @@ class SequencerLayout(BoxLayout):
 
     def update_track_list(self):
         self.track_list_layout.clear_widgets()
-        self.track_widgets.clear() # Clear the list of widget references
-        # ----------------------------------------------------
-        # ⚠️ NOUVEAU : FORCER L'INITIALISATION DE LA TAILLE (Critique)
-        # ----------------------------------------------------
-        
-        # 1. Obtient la longueur correcte du morceau (le cache peut être vide, donc cette première fois est la plus longue)
-        # Note: Cela déclenchera la lecture initiale du fichier audio, mais seulement UNE FOIS.
-        final_total_beats = self.sequencer.get_song_length_in_beats() 
-                
+        self.track_widgets.clear()
+
+        final_total_beats = self.sequencer.get_song_length_in_beats()
+
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.is_metronome:
                 continue
-            
-            # Affecter la propriété Kivy déclenche AUTOMATIQUEMENT update_timeline_size()
+
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
             track_widget.total_beats = final_total_beats
             self.track_widgets.append(track_widget)
             self.track_list_layout.add_widget(track_widget)
 
+        # Bind ruler spacer widths and timeline width
+        if self.track_widgets:
+            first_track_widget = self.track_widgets[0]
+            self.ruler.info_width = first_track_widget.info_width
+            self.ruler.controls_width = first_track_widget.controls_width
             
+            # Ensure ruler content has the same width as track timelines
+            self.ruler.ruler_content.width = first_track_widget.timeline_container.width
+
+            first_track_widget.fbind('info_width', lambda i, v: setattr(self.ruler, 'info_width', v))
+            first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
+            first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
+
+        # --- Bind scroll views for synchronization ---
+        scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]
+        for sv in scroll_views:
+            sv.fbind('scroll_x', lambda instance, value: self._synchronize_scroll(instance, value))
+            sv.bind(on_scroll_stop=self._on_scroll_stop)
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"
@@ -1514,6 +1697,9 @@ class SequencerLayout(BoxLayout):
         if not is_lightweight:
             print(f"DEBUG: Performing full UI refresh for command: {command}")
             self.update_status_display()
+            # Redraw the ruler only after a full UI refresh
+            if hasattr(self, 'ruler'):
+                self.ruler.redraw()
         else:
             print(f"DEBUG: Skipping full UI refresh for lightweight command: {command}")
 
@@ -1585,6 +1771,109 @@ class SequencerLayout(BoxLayout):
             else:
                 # Fin de l'animation
                 self.stop_beat_pulse_animation()
+
+    def _synchronize_scroll(self, source_scroll_view, scroll_x_value):
+        if self._is_scrolling:
+            return
+        self._is_scrolling = True
+
+        scrollable_widgets = [self.ruler.scroll_view] + [
+            track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
+        ]
+
+        for scroll_widget in scrollable_widgets:
+            if scroll_widget is not source_scroll_view:
+                scroll_widget.scroll_x = scroll_x_value
+
+        self._is_scrolling = False
+
+    def _on_scroll_stop(self, scroll_view, *args):
+        """Called when a user stops scrolling one of the timelines."""
+        pass
+
+    def zoom(self, factor):
+        """Zooms the timeline view in or out, keeping the center of the view constant."""
+        if not self.track_widgets:
+            return
+
+        # --- 1. Get the reference ScrollView and its properties ---
+        scroll_view = self.track_widgets[0].timeline_scroll
+        timeline_width = self.track_widgets[0].timeline_container.width
+        viewport_width = scroll_view.width
+
+        if timeline_width <= viewport_width:
+            return # Nothing to scroll/zoom into
+
+        # --- 2. Calculate the beat at the center of the current view ---
+        # The center of the visible area in scroll_x terms (0.0 to 1.0)
+        center_scroll_x = scroll_view.scroll_x + (viewport_width / 2) / (timeline_width - viewport_width)
+        center_pixel_pos = center_scroll_x * (timeline_width - viewport_width)
+
+        current_pixels_per_beat = self.pixels_per_beat
+        if current_pixels_per_beat == 0:
+            return
+
+        center_beat = center_pixel_pos / current_pixels_per_beat
+
+        # --- 3. Apply the new zoom level ---
+        new_pixels_per_beat = max(dp(10), self.pixels_per_beat * factor)  # Set a minimum zoom level
+        self.pixels_per_beat = new_pixels_per_beat
+
+        # Update all relevant widgets with the new zoom level
+        for track_widget in self.track_widgets:
+            track_widget.update_grid_parameters(track_widget.total_beats, new_pixels_per_beat)
+        self.ruler.pixels_per_beat = new_pixels_per_beat
+        self.ruler.redraw()
+
+
+        # --- 4. Calculate the new scroll position to keep the center_beat in the middle ---
+        # Allow Kivy to update widget sizes before calculating the new scroll position
+        Clock.schedule_once(lambda dt: self._recenter_on_zoom(center_beat), 0)
+
+    def reset_zoom(self):
+        """Resets the zoom level to the default value."""
+        default_zoom = dp(100)
+        current_zoom = self.pixels_per_beat
+        if current_zoom == default_zoom:
+            return
+
+        factor = default_zoom / current_zoom
+        self.zoom(factor)
+
+    def _recenter_on_zoom(self, center_beat):
+        """Callback to adjust scroll after zoom has been applied and widgets resized."""
+        if not self.track_widgets:
+            return
+
+        new_pixels_per_beat = self.pixels_per_beat
+
+        # --- Recalculate dimensions based on the new zoom level ---
+        new_timeline_width = self.track_widgets[0].timeline_container.width
+        scroll_view = self.track_widgets[0].timeline_scroll
+        viewport_width = scroll_view.width
+
+        if new_timeline_width <= viewport_width:
+            return
+
+        # Calculate the new pixel position of the center beat
+        new_center_pixel_pos = center_beat * new_pixels_per_beat
+
+        # Calculate the required scroll_x to place this pixel position at the center of the view
+        new_scroll_x_pixels = new_center_pixel_pos - (viewport_width / 2)
+
+        # Clamp the value to be within valid scroll range
+        max_scroll_pixels = new_timeline_width - viewport_width
+        new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, max_scroll_pixels))
+
+        # Normalize to get the final scroll_x value (0.0 to 1.0)
+        if max_scroll_pixels > 0:
+            final_scroll_x = new_scroll_x_pixels / max_scroll_pixels
+        else:
+            final_scroll_x = 0
+
+        # --- 5. Apply the new scroll position to all ScrollViews ---
+        # Use the synchronization method to update all timelines at once
+        self._synchronize_scroll(self.scroll_view, final_scroll_x)
 
 
 class SequencerApp(MDApp):

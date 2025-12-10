@@ -24,3 +24,5 @@ from sequencer.ui_components.ValueSpinner import ValueSpinner
 
 from kivy.uix.widget import Widget
 from kivymd.uix.label import MDIcon
+from .PianoRoll import PianoRoll, PianoRollViewer
+from .PianoKeyboard import PianoKeyboard

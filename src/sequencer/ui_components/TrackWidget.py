@@ -66,7 +66,7 @@ class TrackWidget(BoxLayout):
             note_height = dp(12)
 
             # Main horizontal layout to hold the keyboard and the grid scrollview
-            timeline_layout = BoxLayout(orientation='horizontal', spacing=0)
+            timeline_layout = BoxLayout(orientation='horizontal', spacing=0, size_hint_x=1)
 
             # 1. Keyboard: A vertical scrollview that does not scroll horizontally.
             keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)

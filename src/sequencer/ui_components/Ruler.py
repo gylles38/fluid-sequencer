@@ -106,9 +106,18 @@ class Ruler(BoxLayout):
         self.scroll_view.add_widget(self.ruler_content)
         self.right_spacer = Widget(size_hint_x=None)
 
+        # Nested layout for keyboard and ruler content to remove spacing between them
+        timeline_layout = BoxLayout(
+            orientation='horizontal',
+            spacing=0,
+            padding=[0,0,0,0],
+            size_hint_x=1
+        )
+        timeline_layout.add_widget(self.keyboard_spacer)
+        timeline_layout.add_widget(self.scroll_view)
+
         self.add_widget(self.left_spacer)
-        self.add_widget(self.keyboard_spacer) # Add spacer to layout
-        self.add_widget(self.scroll_view)
+        self.add_widget(timeline_layout)
         self.add_widget(self.right_spacer)
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))

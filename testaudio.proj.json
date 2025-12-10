@@ -1,0 +1,24 @@
+{
+    "song": {
+        "name": "New Song",
+        "tempo": 120,
+        "time_signature_numerator": 4,
+        "time_signature_denominator": 4,
+        "ticks_per_beat": 480,
+        "tracks": [
+            {
+                "name": "voices",
+                "filepath": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/bruitage.ogg",
+                "is_muted": false,
+                "is_solo": false,
+                "start_time": 0.0,
+                "__type__": "AudioTrack"
+            }
+        ],
+        "metronome_enabled": false,
+        "metronome_port_name": null,
+        "__type__": "Song"
+    },
+    "virtual_ports": [],
+    "audio_player_command": "mpv --audio-device=jack"
+}

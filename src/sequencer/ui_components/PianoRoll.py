@@ -1,15 +1,14 @@
-from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
 from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle, Line
 from sequencer.models import MidiTrack
-from .PianoKeyboard import PianoKeyboard
 
 class PianoRoll(FloatLayout):
     """
     Represents the drawing area of the piano roll's grid and notes.
+    This widget is intended to be placed inside a ScrollView.
     """
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
@@ -19,7 +18,8 @@ class PianoRoll(FloatLayout):
 
     def __init__(self, **kwargs):
         super(PianoRoll, self).__init__(**kwargs)
-        self.size_hint = (None, 1) # Takes full height of parent
+        self.size_hint = (None, None)
+        self.height = 128 * self.note_height
 
         self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width,
                   track=self.draw, pos=self.draw, size=self.draw)
@@ -76,52 +76,11 @@ class PianoRoll(FloatLayout):
                         Color(*self._velocity_to_color(note.velocity))
                         Rectangle(pos=(note_x, note_y), size=(note_width, self.note_height))
 
-class PianoRollContent(BoxLayout):
-    """
-    Internal container holding the keyboard and the grid, allowing them to scroll together.
-    """
-    track = ObjectProperty(None, allownone=True)
-    total_beats = NumericProperty(128.0)
-    pixels_per_beat = NumericProperty(dp(100))
-    note_height = NumericProperty(dp(12))
-
-    def __init__(self, **kwargs):
-        super(PianoRollContent, self).__init__(**kwargs)
-        self.size_hint = (None, None)
-        self.height = 128 * self.note_height
-
-        self.keyboard = PianoKeyboard(note_height=self.note_height)
-        self.grid = PianoRoll(
-            track=self.track,
-            total_beats=self.total_beats,
-            pixels_per_beat=self.pixels_per_beat,
-            note_height=self.note_height
-        )
-        self.add_widget(self.keyboard)
-        self.add_widget(self.grid)
-        self._update_width()
-
-    def on_track(self, instance, value):
-        if hasattr(self, 'grid'):
-            self.grid.track = value
-
-    def on_total_beats(self, instance, value):
-        if hasattr(self, 'grid'):
-            self.grid.total_beats = value
-            self._update_width()
-
-    def on_pixels_per_beat(self, instance, value):
-        if hasattr(self, 'grid'):
-            self.grid.pixels_per_beat = value
-            self._update_width()
-
-    def _update_width(self, *args):
-        if hasattr(self, 'keyboard') and hasattr(self, 'grid'):
-            self.width = self.keyboard.width + self.grid.width
 
 class PianoRollViewer(ScrollView):
     """
-    The final, user-facing widget. A scrollable container for the piano roll content.
+    A scrollable container for the PianoRoll grid widget.
+    It handles vertical scrolling for the grid part of the piano roll.
     """
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
@@ -130,33 +89,27 @@ class PianoRollViewer(ScrollView):
 
     def __init__(self, **kwargs):
         super(PianoRollViewer, self).__init__(**kwargs)
-        self.size_hint = (None, 1) # Critical for horizontal scrolling parent
+        self.size_hint = (None, 1)
         self.do_scroll_x = False
         self.do_scroll_y = True
 
-        self.content = PianoRollContent(
+        self.grid = PianoRoll(
             track=self.track,
             total_beats=self.total_beats,
             pixels_per_beat=self.pixels_per_beat,
             note_height=self.note_height
         )
-        self.add_widget(self.content)
-        self._update_width()
+        self.add_widget(self.grid)
+        self.bind(width=self.grid.setter('width'))
 
     def on_track(self, instance, value):
-        if hasattr(self, 'content'):
-            self.content.track = value
+        self.grid.track = value
 
     def on_total_beats(self, instance, value):
-        if hasattr(self, 'content'):
-            self.content.total_beats = value
-            self._update_width()
+        self.grid.total_beats = value
 
     def on_pixels_per_beat(self, instance, value):
-        if hasattr(self, 'content'):
-            self.content.pixels_per_beat = value
-            self._update_width()
+        self.grid.pixels_per_beat = value
 
-    def _update_width(self, *args):
-        if hasattr(self, 'content'):
-            self.width = self.content.width
+    def on_note_height(self, instance, value):
+        self.grid.note_height = value

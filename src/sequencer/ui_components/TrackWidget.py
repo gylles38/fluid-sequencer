@@ -7,6 +7,8 @@ from kivy.uix.widget import Widget
 from kivy.uix.label import Label 
 from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
+from .PianoRoll import PianoRollViewer
+from .PianoKeyboard import PianoKeyboard
 
 class TrackWidget(BoxLayout):
     total_beats = NumericProperty(128.0) 
@@ -49,17 +51,48 @@ class TrackWidget(BoxLayout):
         self.info_section.add_widget(self.name_label)
         self.add_widget(self.info_section)
 
-        self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
-
+        # --- Timeline Section ---
         if isinstance(track, MidiTrack):
-            self.piano_roll_viewer = PianoRollViewer(
+            # For MIDI tracks, we use a complex layout with synchronized scrolling
+            note_height = dp(12)
+
+            # Main horizontal layout for keyboard + grid
+            timeline_layout = BoxLayout(orientation='horizontal')
+
+            # 1. Keyboard ScrollView (vertical scroll only)
+            keyboard_sv = ScrollView(size_hint_x=None, width=dp(80), do_scroll_x=False)
+            self.piano_keyboard = PianoKeyboard(note_height=note_height)
+            keyboard_sv.add_widget(self.piano_keyboard)
+
+            # 2. Main Horizontal ScrollView for the grid
+            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
+
+            # 3. Vertical ScrollView for the grid content
+            grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
-                pixels_per_beat=self.pixels_per_beat
+                pixels_per_beat=self.pixels_per_beat,
+                note_height=note_height
             )
-            self.timeline_container = self.piano_roll_viewer
-            self.measure_grid = self.piano_roll_viewer.content.grid # Reference for updates
+            self.piano_roll_viewer = grid_sv
+            self.measure_grid = grid_sv.grid # For updates
+
+            self.timeline_scroll.add_widget(grid_sv)
+
+            timeline_layout.add_widget(keyboard_sv)
+            timeline_layout.add_widget(self.timeline_scroll)
+
+            self.add_widget(timeline_layout)
+
+            # Link vertical scrolling
+            keyboard_sv.bind(scroll_y=lambda instance, value: setattr(grid_sv, 'scroll_y', value))
+            grid_sv.bind(scroll_y=lambda instance, value: setattr(keyboard_sv, 'scroll_y', value))
+
+            self.timeline_container = grid_sv # Reference for size updates
+
         else:
+            # For other tracks, use the simple layout
+            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
             self.timeline_container = Widget(size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1),
@@ -68,7 +101,10 @@ class TrackWidget(BoxLayout):
                 pixels_per_beat=self.pixels_per_beat
             )
             self.timeline_container.add_widget(self.measure_grid)
+            self.timeline_scroll.add_widget(self.timeline_container)
+            self.add_widget(self.timeline_scroll)
 
+        # --- Playback Line ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
         with self.playback_line.canvas:
             Color(1, 0, 0, 0.8)
@@ -76,22 +112,19 @@ class TrackWidget(BoxLayout):
         self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
 
         if isinstance(track, MidiTrack):
-            self.piano_roll_viewer.content.grid.add_widget(self.playback_line)
-            # The playback line is now a widget, Kivy handles the canvas.
+            self.piano_roll_viewer.grid.add_widget(self.playback_line)
             self.playback_line.size_hint_y = None
-            self.playback_line.height = self.piano_roll_viewer.content.grid.height
+            self.playback_line.height = self.piano_roll_viewer.grid.height
         else:
             self.timeline_container.add_widget(self.playback_line)
             self.playback_line.size_hint_y = 1
 
-        self.timeline_scroll.add_widget(self.timeline_container)
-        self.add_widget(self.timeline_scroll)
-
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
         self.update_timeline_size()
 
+        # --- Controls Section ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
-
+        # ... (rest of the controls code is unchanged)
         type_icon_layout = BoxLayout(
             size_hint_x=None,
             width=dp(44),
@@ -153,7 +186,6 @@ class TrackWidget(BoxLayout):
             pos_hint={'center_y': 0.5},
             theme_icon_color="Custom",
             icon_color=[1, 1, 0, 1] if track.is_solo else [0.6, 0.6, 0.6, 1],
-            theme_bg_color="Custom",
             md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8]
         )
         self.controls_section.add_widget(self.solo_button)
@@ -192,7 +224,6 @@ class TrackWidget(BoxLayout):
             pos_hint={'center_y': 0.5},
             theme_icon_color="Custom",
             icon_color=[1, 0.6, 0, 1] if not track.is_muted else [0.8, 0.3, 0, 1],
-            theme_bg_color="Custom",
             md_bg_color=[0.3, 0.2, 0.1, 0.8] if not track.is_muted else [0.4, 0.2, 0.1, 0.8]
         )
         volume_layout.add_widget(self.mute_button)
@@ -216,11 +247,9 @@ class TrackWidget(BoxLayout):
 
         self.add_widget(self.controls_section)
 
-        # Bind UI updates to property changes
         self.track.bind(is_solo=self.on_solo_changed)
 
     def on_solo_changed(self, instance, value):
-        """Callback for when the track's solo property changes from the backend."""
         self.update_mute_solo_appearance()
 
     def update_playback_rect(self, *args):
@@ -229,12 +258,11 @@ class TrackWidget(BoxLayout):
             self.playback_rect.size = self.playback_line.size
 
     def update_timeline_size(self, *args):
-        if not self.timeline_container: return
-
         if isinstance(self.track, MidiTrack):
             self.piano_roll_viewer.total_beats = self.total_beats
             self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
-        else:
+            self.piano_roll_viewer.width = self.total_beats * self.pixels_per_beat
+        elif hasattr(self, 'timeline_container'):
             content_width = self.total_beats * self.pixels_per_beat
             scroll_view_width = self.timeline_scroll.width
             margin_x = scroll_view_width * 0.3
@@ -247,30 +275,19 @@ class TrackWidget(BoxLayout):
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
         
     def set_playback_position(self, current_beat: float):
-        """Met à jour la tête de lecture et force le défilement si nécessaire."""
-        
         pixels_per_beat = self.pixels_per_beat
         x_pos = current_beat * pixels_per_beat
 
         if self.playback_line:
-            if isinstance(self.track, MidiTrack):
-                 # Position relative to the grid, which is after the keyboard
-                 self.playback_line.x = x_pos
-            else:
-                 self.playback_line.x = x_pos
+            self.playback_line.x = x_pos
 
         if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
             EPSILON_PIXELS = dp(1)
 
-            timeline_width = self.timeline_container.width
+            timeline_width = self.timeline_scroll.children[0].width
             scroll_view_width = self.timeline_scroll.width
             scroll_view = self.timeline_scroll
-
-            if isinstance(self.track, MidiTrack):
-                # The effective position for scrolling must account for the keyboard
-                effective_x_pos = x_pos + self.piano_roll_viewer.content.keyboard.width
-            else:
-                effective_x_pos = x_pos
+            effective_x_pos = x_pos
 
             if timeline_width <= scroll_view_width + EPSILON_PIXELS:
                 scroll_view.scroll_x = 0.0
@@ -303,19 +320,13 @@ class TrackWidget(BoxLayout):
 
             scroll_view.scroll_x = max(0.0, min(1.0, normalized_scroll_value))
 
-
     def update_grid_parameters(self, total_beats: float, pixels_per_beat: float):
-        """Méthode appelée par SequencerApp pour mettre à jour les paramètres de la grille."""
         self.total_beats = total_beats
         self.pixels_per_beat = pixels_per_beat
 
     def reset_timeline_view(self):
-        """Force la vue à se positionner à l'extrême gauche (beat 0) et le curseur à 0."""
-        # S'assurer que le curseur est à 0 (même si la lecture ne démarre pas à 0)
         if self.playback_line:
             self.playback_line.x = 0 
-        
-        # S'assurer que la ScrollView est à l'extrême gauche
         self.timeline_scroll.scroll_x = 0.0
 
     def _update_graphics(self, *args):
@@ -327,22 +338,14 @@ class TrackWidget(BoxLayout):
 
     def _update_type_icon_bg(self, *args):
         if hasattr(self, 'type_bg_rect'):
-            self.type_bg_rect.pos = self.children[-1].pos  # type_icon_layout est le dernier ajouté
+            self.type_bg_rect.pos = self.children[-1].pos
             self.type_bg_rect.size = self.children[-1].size
         if hasattr(self, 'type_border_rect'):
             self.type_border_rect.rectangle = [self.children[-1].x, self.children[-1].y, 
                                              self.children[-1].width, self.children[-1].height]
 
     def on_track_volume_changed(self, instance, value):
-        """
-        Callback for when the track's volume property changes from the backend.
-        This updates the UI to reflect the new state.
-        """
-        # Always update the text label to ensure it's in sync.
         self.volume_label.text = f"{int(value * 100)}"
-
-        # Update the slider's position only if it has changed significantly,
-        # to prevent a feedback loop (backend -> UI -> backend -> ...).
         if abs(self.volume_slider.value - value) > 0.001:
             self.volume_slider.value = value
 
@@ -351,27 +354,22 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout.process_slider_command(f'volume {self.track_index} {value}')
 
     def on_pan_change(self, instance, value):
-        self.pan_label.text = f"{value:+.1f}"  # Format avec signe +
+        self.pan_label.text = f"{value:+.1f}"
         self.sequencer_layout.process_slider_command(f'pan {self.track_index} {value}')
 
     def on_mute_toggle(self, instance):
-        # Directly call a lightweight method on the main layout
         self.sequencer_layout.toggle_track_mute(self.track_index)
 
     def on_solo_toggle(self, instance):
-        # Directly call a lightweight method on the main layout
         self.sequencer_layout.toggle_track_solo(self.track_index)
 
     def update_mute_solo_appearance(self):
-        """Updates the visual state of mute and solo buttons."""
-        # Update Mute Button
         is_muted = self.track.is_muted
         self.mute_button.icon = 'volume-off' if is_muted else 'volume-high'
         self.mute_button.tooltip_text = 'Unmute' if is_muted else 'Mute'
         self.mute_button.icon_color = [0.8, 0.3, 0, 1] if is_muted else [1, 0.6, 0, 1]
         self.mute_button.md_bg_color = [0.4, 0.2, 0.1, 0.8] if is_muted else [0.3, 0.2, 0.1, 0.8]
 
-        # Update Solo Button
         is_solo = self.track.is_solo
         self.solo_button.icon = 'alpha-s-box' if is_solo else 'alpha-s-box-outline'
         self.solo_button.tooltip_text = 'Unsolo' if is_solo else 'Solo'
@@ -379,7 +377,6 @@ class TrackWidget(BoxLayout):
         self.solo_button.md_bg_color = [0.3, 0.3, 0.1, 0.8] if is_solo else [0.1, 0.1, 0.1, 0.8]
 
     def get_record_mode_tooltip(self, mode):
-        """Retourne le texte du tooltip selon le mode"""
         tooltips = {
             'OFF': 'Record: OFF - Piste désactivée',
             'OVERWRITE': 'Record: OVERWRITE - Écrase les notes existantes',
@@ -388,12 +385,8 @@ class TrackWidget(BoxLayout):
         return tooltips.get(mode, 'Record Mode')
 
     def on_record_mode_change(self, track):
-        """Callback quand le mode d'enregistrement change"""
         print(f"Record mode changed for track {self.track_index}: {track.record_mode}")
-        # Mettre à jour le tooltip
         self.record_mode_button.tooltip_text = self.get_record_mode_tooltip(track.record_mode)
-        # Ici vous pouvez ajouter la logique pour informer le séquenceur
-        # self.sequencer_layout.process_command_ui(f'recordmode {self.track_index} {track.record_mode}')
 
     def on_channel_change(self, instance):
         self.sequencer_layout.process_slider_command(f'setch {self.track_index} {instance.text}')

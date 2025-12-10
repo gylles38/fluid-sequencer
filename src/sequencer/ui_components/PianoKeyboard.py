@@ -33,14 +33,14 @@ class PianoKeyboard(FloatLayout):
             Color(0.95, 0.95, 0.95, 1)
             for i in range(128):
                 if (i % 12) not in [1, 3, 6, 8, 10]:
-                    note_y = self.y + (127 - i) * self.note_height
+                    note_y = self.y + i * self.note_height
                     Rectangle(pos=(self.x, note_y), size=(self.width, self.note_height))
 
             # Draw lines between white keys
             Color(0.7, 0.7, 0.7, 1)
             for i in range(128):
                 if (i % 12) not in [1, 3, 6, 8, 10]:
-                    note_y = self.y + (127 - i) * self.note_height
+                    note_y = self.y + i * self.note_height
                     width = 1.1 if (i % 12) in [4, 11] else 0.6 # Thicker line after E and B
                     Line(points=[self.x, note_y, self.x + self.width, note_y], width=width)
 
@@ -48,14 +48,14 @@ class PianoKeyboard(FloatLayout):
             Color(0.1, 0.1, 0.1, 1)
             for i in range(128):
                  if (i % 12) in [1, 3, 6, 8, 10]:
-                    note_y = self.y + (127 - i) * self.note_height
+                    note_y = self.y + i * self.note_height
                     Rectangle(pos=(self.x, note_y), size=(self.width * 0.65, self.note_height))
 
         # Add C note labels
         for i in range(128):
             if (i % 12) == 0:
                 octave_num = (i // 12) - 1  # MIDI note 12 is C0, 24 is C1 etc.
-                note_y = self.y + (127 - i) * self.note_height
+                note_y = self.y + i * self.note_height
                 label = Label(
                     text=f"C{octave_num}",
                     font_size=dp(9),

@@ -47,7 +47,7 @@ class PianoRoll(FloatLayout):
 
             # --- Grid ---
             for i in range(128):
-                note_y = self.y + (127 - i) * self.note_height
+                note_y = self.y + i * self.note_height
                 if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1)
                 else: Color(0.2, 0.2, 0.22, 1)
                 width = 1.1 if (i % 12) in [4, 11] else 0.6
@@ -55,7 +55,7 @@ class PianoRoll(FloatLayout):
 
             current_beat = 0
             while current_beat < self.total_beats:
-                x_pos = self.x + current_beat * self.pixels_per_beat
+                x_pos = current_beat * self.pixels_per_beat
                 if current_beat % self.beat_per_measure == 0:
                     Color(0.8, 0.8, 0.8, 0.8)
                     Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1.5)
@@ -69,8 +69,8 @@ class PianoRoll(FloatLayout):
             with self.canvas:
                 for event in self.track.events:
                     for note in event.notes:
-                        note_x = self.x + event.start_time * self.pixels_per_beat
-                        note_y = self.y + (127 - note.pitch) * self.note_height
+                        note_x = event.start_time * self.pixels_per_beat
+                        note_y = self.y + note.pitch * self.note_height
                         note_width = note.duration * self.pixels_per_beat
 
                         Color(*self._velocity_to_color(note.velocity))

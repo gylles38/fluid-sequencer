@@ -103,13 +103,17 @@ class PianoRollViewer(ScrollView):
         self.bind(width=self.grid.setter('width'))
 
     def on_track(self, instance, value):
-        self.grid.track = value
+        if hasattr(self, 'grid'):
+            self.grid.track = value
 
     def on_total_beats(self, instance, value):
-        self.grid.total_beats = value
+        if hasattr(self, 'grid'):
+            self.grid.total_beats = value
 
     def on_pixels_per_beat(self, instance, value):
-        self.grid.pixels_per_beat = value
+        if hasattr(self, 'grid'):
+            self.grid.pixels_per_beat = value
 
     def on_note_height(self, instance, value):
-        self.grid.note_height = value
+        if hasattr(self, 'grid'):
+            self.grid.note_height = value

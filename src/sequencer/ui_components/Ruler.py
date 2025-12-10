@@ -5,7 +5,6 @@ from kivy.uix.label import Label
 from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle, Line
-from sequencer.models import MidiTrack
 
 class RulerContent(Widget):
     sequencer_layout = ObjectProperty(None)
@@ -43,7 +42,7 @@ class RulerContent(Widget):
         with self.canvas.after:
             for i in range(1, num_measures + 2):
                 beat_pos = (i - 1) * beats_per_measure
-                x_pos = beat_pos * pixels_per_beat
+                x_pos = self.x + (beat_pos * pixels_per_beat)
                 Color(0.4, 0.4, 0.4, 1)
                 Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1)
 
@@ -76,6 +75,7 @@ class RulerContent(Widget):
 
             clicked_beat = local_x / self.pixels_per_beat
 
+            # Appeler directement la méthode de resynchronisation du séquenceur
             self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
 
             return True
@@ -87,16 +87,15 @@ class Ruler(BoxLayout):
     info_width = NumericProperty(0)
     controls_width = NumericProperty(0)
     pixels_per_beat = NumericProperty(dp(100))
-    keyboard_width = NumericProperty(0) # New property for keyboard spacer
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
+        # Match TrackWidget's horizontal spacing and padding for perfect alignment
         self.spacing = dp(12)
         self.padding = [dp(12), 0, dp(12), 0]
 
         self.left_spacer = Widget(size_hint_x=None)
-        self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width) # Keyboard spacer
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
@@ -107,22 +106,15 @@ class Ruler(BoxLayout):
         self.right_spacer = Widget(size_hint_x=None)
 
         self.add_widget(self.left_spacer)
-        self.add_widget(self.keyboard_spacer) # Add spacer to layout
         self.add_widget(self.scroll_view)
         self.add_widget(self.right_spacer)
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.right_spacer, 'width', v))
         self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
-        self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v)) # Bind new property
 
     def redraw(self, *args):
         if self.sequencer_layout and self.sequencer_layout.track_widgets:
             first_track = self.sequencer_layout.track_widgets[0]
-            # The ruler content should match the grid's width, not the whole container
-            if isinstance(first_track.track, MidiTrack):
-                 self.ruler_content.width = first_track.piano_roll_viewer.width
-            else:
-                 self.ruler_content.width = first_track.timeline_container.width
-
+            self.ruler_content.width = first_track.timeline_container.width
         self.ruler_content.redraw(*args)

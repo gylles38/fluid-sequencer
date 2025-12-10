@@ -56,7 +56,7 @@ class SequencerLayout(BoxLayout):
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
         self._is_seeking_on_scroll = False
-        self.pixels_per_beat = dp(50)
+        self.pixels_per_beat = dp(100)
 
         # Tête de lecture "lissée" (celle que l'utilisateur voit)
         self.display_beat = 0.0
@@ -1428,20 +1428,12 @@ class SequencerLayout(BoxLayout):
             self.ruler.info_width = first_track_widget.info_width
             self.ruler.controls_width = first_track_widget.controls_width
             
-            if isinstance(first_track_widget.track, MidiTrack):
-                self.ruler.keyboard_width = first_track_widget.piano_keyboard.width
-                # Bind width for dynamic changes if ever needed
-                first_track_widget.piano_keyboard.fbind('width', lambda i, v: setattr(self.ruler, 'keyboard_width', v))
-                # Ensure ruler content width matches the grid part of the piano roll
-                self.ruler.ruler_content.width = first_track_widget.piano_roll_viewer.width
-                first_track_widget.piano_roll_viewer.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
-            else:
-                self.ruler.keyboard_width = 0
-                self.ruler.ruler_content.width = first_track_widget.timeline_container.width
-                first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
+            # Ensure ruler content has the same width as track timelines
+            self.ruler.ruler_content.width = first_track_widget.timeline_container.width
 
             first_track_widget.fbind('info_width', lambda i, v: setattr(self.ruler, 'info_width', v))
             first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
+            first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
 
         # --- Bind scroll views for synchronization ---
         scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]

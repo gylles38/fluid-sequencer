@@ -91,7 +91,11 @@ class TrackWidget(BoxLayout):
             self.timeline_container = grid_sv # Reference for size updates
 
         else:
-            # For other tracks, use the simple layout
+            # For other tracks, use a layout that includes a spacer for alignment
+            timeline_layout = BoxLayout(orientation='horizontal')
+            keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
+            timeline_layout.add_widget(keyboard_spacer)
+
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
             self.timeline_container = Widget(size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
@@ -102,7 +106,8 @@ class TrackWidget(BoxLayout):
             )
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
-            self.add_widget(self.timeline_scroll)
+            timeline_layout.add_widget(self.timeline_scroll)
+            self.add_widget(timeline_layout)
 
         # --- Playback Line ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))

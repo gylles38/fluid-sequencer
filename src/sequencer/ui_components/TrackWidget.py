@@ -3,9 +3,10 @@ from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
-from kivy.uix.widget import Widget 
-from kivy.uix.label import Label 
+from kivy.uix.widget import Widget
+from kivy.uix.label import Label
 from kivy.metrics import dp
+from kivy.uix.floatlayout import FloatLayout
 from sequencer.ui_components.MeasureGrid import MeasureGrid
 from .PianoRoll import PianoRoll
 
@@ -23,7 +24,10 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout = sequencer_layout
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(56)
+        if isinstance(track, MidiTrack):
+            self.height = dp(128)
+        else:
+            self.height = dp(56)
         self.spacing = dp(12)
         self.padding = [dp(12), dp(6), dp(12), dp(6)]
 
@@ -48,7 +52,7 @@ class TrackWidget(BoxLayout):
         self.add_widget(self.info_section)
 
         self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
-        self.timeline_container = Widget(size_hint=(None, 1)) 
+        self.timeline_container = FloatLayout(size_hint=(None, 1))
 
         self.measure_grid = MeasureGrid(
             size_hint=(1, 1), 
@@ -61,9 +65,12 @@ class TrackWidget(BoxLayout):
         if isinstance(track, MidiTrack):
             self.piano_roll = PianoRoll(
                 track=track,
-                size_hint=(1, 1),
-                pos_hint={'x': 0, 'y': 0}
+                size_hint=(None, 1),
+                pos_hint={'x': 0, 'y': 0},
+                do_scroll_x=False,
+                do_scroll_y=True,
             )
+            self.timeline_container.bind(width=self._update_piano_roll_width)
             self.timeline_container.add_widget(self.piano_roll)
 
         self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
@@ -210,6 +217,11 @@ class TrackWidget(BoxLayout):
 
         # Bind UI updates to property changes
         self.track.bind(is_solo=self.on_solo_changed)
+
+    def _update_piano_roll_width(self, instance, width):
+        if hasattr(self, 'piano_roll'):
+            self.piano_roll.width = width
+            self.piano_roll.timeline_width = width
 
     def on_solo_changed(self, instance, value):
         """Callback for when the track's solo property changes from the backend."""

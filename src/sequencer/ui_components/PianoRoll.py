@@ -1,61 +1,39 @@
-from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
+from kivy.properties import NumericProperty, ObjectProperty
 from kivy.graphics import Color, Rectangle
-from kivy.uix.label import Label
-from kivy.properties import ObjectProperty, NumericProperty
+from kivy.metrics import dp
+from kivy.uix.floatlayout import FloatLayout
 
-class PianoRoll(FloatLayout):
+class PianoRoll(ScrollView):
+    timeline_width = NumericProperty(0)
+    pixels_per_beat = NumericProperty(0)
     track = ObjectProperty(None)
-    pixels_per_beat = NumericProperty(100)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(
-            track=self.update_notes,
-            pixels_per_beat=self.update_notes,
-            size=self.update_notes,
-            pos=self.update_notes
-        )
+        self.note_container = FloatLayout(size_hint=(None, None))
+        self.add_widget(self.note_container)
+        self.bind(pixels_per_beat=self.draw_notes, track=self.draw_notes, timeline_width=self.draw_notes)
 
-    def update_notes(self, *args):
-        self.canvas.clear()
-        if self.track:
-            with self.canvas:
-                for event in self.track.events:
-                    for note in event.notes:
-                        self._draw_note(note, event.start_time)
-
-    def _draw_note(self, note, start_time):
-        if self.height <= 0:
+    def draw_notes(self, *args):
+        if not self.track or not self.pixels_per_beat or self.timeline_width == 0:
             return
 
-        MAX_VELOCITY = 127.0
-        TOTAL_PITCHES = 128.0
-        note_height = self.height / TOTAL_PITCHES
+        self.note_container.canvas.clear()
+        self.note_container.width = self.timeline_width
+        self.note_container.height = 128 * dp(10)
 
-        # Velocity to color (blue tint)
-        velocity_normalized = note.velocity / MAX_VELOCITY
-        color = (0.2, 0.5, 1.0, velocity_normalized)  # RGBA
+        with self.note_container.canvas:
+            for note in self.track.notes:
+                note_y = note.pitch * dp(10)
+                note_x = note.start * self.pixels_per_beat
 
-        # Position and size
-        x = start_time * self.pixels_per_beat
-        y = self.y + note.pitch * note_height
-        width = note.duration * self.pixels_per_beat
+                note_width = note.duration * self.pixels_per_beat
+                note_height = dp(10)
 
-        Color(*color)
-        Rectangle(pos=(x, y), size=(width, note_height))
+                velocity_alpha = 0.5 + (note.velocity / 127) * 0.5
+                note_color = (0.0, 0.7, 0.9, velocity_alpha)
 
-        # Add note name
-        note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        note_name = note_names[note.pitch % 12]
-
-        label = Label(
-            text=note_name,
-            pos=(x, y),
-            size=(width, note_height),
-            font_size='8sp',
-            halign='center',
-            valign='middle'
-        )
-        label.texture_update()
-        Color(1, 1, 1, 1) # White text
-        Rectangle(texture=label.texture, pos=label.pos, size=label.size)
+                Color(*note_color)
+                Rectangle(pos=(note_x, note_y), size=(note_width, note_height))

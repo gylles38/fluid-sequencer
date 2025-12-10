@@ -60,7 +60,7 @@ class TrackWidget(BoxLayout):
             timeline_layout = BoxLayout(orientation='horizontal')
 
             # 1. Keyboard ScrollView (vertical scroll only)
-            keyboard_sv = ScrollView(size_hint_x=None, width=dp(80), do_scroll_x=False)
+            keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             keyboard_sv.add_widget(self.piano_keyboard)
 

@@ -15,7 +15,7 @@ class PianoKeyboard(FloatLayout):
         super(PianoKeyboard, self).__init__(**kwargs)
         self.size_hint = (None, None)
         self.height = 128 * self.note_height
-        self.width = dp(80)
+        self.width = dp(40)
 
         self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule)
         self._redraw_on_schedule()

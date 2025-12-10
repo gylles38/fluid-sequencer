@@ -56,7 +56,7 @@ class SequencerLayout(BoxLayout):
         self.blink_animation = None  # Référence à l'animation de clignotement
         self._current_measure = None # Initialisation pour la détection du beat 1
         self._is_seeking_on_scroll = False
-        self.pixels_per_beat = dp(50)
+        self.pixels_per_beat = dp(100)
 
         # Tête de lecture "lissée" (celle que l'utilisateur voit)
         self.display_beat = 0.0

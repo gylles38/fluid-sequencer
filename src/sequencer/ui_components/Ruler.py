@@ -5,6 +5,7 @@ from kivy.uix.label import Label
 from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle, Line
+from sequencer.models import MidiTrack
 
 class RulerContent(Widget):
     sequencer_layout = ObjectProperty(None)

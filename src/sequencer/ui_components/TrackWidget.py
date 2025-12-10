@@ -303,11 +303,16 @@ class TrackWidget(BoxLayout):
 
         self.timeline_container.width = final_width
 
-        # Update the underlying grid components with the new parameters.
+        # Update the underlying grid components with the new parameters AND width.
         if isinstance(self.track, MidiTrack):
             self.piano_roll_viewer.total_beats = self.total_beats
             self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
+            # This is the critical missing part: the PianoRollViewer itself needs its width set
+            # so its internal grid can be drawn correctly across the full song length.
+            self.piano_roll_viewer.width = content_width
         else:
+            # For other tracks, the MeasureGrid is inside the container and likely fills it,
+            # but we still need to tell it about the new parameters so it can redraw its lines.
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
         

@@ -87,7 +87,11 @@ class TrackWidget(BoxLayout):
             self.piano_roll_viewer = grid_sv
             self.measure_grid = grid_sv.grid # Reference to the grid for updates
 
-            self.timeline_scroll.add_widget(grid_sv)
+            # Wrap the PianoRollViewer in a container widget, similar to how audio tracks are handled.
+            # This is crucial for the ScrollView to correctly manage the layout and prevent overlap.
+            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container.add_widget(grid_sv)
+            self.timeline_scroll.add_widget(self.timeline_container)
 
             # Add the keyboard and grid to the main timeline layout
             timeline_layout.add_widget(keyboard_sv)
@@ -98,8 +102,6 @@ class TrackWidget(BoxLayout):
             # Link the vertical scrolling of the keyboard and the grid so they move together.
             keyboard_sv.bind(scroll_y=lambda instance, value: setattr(grid_sv, 'scroll_y', value))
             grid_sv.bind(scroll_y=lambda instance, value: setattr(keyboard_sv, 'scroll_y', value))
-
-            self.timeline_container = grid_sv # Reference for size updates
 
         else:
             # For non-MIDI tracks (Audio, Automation), we use a simpler layout.
@@ -286,25 +288,26 @@ class TrackWidget(BoxLayout):
         Updates the width of the timeline content based on the total beats and zoom level (pixels_per_beat).
         This is crucial for ensuring the scroll view has the correct scrollable area.
         """
+        if not hasattr(self, 'timeline_container'):
+            return
+
+        # Unified logic for all track types, now that MIDI tracks also use a container.
+        content_width = self.total_beats * self.pixels_per_beat
+        scroll_view_width = self.timeline_scroll.width
+
+        margin_x = scroll_view_width * 0.3
+        min_width = scroll_view_width
+        EPSILON_PIXELS = dp(1)
+        required_width = content_width + margin_x + EPSILON_PIXELS
+        final_width = max(required_width, min_width)
+
+        self.timeline_container.width = final_width
+
+        # Update the underlying grid components with the new parameters.
         if isinstance(self.track, MidiTrack):
-            # For MIDI tracks, the PianoRollViewer handles its own sizing internally.
             self.piano_roll_viewer.total_beats = self.total_beats
             self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
-            self.piano_roll_viewer.width = self.total_beats * self.pixels_per_beat
-        elif hasattr(self, 'timeline_container'):
-            # For other tracks, we calculate the width needed.
-            content_width = self.total_beats * self.pixels_per_beat
-            scroll_view_width = self.timeline_scroll.width
-
-            # We add a margin to the right so the view can scroll past the last beat,
-            # allowing the playhead to be centered even at the very end of the song.
-            margin_x = scroll_view_width * 0.3
-            min_width = scroll_view_width
-            EPSILON_PIXELS = dp(1)
-            required_width = content_width + margin_x + EPSILON_PIXELS
-            final_width = max(required_width, min_width)
-
-            self.timeline_container.width = final_width
+        else:
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
         

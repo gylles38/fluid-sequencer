@@ -54,7 +54,7 @@ class PianoKeyboard(FloatLayout):
         # Add C note labels
         for i in range(128):
             if (i % 12) == 0:
-                octave_num = (i // 12) - 2  # MIDI note 24 is C1, so 0 is C-2
+                octave_num = (i // 12) - 1  # MIDI note 12 is C0, 24 is C1 etc.
                 note_y = self.y + (127 - i) * self.note_height
                 label = Label(
                     text=f"C{octave_num}",

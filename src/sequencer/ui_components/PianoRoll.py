@@ -99,14 +99,17 @@ class PianoRollContent(BoxLayout):
         )
         self.add_widget(self.keyboard)
         self.add_widget(self.grid)
+        self._update_width()
 
-        self.bind(
-            track=self.grid.setter('track'),
-            total_beats=self.grid.setter('total_beats'),
-            pixels_per_beat=self.grid.setter('pixels_per_beat'),
-            total_beats=self._update_width,
-            pixels_per_beat=self._update_width
-        )
+    def on_track(self, instance, value):
+        self.grid.track = value
+
+    def on_total_beats(self, instance, value):
+        self.grid.total_beats = value
+        self._update_width()
+
+    def on_pixels_per_beat(self, instance, value):
+        self.grid.pixels_per_beat = value
         self._update_width()
 
     def _update_width(self, *args):
@@ -134,14 +137,17 @@ class PianoRollViewer(ScrollView):
             note_height=self.note_height
         )
         self.add_widget(self.content)
+        self._update_width()
 
-        self.bind(
-            track=self.content.setter('track'),
-            total_beats=self.content.setter('total_beats'),
-            pixels_per_beat=self.content.setter('pixels_per_beat'),
-            pixels_per_beat=self._update_width,
-            total_beats=self._update_width
-        )
+    def on_track(self, instance, value):
+        self.content.track = value
+
+    def on_total_beats(self, instance, value):
+        self.content.total_beats = value
+        self._update_width()
+
+    def on_pixels_per_beat(self, instance, value):
+        self.content.pixels_per_beat = value
         self._update_width()
 
     def _update_width(self, *args):

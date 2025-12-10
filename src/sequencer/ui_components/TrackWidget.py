@@ -58,26 +58,17 @@ class TrackWidget(BoxLayout):
         self.info_section.add_widget(self.name_label)
         self.add_widget(self.info_section)
 
-        # --- Middle Section: Timeline ---
+        # --- Middle Section: Timeline (Refactored to a flatter structure) ---
         if isinstance(track, MidiTrack):
-            # For MIDI tracks, we use a complex layout with a piano keyboard and a note grid.
-            # The keyboard scrolls vertically, and the grid scrolls vertically and horizontally.
-            # Their vertical scrolling is synchronized.
             note_height = dp(12)
 
-            # Main horizontal layout to hold the keyboard and the grid scrollview
-            timeline_layout = BoxLayout(orientation='horizontal', spacing=0, size_hint_x=1)
-
-            # 1. Keyboard: A vertical scrollview that does not scroll horizontally.
+            # 1. Keyboard (fixed width)
             keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             keyboard_sv.add_widget(self.piano_keyboard)
 
-            # 2. Grid ScrollView: The main horizontal scrollview for the piano roll grid.
+            # 2. Grid ScrollView (expanding)
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
-
-            # 3. Grid Container: A vertically scrolling container for the actual grid content.
-            # This is a custom class that handles drawing the notes and the grid.
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -85,30 +76,22 @@ class TrackWidget(BoxLayout):
                 note_height=note_height
             )
             self.piano_roll_viewer = grid_sv
-            self.measure_grid = grid_sv.grid # Reference to the grid for updates
-
-            # Wrap the PianoRollViewer in a container widget, similar to how audio tracks are handled.
-            # This is crucial for the ScrollView to correctly manage the layout and prevent overlap.
+            self.measure_grid = grid_sv.grid
             self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            # Add the keyboard and grid to the main timeline layout
-            timeline_layout.add_widget(keyboard_sv)
-            timeline_layout.add_widget(self.timeline_scroll)
+            # Add keyboard and timeline directly to the main widget. This avoids nested
+            # layouts with ambiguous size hints, which was the root cause of the bug.
+            self.add_widget(keyboard_sv)
+            self.add_widget(self.timeline_scroll)
 
-            self.add_widget(timeline_layout)
+            # Link vertical scrolling
+            keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
+            grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
 
-            # Link the vertical scrolling of the keyboard and the grid so they move together.
-            keyboard_sv.bind(scroll_y=lambda instance, value: setattr(grid_sv, 'scroll_y', value))
-            grid_sv.bind(scroll_y=lambda instance, value: setattr(keyboard_sv, 'scroll_y', value))
-
-        else:
-            # For non-MIDI tracks (Audio, Automation), we use a simpler layout.
-            # It includes a spacer on the left to align with the MIDI track's piano keyboard.
-            timeline_layout = BoxLayout(orientation='horizontal', spacing=0)
+        else: # Audio and Automation tracks
             keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
-            timeline_layout.add_widget(keyboard_spacer)
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
             self.timeline_container = Widget(size_hint=(None, 1))
@@ -120,8 +103,10 @@ class TrackWidget(BoxLayout):
             )
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
-            timeline_layout.add_widget(self.timeline_scroll)
-            self.add_widget(timeline_layout)
+
+            # Add spacer and timeline directly to the main widget for a consistent flat structure.
+            self.add_widget(keyboard_spacer)
+            self.add_widget(self.timeline_scroll)
 
         # --- Playback Line (Cursor) ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))

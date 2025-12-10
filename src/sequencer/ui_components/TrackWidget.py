@@ -22,7 +22,10 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout = sequencer_layout
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(56)
+        if isinstance(track, MidiTrack):
+            self.height = dp(128)
+        else:
+            self.height = dp(56)
         self.spacing = dp(12)
         self.padding = [dp(12), dp(6), dp(12), dp(6)]
 
@@ -47,22 +50,40 @@ class TrackWidget(BoxLayout):
         self.add_widget(self.info_section)
 
         self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
-        self.timeline_container = Widget(size_hint=(None, 1)) 
-        self.measure_grid = MeasureGrid(
-            size_hint=(1, 1), 
-            beat_per_measure=4, 
-            total_beats=self.total_beats,
-            pixels_per_beat=self.pixels_per_beat
-        )
-        self.timeline_container.add_widget(self.measure_grid)
-        self.event_container = BoxLayout(size_hint=(1, 1), padding=dp(2))
-        self.timeline_container.add_widget(self.event_container)
-        self.playback_line = Widget(size_hint_x=None, width=dp(2), size_hint_y=1)
+
+        if isinstance(track, MidiTrack):
+            self.piano_roll_viewer = PianoRollViewer(
+                track=track,
+                total_beats=self.total_beats,
+                pixels_per_beat=self.pixels_per_beat
+            )
+            self.timeline_container = self.piano_roll_viewer
+            self.measure_grid = self.piano_roll_viewer.content.grid # Reference for updates
+        else:
+            self.timeline_container = Widget(size_hint=(None, 1))
+            self.measure_grid = MeasureGrid(
+                size_hint=(1, 1),
+                beat_per_measure=4,
+                total_beats=self.total_beats,
+                pixels_per_beat=self.pixels_per_beat
+            )
+            self.timeline_container.add_widget(self.measure_grid)
+
+        self.playback_line = Widget(size_hint_x=None, width=dp(2))
         with self.playback_line.canvas:
             Color(1, 0, 0, 0.8)
             self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
         self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
-        self.timeline_container.add_widget(self.playback_line)        
+
+        if isinstance(track, MidiTrack):
+            self.piano_roll_viewer.content.grid.add_widget(self.playback_line)
+            # The playback line is now a widget, Kivy handles the canvas.
+            self.playback_line.size_hint_y = None
+            self.playback_line.height = self.piano_roll_viewer.content.grid.height
+        else:
+            self.timeline_container.add_widget(self.playback_line)
+            self.playback_line.size_hint_y = 1
+
         self.timeline_scroll.add_widget(self.timeline_container)
         self.add_widget(self.timeline_scroll)
 
@@ -208,107 +229,79 @@ class TrackWidget(BoxLayout):
             self.playback_rect.size = self.playback_line.size
 
     def update_timeline_size(self, *args):
-        # Met à jour la largeur du conteneur pour correspondre à la longueur du morceau et au zoom.
         if not self.timeline_container: return
 
-        width = self.total_beats * self.pixels_per_beat
+        if isinstance(self.track, MidiTrack):
+            self.piano_roll_viewer.total_beats = self.total_beats
+            self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
+        else:
+            content_width = self.total_beats * self.pixels_per_beat
+            scroll_view_width = self.timeline_scroll.width
+            margin_x = scroll_view_width * 0.3
+            min_width = scroll_view_width
+            EPSILON_PIXELS = dp(1)
+            required_width = content_width + margin_x + EPSILON_PIXELS
+            final_width = max(required_width, min_width)
+            self.timeline_container.width = final_width
+            self.measure_grid.total_beats = self.total_beats
+            self.measure_grid.pixels_per_beat = self.pixels_per_beat
         
-        scroll_view_width = self.timeline_scroll.width 
-        
-        # Calcul de la marge utilisée pour le centrage (la même que dans set_playback_position)
-        margin_x = scroll_view_width * 0.3 
-
-        # ⚠️ CORRECTION CRITIQUE ⚠️
-        # La largeur minimale du contenu doit inclure la ScrollView width PLUS la marge de fin
-        # pour permettre à la tête de lecture de se centrer sur le dernier beat du morceau.
-        min_width = scroll_view_width 
-        
-        EPSILON_PIXELS = dp(1)
-        # Largeur de la piste + une marge de fin pour que le dernier beat puisse être centré.
-        required_width = width + margin_x + EPSILON_PIXELS
-        
-        # La largeur finale doit être au moins la largeur de la ScrollView ou la largeur requise.
-        final_width = max(required_width, min_width)
-        
-        self.timeline_container.width = final_width
-        
-        # Assurez-vous que le MeasureGrid reçoit les paramètres de mise à jour.
-        self.measure_grid.total_beats = self.total_beats
-        self.measure_grid.pixels_per_beat = self.pixels_per_beat
-        
-        print(f"DEBUG: update_timeline_size width= {width}, margin_x={margin_x}, final_width= {final_width}")
-
     def set_playback_position(self, current_beat: float):
         """Met à jour la tête de lecture et force le défilement si nécessaire."""
         
-        EPSILON_PIXELS = dp(1) 
         pixels_per_beat = self.pixels_per_beat
-        
-        # timeline_width inclut maintenant la marge de fin
-        timeline_width = self.timeline_container.width 
-        scroll_view_width = self.timeline_scroll.width
-        
-        # 1. Mise à jour de la position du curseur
         x_pos = current_beat * pixels_per_beat
+
         if self.playback_line:
-            self.playback_line.x = x_pos 
-            
-        # --- Auto-scroll logic ---
-        # Only perform if currently playing or recording
+            if isinstance(self.track, MidiTrack):
+                 # Position relative to the grid, which is after the keyboard
+                 self.playback_line.x = x_pos
+            else:
+                 self.playback_line.x = x_pos
+
         if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
-            # Vérification des dimensions (si le contenu est plus petit que la ScrollView)
+            EPSILON_PIXELS = dp(1)
+
+            timeline_width = self.timeline_container.width
+            scroll_view_width = self.timeline_scroll.width
+            scroll_view = self.timeline_scroll
+
+            if isinstance(self.track, MidiTrack):
+                # The effective position for scrolling must account for the keyboard
+                effective_x_pos = x_pos + self.piano_roll_viewer.content.keyboard.width
+            else:
+                effective_x_pos = x_pos
+
             if timeline_width <= scroll_view_width + EPSILON_PIXELS:
-                self.timeline_scroll.scroll_x = 0.0
+                scroll_view.scroll_x = 0.0
                 return
 
             margin_x = scroll_view_width * 0.3
+            max_displacement = timeline_width - scroll_view_width + EPSILON_PIXELS
 
-            # ⚠️ CORRECTION CRITIQUE DU DÉPLACEMENT MAXIMAL
-            # Nous ajoutons EPSILON_PIXELS pour s'assurer que le MAX_DISPLACEMENT_PHYSICAL
-            # n'est jamais trop petit à cause des erreurs de flottant, garantissant que scroll_x = 1.0 est atteignable
-            MAX_DISPLACEMENT_PHYSICAL = timeline_width - scroll_view_width + EPSILON_PIXELS
-
-            # -----------------------------------------------------------
-            # CRITIQUE 1 : CORRECTION DU PINNAGE AU DÉPART
-            if x_pos < margin_x:
-                self.timeline_scroll.scroll_x = 0.0
+            if effective_x_pos < margin_x:
+                scroll_view.scroll_x = 0.0
                 return
-            # -----------------------------------------------------------
 
-
-            # --- 2. Logique de Défilement Automatique ---
-
-            # current_scroll_x_pixels doit être calculé avec le nouveau MAX_DISPLACEMENT_PHYSICAL
-            current_scroll_x_pixels = self.timeline_scroll.scroll_x * MAX_DISPLACEMENT_PHYSICAL
+            current_scroll_x_pixels = scroll_view.scroll_x * max_displacement
             new_scroll_x_pixels = -1
 
-            # Cas A: Défilement vers la DROITE
-            if x_pos > current_scroll_x_pixels + scroll_view_width - margin_x:
-                new_scroll_x_pixels = x_pos - (scroll_view_width - margin_x)
+            if effective_x_pos > current_scroll_x_pixels + scroll_view_width - margin_x:
+                new_scroll_x_pixels = effective_x_pos - (scroll_view_width - margin_x)
+            elif effective_x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > EPSILON_PIXELS:
+                new_scroll_x_pixels = effective_x_pos - margin_x
 
-            # Cas B: Défilement vers la GAUCHE
-            elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > EPSILON_PIXELS:
-                new_scroll_x_pixels = x_pos - margin_x
-
-            
             if new_scroll_x_pixels == -1:
                 return
 
-            # -----------------------------------------------------------
-            # CRITIQUE 2 : LIMITE DE FIN DE PISTE
+            new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, max_displacement))
 
-            # Plafonnement des pixels de défilement
-            new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, MAX_DISPLACEMENT_PHYSICAL))
-
-            # Normalisation L->R
-            # ⚠️ Plafonner la division pour éviter l'erreur si MAX_DISPLACEMENT_PHYSICAL est nul ou très proche de zéro
-            if MAX_DISPLACEMENT_PHYSICAL < EPSILON_PIXELS:
+            if max_displacement < EPSILON_PIXELS:
                 normalized_scroll_value = 0.0
             else:
-                normalized_scroll_value = new_scroll_x_pixels / MAX_DISPLACEMENT_PHYSICAL
+                normalized_scroll_value = new_scroll_x_pixels / max_displacement
 
-            # Appliquer le défilement (doit être entre 0.0 et 1.0)
-            self.timeline_scroll.scroll_x = max(0.0, min(1.0, normalized_scroll_value))
+            scroll_view.scroll_x = max(0.0, min(1.0, normalized_scroll_value))
 
 
     def update_grid_parameters(self, total_beats: float, pixels_per_beat: float):

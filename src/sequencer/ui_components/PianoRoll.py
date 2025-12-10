@@ -102,18 +102,22 @@ class PianoRollContent(BoxLayout):
         self._update_width()
 
     def on_track(self, instance, value):
-        self.grid.track = value
+        if hasattr(self, 'grid'):
+            self.grid.track = value
 
     def on_total_beats(self, instance, value):
-        self.grid.total_beats = value
-        self._update_width()
+        if hasattr(self, 'grid'):
+            self.grid.total_beats = value
+            self._update_width()
 
     def on_pixels_per_beat(self, instance, value):
-        self.grid.pixels_per_beat = value
-        self._update_width()
+        if hasattr(self, 'grid'):
+            self.grid.pixels_per_beat = value
+            self._update_width()
 
     def _update_width(self, *args):
-        self.width = self.keyboard.width + self.grid.width
+        if hasattr(self, 'keyboard') and hasattr(self, 'grid'):
+            self.width = self.keyboard.width + self.grid.width
 
 class PianoRollViewer(ScrollView):
     """
@@ -140,15 +144,19 @@ class PianoRollViewer(ScrollView):
         self._update_width()
 
     def on_track(self, instance, value):
-        self.content.track = value
+        if hasattr(self, 'content'):
+            self.content.track = value
 
     def on_total_beats(self, instance, value):
-        self.content.total_beats = value
-        self._update_width()
+        if hasattr(self, 'content'):
+            self.content.total_beats = value
+            self._update_width()
 
     def on_pixels_per_beat(self, instance, value):
-        self.content.pixels_per_beat = value
-        self._update_width()
+        if hasattr(self, 'content'):
+            self.content.pixels_per_beat = value
+            self._update_width()
 
     def _update_width(self, *args):
-        self.width = self.content.width
+        if hasattr(self, 'content'):
+            self.width = self.content.width

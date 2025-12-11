@@ -93,7 +93,7 @@ class Ruler(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.spacing = dp(12)
-        self.padding = [dp(12), 0, dp(12), 0]
+        self.padding = [dp(12), dp(6), dp(12), dp(6)]
 
         self.left_spacer = Widget(size_hint_x=None)
         self.controls_spacer = Widget(size_hint_x=None)

@@ -89,8 +89,7 @@ class PianoRollViewer(ScrollView):
 
     def __init__(self, **kwargs):
         super(PianoRollViewer, self).__init__(**kwargs)
-        # This is the correct hint for a widget that will be scrolled horizontally.
-        # It tells the layout that the width will be set manually.
+        self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
 
@@ -101,6 +100,9 @@ class PianoRollViewer(ScrollView):
             note_height=self.note_height
         )
         self.add_widget(self.grid)
+
+        # Bind this viewer's width to the grid's width ("content-out" sizing)
+        self.grid.bind(width=self.setter('width'))
 
     def on_track(self, instance, value):
         if hasattr(self, 'grid'):

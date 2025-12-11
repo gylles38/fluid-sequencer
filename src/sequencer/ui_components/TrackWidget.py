@@ -72,7 +72,6 @@ class TrackWidget(BoxLayout):
             self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
-                # No size_hint_x=None here. Let it fill the container.
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat,
                 note_height=note_height
@@ -80,11 +79,13 @@ class TrackWidget(BoxLayout):
             self.piano_roll_viewer = grid_sv
             self.measure_grid = grid_sv.grid
 
-            # A ScrollView must have a single child. We restore the container.
+            # A ScrollView must have a single child.
             self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
-            # No binding needed. The update_timeline_size method handles the container's width,
-            # and the grid_sv will fill it automatically.
+
+            # Bind the container's width to the viewer's width.
+            grid_sv.bind(width=self.timeline_container.setter('width'))
+
             self.timeline_scroll.add_widget(self.timeline_container)
 
             self.add_widget(keyboard_sv)
@@ -280,16 +281,17 @@ class TrackWidget(BoxLayout):
         if not hasattr(self, 'timeline_container'):
             return
 
-        content_width = self.total_beats * self.pixels_per_beat
-        self.timeline_container.width = content_width
-
-        # Update the underlying grid components with the new parameters.
+        # For MIDI tracks, the width is now controlled by the content ("content-out").
+        # We just need to pass the new parameters down to the PianoRollViewer,
+        # which will trigger the chain of width updates.
         if isinstance(self.track, MidiTrack):
-            # The PianoRollViewer is a ScrollView, its content (the grid) will size itself.
-            # We just need to pass the parameters down.
             self.piano_roll_viewer.total_beats = self.total_beats
             self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
         else:
+            # For other track types, we still use the "top-down" sizing model.
+            content_width = self.total_beats * self.pixels_per_beat
+            self.timeline_container.width = content_width
+
             # The MeasureGrid is not a layout, so it doesn't automatically resize its canvas.
             # We must explicitly tell it to redraw by passing down the parameters.
             self.measure_grid.total_beats = self.total_beats

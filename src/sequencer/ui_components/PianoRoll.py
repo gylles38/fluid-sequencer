@@ -89,7 +89,9 @@ class PianoRollViewer(ScrollView):
 
     def __init__(self, **kwargs):
         super(PianoRollViewer, self).__init__(**kwargs)
-        self.size_hint = (None, 1)
+        # size_hint_x=1 is critical: it tells the widget to fill its parent's width.
+        # The previous value of `None` was causing the layout ambiguity.
+        self.size_hint = (1, 1)
         self.do_scroll_x = False
         self.do_scroll_y = True
 
@@ -100,7 +102,11 @@ class PianoRollViewer(ScrollView):
             note_height=self.note_height
         )
         self.add_widget(self.grid)
-        self.bind(width=self.grid.setter('width'))
+        # The following binding was incorrect. It was forcing the grid's total width
+        # to be the same as the visible scrollview width, which is why the piano roll
+        # appeared truncated. The PianoRoll widget itself correctly calculates its
+        # own width based on total_beats and pixels_per_beat.
+        # self.bind(width=self.grid.setter('width'))
 
     def on_track(self, instance, value):
         if hasattr(self, 'grid'):

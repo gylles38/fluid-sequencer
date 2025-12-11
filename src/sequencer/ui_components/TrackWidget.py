@@ -91,6 +91,9 @@ class TrackWidget(BoxLayout):
             self.measure_grid = grid_sv.grid
             self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
+            # This binding is the final key: it ensures the PianoRollViewer's canvas
+            # resizes to fill its container, fixing the visual bug.
+            self.timeline_container.bind(width=grid_sv.setter('width'))
             self.timeline_scroll.add_widget(self.timeline_container)
 
             # Add keyboard and timeline directly to the main widget. This avoids nested

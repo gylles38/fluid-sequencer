@@ -89,15 +89,8 @@ class TrackWidget(BoxLayout):
             )
             self.piano_roll_viewer = grid_sv
             self.measure_grid = grid_sv.grid
-            self.timeline_container = Widget(size_hint=(None, 1))
-            self.timeline_container.add_widget(grid_sv)
-            # This binding is the final key: it ensures the PianoRollViewer's canvas
-            # resizes to fill its container, fixing the visual bug.
-            self.timeline_container.bind(width=grid_sv.setter('width'))
-            self.timeline_scroll.add_widget(self.timeline_container)
+            self.timeline_scroll.add_widget(grid_sv)
 
-            # Add keyboard and timeline directly to the main widget. This avoids nested
-            # layouts with ambiguous size hints, which was the root cause of the bug.
             self.add_widget(keyboard_sv)
             self.add_widget(self.timeline_scroll)
 
@@ -107,19 +100,15 @@ class TrackWidget(BoxLayout):
 
         else: # Audio and Automation tracks
             keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
-
             self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
-            self.timeline_container = Widget(size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
-                size_hint=(1, 1),
+                size_hint=(None, 1), # Use None for width to allow manual setting
                 beat_per_measure=4,
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat
             )
-            self.timeline_container.add_widget(self.measure_grid)
-            self.timeline_scroll.add_widget(self.timeline_container)
+            self.timeline_scroll.add_widget(self.measure_grid)
 
-            # Add spacer and timeline directly to the main widget for a consistent flat structure.
             self.add_widget(keyboard_spacer)
             self.add_widget(self.timeline_scroll)
 
@@ -288,30 +277,20 @@ class TrackWidget(BoxLayout):
         Updates the width of the timeline content based on the total beats and zoom level (pixels_per_beat).
         This is crucial for ensuring the scroll view has the correct scrollable area.
         """
-        if not hasattr(self, 'timeline_container'):
-            return
-
-        # Unified logic for all track types, now that MIDI tracks also use a container.
         content_width = self.total_beats * self.pixels_per_beat
-        scroll_view_width = self.timeline_scroll.width
 
-        margin_x = scroll_view_width * 0.3
-        min_width = scroll_view_width
-        EPSILON_PIXELS = dp(1)
-        required_width = content_width + margin_x + EPSILON_PIXELS
-        final_width = max(required_width, min_width)
-
-        self.timeline_container.width = final_width
-
-        # Update the underlying grid components with the new parameters AND width.
+        # Explicitly set the width of the scrollable content. This is the key
+        # to fixing the visual bug where only one measure was visible.
         if isinstance(self.track, MidiTrack):
-            self.piano_roll_viewer.total_beats = self.total_beats
-            self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
+            if hasattr(self, 'piano_roll_viewer'):
+                self.piano_roll_viewer.width = content_width
+                self.piano_roll_viewer.total_beats = self.total_beats
+                self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
         else:
-            # For other tracks, the MeasureGrid is inside the container and likely fills it,
-            # but we still need to tell it about the new parameters so it can redraw its lines.
-            self.measure_grid.total_beats = self.total_beats
-            self.measure_grid.pixels_per_beat = self.pixels_per_beat
+            if hasattr(self, 'measure_grid'):
+                self.measure_grid.width = content_width
+                self.measure_grid.total_beats = self.total_beats
+                self.measure_grid.pixels_per_beat = self.pixels_per_beat
         
     def set_playback_position(self, current_beat: float):
         """

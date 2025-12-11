@@ -104,7 +104,6 @@ class Ruler(BoxLayout):
             size_hint=(None, 1)
         )
         self.scroll_view.add_widget(self.ruler_content)
-        self.right_spacer = Widget(size_hint_x=None)
 
         # Nested layout for keyboard and ruler content to remove spacing between them
         timeline_layout = BoxLayout(
@@ -116,14 +115,16 @@ class Ruler(BoxLayout):
         timeline_layout.add_widget(self.keyboard_spacer)
         timeline_layout.add_widget(self.scroll_view)
 
+        self.controls_spacer = Widget(size_hint_x=None)
+
         self.add_widget(self.left_spacer)
+        self.add_widget(self.controls_spacer)
         self.add_widget(timeline_layout)
-        self.add_widget(self.right_spacer)
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
-        self.bind(controls_width=lambda i, v: setattr(self.right_spacer, 'width', v))
+        self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
-        self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v)) # Bind new property
+        self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
 
     def redraw(self, *args):
         if self.sequencer_layout and self.sequencer_layout.track_widgets:

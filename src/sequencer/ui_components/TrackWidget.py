@@ -10,6 +10,18 @@ from sequencer.ui_components.MeasureGrid import MeasureGrid
 from .PianoRoll import PianoRollViewer
 from .PianoKeyboard import PianoKeyboard
 
+
+class BoundedScrollView(ScrollView):
+    """
+    A ScrollView that only handles touch events that occur within its actual bounds.
+    This prevents it from 'stealing' touch events from sibling widgets, which was
+    the root cause of the unclickable controls bug.
+    """
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            return super(BoundedScrollView, self).on_touch_down(touch)
+        return False
+
 class TrackWidget(BoxLayout):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
@@ -63,12 +75,12 @@ class TrackWidget(BoxLayout):
             note_height = dp(12)
 
             # 1. Keyboard (fixed width)
-            keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
+            keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Grid ScrollView (expanding)
-            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -93,7 +105,7 @@ class TrackWidget(BoxLayout):
         else: # Audio and Automation tracks
             keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
 
-            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
             self.timeline_container = Widget(size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1),
@@ -292,9 +304,6 @@ class TrackWidget(BoxLayout):
         if isinstance(self.track, MidiTrack):
             self.piano_roll_viewer.total_beats = self.total_beats
             self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
-            # This is the critical missing part: the PianoRollViewer itself needs its width set
-            # so its internal grid can be drawn correctly across the full song length.
-            self.piano_roll_viewer.width = content_width
         else:
             # For other tracks, the MeasureGrid is inside the container and likely fills it,
             # but we still need to tell it about the new parameters so it can redraw its lines.

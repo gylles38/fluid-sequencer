@@ -96,7 +96,8 @@ class Ruler(BoxLayout):
         self.padding = [dp(12), 0, dp(12), 0]
 
         self.left_spacer = Widget(size_hint_x=None)
-        self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width) # Keyboard spacer
+        self.controls_spacer = Widget(size_hint_x=None)
+        self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
@@ -105,21 +106,11 @@ class Ruler(BoxLayout):
         )
         self.scroll_view.add_widget(self.ruler_content)
 
-        # Nested layout for keyboard and ruler content to remove spacing between them
-        timeline_layout = BoxLayout(
-            orientation='horizontal',
-            spacing=0,
-            padding=[0,0,0,0],
-            size_hint_x=1
-        )
-        timeline_layout.add_widget(self.keyboard_spacer)
-        timeline_layout.add_widget(self.scroll_view)
-
-        self.controls_spacer = Widget(size_hint_x=None)
-
+        # Add widgets directly to the main layout to mirror TrackWidget structure
         self.add_widget(self.left_spacer)
         self.add_widget(self.controls_spacer)
-        self.add_widget(timeline_layout)
+        self.add_widget(self.keyboard_spacer)
+        self.add_widget(self.scroll_view)
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))

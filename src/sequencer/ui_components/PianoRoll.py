@@ -91,7 +91,6 @@ class PianoRollViewer(ScrollView):
         super(PianoRollViewer, self).__init__(**kwargs)
         # This is the correct hint for a widget that will be scrolled horizontally.
         # It tells the layout that the width will be set manually.
-        self.size_hint = (None, 1)
         self.do_scroll_x = False
         self.do_scroll_y = True
 

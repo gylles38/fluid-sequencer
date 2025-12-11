@@ -11,17 +11,6 @@ from .PianoRoll import PianoRollViewer
 from .PianoKeyboard import PianoKeyboard
 
 
-class BoundedScrollView(ScrollView):
-    """
-    A ScrollView that only handles touch events that occur within its actual bounds.
-    This prevents it from 'stealing' touch events from sibling widgets, which was
-    the root cause of the unclickable controls bug.
-    """
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            return super(BoundedScrollView, self).on_touch_down(touch)
-        return False
-
 class TrackWidget(BoxLayout):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
@@ -83,6 +72,7 @@ class TrackWidget(BoxLayout):
             self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
+                # No size_hint_x=None here. Let it fill the container.
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat,
                 note_height=note_height
@@ -93,7 +83,8 @@ class TrackWidget(BoxLayout):
             # A ScrollView must have a single child. We restore the container.
             self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
-            self.timeline_container.bind(width=grid_sv.setter('width'))
+            # No binding needed. The update_timeline_size method handles the container's width,
+            # and the grid_sv will fill it automatically.
             self.timeline_scroll.add_widget(self.timeline_container)
 
             self.add_widget(keyboard_sv)

@@ -59,80 +59,7 @@ class TrackWidget(BoxLayout):
         self.info_section.add_widget(self.name_label)
         self.add_widget(self.info_section)
 
-        # --- Middle Section: Timeline (Refactored to a flatter structure) ---
-        if isinstance(track, MidiTrack):
-            note_height = dp(12)
-
-            # 1. Keyboard (fixed width)
-            keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
-            self.piano_keyboard = PianoKeyboard(note_height=note_height)
-            keyboard_sv.add_widget(self.piano_keyboard)
-
-            # 2. Grid ScrollView (expanding)
-            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
-            grid_sv = PianoRollViewer(
-                track=track,
-                total_beats=self.total_beats,
-                pixels_per_beat=self.pixels_per_beat,
-                note_height=note_height
-            )
-            self.piano_roll_viewer = grid_sv
-            self.measure_grid = grid_sv.grid
-
-            # A ScrollView must have a single child.
-            self.timeline_container = Widget(size_hint=(None, 1))
-            self.timeline_container.add_widget(grid_sv)
-
-            # Bind the container's width to the viewer's width.
-            grid_sv.bind(width=self.timeline_container.setter('width'))
-
-            self.timeline_scroll.add_widget(self.timeline_container)
-
-            self.add_widget(keyboard_sv)
-            self.add_widget(self.timeline_scroll)
-
-            # Link vertical scrolling
-            keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
-            grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
-
-        else: # Audio and Automation tracks
-            keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
-            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
-
-            # A ScrollView must have a single child. We restore the container.
-            self.timeline_container = Widget(size_hint=(None, 1))
-            self.measure_grid = MeasureGrid(
-                size_hint=(1, 1), # The grid itself can fill the container
-                beat_per_measure=4,
-                total_beats=self.total_beats,
-                pixels_per_beat=self.pixels_per_beat
-            )
-            self.timeline_container.add_widget(self.measure_grid)
-            self.timeline_scroll.add_widget(self.timeline_container)
-
-            self.add_widget(keyboard_spacer)
-            self.add_widget(self.timeline_scroll)
-
-        # --- Playback Line (Cursor) ---
-        self.playback_line = Widget(size_hint_x=None, width=dp(2))
-        with self.playback_line.canvas:
-            Color(1, 0, 0, 0.8)
-            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
-        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
-
-        # The playback line is added to the timeline_container, which exists for all track types.
-        if isinstance(track, MidiTrack):
-            self.timeline_container.add_widget(self.playback_line)
-            self.playback_line.size_hint_y = None
-            self.playback_line.height = self.piano_roll_viewer.grid.height
-        else:
-            self.timeline_container.add_widget(self.playback_line)
-            self.playback_line.size_hint_y = 1
-
-        self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
-        self.update_timeline_size()
-
-        # --- Right Section: Controls ---
+        # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
 
         # --- Track Type Icon ---
@@ -261,6 +188,79 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(pan_layout)
 
         self.add_widget(self.controls_section)
+
+        # --- Right Section: Timeline ---
+        if isinstance(track, MidiTrack):
+            note_height = dp(12)
+
+            # 1. Keyboard (fixed width)
+            keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
+            self.piano_keyboard = PianoKeyboard(note_height=note_height)
+            keyboard_sv.add_widget(self.piano_keyboard)
+
+            # 2. Grid ScrollView (expanding)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+            grid_sv = PianoRollViewer(
+                track=track,
+                total_beats=self.total_beats,
+                pixels_per_beat=self.pixels_per_beat,
+                note_height=note_height
+            )
+            self.piano_roll_viewer = grid_sv
+            self.measure_grid = grid_sv.grid
+
+            # A ScrollView must have a single child.
+            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container.add_widget(grid_sv)
+
+            # Bind the container's width to the viewer's width.
+            grid_sv.bind(width=self.timeline_container.setter('width'))
+
+            self.timeline_scroll.add_widget(self.timeline_container)
+
+            self.add_widget(keyboard_sv)
+            self.add_widget(self.timeline_scroll)
+
+            # Link vertical scrolling
+            keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
+            grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+
+        else: # Audio and Automation tracks
+            keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+
+            # A ScrollView must have a single child. We restore the container.
+            self.timeline_container = Widget(size_hint=(None, 1))
+            self.measure_grid = MeasureGrid(
+                size_hint=(1, 1), # The grid itself can fill the container
+                beat_per_measure=4,
+                total_beats=self.total_beats,
+                pixels_per_beat=self.pixels_per_beat
+            )
+            self.timeline_container.add_widget(self.measure_grid)
+            self.timeline_scroll.add_widget(self.timeline_container)
+
+            self.add_widget(keyboard_spacer)
+            self.add_widget(self.timeline_scroll)
+
+        # --- Playback Line (Cursor) ---
+        self.playback_line = Widget(size_hint_x=None, width=dp(2))
+        with self.playback_line.canvas:
+            Color(1, 0, 0, 0.8)
+            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
+        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
+
+        # The playback line is added to the timeline_container, which exists for all track types.
+        if isinstance(track, MidiTrack):
+            self.timeline_container.add_widget(self.playback_line)
+            self.playback_line.size_hint_y = None
+            self.playback_line.height = self.piano_roll_viewer.grid.height
+        else:
+            self.timeline_container.add_widget(self.playback_line)
+            self.playback_line.size_hint_y = 1
+
+        self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
+        self.update_timeline_size()
 
         self.track.bind(is_solo=self.on_solo_changed)
 

@@ -35,7 +35,7 @@ class TrackWidget(BoxLayout):
         else:
             self.height = dp(112)
         self.spacing = dp(12)
-        self.padding = [dp(12), dp(6), dp(12), dp(6)]
+        self.padding = [dp(12), 0, dp(12), 0]
 
         # --- Canvas Background ---
         with self.canvas.before:
@@ -116,7 +116,7 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=dp(2))
+        volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
         mute_button_container = BoxLayout(size_hint_y=None, height=dp(30), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
@@ -138,7 +138,7 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(volume_layout)
 
         # --- Pan Controls ---
-        pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=dp(2))
+        pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
         pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
         pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})

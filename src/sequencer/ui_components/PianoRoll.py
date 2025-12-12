@@ -47,11 +47,18 @@ class PianoRoll(FloatLayout):
 
             # --- Grid ---
             for i in range(128):
-                note_y = self.y + i * self.note_height
-                if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1)
-                else: Color(0.2, 0.2, 0.22, 1)
-                width = 1.1 if (i % 12) in [4, 11] else 0.6
-                Line(points=[self.x, note_y, self.x + self.width, note_y], width=width)
+                # Invert the y-coordinate for the grid lines
+                note_y = self.y + (127 - i) * self.note_height
+                if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1) # Black keys
+                else: Color(0.2, 0.2, 0.22, 1) # White keys
+
+                # Draw horizontal lines for note separation
+                Line(points=[self.x, note_y, self.x + self.width, note_y], width=0.6)
+
+                # Draw thicker lines to mark octaves (after B notes)
+                if (i % 12) == 11:
+                    Color(0.8, 0.8, 0.8, 0.6)
+                    Line(points=[self.x, note_y, self.x + self.width, note_y], width=1.2)
 
             current_beat = 0
             while current_beat < self.total_beats:
@@ -70,7 +77,7 @@ class PianoRoll(FloatLayout):
                 for event in self.track.events:
                     for note in event.notes:
                         note_x = event.start_time * self.pixels_per_beat
-                        note_y = self.y + note.pitch * self.note_height
+                        note_y = self.y + (127 - note.pitch) * self.note_height
                         note_width = note.duration * self.pixels_per_beat
 
                         Color(*self._velocity_to_color(note.velocity))

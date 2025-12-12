@@ -32,10 +32,8 @@ class TrackWidget(BoxLayout):
         self.size_hint_y = None
         if isinstance(track, MidiTrack):
             self.height = dp(128)
-        elif isinstance(track, AudioTrack):
-            self.height = dp(112)
         else:
-            self.height = dp(56)
+            self.height = dp(112)
         self.spacing = dp(12)
         self.padding = [dp(12), dp(6), dp(12), dp(6)]
 
@@ -90,25 +88,27 @@ class TrackWidget(BoxLayout):
 
         # --- MIDI Specific Controls (Channel, Program) ---
         midi_controls_layout = BoxLayout(
-            size_hint_x=None, 
-            width=dp(260),
-            spacing=dp(8),
+            orientation='vertical',
+            size_hint_x=None,
+            width=dp(130),
+            spacing=dp(4),
             pos_hint={'center_y': 0.5}
         )
 
         if isinstance(track, MidiTrack):
-            channel_container = BoxLayout(orientation='horizontal', spacing=dp(4))
-            channel_label = Label(text='Channel:', size_hint_x=None, width=dp(42), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
+            channel_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            channel_label = Label(text='Ch:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             channel_container.add_widget(channel_label)
-            channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change, height=dp(32))
+            channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change)
             channel_container.add_widget(channel_spinner)
-            midi_controls_layout.add_widget(channel_container)
 
-            program_container = BoxLayout(orientation='horizontal', spacing=dp(4))
-            program_label = Label(text='Program:', size_hint_x=None, width=dp(42), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
+            program_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            program_label = Label(text='Prg:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             program_container.add_widget(program_label)
-            program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change, height=dp(32))
+            program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change)
             program_container.add_widget(program_spinner)
+
+            midi_controls_layout.add_widget(channel_container)
             midi_controls_layout.add_widget(program_container)
         else:
             midi_controls_layout.add_widget(Widget())
@@ -116,34 +116,33 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(8), pos_hint={'center_y': 0.5})
+        volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=dp(4))
         self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
             on_press=self.on_mute_toggle,
-            pos_hint={'center_y': 0.5},
-            theme_icon_color="Custom",
-            icon_color=[1, 0.6, 0, 1] if not track.is_muted else [0.8, 0.3, 0, 1],
-            md_bg_color=[0.3, 0.2, 0.1, 0.8] if not track.is_muted else [0.4, 0.2, 0.1, 0.8]
+            pos_hint={'center_x': 0.5},
         )
+        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(18), color=[0.9, 0.9, 0.9, 1], font_size=dp(11))
+        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1)
+
         volume_layout.add_widget(self.mute_button)
-        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=dp(35), color=[0.9, 0.9, 0.9, 1], font_size=dp(12), halign='center')
-        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, size_hint_x=1, pos_hint={'center_y': 0.5})
-        self.volume_slider.bind(value=self.on_volume_change)
-        self.track.bind(volume=self.on_track_volume_changed)
         volume_layout.add_widget(self.volume_label)
         volume_layout.add_widget(self.volume_slider)
+        self.volume_slider.bind(value=self.on_volume_change)
+        self.track.bind(volume=self.on_track_volume_changed)
         self.controls_section.add_widget(volume_layout)
 
         # --- Pan Controls ---
-        pan_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(8), pos_hint={'center_y': 0.5})
-        pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_y': 0.5}, font_size=dp(18))
+        pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=dp(4))
+        pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5})
+        self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(18), color=[0.9, 0.9, 0.9, 1], font_size=dp(11))
+        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1)
+
         pan_layout.add_widget(pan_icon)
-        self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_x=None, width=dp(35), color=[0.9, 0.9, 0.9, 1], font_size=dp(12), halign='center')
-        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, size_hint_x=1, pos_hint={'center_y': 0.5})
-        self.pan_slider.bind(value=self.on_pan_change)
         pan_layout.add_widget(self.pan_label)
         pan_layout.add_widget(self.pan_slider)
+        self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
         self.add_widget(self.controls_section)

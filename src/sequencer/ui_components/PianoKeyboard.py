@@ -59,8 +59,11 @@ class PianoKeyboard(FloatLayout):
                 label = Label(
                     text=f"C{octave_num}",
                     font_size=dp(9),
-                    color=(0, 0, 0, 1),
-                    center_x=self.center_x,
-                    center_y=note_y + self.note_height / 2,
+                    color=(0,0,0,1),
+                    pos=(self.x, note_y),
+                    size=(self.width, self.note_height),
+                    halign='center',
+                    valign='middle',
+                    text_size=(self.width, self.note_height)
                 )
                 self.add_widget(label)

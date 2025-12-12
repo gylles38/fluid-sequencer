@@ -32,6 +32,8 @@ class TrackWidget(BoxLayout):
         self.size_hint_y = None
         if isinstance(track, MidiTrack):
             self.height = dp(128)
+        elif isinstance(track, AudioTrack):
+            self.height = dp(112)
         else:
             self.height = dp(56)
         self.spacing = dp(12)

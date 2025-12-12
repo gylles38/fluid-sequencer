@@ -2468,8 +2468,10 @@ class Sequencer(EventDispatcher):
                         if pending_first_note:
                             msg = pending_first_note
                             if msg.note not in open_notes:
-                                open_notes[msg.note] = (current_beat, msg.velocity)
-                                print(f"Note ON: {msg.note} à {self._format_beats_to_position(current_beat)}")
+                                # Correction: Utiliser le temps de départ le plus précis possible
+                                note_start_time = recording_start_beat if recording_start_beat is not None else current_beat
+                                open_notes[msg.note] = (note_start_time, msg.velocity)
+                                print(f"Note ON: {msg.note} à {self._format_beats_to_position(note_start_time)}")
                                 if outport and enable_thru:
                                     outport.send(msg.copy(channel=target_track.channel))
                             pending_first_note = None

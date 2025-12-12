@@ -91,8 +91,7 @@ class TrackWidget(BoxLayout):
             orientation='vertical',
             size_hint_x=None,
             width=dp(130),
-            spacing=dp(4),
-            pos_hint={'center_y': 0.5}
+            spacing=dp(4)
         )
 
         if isinstance(track, MidiTrack):
@@ -108,8 +107,10 @@ class TrackWidget(BoxLayout):
             program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change)
             program_container.add_widget(program_spinner)
 
+            midi_controls_layout.add_widget(Widget()) # Top spacer
             midi_controls_layout.add_widget(channel_container)
             midi_controls_layout.add_widget(program_container)
+            midi_controls_layout.add_widget(Widget()) # Bottom spacer
         else:
             midi_controls_layout.add_widget(Widget())
             

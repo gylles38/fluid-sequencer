@@ -62,40 +62,6 @@ class TrackWidget(BoxLayout):
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
 
-        # --- Track Type Icon ---
-        type_icon_layout = BoxLayout(
-            size_hint_x=None,
-            width=dp(44),
-            pos_hint={'center_y': 0.5},
-            padding=dp(4)
-        )
-        
-        track_type_icon = "help-circle"
-        track_type_color = [0.5, 0.5, 0.5, 1]
-        bg_color = [0.2, 0.2, 0.2, 1]
-        
-        if isinstance(track, MidiTrack):
-            track_type_icon = "midi"
-            track_type_color = [0.3, 0.5, 0.9, 1]
-            bg_color = [0.2, 0.3, 0.4, 0.3]
-        elif isinstance(track, AudioTrack):
-            track_type_icon = "waveform"
-            track_type_color = [0.9, 0.5, 0.2, 1]
-            bg_color = [0.4, 0.3, 0.2, 0.3]
-        elif isinstance(track, AutomationTrack):
-            track_type_icon = "chart-line"
-            track_type_color = [0.2, 0.8, 0.8, 1]
-            bg_color = [0.2, 0.4, 0.4, 0.3]
-
-        with type_icon_layout.canvas.before:
-            Color(*bg_color)
-            self.type_bg_rect = Rectangle(pos=type_icon_layout.pos, size=type_icon_layout.size)
-            Color(0.4, 0.4, 0.4, 0.5)
-            self.type_border_rect = Line(rectangle=[type_icon_layout.x, type_icon_layout.y, 
-                                                   type_icon_layout.width, type_icon_layout.height], width=1)
-
-        type_icon_layout.bind(pos=self._update_type_icon_bg, size=self._update_type_icon_bg)
-
         if isinstance(track, MidiTrack):
             self.record_mode_button = ThreeStateRecordButton(
                 track=track,
@@ -105,17 +71,8 @@ class TrackWidget(BoxLayout):
             )
             self.controls_section.add_widget(self.record_mode_button)
         else:
+            # Add a spacer to maintain alignment with MIDI tracks that have a record button
             self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
-
-        type_icon = MDIcon(
-            icon=track_type_icon,
-            theme_text_color="Custom",
-            text_color=track_type_color,
-            pos_hint={'center_x': 0.5, 'center_y': 0.5},
-            font_size=dp(20)
-        )
-        type_icon_layout.add_widget(type_icon)
-        self.controls_section.add_widget(type_icon_layout)
 
         # --- Solo Button ---
         self.solo_button = TooltipMDIconButton(
@@ -225,11 +182,37 @@ class TrackWidget(BoxLayout):
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
             grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
 
-        else: # Audio and Automation tracks
-            keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
+        else:  # Audio and Automation tracks
+            # Create a layout for the track type icon, replacing the old spacer
+            icon_layout = BoxLayout(
+                size_hint_x=None,
+                width=dp(40),
+                orientation='vertical',
+                pos_hint={'center_y': 0.5}
+            )
+
+            track_type_icon = "help-circle"
+            track_type_color = [0.5, 0.5, 0.5, 1]
+
+            if isinstance(track, AudioTrack):
+                track_type_icon = "waveform"
+                track_type_color = [0.9, 0.5, 0.2, 1]
+            elif isinstance(track, AutomationTrack):
+                track_type_icon = "chart-line"
+                track_type_color = [0.2, 0.8, 0.8, 1]
+
+            icon = MDIcon(
+                icon=track_type_icon,
+                theme_text_color="Custom",
+                text_color=track_type_color,
+                halign='center',
+                valign='center'
+            )
+            icon_layout.add_widget(icon)
+
             self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
 
-            # A ScrollView must have a single child. We restore the container.
+            # A ScrollView must have a single child.
             self.timeline_container = Widget(size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1), # The grid itself can fill the container
@@ -240,7 +223,7 @@ class TrackWidget(BoxLayout):
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(keyboard_spacer)
+            self.add_widget(icon_layout)
             self.add_widget(self.timeline_scroll)
 
         # --- Playback Line (Cursor) ---

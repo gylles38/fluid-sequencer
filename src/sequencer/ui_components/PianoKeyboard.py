@@ -28,8 +28,8 @@ class PianoKeyboard(FloatLayout):
         self.canvas.before.clear()
         self.clear_widgets()
 
-        # Vertical offset to correct the display by one semitone
-        y_offset = -self.note_height
+        # Vertical offset to center the keyboard on the note lines (half a semitone)
+        y_offset = self.note_height / 2
 
         with self.canvas.before:
             # Draw white keys

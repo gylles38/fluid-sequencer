@@ -1,9 +1,9 @@
 from . import *  # Importe tous les imports communs
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
-from kivy.uix.widget import Widget 
 from kivy.uix.label import Label 
 from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
@@ -21,7 +21,7 @@ class TrackWidget(BoxLayout):
     pixels_per_beat = NumericProperty(dp(100))
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
-    controls_width = NumericProperty(dp(832))
+    controls_width = NumericProperty(dp(350))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs):
         super(TrackWidget, self).__init__(**kwargs)
@@ -177,7 +177,7 @@ class TrackWidget(BoxLayout):
             self.measure_grid = grid_sv.grid
 
             # A ScrollView must have a single child.
-            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container = FloatLayout(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
 
             # Bind the container's width to the viewer's width.
@@ -191,6 +191,30 @@ class TrackWidget(BoxLayout):
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
             grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+
+            # Center the view on C4 by default
+            def set_default_scroll(dt):
+                # MIDI note for C4 is 60. Total notes are 128.
+                # ScrollY is from 0 (bottom) to 1 (top).
+                # To center on C4, we want C4 to be at the middle of the viewport.
+                # The total height is 128 * note_height.
+                # The position of C4 is 60 * note_height.
+                # The visible height is self.height.
+                # We want to scroll to (60 * note_height) - (self.height / 2)
+                # Normalize this value.
+                total_height = 128 * note_height
+                scroll_pos_pixels = (60 * note_height) - (self.height / 2)
+
+                # The maximum scroll value in pixels is the total content height minus the viewport height
+                max_scroll_pixels = total_height - self.height
+
+                if max_scroll_pixels > 0:
+                    normalized_scroll = scroll_pos_pixels / max_scroll_pixels
+                    # Clamp the value between 0 and 1
+                    grid_sv.scroll_y = max(0.0, min(1.0, normalized_scroll))
+
+
+            Clock.schedule_once(set_default_scroll)
 
         else:  # Audio and Automation tracks
             # Create a layout for the track type icon, replacing the old spacer

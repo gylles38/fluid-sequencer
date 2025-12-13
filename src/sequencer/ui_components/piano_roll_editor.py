@@ -265,7 +265,6 @@ Builder.load_string("""
                     id: piano_keyboard
                     size_hint: (None, None)
                     width: self.parent.width
-                    height: grid_viewer.grid.height
                     note_height: root.note_height
 
             BoundedScrollView:
@@ -391,6 +390,10 @@ class PianoRollEditor(ModalView):
 
         keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_viewer, 'scroll_y', v))
         grid_viewer.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+
+        # Programmatically bind the keyboard's height to the grid's height
+        self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
+        self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
 
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)

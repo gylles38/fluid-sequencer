@@ -10,7 +10,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.metrics import dp
 from kivy.clock import Clock
 import copy
-from sequencer.models import Event, Note
+from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 
@@ -302,7 +302,19 @@ class PianoRollEditor(ModalView):
 
     def __init__(self, **kwargs):
         super(PianoRollEditor, self).__init__(**kwargs)
-        self.track_copy = copy.deepcopy(self.track)
+
+        # Manual deep copy of the track to avoid Kivy's EventDispatcher issues
+        self.track_copy = MidiTrack(
+            name=self.track.name,
+            channel=self.track.channel,
+            instrument=self.track.instrument,
+            is_muted=self.track.is_muted,
+            is_solo=self.track.is_solo,
+            volume=self.track.volume,
+            pan=self.track.pan,
+            events=copy.deepcopy(self.track.events) # Deepcopy only the event data
+        )
+
         self.total_beats = self.sequencer_layout.sequencer.song.get_total_beats()
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)

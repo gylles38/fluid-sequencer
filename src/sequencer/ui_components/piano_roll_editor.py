@@ -274,7 +274,7 @@ Builder.load_string("""
             id: main_content
             orientation: 'horizontal'
 
-            BoundedScrollView:
+            ScrollView:
                 id: keyboard_sv
                 size_hint_x: None
                 width: dp(60)
@@ -286,7 +286,7 @@ Builder.load_string("""
                     width: self.parent.width
                     note_height: root.note_height
 
-            BoundedScrollView:
+            ScrollView:
                 id: timeline_scroll
                 do_scroll_y: False
 

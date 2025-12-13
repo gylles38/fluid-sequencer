@@ -66,6 +66,7 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = event
                         self._drag_mode = 'resize'
                         self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+                        touch.grab(self)
                         return True
 
                     elif note_x <= local_pos[0] <= note_x + note_width and \
@@ -74,6 +75,7 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = event
                         self._drag_mode = 'move'
                         self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+                        touch.grab(self)
                         return True
 
         quantized_beat = round(clicked_beat)
@@ -132,13 +134,14 @@ class EditableMidiGrid(PianoRoll):
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
     def on_touch_up(self, touch):
-        if self._dragged_note:
+        if self._dragged_note and touch.grab_current is self:
             if self._drag_mode == 'move':
                 self.editor.track_copy.events.sort(key=lambda e: e.start_time)
 
             self._dragged_note = None
             self._drag_event = None
             self._drag_mode = None
+            touch.ungrab(self)
             return True
         return super(EditableMidiGrid, self).on_touch_up(touch)
 

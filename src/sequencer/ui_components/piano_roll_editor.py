@@ -162,6 +162,13 @@ class EditablePianoRollViewer(ScrollView):
         self.add_widget(self.grid)
         self.grid.bind(width=self.setter('width'))
 
+    def on_touch_move(self, touch):
+        # If a note is being dragged on the child grid, consume the event
+        # to prevent this ScrollView from scrolling.
+        if self.grid._dragged_note and touch.grab_current is self.grid:
+            return True
+        return super(EditablePianoRollViewer, self).on_touch_move(touch)
+
     def on_editor(self, i, v): self.grid.editor = v
     def on_track(self, i, v): self.grid.track = v
     def on_total_beats(self, i, v): self.grid.total_beats = v
@@ -274,7 +281,7 @@ Builder.load_string("""
             id: main_content
             orientation: 'horizontal'
 
-            ScrollView:
+            BoundedScrollView:
                 id: keyboard_sv
                 size_hint_x: None
                 width: dp(60)
@@ -286,7 +293,7 @@ Builder.load_string("""
                     width: self.parent.width
                     note_height: root.note_height
 
-            ScrollView:
+            BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: False
 

@@ -485,7 +485,7 @@ class TrackWidget(BoxLayout):
         """Creates and opens the piano roll editor popup for the current track."""
         if isinstance(self.track, MidiTrack):
             # Stop playback if it's running
-            if self.sequencer_layout.sequencer.is_playing():
+            if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
                 self.sequencer_layout.sequencer.stop()
                 # We might want to add a small delay or callback to ensure the transport
                 # is fully stopped before opening the editor, but for now, this is direct.

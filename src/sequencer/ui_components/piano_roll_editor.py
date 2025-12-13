@@ -315,7 +315,7 @@ class PianoRollEditor(ModalView):
             events=copy.deepcopy(self.track.events) # Deepcopy only the event data
         )
 
-        self.total_beats = self.sequencer_layout.sequencer.song.get_total_beats()
+        self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)
 

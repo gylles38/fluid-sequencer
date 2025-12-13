@@ -332,9 +332,9 @@ class PianoRollEditor(ModalView):
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
 
         self._center_view_on_c4()
-        last_beat = self.sequencer_layout.sequencer.last_beat
-        if last_beat > 0 and self.total_beats > 0:
-            scroll_pos = (last_beat * self.pixels_per_beat)
+        current_beat = self.sequencer_layout.sequencer.current_beat
+        if current_beat > 0 and self.total_beats > 0:
+            scroll_pos = (current_beat * self.pixels_per_beat)
             max_scroll = self.ids.grid_viewer.grid.width - timeline_scroll.width
             if max_scroll > 0:
                 timeline_scroll.scroll_x = min(1.0, scroll_pos / max_scroll)

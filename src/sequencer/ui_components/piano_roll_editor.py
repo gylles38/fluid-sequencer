@@ -42,7 +42,6 @@ class EditableMidiGrid(PianoRoll):
             self.playback_rect.size = self.playback_line.size
 
     def on_touch_down(self, touch):
-        # ... (rest of the method as before)
         if not self.collide_point(*touch.pos):
             return super(EditableMidiGrid, self).on_touch_down(touch)
 
@@ -107,7 +106,6 @@ class EditableMidiGrid(PianoRoll):
 
         return super(EditableMidiGrid, self).on_touch_down(touch)
 
-    # ... (on_touch_move and on_touch_up as before)
     def on_touch_move(self, touch):
         if self._dragged_note and self.collide_point(*touch.pos):
             local_pos = self.to_local(*touch.pos)
@@ -146,12 +144,30 @@ class EditableMidiGrid(PianoRoll):
 
 
 class EditablePianoRollViewer(ScrollView):
-    # ... (as before)
-    pass
+    editor = ObjectProperty()
+    total_beats = NumericProperty(128.0)
+    pixels_per_beat = NumericProperty(dp(100))
+    track = ObjectProperty(None, allownone=True)
+    note_height = NumericProperty(dp(12))
+
+    def __init__(self, **kwargs):
+        super(EditablePianoRollViewer, self).__init__(**kwargs)
+        self.size_hint_x = None
+        self.do_scroll_x = False
+        self.do_scroll_y = True
+        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
+        self.add_widget(self.grid)
+        self.grid.bind(width=self.setter('width'))
+
+    def on_editor(self, i, v): self.grid.editor = v
+    def on_track(self, i, v): self.grid.track = v
+    def on_total_beats(self, i, v): self.grid.total_beats = v
+    def on_pixels_per_beat(self, i, v): self.grid.pixels_per_beat = v
+    def on_note_height(self, i, v): self.grid.note_height = v
+
 
 # --- Builder String ---
 Builder.load_string("""
-# ... (same as before, no changes needed to kv string for this logic)
 <PianoRollEditor>:
     size_hint: 0.9, 0.9
     auto_dismiss: False
@@ -306,71 +322,6 @@ Builder.load_string("""
 """)
 
 class PianoRollEditor(ModalView):
-    # ... (properties as before)
-    _update_event = None
-
-    def __init__(self, **kwargs):
-        super(PianoRollEditor, self).__init__(**kwargs)
-        # ... (manual copy as before)
-        self.track_copy = MidiTrack(
-            name=self.track.name,
-            channel=self.track.channel,
-            instrument=self.track.instrument,
-            is_muted=self.track.is_muted,
-            is_solo=self.track.is_solo,
-            volume=self.track.volume,
-            pan=self.track.pan,
-            events=copy.deepcopy(self.track.events)
-        )
-
-        self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
-        self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
-        Clock.schedule_once(self._post_kv_init)
-        self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
-
-    def on_dismiss(self):
-        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
-        if self._update_event:
-            self._update_event.cancel()
-
-    def update_playhead(self, dt):
-        """Periodically updates the playhead position and handles scrolling."""
-        current_beat = self.sequencer_layout.sequencer.current_beat
-        self.set_playback_position(current_beat)
-
-    def set_playback_position(self, current_beat: float):
-        """Updates the visual position of the playback line and handles auto-scrolling."""
-        grid = self.ids.grid_viewer.grid
-        pixels_per_beat = self.pixels_per_beat
-        x_pos = current_beat * pixels_per_beat
-
-        if grid.playback_line:
-            grid.playback_line.x = x_pos
-
-        if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
-            scroll_view = self.ids.timeline_scroll
-            timeline_width = grid.width
-            viewport_width = scroll_view.width
-
-            if timeline_width <= viewport_width:
-                return
-
-            margin_x = viewport_width * 0.3
-            max_displacement = timeline_width - viewport_width
-
-            current_scroll_x_pixels = scroll_view.scroll_x * max_displacement
-            new_scroll_x_pixels = -1
-
-            if x_pos > current_scroll_x_pixels + viewport_width - margin_x:
-                new_scroll_x_pixels = x_pos - (viewport_width - margin_x)
-            elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > 1:
-                new_scroll_x_pixels = x_pos - margin_x
-
-            if new_scroll_x_pixels != -1:
-                new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, max_displacement))
-                scroll_view.scroll_x = new_scroll_x_pixels / max_displacement
-
-    # ... (rest of the class as before)
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
     track_copy = ObjectProperty()
@@ -381,6 +332,24 @@ class PianoRollEditor(ModalView):
     note_duration = NumericProperty(2.0)
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
+    _update_event = None
+
+    def __init__(self, **kwargs):
+        super(PianoRollEditor, self).__init__(**kwargs)
+        self.track_copy = MidiTrack(
+            name=self.track.name,
+            channel=self.track.channel,
+            instrument=self.track.instrument,
+            is_muted=self.track.is_muted,
+            is_solo=self.track.is_solo,
+            volume=self.track.volume,
+            pan=self.track.pan,
+            events=copy.deepcopy(self.track.events)
+        )
+        self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
+        self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
+        Clock.schedule_once(self._post_kv_init)
+        self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
 
     def _post_kv_init(self, dt):
         keyboard_sv = self.ids.keyboard_sv
@@ -391,7 +360,6 @@ class PianoRollEditor(ModalView):
         keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_viewer, 'scroll_y', v))
         grid_viewer.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
 
-        # Programmatically bind the keyboard's height to the grid's height
         self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
         self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
 
@@ -416,6 +384,11 @@ class PianoRollEditor(ModalView):
         self.set_edit_mode(self.edit_mode, self.mode_buttons[self.edit_mode])
         self.set_note_duration(self.note_duration, self.duration_buttons[self.note_duration])
         self.on_playback_state_change(None, self.sequencer_layout.sequencer.playback_state)
+
+    def on_dismiss(self):
+        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+        if self._update_event:
+            self._update_event.cancel()
 
     def dismiss(self, action=None, *args):
         if action == 'save_and_close':
@@ -444,6 +417,38 @@ class PianoRollEditor(ModalView):
             if tw.track == self.track and hasattr(tw, 'piano_roll_viewer'):
                 tw.piano_roll_viewer.grid.draw()
                 break
+
+    def update_playhead(self, dt):
+        current_beat = self.sequencer_layout.sequencer.current_beat
+        self.set_playback_position(current_beat)
+
+    def set_playback_position(self, current_beat: float):
+        grid = self.ids.grid_viewer.grid
+        pixels_per_beat = self.pixels_per_beat
+        x_pos = current_beat * pixels_per_beat
+
+        if grid.playback_line:
+            grid.playback_line.x = x_pos
+
+        if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
+            scroll_view = self.ids.timeline_scroll
+            timeline_width = grid.width
+            viewport_width = scroll_view.width
+            if timeline_width <= viewport_width: return
+
+            margin_x = viewport_width * 0.3
+            max_displacement = timeline_width - viewport_width
+            current_scroll_x_pixels = scroll_view.scroll_x * max_displacement
+            new_scroll_x_pixels = -1
+
+            if x_pos > current_scroll_x_pixels + viewport_width - margin_x:
+                new_scroll_x_pixels = x_pos - (viewport_width - margin_x)
+            elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > 1:
+                new_scroll_x_pixels = x_pos - margin_x
+
+            if new_scroll_x_pixels != -1:
+                new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, max_displacement))
+                scroll_view.scroll_x = new_scroll_x_pixels / max_displacement
 
     def play_pressed(self, *args): self.sequencer_layout.sequencer.process_transport_command("play_pause")
     def stop_pressed(self, *args): self.sequencer_layout.sequencer.process_transport_command("stop")
@@ -478,25 +483,3 @@ class PianoRollEditor(ModalView):
         max_scroll = (128 * self.note_height) - grid_viewer.height
         if max_scroll > 0:
             grid_viewer.scroll_y = max(0.0, min(1.0, ((60 * self.note_height) - (self.height / 2)) / max_scroll))
-
-class EditablePianoRollViewer(ScrollView):
-    editor = ObjectProperty()
-    total_beats = NumericProperty(128.0)
-    pixels_per_beat = NumericProperty(dp(100))
-    track = ObjectProperty(None, allownone=True)
-    note_height = NumericProperty(dp(12))
-
-    def __init__(self, **kwargs):
-        super(EditablePianoRollViewer, self).__init__(**kwargs)
-        self.size_hint_x = None
-        self.do_scroll_x = False
-        self.do_scroll_y = True
-        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
-        self.add_widget(self.grid)
-        self.grid.bind(width=self.setter('width'))
-
-    def on_editor(self, i, v): self.grid.editor = v
-    def on_track(self, i, v): self.grid.track = v
-    def on_total_beats(self, i, v): self.grid.total_beats = v
-    def on_pixels_per_beat(self, i, v): self.grid.pixels_per_beat = v
-    def on_note_height(self, i, v): self.grid.note_height = v

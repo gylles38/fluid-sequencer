@@ -3,7 +3,6 @@ from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
-from kivy.uix.widget import Widget 
 from kivy.uix.label import Label 
 from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
@@ -35,7 +34,7 @@ class TrackWidget(BoxLayout):
         else:
             self.height = dp(112)
         self.spacing = dp(12)
-        self.padding = [dp(12), dp(4), dp(12), 0] # Added top padding
+        self.padding = [dp(12), 0, dp(12), 0]
 
         # --- Canvas Background ---
         with self.canvas.before:
@@ -177,7 +176,7 @@ class TrackWidget(BoxLayout):
             self.measure_grid = grid_sv.grid
 
             # A ScrollView must have a single child.
-            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container = FloatLayout(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
 
             # Bind the container's width to the viewer's width.

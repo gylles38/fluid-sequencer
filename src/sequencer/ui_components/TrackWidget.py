@@ -35,7 +35,7 @@ class TrackWidget(BoxLayout):
         else:
             self.height = dp(112)
         self.spacing = dp(12)
-        self.padding = [dp(12), 0, dp(12), 0]
+        self.padding = [dp(12), dp(4), dp(12), 0] # Added top padding
 
         # --- Canvas Background ---
         with self.canvas.before:

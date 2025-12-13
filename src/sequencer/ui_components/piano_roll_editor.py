@@ -27,6 +27,9 @@ class EditableMidiGrid(PianoRoll):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.playback_line = None
+
+    def add_playback_line(self):
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
         with self.playback_line.canvas:
             Color(1, 0, 0, 0.8)
@@ -374,6 +377,9 @@ class PianoRollEditor(ModalView):
 
         self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
         self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
+
+        # Add the playback line here to ensure it's drawn on top
+        self.ids.grid_viewer.grid.add_playback_line()
 
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)

@@ -59,11 +59,14 @@ class PianoKeyboard(FloatLayout):
                 label = Label(
                     text=f"C{octave_num}",
                     font_size=dp(9),
-                    color=(0,0,0,1),
-                    pos=(self.x + dp(5), note_y),
-                    size=(self.width - dp(10), self.note_height),
-                    halign='left',
+                    color=(0, 0, 0, 1),
+                    size_hint=(None, None),
+                    size=(self.width, self.note_height),
+                    center_x=self.center_x,
+                    center_y=note_y + self.note_height / 2,
+                    halign='center',
                     valign='middle',
-                    text_size=(self.width - dp(10), self.note_height)
                 )
+                # Kivy's text_size is needed for alignment to work correctly
+                label.text_size = label.size
                 self.add_widget(label)

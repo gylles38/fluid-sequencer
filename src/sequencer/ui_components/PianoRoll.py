@@ -47,11 +47,20 @@ class PianoRoll(FloatLayout):
 
             # --- Grid ---
             for i in range(128):
+                # Y-coordinate is now proportional to pitch (bottom-up)
                 note_y = self.y + i * self.note_height
-                if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1)
-                else: Color(0.2, 0.2, 0.22, 1)
-                width = 1.1 if (i % 12) in [4, 11] else 0.6
-                Line(points=[self.x, note_y, self.x + self.width, note_y], width=width)
+                if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1) # Black keys
+                else: Color(0.2, 0.2, 0.22, 1) # White keys
+
+                # Draw horizontal lines for note separation
+                Line(points=[self.x, note_y, self.x + self.width, note_y], width=0.6)
+
+                # Draw thicker lines to mark octaves (after B notes)
+                if (i % 12) == 11:
+                    Color(0.8, 0.8, 0.8, 0.6)
+                    # Draw octave line at the TOP of the B key row, to separate from C
+                    octave_line_y = note_y + self.note_height
+                    Line(points=[self.x, octave_line_y, self.x + self.width, octave_line_y], width=1.2)
 
             current_beat = 0
             while current_beat < self.total_beats:
@@ -89,7 +98,7 @@ class PianoRollViewer(ScrollView):
 
     def __init__(self, **kwargs):
         super(PianoRollViewer, self).__init__(**kwargs)
-        self.size_hint = (None, 1)
+        self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
 
@@ -100,7 +109,9 @@ class PianoRollViewer(ScrollView):
             note_height=self.note_height
         )
         self.add_widget(self.grid)
-        self.bind(width=self.grid.setter('width'))
+
+        # Bind this viewer's width to the grid's width ("content-out" sizing)
+        self.grid.bind(width=self.setter('width'))
 
     def on_track(self, instance, value):
         if hasattr(self, 'grid'):

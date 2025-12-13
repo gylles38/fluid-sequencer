@@ -93,10 +93,11 @@ class Ruler(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.spacing = dp(12)
-        self.padding = [dp(12), 0, dp(12), 0]
+        self.padding = [dp(12), dp(6), dp(12), dp(6)]
 
         self.left_spacer = Widget(size_hint_x=None)
-        self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width) # Keyboard spacer
+        self.controls_spacer = Widget(size_hint_x=None)
+        self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
@@ -104,26 +105,17 @@ class Ruler(BoxLayout):
             size_hint=(None, 1)
         )
         self.scroll_view.add_widget(self.ruler_content)
-        self.right_spacer = Widget(size_hint_x=None)
 
-        # Nested layout for keyboard and ruler content to remove spacing between them
-        timeline_layout = BoxLayout(
-            orientation='horizontal',
-            spacing=0,
-            padding=[0,0,0,0],
-            size_hint_x=1
-        )
-        timeline_layout.add_widget(self.keyboard_spacer)
-        timeline_layout.add_widget(self.scroll_view)
-
+        # Add widgets directly to the main layout to mirror TrackWidget structure
         self.add_widget(self.left_spacer)
-        self.add_widget(timeline_layout)
-        self.add_widget(self.right_spacer)
+        self.add_widget(self.controls_spacer)
+        self.add_widget(self.keyboard_spacer)
+        self.add_widget(self.scroll_view)
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
-        self.bind(controls_width=lambda i, v: setattr(self.right_spacer, 'width', v))
+        self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
-        self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v)) # Bind new property
+        self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
 
     def redraw(self, *args):
         if self.sequencer_layout and self.sequencer_layout.track_widgets:

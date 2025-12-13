@@ -2440,29 +2440,20 @@ class Sequencer(EventDispatcher):
                     print(f"En attente de la première note sur '{target_track.name}'...")
                     
                     wait_start_time = time.time()
+                    pending_first_note = None
                     while not self._stop_event.is_set() and not first_note_detected:
                         if time.time() - wait_start_time > 30:
                             print("Timeout: Aucune note reçue après 30 secondes")
                             return
-                        
                         msg = inport.poll()
                         if msg and msg.type == 'note_on' and msg.velocity > 0:
                             print(f"Première note détectée: {msg.note} (vélocité: {msg.velocity})")
                             first_note_detected = True
-                            
+                            pending_first_note = msg
                             self.play(start_beat=start_beat)
                             time.sleep(0.05)
-                            
-                            current_beat = self._get_current_beat()
-                            recording_start_beat = current_beat
-                            
-                            # Mémoriser le temps ET la vélocité
-                            open_notes[msg.note] = (current_beat, msg.velocity)
-                            print(f"Enregistrement démarré à la position: {self._format_beats_to_position(current_beat)}")
-                            
-                            if outport and enable_thru:
-                                outport.send(msg.copy(channel=target_track.channel))
-                        
+                            recording_start_beat = self._get_current_beat()
+                            print(f"Enregistrement démarré à la position: {self._format_beats_to_position(recording_start_beat)}")
                         time.sleep(0.001)
 
                     if not first_note_detected:
@@ -2473,13 +2464,24 @@ class Sequencer(EventDispatcher):
                     while not self._stop_event.is_set():
                         current_beat = self._get_current_beat()
                         
+                        # Traiter la première note qui a déclenché l'enregistrement
+                        if pending_first_note:
+                            msg = pending_first_note
+                            if msg.note not in open_notes:
+                                # Correction: Utiliser le temps de départ le plus précis possible
+                                note_start_time = recording_start_beat if recording_start_beat is not None else current_beat
+                                open_notes[msg.note] = (note_start_time, msg.velocity)
+                                print(f"Note ON: {msg.note} à {self._format_beats_to_position(note_start_time)}")
+                                if outport and enable_thru:
+                                    outport.send(msg.copy(channel=target_track.channel))
+                            pending_first_note = None
+
                         for msg in inport.iter_pending():
                             if outport and enable_thru and hasattr(msg, 'channel'):
                                 outport.send(msg.copy(channel=target_track.channel))
 
                             if msg.type == 'note_on' and msg.velocity > 0:
                                 if msg.note not in open_notes:
-                                    # Mémoriser le temps ET la vélocité
                                     open_notes[msg.note] = (current_beat, msg.velocity)
                                     print(f"Note ON: {msg.note} à {self._format_beats_to_position(current_beat)}")
                             

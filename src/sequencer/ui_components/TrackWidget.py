@@ -10,6 +10,7 @@ from sequencer.ui_components.MeasureGrid import MeasureGrid
 from .PianoRoll import PianoRollViewer
 from .PianoKeyboard import PianoKeyboard
 
+
 class TrackWidget(BoxLayout):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
@@ -32,9 +33,9 @@ class TrackWidget(BoxLayout):
         if isinstance(track, MidiTrack):
             self.height = dp(128)
         else:
-            self.height = dp(56)
+            self.height = dp(112)
         self.spacing = dp(12)
-        self.padding = [dp(12), dp(6), dp(12), dp(6)]
+        self.padding = [dp(12), 0, dp(12), 0]
 
         # --- Canvas Background ---
         with self.canvas.before:
@@ -58,124 +59,8 @@ class TrackWidget(BoxLayout):
         self.info_section.add_widget(self.name_label)
         self.add_widget(self.info_section)
 
-        # --- Middle Section: Timeline ---
-        if isinstance(track, MidiTrack):
-            # For MIDI tracks, we use a complex layout with a piano keyboard and a note grid.
-            # The keyboard scrolls vertically, and the grid scrolls vertically and horizontally.
-            # Their vertical scrolling is synchronized.
-            note_height = dp(12)
-
-            # Main horizontal layout to hold the keyboard and the grid scrollview
-            timeline_layout = BoxLayout(orientation='horizontal', spacing=0, size_hint_x=1)
-
-            # 1. Keyboard: A vertical scrollview that does not scroll horizontally.
-            keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
-            self.piano_keyboard = PianoKeyboard(note_height=note_height)
-            keyboard_sv.add_widget(self.piano_keyboard)
-
-            # 2. Grid ScrollView: The main horizontal scrollview for the piano roll grid.
-            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
-
-            # 3. Grid Container: A vertically scrolling container for the actual grid content.
-            # This is a custom class that handles drawing the notes and the grid.
-            grid_sv = PianoRollViewer(
-                track=track,
-                total_beats=self.total_beats,
-                pixels_per_beat=self.pixels_per_beat,
-                note_height=note_height
-            )
-            self.piano_roll_viewer = grid_sv
-            self.measure_grid = grid_sv.grid # Reference to the grid for updates
-
-            self.timeline_scroll.add_widget(grid_sv)
-
-            # Add the keyboard and grid to the main timeline layout
-            timeline_layout.add_widget(keyboard_sv)
-            timeline_layout.add_widget(self.timeline_scroll)
-
-            self.add_widget(timeline_layout)
-
-            # Link the vertical scrolling of the keyboard and the grid so they move together.
-            keyboard_sv.bind(scroll_y=lambda instance, value: setattr(grid_sv, 'scroll_y', value))
-            grid_sv.bind(scroll_y=lambda instance, value: setattr(keyboard_sv, 'scroll_y', value))
-
-            self.timeline_container = grid_sv # Reference for size updates
-
-        else:
-            # For non-MIDI tracks (Audio, Automation), we use a simpler layout.
-            # It includes a spacer on the left to align with the MIDI track's piano keyboard.
-            timeline_layout = BoxLayout(orientation='horizontal', spacing=0)
-            keyboard_spacer = Widget(size_hint_x=None, width=dp(40))
-            timeline_layout.add_widget(keyboard_spacer)
-
-            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_y=False)
-            self.timeline_container = Widget(size_hint=(None, 1))
-            self.measure_grid = MeasureGrid(
-                size_hint=(1, 1),
-                beat_per_measure=4,
-                total_beats=self.total_beats,
-                pixels_per_beat=self.pixels_per_beat
-            )
-            self.timeline_container.add_widget(self.measure_grid)
-            self.timeline_scroll.add_widget(self.timeline_container)
-            timeline_layout.add_widget(self.timeline_scroll)
-            self.add_widget(timeline_layout)
-
-        # --- Playback Line (Cursor) ---
-        self.playback_line = Widget(size_hint_x=None, width=dp(2))
-        with self.playback_line.canvas:
-            Color(1, 0, 0, 0.8)
-            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
-        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
-
-        # The playback line is added to the innermost scrollable container.
-        if isinstance(track, MidiTrack):
-            self.piano_roll_viewer.grid.add_widget(self.playback_line)
-            self.playback_line.size_hint_y = None
-            self.playback_line.height = self.piano_roll_viewer.grid.height
-        else:
-            self.timeline_container.add_widget(self.playback_line)
-            self.playback_line.size_hint_y = 1
-
-        self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
-        self.update_timeline_size()
-
-        # --- Right Section: Controls ---
+        # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
-
-        # --- Track Type Icon ---
-        type_icon_layout = BoxLayout(
-            size_hint_x=None,
-            width=dp(44),
-            pos_hint={'center_y': 0.5},
-            padding=dp(4)
-        )
-        
-        track_type_icon = "help-circle"
-        track_type_color = [0.5, 0.5, 0.5, 1]
-        bg_color = [0.2, 0.2, 0.2, 1]
-        
-        if isinstance(track, MidiTrack):
-            track_type_icon = "midi"
-            track_type_color = [0.3, 0.5, 0.9, 1]
-            bg_color = [0.2, 0.3, 0.4, 0.3]
-        elif isinstance(track, AudioTrack):
-            track_type_icon = "waveform"
-            track_type_color = [0.9, 0.5, 0.2, 1]
-            bg_color = [0.4, 0.3, 0.2, 0.3]
-        elif isinstance(track, AutomationTrack):
-            track_type_icon = "chart-line"
-            track_type_color = [0.2, 0.8, 0.8, 1]
-            bg_color = [0.2, 0.4, 0.4, 0.3]
-
-        with type_icon_layout.canvas.before:
-            Color(*bg_color)
-            self.type_bg_rect = Rectangle(pos=type_icon_layout.pos, size=type_icon_layout.size)
-            Color(0.4, 0.4, 0.4, 0.5)
-            self.type_border_rect = Line(rectangle=[type_icon_layout.x, type_icon_layout.y, 
-                                                   type_icon_layout.width, type_icon_layout.height], width=1)
-
-        type_icon_layout.bind(pos=self._update_type_icon_bg, size=self._update_type_icon_bg)
 
         if isinstance(track, MidiTrack):
             self.record_mode_button = ThreeStateRecordButton(
@@ -186,17 +71,8 @@ class TrackWidget(BoxLayout):
             )
             self.controls_section.add_widget(self.record_mode_button)
         else:
+            # Add a spacer to maintain alignment with MIDI tracks that have a record button
             self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
-
-        type_icon = MDIcon(
-            icon=track_type_icon,
-            theme_text_color="Custom",
-            text_color=track_type_color,
-            pos_hint={'center_x': 0.5, 'center_y': 0.5},
-            font_size=dp(20)
-        )
-        type_icon_layout.add_widget(type_icon)
-        self.controls_section.add_widget(type_icon_layout)
 
         # --- Solo Button ---
         self.solo_button = TooltipMDIconButton(
@@ -212,63 +88,172 @@ class TrackWidget(BoxLayout):
 
         # --- MIDI Specific Controls (Channel, Program) ---
         midi_controls_layout = BoxLayout(
-            size_hint_x=None, 
-            width=dp(260),
-            spacing=dp(8),
-            pos_hint={'center_y': 0.5}
+            orientation='vertical',
+            size_hint_x=None,
+            width=dp(130),
+            spacing=dp(4)
         )
 
         if isinstance(track, MidiTrack):
-            channel_container = BoxLayout(orientation='horizontal', spacing=dp(4))
-            channel_label = Label(text='Channel:', size_hint_x=None, width=dp(42), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
+            channel_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            channel_label = Label(text='Ch:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             channel_container.add_widget(channel_label)
-            channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change, height=dp(32))
+            channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change)
             channel_container.add_widget(channel_spinner)
-            midi_controls_layout.add_widget(channel_container)
 
-            program_container = BoxLayout(orientation='horizontal', spacing=dp(4))
-            program_label = Label(text='Program:', size_hint_x=None, width=dp(42), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
+            program_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            program_label = Label(text='Prg:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             program_container.add_widget(program_label)
-            program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change, height=dp(32))
+            program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change)
             program_container.add_widget(program_spinner)
+
+            midi_controls_layout.add_widget(Widget()) # Top spacer
+            midi_controls_layout.add_widget(channel_container)
             midi_controls_layout.add_widget(program_container)
+            midi_controls_layout.add_widget(Widget()) # Bottom spacer
         else:
             midi_controls_layout.add_widget(Widget())
             
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(8), pos_hint={'center_y': 0.5})
+        volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
+
+        mute_button_container = BoxLayout(size_hint_y=None, height=dp(30), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
             on_press=self.on_mute_toggle,
-            pos_hint={'center_y': 0.5},
-            theme_icon_color="Custom",
-            icon_color=[1, 0.6, 0, 1] if not track.is_muted else [0.8, 0.3, 0, 1],
-            md_bg_color=[0.3, 0.2, 0.1, 0.8] if not track.is_muted else [0.4, 0.2, 0.1, 0.8]
+            pos_hint={'center_x': 0.5, 'center_y': 0.5}
         )
-        volume_layout.add_widget(self.mute_button)
-        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_x=None, width=dp(35), color=[0.9, 0.9, 0.9, 1], font_size=dp(12), halign='center')
-        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, size_hint_x=1, pos_hint={'center_y': 0.5})
+        mute_button_container.add_widget(self.mute_button)
+
+        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(8), track_inactive_width=dp(8))
+        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
+
+        volume_layout.add_widget(mute_button_container)
+        volume_layout.add_widget(self.volume_slider)
+        volume_layout.add_widget(self.volume_label)
         self.volume_slider.bind(value=self.on_volume_change)
         self.track.bind(volume=self.on_track_volume_changed)
-        volume_layout.add_widget(self.volume_label)
-        volume_layout.add_widget(self.volume_slider)
         self.controls_section.add_widget(volume_layout)
 
         # --- Pan Controls ---
-        pan_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(8), pos_hint={'center_y': 0.5})
-        pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_y': 0.5}, font_size=dp(18))
-        pan_layout.add_widget(pan_icon)
-        self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_x=None, width=dp(35), color=[0.9, 0.9, 0.9, 1], font_size=dp(12), halign='center')
-        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, size_hint_x=1, pos_hint={'center_y': 0.5})
-        self.pan_slider.bind(value=self.on_pan_change)
-        pan_layout.add_widget(self.pan_label)
+        pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
+
+        pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
+        pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
+        pan_icon_container.add_widget(pan_icon)
+
+        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(8), track_inactive_width=dp(8))
+        self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
+
+        pan_layout.add_widget(pan_icon_container)
         pan_layout.add_widget(self.pan_slider)
+        pan_layout.add_widget(self.pan_label)
+        self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
         self.add_widget(self.controls_section)
+
+        # --- Right Section: Timeline ---
+        if isinstance(track, MidiTrack):
+            note_height = dp(12)
+
+            # 1. Keyboard (fixed width)
+            keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
+            self.piano_keyboard = PianoKeyboard(note_height=note_height)
+            keyboard_sv.add_widget(self.piano_keyboard)
+
+            # 2. Grid ScrollView (expanding)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+            grid_sv = PianoRollViewer(
+                track=track,
+                total_beats=self.total_beats,
+                pixels_per_beat=self.pixels_per_beat,
+                note_height=note_height
+            )
+            self.piano_roll_viewer = grid_sv
+            self.measure_grid = grid_sv.grid
+
+            # A ScrollView must have a single child.
+            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container.add_widget(grid_sv)
+
+            # Bind the container's width to the viewer's width.
+            grid_sv.bind(width=self.timeline_container.setter('width'))
+
+            self.timeline_scroll.add_widget(self.timeline_container)
+
+            self.add_widget(keyboard_sv)
+            self.add_widget(self.timeline_scroll)
+
+            # Link vertical scrolling
+            keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
+            grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+
+        else:  # Audio and Automation tracks
+            # Create a layout for the track type icon, replacing the old spacer
+            icon_layout = BoxLayout(
+                size_hint_x=None,
+                width=dp(40),
+                orientation='vertical',
+                pos_hint={'center_y': 0.5}
+            )
+
+            track_type_icon = "help-circle"
+            track_type_color = [0.5, 0.5, 0.5, 1]
+
+            if isinstance(track, AudioTrack):
+                track_type_icon = "waveform"
+                track_type_color = [0.9, 0.5, 0.2, 1]
+            elif isinstance(track, AutomationTrack):
+                track_type_icon = "chart-line"
+                track_type_color = [0.2, 0.8, 0.8, 1]
+
+            icon = MDIcon(
+                icon=track_type_icon,
+                theme_text_color="Custom",
+                text_color=track_type_color,
+                halign='center',
+                valign='center'
+            )
+            icon_layout.add_widget(icon)
+
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+
+            # A ScrollView must have a single child.
+            self.timeline_container = Widget(size_hint=(None, 1))
+            self.measure_grid = MeasureGrid(
+                size_hint=(1, 1), # The grid itself can fill the container
+                beat_per_measure=4,
+                total_beats=self.total_beats,
+                pixels_per_beat=self.pixels_per_beat
+            )
+            self.timeline_container.add_widget(self.measure_grid)
+            self.timeline_scroll.add_widget(self.timeline_container)
+
+            self.add_widget(icon_layout)
+            self.add_widget(self.timeline_scroll)
+
+        # --- Playback Line (Cursor) ---
+        self.playback_line = Widget(size_hint_x=None, width=dp(2))
+        with self.playback_line.canvas:
+            Color(1, 0, 0, 0.8)
+            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
+        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
+
+        # The playback line is added to the timeline_container, which exists for all track types.
+        if isinstance(track, MidiTrack):
+            self.timeline_container.add_widget(self.playback_line)
+            self.playback_line.size_hint_y = None
+            self.playback_line.height = self.piano_roll_viewer.grid.height
+        else:
+            self.timeline_container.add_widget(self.playback_line)
+            self.playback_line.size_hint_y = 1
+
+        self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
+        self.update_timeline_size()
 
         self.track.bind(is_solo=self.on_solo_changed)
 
@@ -286,25 +271,22 @@ class TrackWidget(BoxLayout):
         Updates the width of the timeline content based on the total beats and zoom level (pixels_per_beat).
         This is crucial for ensuring the scroll view has the correct scrollable area.
         """
+        if not hasattr(self, 'timeline_container'):
+            return
+
+        # For MIDI tracks, the width is now controlled by the content ("content-out").
+        # We just need to pass the new parameters down to the PianoRollViewer,
+        # which will trigger the chain of width updates.
         if isinstance(self.track, MidiTrack):
-            # For MIDI tracks, the PianoRollViewer handles its own sizing internally.
             self.piano_roll_viewer.total_beats = self.total_beats
             self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
-            self.piano_roll_viewer.width = self.total_beats * self.pixels_per_beat
-        elif hasattr(self, 'timeline_container'):
-            # For other tracks, we calculate the width needed.
+        else:
+            # For other track types, we still use the "top-down" sizing model.
             content_width = self.total_beats * self.pixels_per_beat
-            scroll_view_width = self.timeline_scroll.width
+            self.timeline_container.width = content_width
 
-            # We add a margin to the right so the view can scroll past the last beat,
-            # allowing the playhead to be centered even at the very end of the song.
-            margin_x = scroll_view_width * 0.3
-            min_width = scroll_view_width
-            EPSILON_PIXELS = dp(1)
-            required_width = content_width + margin_x + EPSILON_PIXELS
-            final_width = max(required_width, min_width)
-
-            self.timeline_container.width = final_width
+            # The MeasureGrid is not a layout, so it doesn't automatically resize its canvas.
+            # We must explicitly tell it to redraw by passing down the parameters.
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
         

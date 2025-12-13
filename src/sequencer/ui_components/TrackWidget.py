@@ -1,6 +1,7 @@
 from . import *  # Importe tous les imports communs
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
 from kivy.uix.label import Label 

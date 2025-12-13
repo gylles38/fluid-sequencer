@@ -192,6 +192,30 @@ class TrackWidget(BoxLayout):
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
             grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
 
+            # Center the view on C4 by default
+            def set_default_scroll(dt):
+                # MIDI note for C4 is 60. Total notes are 128.
+                # ScrollY is from 0 (bottom) to 1 (top).
+                # To center on C4, we want C4 to be at the middle of the viewport.
+                # The total height is 128 * note_height.
+                # The position of C4 is 60 * note_height.
+                # The visible height is self.height.
+                # We want to scroll to (60 * note_height) - (self.height / 2)
+                # Normalize this value.
+                total_height = 128 * note_height
+                scroll_pos_pixels = (60 * note_height) - (self.height / 2)
+
+                # The maximum scroll value in pixels is the total content height minus the viewport height
+                max_scroll_pixels = total_height - self.height
+
+                if max_scroll_pixels > 0:
+                    normalized_scroll = scroll_pos_pixels / max_scroll_pixels
+                    # Clamp the value between 0 and 1
+                    grid_sv.scroll_y = max(0.0, min(1.0, normalized_scroll))
+
+
+            Clock.schedule_once(set_default_scroll)
+
         else:  # Audio and Automation tracks
             # Create a layout for the track type icon, replacing the old spacer
             icon_layout = BoxLayout(

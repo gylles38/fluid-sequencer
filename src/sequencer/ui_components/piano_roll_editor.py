@@ -109,7 +109,7 @@ class EditableMidiGrid(PianoRoll):
         return super(EditableMidiGrid, self).on_touch_down(touch)
 
     def on_touch_move(self, touch):
-        if self._dragged_note and self.collide_point(*touch.pos):
+        if self._dragged_note and touch.grab_current is self:
             local_pos = self.to_local(*touch.pos)
 
             if self._drag_mode == 'resize':

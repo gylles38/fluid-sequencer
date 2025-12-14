@@ -296,6 +296,7 @@ Builder.load_string("""
         BoxLayout:
             id: main_content
             orientation: 'horizontal'
+            spacing: 0
 
             BoundedScrollView:
                 id: keyboard_sv

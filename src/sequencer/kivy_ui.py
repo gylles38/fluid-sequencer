@@ -1413,6 +1413,10 @@ class SequencerLayout(BoxLayout):
 
         final_total_beats = self.sequencer.get_song_length_in_beats()
 
+        # Update the main ruler's properties
+        self.ruler.total_beats = final_total_beats
+        self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
+
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.is_metronome:
                 continue

@@ -31,7 +31,7 @@ class EditableMidiGrid(PianoRoll):
 
     def add_playback_line(self):
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
-        with self.playback_line.canvas:
+        with self.canvas.after:
             Color(1, 0, 0, 0.8)
             self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
         self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)

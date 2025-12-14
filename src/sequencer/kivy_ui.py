@@ -1413,6 +1413,10 @@ class SequencerLayout(BoxLayout):
 
         final_total_beats = self.sequencer.get_song_length_in_beats()
 
+        # Update the main ruler's properties
+        self.ruler.total_beats = final_total_beats
+        self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
+
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.is_metronome:
                 continue
@@ -1427,7 +1431,7 @@ class SequencerLayout(BoxLayout):
             first_track_widget = self.track_widgets[0]
             self.ruler.info_width = first_track_widget.info_width
             self.ruler.controls_width = first_track_widget.controls_width
-            
+
             if isinstance(first_track_widget.track, MidiTrack):
                 self.ruler.keyboard_width = first_track_widget.piano_keyboard.width
                 # Bind width for dynamic changes if ever needed
@@ -1705,7 +1709,6 @@ class SequencerLayout(BoxLayout):
         if not is_lightweight:
             print(f"DEBUG: Performing full UI refresh for command: {command}")
             self.update_status_display()
-            # Redraw the ruler only after a full UI refresh
             if hasattr(self, 'ruler'):
                 self.ruler.redraw()
         else:

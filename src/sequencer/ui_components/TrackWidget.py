@@ -47,14 +47,29 @@ class TrackWidget(BoxLayout):
         self.bind(pos=self._update_graphics, size=self._update_graphics)
 
         # --- Left Section: Track Info ---
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width)
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[dp(4), 0, 0, 0])
+
+        if isinstance(track, MidiTrack):
+            self.piano_roll_button = TooltipMDIconButton(
+                icon='piano',
+                tooltip_text='Open Piano Roll Editor',
+                on_press=self.open_piano_roll_editor,
+                pos_hint={'center_y': 0.5},
+                theme_icon_color="Custom",
+                icon_color=[0.7, 0.7, 0.9, 1],
+                size_hint_x=None,
+                width=dp(36)
+            )
+            self.info_section.add_widget(self.piano_roll_button)
+
         self.name_label = Label(
             text=f"[{track_index}] {track.name}",
             halign='left', 
             valign='middle', 
             color=[0.9, 0.9, 0.9, 1],
             font_size=dp(14),
-            bold=True            
+            bold=True,
+            text_size=(self.info_width - dp(50), None) # Allow text to wrap if needed
         )
         self.info_section.add_widget(self.name_label)
         self.add_widget(self.info_section)
@@ -465,3 +480,15 @@ class TrackWidget(BoxLayout):
     def on_set_as_metronome(self, instance):
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
+
+    def open_piano_roll_editor(self, instance):
+        """Creates and opens the piano roll editor popup for the current track."""
+        if isinstance(self.track, MidiTrack):
+            # Stop playback if it's running
+            if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
+                self.sequencer_layout.sequencer.stop()
+                # We might want to add a small delay or callback to ensure the transport
+                # is fully stopped before opening the editor, but for now, this is direct.
+
+            editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
+            editor.open()

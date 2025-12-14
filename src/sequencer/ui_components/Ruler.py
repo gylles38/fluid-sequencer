@@ -1,8 +1,9 @@
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
-from kivy.properties import ObjectProperty, NumericProperty
+from kivy.properties import ObjectProperty, NumericProperty, ListProperty
 from kivy.uix.label import Label
 from kivy.metrics import dp
+import math
 from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle, Line
 from sequencer.models import MidiTrack
@@ -10,6 +11,8 @@ from sequencer.models import MidiTrack
 class RulerContent(Widget):
     sequencer_layout = ObjectProperty(None)
     pixels_per_beat = NumericProperty(dp(100))
+    total_beats = NumericProperty(16)
+    beats_per_measure = NumericProperty(4)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -26,36 +29,28 @@ class RulerContent(Widget):
         self.canvas.after.clear()
         self.clear_widgets()
 
-        if not self.sequencer_layout or not self.sequencer_layout.track_widgets:
-            return
-
-        track_widget = self.sequencer_layout.track_widgets[0]
-        seq = self.sequencer_layout.sequencer
-        beats_per_measure = seq.song.time_signature_numerator
-        total_beats = track_widget.total_beats
-
-        if total_beats <= 0:
+        if self.total_beats <= 0 or self.beats_per_measure <= 0:
             return
 
         pixels_per_beat = self.pixels_per_beat
-        num_measures = int(total_beats / beats_per_measure)
+        num_measures = math.ceil(self.total_beats / self.beats_per_measure)
 
         with self.canvas.after:
             for i in range(1, num_measures + 2):
-                beat_pos = (i - 1) * beats_per_measure
+                beat_pos = (i - 1) * self.beats_per_measure
                 x_pos = beat_pos * pixels_per_beat
                 Color(0.4, 0.4, 0.4, 1)
                 Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1)
 
         for i in range(1, num_measures + 2):
-            beat_pos = (i - 1) * beats_per_measure
-            x_pos = (beat_pos * pixels_per_beat) # Position relative to self
+            beat_pos = (i - 1) * self.beats_per_measure
+            x_pos = (beat_pos * pixels_per_beat)
 
             label = Label(
                 text=str(i),
                 font_size='10sp',
                 pos=(x_pos, 0),
-                size=(pixels_per_beat * beats_per_measure, self.height),
+                size=(pixels_per_beat * self.beats_per_measure, self.height),
                 halign='left',
                 valign='middle',
                 color=(0.8, 0.8, 0.8, 1),
@@ -66,17 +61,15 @@ class RulerContent(Widget):
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
+            if not self.sequencer_layout or self.total_beats <= 0 or self.pixels_per_beat <= 0:
+                return True
+
             local_x, _ = self.to_local(*touch.pos)
-            if not self.sequencer_layout.track_widgets: return True
-
-            track_widget = self.sequencer_layout.track_widgets[0]
-            if track_widget.total_beats <= 0: return True
-
-            if self.pixels_per_beat <= 0: return True
-
             clicked_beat = local_x / self.pixels_per_beat
 
-            self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
+            # Only seek if the sequencer is stopped
+            if self.sequencer_layout.sequencer.playback_state == 'stopped':
+                self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
 
             return True
         return super().on_touch_down(touch)
@@ -86,14 +79,18 @@ class Ruler(BoxLayout):
     scroll_view = ObjectProperty(None)
     info_width = NumericProperty(0)
     controls_width = NumericProperty(0)
+    keyboard_width = NumericProperty(0)
     pixels_per_beat = NumericProperty(dp(100))
-    keyboard_width = NumericProperty(0) # New property for keyboard spacer
+    total_beats = NumericProperty(16)
+    beats_per_measure = NumericProperty(4)
+    spacing = NumericProperty(dp(12))
+    padding = ListProperty([dp(12), dp(6), dp(12), dp(6)])
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
-        self.spacing = dp(12)
-        self.padding = [dp(12), dp(6), dp(12), dp(6)]
+        self.bind(spacing=self.setter('spacing'))
+        self.bind(padding=self.setter('padding'))
 
         self.left_spacer = Widget(size_hint_x=None)
         self.controls_spacer = Widget(size_hint_x=None)
@@ -102,11 +99,12 @@ class Ruler(BoxLayout):
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
             pixels_per_beat=self.pixels_per_beat,
+            total_beats=self.total_beats,
+            beats_per_measure=self.beats_per_measure,
             size_hint=(None, 1)
         )
         self.scroll_view.add_widget(self.ruler_content)
 
-        # Add widgets directly to the main layout to mirror TrackWidget structure
         self.add_widget(self.left_spacer)
         self.add_widget(self.controls_spacer)
         self.add_widget(self.keyboard_spacer)
@@ -114,16 +112,12 @@ class Ruler(BoxLayout):
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
-        self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
         self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
+        self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
+        self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))
+        self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))
+
 
     def redraw(self, *args):
-        if self.sequencer_layout and self.sequencer_layout.track_widgets:
-            first_track = self.sequencer_layout.track_widgets[0]
-            # The ruler content should match the grid's width, not the whole container
-            if isinstance(first_track.track, MidiTrack):
-                 self.ruler_content.width = first_track.piano_roll_viewer.width
-            else:
-                 self.ruler_content.width = first_track.timeline_container.width
-
+        self.ruler_content.width = self.total_beats * self.pixels_per_beat
         self.ruler_content.redraw(*args)

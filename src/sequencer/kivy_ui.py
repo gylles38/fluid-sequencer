@@ -1429,23 +1429,31 @@ class SequencerLayout(BoxLayout):
         # Bind ruler spacer widths and timeline width
         if self.track_widgets:
             first_track_widget = self.track_widgets[0]
-            self.ruler.info_width = first_track_widget.info_width
-            self.ruler.controls_width = first_track_widget.controls_width
             
+            # Combine info and keyboard widths for the ruler's left spacer
+            keyboard_width = first_track_widget.piano_keyboard.width if isinstance(first_track_widget.track, MidiTrack) else dp(40)
+            self.ruler.info_width = first_track_widget.info_width + keyboard_width
+
+            self.ruler.controls_width = first_track_widget.controls_width
+
+            # Bind for dynamic updates
+            def update_ruler_info_width(*args):
+                kbd_width = first_track_widget.piano_keyboard.width if isinstance(first_track_widget.track, MidiTrack) else dp(40)
+                self.ruler.info_width = first_track_widget.info_width + kbd_width
+
+            first_track_widget.fbind('info_width', update_ruler_info_width)
             if isinstance(first_track_widget.track, MidiTrack):
-                self.ruler.keyboard_width = first_track_widget.piano_keyboard.width
-                # Bind width for dynamic changes if ever needed
-                first_track_widget.piano_keyboard.fbind('width', lambda i, v: setattr(self.ruler, 'keyboard_width', v))
-                # Ensure ruler content width matches the grid part of the piano roll
+                first_track_widget.piano_keyboard.fbind('width', update_ruler_info_width)
+
+            first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
+
+            # Match ruler content width to the correct scrollable area
+            if isinstance(first_track_widget.track, MidiTrack):
                 self.ruler.ruler_content.width = first_track_widget.piano_roll_viewer.width
                 first_track_widget.piano_roll_viewer.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
             else:
-                self.ruler.keyboard_width = dp(40) # Set to the same as keyboard width for alignment
                 self.ruler.ruler_content.width = first_track_widget.timeline_container.width
                 first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
-
-            first_track_widget.fbind('info_width', lambda i, v: setattr(self.ruler, 'info_width', v))
-            first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
 
         # --- Bind scroll views for synchronization ---
         scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]

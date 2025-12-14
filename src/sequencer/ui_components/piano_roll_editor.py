@@ -288,6 +288,7 @@ Builder.load_string("""
             size_hint_y: None
             height: dp(30)
             info_width: keyboard_sv.width
+            spacing: 0
 
         BoxLayout:
             id: main_content

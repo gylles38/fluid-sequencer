@@ -82,12 +82,13 @@ class Ruler(BoxLayout):
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
+    spacing = NumericProperty(dp(12))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
-        self.spacing = dp(12)
         self.padding = [dp(12), dp(6), dp(12), dp(6)]
+        self.bind(spacing=self.setter('spacing'))
 
         self.left_spacer = Widget(size_hint_x=None)
         self.controls_spacer = Widget(size_hint_x=None)
@@ -102,8 +103,8 @@ class Ruler(BoxLayout):
         self.scroll_view.add_widget(self.ruler_content)
 
         self.add_widget(self.left_spacer)
-        self.add_widget(self.controls_spacer)
         self.add_widget(self.scroll_view)
+        self.add_widget(self.controls_spacer)
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))

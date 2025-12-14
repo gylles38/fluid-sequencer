@@ -44,15 +44,9 @@ import sys, os, time
 class SequencerLayout(BoxLayout):
     
     def __init__(self, **kwargs):
-        project_file = kwargs.pop('project_file', None)
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
         self.sequencer = Sequencer(gui_mode=True)
-        if project_file:
-            try:
-                self.sequencer.load_project(project_file)
-            except Exception as e:
-                print(f"Error loading project from file '{project_file}': {e}")
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self._transport_update_event = None # Pour stocker l'événement Clock        
         self.current_command = ""

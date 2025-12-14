@@ -276,6 +276,8 @@ Builder.load_string("""
             id: ruler
             sequencer_layout: root.sequencer_layout
             pixels_per_beat: root.pixels_per_beat
+            total_beats: root.total_beats
+            beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             size_hint_y: None
             height: dp(30)
             info_width: 0
@@ -402,6 +404,7 @@ class PianoRollEditor(ModalView):
         self.set_edit_mode(self.edit_mode, self.mode_buttons[self.edit_mode])
         self.set_note_duration(self.note_duration, self.duration_buttons[self.note_duration])
         self.on_playback_state_change(None, self.sequencer_layout.sequencer.playback_state)
+        self.ids.ruler.redraw()
 
     def on_dismiss(self):
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)

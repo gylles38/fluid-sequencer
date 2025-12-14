@@ -1705,7 +1705,6 @@ class SequencerLayout(BoxLayout):
         if not is_lightweight:
             print(f"DEBUG: Performing full UI refresh for command: {command}")
             self.update_status_display()
-            # Redraw the ruler only after a full UI refresh
             if hasattr(self, 'ruler'):
                 self.ruler.redraw()
         else:

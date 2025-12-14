@@ -80,7 +80,6 @@ class Ruler(BoxLayout):
     info_width = NumericProperty(0)
     controls_width = NumericProperty(0)
     pixels_per_beat = NumericProperty(dp(100))
-    keyboard_width = NumericProperty(0)
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
 
@@ -92,7 +91,6 @@ class Ruler(BoxLayout):
 
         self.left_spacer = Widget(size_hint_x=None)
         self.controls_spacer = Widget(size_hint_x=None)
-        self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
@@ -105,13 +103,11 @@ class Ruler(BoxLayout):
 
         self.add_widget(self.left_spacer)
         self.add_widget(self.controls_spacer)
-        self.add_widget(self.keyboard_spacer)
         self.add_widget(self.scroll_view)
 
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
-        self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
         self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))
         self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))
 

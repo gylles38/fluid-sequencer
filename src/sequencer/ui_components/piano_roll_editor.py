@@ -166,12 +166,10 @@ class EditablePianoRollViewer(ScrollView):
         self.grid.bind(width=self.setter('width'))
 
     def on_touch_move(self, touch):
-        if self.grid._dragged_note and touch.grab_current is self.grid:
-            # If the vertical movement is greater than horizontal, it's a vertical drag
-            # intended for the grid. Consume the event to prevent scrolling.
-            if abs(touch.dy) > abs(touch.dx):
-                return True
-        # Otherwise, allow the event to propagate for horizontal scrolling.
+        # If the grid has grabbed the touch for a note drag/resize operation,
+        # we must not process it for scrolling. We consume the event by returning True.
+        if touch.grab_current is self.grid:
+            return True
         return super(EditablePianoRollViewer, self).on_touch_move(touch)
 
     def on_editor(self, i, v): self.grid.editor = v
@@ -289,7 +287,7 @@ Builder.load_string("""
             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             size_hint_y: None
             height: dp(30)
-            keyboard_width: keyboard_sv.width
+            info_width: keyboard_sv.width
 
         BoxLayout:
             id: main_content

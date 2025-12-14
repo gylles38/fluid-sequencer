@@ -272,6 +272,15 @@ Builder.load_string("""
                 tooltip_text: "Record"
                 on_press: root.record_pressed()
 
+            Widget:
+                size_hint_x: 0.5
+
+            Label:
+                id: pos_label
+                text: "Pos: 1:1"
+                size_hint_x: None
+                width: self.texture_size[0]
+
         Ruler:
             id: ruler
             sequencer_layout: root.sequencer_layout
@@ -280,8 +289,6 @@ Builder.load_string("""
             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             size_hint_y: None
             height: dp(30)
-            info_width: 0
-            controls_width: 0
             keyboard_width: keyboard_sv.width
 
         BoxLayout:
@@ -442,6 +449,10 @@ class PianoRollEditor(ModalView):
     def update_playhead(self, dt):
         current_beat = self.sequencer_layout.sequencer.current_beat
         self.set_playback_position(current_beat)
+
+        # Update position label
+        pos_str = self.sequencer_layout.sequencer._format_beats_to_position(current_beat)
+        self.ids.pos_label.text = f"Pos: {pos_str}"
 
     def set_playback_position(self, current_beat: float):
         grid = self.ids.grid_viewer.grid

@@ -3,6 +3,7 @@ from kivy.uix.widget import Widget
 from kivy.properties import ObjectProperty, NumericProperty
 from kivy.uix.label import Label
 from kivy.metrics import dp
+import math
 from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle, Line
 from sequencer.models import MidiTrack
@@ -32,7 +33,7 @@ class RulerContent(Widget):
             return
 
         pixels_per_beat = self.pixels_per_beat
-        num_measures = int(self.total_beats / self.beats_per_measure)
+        num_measures = math.ceil(self.total_beats / self.beats_per_measure)
 
         with self.canvas.after:
             for i in range(1, num_measures + 2):
@@ -86,11 +87,9 @@ class Ruler(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
-        self.spacing = dp(12)
-        self.padding = [dp(12), dp(6), dp(12), dp(6)]
+        self.spacing = 0  # Remove spacing to align with grid
+        self.padding = [0, dp(6), 0, dp(6)] # Remove horizontal padding
 
-        self.left_spacer = Widget(size_hint_x=None)
-        self.controls_spacer = Widget(size_hint_x=None)
         self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
@@ -102,14 +101,9 @@ class Ruler(BoxLayout):
         )
         self.scroll_view.add_widget(self.ruler_content)
 
-        # Add widgets directly to the main layout to mirror TrackWidget structure
-        self.add_widget(self.left_spacer)
-        self.add_widget(self.controls_spacer)
         self.add_widget(self.keyboard_spacer)
         self.add_widget(self.scroll_view)
 
-        self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
-        self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
         self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
         self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))

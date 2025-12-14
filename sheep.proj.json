@@ -1,0 +1,3182 @@
+{
+    "song": {
+        "name": "New Song",
+        "tempo": 120,
+        "time_signature_numerator": 4,
+        "time_signature_denominator": 4,
+        "ticks_per_beat": 480,
+        "tracks": [
+            {
+                "name": "rhodes",
+                "is_muted": false,
+                "is_solo": false,
+                "channel": 0,
+                "volume": 1.0,
+                "events": [
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 107,
+                                "duration": 0.13241147994995117,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 5.0,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 87,
+                                "duration": 0.1821589469909668,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 5.186007976531982,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 127,
+                                "duration": 0.1633286476135254,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 5.612826347351074,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 119,
+                                "duration": 0.16587448120117188,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 5.791337966918945,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 127,
+                                "duration": 0.17070770263671875,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 6.21080207824707,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 119,
+                                "duration": 0.09284210205078125,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 6.394354343414307,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 127,
+                                "duration": 0.14320087432861328,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 6.746277332305908,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 127,
+                                "duration": 0.31353139877319336,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 6.880795955657959,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 55,
+                                "duration": 0.424771785736084,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 7.18126916885376,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 127,
+                                "duration": 4.052133083343506,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 7.601647853851318,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 83,
+                                "duration": 0.33157873153686523,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 12.849421501159668,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 127,
+                                "duration": 0.6745510101318359,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 13.290762424468994,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 125,
+                                "duration": 0.29377222061157227,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 13.952118873596191,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 119,
+                                "duration": 0.7524933815002441,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 14.524444580078125,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 88,
+                                "duration": 0.3780345916748047,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 15.043288707733154,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 88,
+                                "duration": 5.4551544189453125,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 15.391125202178955,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 47,
+                                "duration": 5.385392189025879,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 15.414857864379883,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 92,
+                                "duration": 0.6235899925231934,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 20.802524089813232,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 50,
+                                "velocity": 110,
+                                "duration": 0.5991888046264648,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 20.811476230621338,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 85,
+                                "duration": 0.23272180557250977,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 21.130425930023193,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 126,
+                                "duration": 0.20159292221069336,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 21.14592981338501,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 58,
+                                "duration": 0.16680383682250977,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 21.152402877807617,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 111,
+                                "duration": 0.22702598571777344,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 21.69663429260254,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 118,
+                                "duration": 0.18526077270507812,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 21.705307006835938,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 124,
+                                "duration": 0.19197320938110352,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 21.713976860046387,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 79,
+                                "duration": 5.468491077423096,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 23.707602977752686,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 70,
+                                "duration": 5.403088092803955,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 23.71199941635132,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 50,
+                                "duration": 5.526886940002441,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 23.73353385925293,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 38,
+                                "velocity": 51,
+                                "duration": 1.8714299201965332,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 27.410918712615967,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 50,
+                                "velocity": 75,
+                                "duration": 2.629395008087158,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 29.048165798187256,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 97,
+                                "duration": 0.30286502838134766,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 29.678982734680176,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 79,
+                                "duration": 0.2640266418457031,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 29.687660217285156,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 78,
+                                "duration": 0.32402515411376953,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 29.718225479125977,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 108,
+                                "duration": 0.21934986114501953,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 30.30983591079712,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 110,
+                                "duration": 0.173583984375,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 30.318554401397705,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 72,
+                                "duration": 0.13022232055664062,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 30.34458303451538,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 93,
+                                "duration": 0.22910070419311523,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 30.850370407104492,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 114,
+                                "duration": 0.21795129776000977,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 30.86588191986084,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 76,
+                                "duration": 0.1826624870300293,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 30.883437633514404,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 38,
+                                "velocity": 90,
+                                "duration": 2.328855514526367,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 31.5687255859375,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 70,
+                                "duration": 5.701999664306641,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 31.570969104766846,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 53,
+                                "duration": 5.694899559020996,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 31.575348377227783,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 60,
+                                "duration": 5.612513065338135,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 31.581881046295166,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 50,
+                                "velocity": 44,
+                                "duration": 2.2743406295776367,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 33.79999542236328,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 38,
+                                "velocity": 46,
+                                "duration": 0.9004426002502441,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 35.79948949813843,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 86,
+                                "duration": 2.030949592590332,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 37.19908332824707,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 75,
+                                "duration": 0.2464299201965332,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 37.60303592681885,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 117,
+                                "duration": 0.24218177795410156,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 37.61166334152222,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 88,
+                                "duration": 0.27144527435302734,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 38.2266206741333,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 83,
+                                "duration": 0.2998485565185547,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 38.24853563308716,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 50,
+                                "duration": 0.07031011581420898,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 38.312079429626465,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 95,
+                                "duration": 0.2595648765563965,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 38.82649040222168,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 108,
+                                "duration": 0.21155309677124023,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 38.8396258354187,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 62,
+                                "duration": 0.17880678176879883,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 38.86152505874634,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 47,
+                                "duration": 0.09340572357177734,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 38.89640998840332,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 93,
+                                "duration": 3.3180251121520996,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 39.45646810531616,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 68,
+                                "duration": 3.294203281402588,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 39.4608473777771,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 79,
+                                "duration": 3.143343925476074,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 39.48464822769165,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 81,
+                                "duration": 1.8478279113769531,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 39.49142646789551,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 44,
+                                "duration": 1.5897321701049805,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 41.595656394958496,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 96,
+                                "duration": 0.1076350212097168,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 43.51161527633667,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 83,
+                                "duration": 1.4655938148498535,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 43.52029514312744,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 119,
+                                "duration": 0.653282642364502,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 43.6605920791626,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 127,
+                                "duration": 0.3516421318054199,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 44.195841789245605,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 68,
+                                "velocity": 110,
+                                "duration": 0.04815483093261719,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 45.42631006240845,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 90,
+                                "duration": 1.4243927001953125,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 45.440001010894775,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 107,
+                                "duration": 0.5405097007751465,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 45.4941987991333,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 59,
+                                "duration": 0.3501424789428711,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 45.51186561584473,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 94,
+                                "duration": 0.3840823173522949,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 46.12777662277222,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 74,
+                                "duration": 1.8869729042053223,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 47.42726278305054,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 67,
+                                "duration": 4.796579360961914,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 47.44668626785278,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 80,
+                                "duration": 4.754208564758301,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 47.45552968978882,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 94,
+                                "duration": 4.802945137023926,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 47.45776844024658,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 72,
+                                "duration": 1.6915030479431152,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 49.65666913986206,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 91,
+                                "duration": 0.8285617828369141,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 51.65726137161255,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 111,
+                                "duration": 0.3643531799316406,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 52.66009712219238,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 125,
+                                "duration": 0.4383883476257324,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 52.92201900482178,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 96,
+                                "duration": 0.3638911247253418,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 53.279746532440186,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 68,
+                                "velocity": 127,
+                                "duration": 0.17018365859985352,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 53.671886920928955,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 127,
+                                "duration": 0.2491755485534668,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 53.70473384857178,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 85,
+                                "duration": 0.16553592681884766,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 54.202635765075684,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 107,
+                                "duration": 0.501338005065918,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 54.23141527175903,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 127,
+                                "duration": 0.6360993385314941,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 54.58448553085327,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 86,
+                                "duration": 3.649538516998291,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 55.518062591552734,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 63,
+                                "duration": 3.539364814758301,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 55.528921127319336,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 69,
+                                "duration": 3.596627712249756,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 55.53331804275513,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 68,
+                                "duration": 3.6185717582702637,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 55.539833545684814,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 99,
+                                "duration": 0.1832270622253418,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 59.44237041473389,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 92,
+                                "duration": 0.2205805778503418,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 59.48398303985596,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 93,
+                                "duration": 0.538151741027832,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 60.08552026748657,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 91,
+                                "duration": 0.6100177764892578,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 60.09419393539429,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 87,
+                                "duration": 0.36313962936401367,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 61.189218521118164,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 97,
+                                "duration": 0.3085031509399414,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 61.19141626358032,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 85,
+                                "duration": 0.25853919982910156,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 61.1979546546936,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 94,
+                                "duration": 0.1566448211669922,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 61.84359169006348,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 94,
+                                "duration": 0.3476901054382324,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 61.860981941223145,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 65,
+                                "duration": 4.450097560882568,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 63.294790267944336,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 60,
+                                "duration": 4.380070209503174,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 63.323570728302,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 27,
+                                "duration": 4.308204650878906,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 63.3258056640625,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 77,
+                                "velocity": 93,
+                                "duration": 0.38733625411987305,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 68.52225828170776,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 63,
+                                "duration": 0.07853460311889648,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 68.5570478439331,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 97,
+                                "duration": 0.46750545501708984,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 68.83794975280762,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 122,
+                                "duration": 0.2667713165283203,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 69.23818254470825,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 103,
+                                "duration": 0.6646232604980469,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 69.51801252365112,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 88,
+                                "duration": 0.30448055267333984,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 70.06941366195679,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 68,
+                                "duration": 4.501905918121338,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 71.43786668777466,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 100,
+                                "duration": 4.207942962646484,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 71.44009733200073,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 111,
+                                "duration": 4.153809070587158,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 71.44874954223633,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 111,
+                                "duration": 3.6511693000793457,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 75.53489255905151,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 109,
+                                "duration": 0.2528090476989746,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 77.37393045425415,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 76,
+                                "duration": 0.2913379669189453,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 77.37616634368896,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 115,
+                                "duration": 0.20736169815063477,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 77.38054037094116,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 127,
+                                "duration": 0.16875553131103516,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 77.94960737228394,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 82,
+                                "duration": 0.14718341827392578,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 77.96894645690918,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 105,
+                                "duration": 0.10825967788696289,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 77.98178768157959,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 111,
+                                "duration": 0.2794070243835449,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 78.4363751411438,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 98,
+                                "duration": 0.17452764511108398,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 78.4513955116272,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 87,
+                                "duration": 0.27564048767089844,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 78.45788097381592,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 118,
+                                "duration": 7.087050437927246,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 79.32166624069214,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 86,
+                                "duration": 7.137561798095703,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 79.32599020004272,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 34,
+                                "duration": 7.0970563888549805,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 79.37519407272339,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 63,
+                                "duration": 7.04095458984375,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 87.25761651992798,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 70,
+                                "duration": 7.093674659729004,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 87.27487897872925,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 102,
+                                "duration": 7.043649673461914,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 87.27925443649292,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 49,
+                                "duration": 1.5741209983825684,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 95.29218101501465,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 101,
+                                "duration": 1.5436477661132812,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 95.30293607711792,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 79,
+                                "duration": 1.5349159240722656,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 95.30297422409058,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 127,
+                                "duration": 3.4729557037353516,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 97.22550249099731,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 122,
+                                "duration": 3.4619932174682617,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 97.23422718048096,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 94,
+                                "duration": 3.496880531311035,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 97.23427486419678,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 50,
+                                "velocity": 94,
+                                "duration": 1.5811691284179688,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 99.16941261291504,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 110,
+                                "duration": 0.30037403106689453,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 101.01064586639404,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 83,
+                                "duration": 0.23017072677612305,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 101.01286220550537,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 83,
+                                "duration": 0.315004825592041,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 101.02832412719727,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 126,
+                                "duration": 0.15541696548461914,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 101.56611394882202,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 104,
+                                "duration": 0.09259843826293945,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 101.5855622291565,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 81,
+                                "duration": 0.1770949363708496,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 101.5899224281311,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 127,
+                                "duration": 0.6326775550842285,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 102.07595825195312,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 123,
+                                "duration": 0.610832691192627,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 102.08251953125,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 92,
+                                "duration": 0.6023221015930176,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 102.09333753585815,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 81,
+                                "duration": 1.6093659400939941,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 103.12920093536377,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 112,
+                                "duration": 1.5962791442871094,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 103.13999223709106,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 127,
+                                "duration": 1.5656237602233887,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 103.14655780792236,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 113,
+                                "duration": 3.5031275749206543,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 105.05283880233765,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 75,
+                                "duration": 3.4917125701904297,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 105.05511522293091,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 99,
+                                "duration": 3.4655470848083496,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 105.05515384674072,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 75,
+                                "duration": 0.35495519638061523,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 108.90691614151001,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 104,
+                                "duration": 0.39378976821899414,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 108.91127729415894,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 61,
+                                "duration": 0.4720187187194824,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 108.91571378707886,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 102,
+                                "duration": 0.23581218719482422,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 109.66250658035278,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 76,
+                                "duration": 0.31089305877685547,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 109.67170238494873,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 70,
+                                "duration": 0.15034055709838867,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 109.7043809890747,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 97,
+                                "duration": 0.25803184509277344,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 110.30697393417358,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 103,
+                                "duration": 0.24042606353759766,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 110.31355333328247,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 63,
+                                "duration": 0.23407268524169922,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 110.32222270965576,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 80,
+                                "duration": 5.06710147857666,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 110.93209075927734,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 76,
+                                "duration": 4.986433506011963,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 110.99327993392944,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 58,
+                                "duration": 4.8941521644592285,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 111.00621557235718,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 127,
+                                "duration": 0.05194377899169922,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 116.79209756851196,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 127,
+                                "duration": 0.8440499305725098,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 116.85950708389282,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 105,
+                                "duration": 0.383333683013916,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 117.35265016555786,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 127,
+                                "duration": 0.24536561965942383,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 117.75329303741455,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 90,
+                                "duration": 4.777218341827393,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 118.7484712600708,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 63,
+                                "duration": 4.79867696762085,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 118.75919246673584,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 61,
+                                "duration": 4.845900535583496,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 118.76986169815063,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 85,
+                                "duration": 1.4002337455749512,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 123.73780107498169,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 92,
+                                "duration": 0.2974214553833008,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 124.62938928604126,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 99,
+                                "duration": 0.28896236419677734,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 124.64012050628662,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 110,
+                                "duration": 0.26961612701416016,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 124.66592931747437,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 93,
+                                "duration": 0.1832866668701172,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 125.25583505630493,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 92,
+                                "duration": 0.1731095314025879,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 125.2709093093872,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 75,
+                                "duration": 0.109527587890625,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 125.28658294677734,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 127,
+                                "duration": 0.3016982078552246,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 125.66111707687378,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 127,
+                                "duration": 0.3168482780456543,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 125.67019081115723,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 106,
+                                "duration": 0.3125324249267578,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 125.6746153831482,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 127,
+                                "duration": 5.222062587738037,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 126.6351752281189,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 88,
+                                "duration": 5.117432594299316,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 126.65048503875732,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 103,
+                                "duration": 5.155055999755859,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 126.6569995880127,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 71,
+                                "velocity": 124,
+                                "duration": 0.6694679260253906,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 132.56772804260254,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 76,
+                                "duration": 0.385434627532959,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 133.13917112350464,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 126,
+                                "duration": 0.3058304786682129,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 133.45371866226196,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 68,
+                                "duration": 3.990100860595703,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 134.58484029769897,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 56,
+                                "duration": 3.8099565505981445,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 134.60901260375977,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 85,
+                                "duration": 3.9308576583862305,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 134.61555767059326,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 81,
+                                "velocity": 110,
+                                "duration": 0.39070987701416016,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 139.35118532180786,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 80,
+                                "velocity": 127,
+                                "duration": 0.22845697402954102,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 139.63951349258423,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 79,
+                                "velocity": 74,
+                                "duration": 0.24577856063842773,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 139.9388518333435,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 77,
+                                "velocity": 72,
+                                "duration": 0.690091609954834,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 140.22314262390137,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 106,
+                                "duration": 0.5125551223754883,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 140.84906435012817,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 82,
+                                "duration": 4.079831600189209,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 142.273663520813,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 81,
+                                "velocity": 71,
+                                "duration": 3.8503904342651367,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 142.29093551635742,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 123,
+                                "duration": 3.9963150024414062,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 142.3016242980957,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 120,
+                                "duration": 0.3257927894592285,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 147.0592131614685,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 97,
+                                "duration": 0.3442225456237793,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 147.34864139556885,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 88,
+                                "duration": 0.42348623275756836,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 147.70175313949585,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 72,
+                                "velocity": 107,
+                                "duration": 0.6161084175109863,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 148.0324034690857,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 108,
+                                "duration": 0.7862710952758789,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 148.62070417404175,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 56,
+                                "duration": 4.118297576904297,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 150.09645557403564,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 82,
+                                "duration": 4.148316860198975,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 150.11624193191528,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 74,
+                                "velocity": 60,
+                                "duration": 3.9505176544189453,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 150.13137674331665,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 101,
+                                "duration": 0.42279815673828125,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 154.83868837356567,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 68,
+                                "velocity": 127,
+                                "duration": 0.2920856475830078,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 155.14523792266846,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 67,
+                                "velocity": 44,
+                                "duration": 0.40772294998168945,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 155.38167524337769,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 107,
+                                "duration": 0.6592569351196289,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 155.72464275360107,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 65,
+                                "velocity": 114,
+                                "duration": 0.7230558395385742,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 156.31306648254395,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 85,
+                                "duration": 5.168286323547363,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 157.64419269561768,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 75,
+                                "duration": 5.380674362182617,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 157.65715837478638,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 47,
+                                "duration": 5.418840408325195,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 157.67895555496216,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 73,
+                                "duration": 0.41326379776000977,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 163.52716541290283,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 55,
+                                "velocity": 83,
+                                "duration": 0.43257904052734375,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 163.54934787750244,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 81,
+                                "duration": 0.35178470611572266,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 163.58417892456055,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 55,
+                                "velocity": 52,
+                                "duration": 0.2744631767272949,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 164.25844764709473,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 85,
+                                "duration": 0.24186325073242188,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 164.27578449249268,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 67,
+                                "duration": 0.27657365798950195,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 164.27802991867065,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 73,
+                                "duration": 0.32540178298950195,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 164.8419885635376,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 55,
+                                "velocity": 74,
+                                "duration": 0.30359315872192383,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 164.86148977279663,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 96,
+                                "duration": 0.306180477142334,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 164.8745551109314,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 69,
+                                "duration": 5.808335304260254,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 165.6122441291809,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 88,
+                                "duration": 5.862868785858154,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 165.62088823318481,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 44,
+                                "duration": 5.832378387451172,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 165.63381576538086,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 66,
+                                "velocity": 66,
+                                "duration": 2.4530282020568848,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 173.27800226211548,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 62,
+                                "duration": 2.289320945739746,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 173.29099082946777,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 117,
+                                "duration": 2.3904175758361816,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 173.30180835723877,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 66,
+                                "velocity": 127,
+                                "duration": 0.9463396072387695,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 176.34409713745117,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 70,
+                                "velocity": 127,
+                                "duration": 0.5007524490356445,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 176.6373734474182,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 102,
+                                "duration": 0.289306640625,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 177.16381645202637,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 76,
+                                "velocity": 94,
+                                "duration": 1.7879199981689453,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 177.35274648666382,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 73,
+                                "velocity": 127,
+                                "duration": 0.8287501335144043,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 177.96917629241943,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 69,
+                                "velocity": 99,
+                                "duration": 0.5026507377624512,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 178.8321418762207,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 66,
+                                "velocity": 106,
+                                "duration": 0.6819953918457031,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 179.26559972763062,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 121,
+                                "duration": 0.5279402732849121,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 180.0725965499878,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 61,
+                                "velocity": 82,
+                                "duration": 0.6781282424926758,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 180.39656448364258,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 17,
+                                "duration": 5.80934476852417,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 181.04035186767578,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 50,
+                                "velocity": 93,
+                                "duration": 3.800814151763916,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 181.15375471115112,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 42,
+                                "duration": 5.590935707092285,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 181.24797010421753,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 50,
+                                "velocity": 112,
+                                "duration": 2.909764289855957,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 185.10176277160645,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 114,
+                                "duration": 0.30522632598876953,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 187.09429168701172,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 69,
+                                "duration": 0.32042360305786133,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 187.10069513320923,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 66,
+                                "velocity": 115,
+                                "duration": 0.20214176177978516,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 187.1114149093628,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 104,
+                                "duration": 0.25160789489746094,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 187.66701793670654,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 68,
+                                "duration": 0.18927955627441406,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 187.7380895614624,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 123,
+                                "duration": 0.5128178596496582,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 188.18027782440186,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 55,
+                                "velocity": 96,
+                                "duration": 0.49329280853271484,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 188.19108963012695,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 96,
+                                "duration": 0.4697079658508301,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 188.22567558288574,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 126,
+                                "duration": 2.588296890258789,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 189.04479122161865,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 82,
+                                "duration": 2.601518154144287,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 189.0663299560547,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 82,
+                                "duration": 2.429960250854492,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 189.09073781967163,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 124,
+                                "duration": 0.6566300392150879,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 191.99865627288818,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 55,
+                                "velocity": 100,
+                                "duration": 0.6259293556213379,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 192.00736570358276,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 84,
+                                "duration": 0.6204795837402344,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 192.04179286956787,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 119,
+                                "duration": 3.2493491172790527,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 192.93465042114258,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 100,
+                                "duration": 3.2317991256713867,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 192.93904066085815,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 78,
+                                "duration": 3.1555275917053223,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 192.96728086471558,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 59,
+                                "velocity": 124,
+                                "duration": 0.16885709762573242,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 196.43957328796387,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 55,
+                                "velocity": 96,
+                                "duration": 0.19292259216308594,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 196.4439516067505,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 62,
+                                "velocity": 81,
+                                "duration": 0.10341501235961914,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 196.4894585609436,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "velocity": 120,
+                                "duration": 4.174535751342773,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 196.84161710739136,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 57,
+                                "velocity": 85,
+                                "duration": 4.00390625,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 196.86967754364014,
+                        "__type__": "Event"
+                    },
+                    {
+                        "notes": [
+                            {
+                                "pitch": 64,
+                                "velocity": 92,
+                                "duration": 4.1657938957214355,
+                                "__type__": "Note"
+                            }
+                        ],
+                        "start_time": 196.87857627868652,
+                        "__type__": "Event"
+                    }
+                ],
+                "instrument": 0,
+                "bank_msb": null,
+                "bank_lsb": null,
+                "output_port_name": "rhodes",
+                "__type__": "MidiTrack"
+            },
+            {
+                "name": "voices",
+                "filepath": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/bruitage.ogg",
+                "is_muted": false,
+                "is_solo": false,
+                "start_time": 0.0,
+                "volume": 1.0,
+                "__type__": "AudioTrack"
+            },
+            {
+                "name": "bass",
+                "is_muted": true,
+                "is_solo": false,
+                "channel": 2,
+                "volume": 0.8,
+                "events": [],
+                "instrument": 33,
+                "bank_msb": null,
+                "bank_lsb": null,
+                "output_port_name": "bass",
+                "__type__": "MidiTrack"
+            },
+            {
+                "name": "bass",
+                "filepath": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/Sheep-bass.ogg",
+                "is_muted": false,
+                "is_solo": false,
+                "start_time": 0.0,
+                "volume": 1.0,
+                "__type__": "AudioTrack"
+            },
+            {
+                "name": "rhodes",
+                "filepath": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes.ogg",
+                "is_muted": false,
+                "is_solo": false,
+                "start_time": 0.0,
+                "volume": 1.0,
+                "__type__": "AudioTrack"
+            }
+        ],
+        "metronome_enabled": false,
+        "metronome_port_name": "metro",
+        "__type__": "Song"
+    },
+    "virtual_ports": [
+        "rhodes",
+        "bass",
+        "metro"
+    ],
+    "audio_player_command": "mpv --really-quiet --no-video --idle"
+}

@@ -290,6 +290,7 @@ Builder.load_string("""
             info_width: keyboard_sv.width
             spacing: 0
             padding: [0, dp(6), 0, dp(6)]
+            label_padding_x: 0
 
         BoxLayout:
             id: main_content

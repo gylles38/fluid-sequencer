@@ -157,11 +157,18 @@ class EditablePianoRollViewer(ScrollView):
     note_height = NumericProperty(dp(12))
 
     def __init__(self, **kwargs):
+        # Create the grid before calling super(), so that property handlers can access it.
+        self.grid = EditableMidiGrid(
+            editor=kwargs.get('editor'),
+            track=kwargs.get('track'),
+            total_beats=kwargs.get('total_beats'),
+            pixels_per_beat=kwargs.get('pixels_per_beat'),
+            note_height=kwargs.get('note_height')
+        )
         super(EditablePianoRollViewer, self).__init__(**kwargs)
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
-        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
         self.add_widget(self.grid)
         self.grid.bind(width=self.setter('width'))
 

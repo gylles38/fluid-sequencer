@@ -287,7 +287,7 @@ Builder.load_string("""
             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             size_hint_y: None
             height: dp(30)
-            info_width: keyboard_sv.width
+            keyboard_width: -dp(138)
             spacing: 0
             padding: [0, dp(6), 0, dp(6)]
             label_padding_x: 0

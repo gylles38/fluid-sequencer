@@ -361,6 +361,7 @@ class PianoRollEditor(ModalView):
 
     def __init__(self, **kwargs):
         super(PianoRollEditor, self).__init__(**kwargs)
+        self._original_events = None
         self.track_copy = MidiTrack(
             name=self.track.name,
             channel=self.track.channel,
@@ -415,6 +416,10 @@ class PianoRollEditor(ModalView):
         self.ids.ruler.redraw()
 
     def on_dismiss(self):
+        # If the editor is dismissed during preview playback, ensure we stop
+        # playback and restore the original track state.
+        if self.sequencer_layout.sequencer.playback_state != 'stopped':
+            self.sequencer_layout.sequencer.stop() # This will trigger the state change and restore events
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
             self._update_event.cancel()
@@ -483,12 +488,33 @@ class PianoRollEditor(ModalView):
                 new_scroll_x_pixels = max(0, min(new_scroll_x_pixels, max_displacement))
                 scroll_view.scroll_x = new_scroll_x_pixels / max_displacement
 
-    def play_pressed(self, *args): self.sequencer_layout.sequencer.process_transport_command("play_pause")
+    def play_pressed(self, *args):
+        # When entering 'play' from a 'stopped' state, swap the original track
+        # events with the editor's copy so the user can hear their changes.
+        if self.sequencer_layout.sequencer.playback_state == 'stopped':
+            song = self.sequencer_layout.sequencer.song
+            # Find the original track in the main song object by comparing names
+            # (assuming track names are unique for now)
+            original_track = next((t for t in song.tracks if t.name == self.track.name), None)
+            if original_track:
+                self._original_events = copy.deepcopy(original_track.events)
+                original_track.events = self.track_copy.events
+
+        self.sequencer_layout.sequencer.process_transport_command("play_pause")
+
     def stop_pressed(self, *args): self.sequencer_layout.sequencer.process_transport_command("stop")
     def record_pressed(self, *args): self.sequencer_layout.sequencer.process_transport_command("record")
     def rewind_pressed(self, *args): self.sequencer_layout.sequencer._resync_all_at_beat(0)
 
     def on_playback_state_change(self, instance, state):
+        # When playback stops, restore the original track events if they were swapped
+        if state == 'stopped' and self._original_events is not None:
+            song = self.sequencer_layout.sequencer.song
+            original_track = next((t for t in song.tracks if t.name == self.track.name), None)
+            if original_track:
+                original_track.events = self._original_events
+            self._original_events = None
+
         play_button, record_button = self.ids.play_button, self.ids.record_button
         play_button.icon = 'pause' if state in ('playing', 'recording') else 'play'
         play_button.tooltip_text = "Pause" if state in ('playing', 'recording') else "Play"

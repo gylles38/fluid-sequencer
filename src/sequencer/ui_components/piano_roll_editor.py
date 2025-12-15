@@ -277,7 +277,8 @@ class PianoRollEditor(ModalView):
             controls_width=0,
             keyboard_width=0,
             spacing=0,
-            padding=[0, dp(6), 0, dp(6)]
+            padding=[0, dp(6), 0, dp(6)],
+            label_padding_x=0
         )
         root_layout.add_widget(self.ids.ruler)
 

@@ -13,7 +13,6 @@ class RulerContent(Widget):
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
-    label_padding_x = NumericProperty(dp(4))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -55,7 +54,7 @@ class RulerContent(Widget):
                 halign='left',
                 valign='middle',
                 color=(0.8, 0.8, 0.8, 1),
-                padding_x=self.label_padding_x
+                padding_x=dp(4)
             )
             label.text_size = label.size
             self.add_widget(label)
@@ -86,11 +85,8 @@ class Ruler(BoxLayout):
     beats_per_measure = NumericProperty(4)
     spacing = NumericProperty(dp(12))
     padding = ListProperty([dp(12), dp(6), dp(12), dp(6)])
-    label_padding_x = NumericProperty(dp(4))
 
     def __init__(self, **kwargs):
-        if 'label_padding_x' in kwargs:
-            self.label_padding_x = kwargs.pop('label_padding_x')
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
         self.bind(spacing=self.setter('spacing'))
@@ -105,7 +101,6 @@ class Ruler(BoxLayout):
             pixels_per_beat=self.pixels_per_beat,
             total_beats=self.total_beats,
             beats_per_measure=self.beats_per_measure,
-            label_padding_x=self.label_padding_x,
             size_hint=(None, 1)
         )
         self.scroll_view.add_widget(self.ruler_content)
@@ -121,7 +116,6 @@ class Ruler(BoxLayout):
         self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
         self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))
         self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))
-        self.bind(label_padding_x=lambda i, v: setattr(self.ruler_content, 'label_padding_x', v))
 
 
     def redraw(self, *args):

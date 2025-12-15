@@ -1,7 +1,8 @@
 from kivy.uix.modalview import ModalView
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty
-from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
+from . import TooltipMDIconButton, PianoKeyboard, BoundedScrollView
+from sequencer.ui_components.Ruler import Ruler
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -157,19 +158,26 @@ class EditablePianoRollViewer(ScrollView):
     note_height = NumericProperty(dp(12))
 
     def __init__(self, **kwargs):
-        # Create the grid before calling super(), so that property handlers can access it.
-        self.grid = EditableMidiGrid(
-            editor=kwargs.get('editor'),
-            track=kwargs.get('track'),
-            total_beats=kwargs.get('total_beats'),
-            pixels_per_beat=kwargs.get('pixels_per_beat'),
-            note_height=kwargs.get('note_height')
-        )
+        # We create a default grid *before* super() to prevent the AttributeError.
+        # This grid will be immediately replaced after super() is called.
+        self.grid = EditableMidiGrid()
         super(EditablePianoRollViewer, self).__init__(**kwargs)
+
+        # Now we remove the temporary grid and create the real one,
+        # ensuring all Kivy properties are correctly propagated.
+        self.clear_widgets()
+        self.grid = EditableMidiGrid(
+            editor=self.editor,
+            track=self.track,
+            total_beats=self.total_beats,
+            pixels_per_beat=self.pixels_per_beat,
+            note_height=self.note_height
+        )
+        self.add_widget(self.grid)
+
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
-        self.add_widget(self.grid)
         self.grid.bind(width=self.setter('width'))
 
     def on_touch_move(self, touch):

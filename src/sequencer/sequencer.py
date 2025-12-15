@@ -49,35 +49,6 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
-        if isinstance(o, MidiTrack):
-            return {
-                '__type__': 'MidiTrack',
-                'name': o.name,
-                'is_muted': o.is_muted,
-                'is_solo': o.is_solo,
-                'channel': o.channel,
-                'volume': o.volume,
-                'pan': o.pan,
-                'velocity': o.velocity,
-                'events': o.events,
-                'instrument': o.instrument,
-                'bank_msb': o.bank_msb,
-                'bank_lsb': o.bank_lsb,
-                'output_port_name': o.output_port_name,
-                'record_mode': o.record_mode,
-            }
-        if isinstance(o, AudioTrack):
-            return {
-                '__type__': 'AudioTrack',
-                'name': o.name,
-                'filepath': o.filepath,
-                'is_muted': o.is_muted,
-                'is_solo': o.is_solo,
-                'start_time': o.start_time,
-                'volume': o.volume,
-                'pan': o.pan,
-                'native_tempo': o.native_tempo,
-            }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
@@ -707,30 +678,27 @@ class JackManager:
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
 
         for i, track in enumerate(tracks):
-            # Check for an overridden version of the track for live preview
-            track_to_play = self.sequencer.track_overrides.get(i, track)
-
-            if not isinstance(track_to_play, MidiTrack) or not track_to_play.output_port_name in self.open_ports:
+            if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
                 continue
 
-            should_be_audible = (track_to_play.is_solo or not is_any_track_soloed) and not track_to_play.is_muted
-            port = self.open_ports[track_to_play.output_port_name]
+            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+            port = self.open_ports[track.output_port_name]
 
             if i >= len(self.next_event_indices):
                 self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
 
-            while self.next_event_indices[i] < len(track_to_play.events):
-                event = track_to_play.events[self.next_event_indices[i]]
+            while self.next_event_indices[i] < len(track.events):
+                event = track.events[self.next_event_indices[i]]
 
                 if start_beat_of_block <= event.start_time < end_beat_of_block:
                     if should_be_audible:
                         for note in event.notes:
-                            note_on_msg = mido.Message('note_on', channel=track_to_play.channel, note=note.pitch, velocity=int(note.velocity * track_to_play.velocity))
+                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
                             port.send(note_on_msg)
                             note_end_beat = event.start_time + note.duration
                             self._active_notes[(i, note.pitch)] = note_end_beat
                         for cc in event.cc_messages:
-                            cc_msg = mido.Message('control_change', channel=track_to_play.channel, control=cc.control, value=cc.value)
+                            cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
                             port.send(cc_msg)
                     self.next_event_indices[i] += 1
                 elif event.start_time >= end_beat_of_block:
@@ -972,8 +940,6 @@ class Sequencer(EventDispatcher):
         
         # Cache pour la longueur totale du morceau (dépend de l'audio)
         self._cached_song_length_beats: Optional[float] = None
-
-        self.track_overrides: Dict[int, MidiTrack] = {}
 
     def process_transport_command(self, command: str):
         """
@@ -1367,19 +1333,8 @@ class Sequencer(EventDispatcher):
                 return {"status": "cancelled", "message": "Deletion cancelled."}
 
         self.song.tracks.pop(track_index)
-
-        # After removing a track, the JACK client must be restarted to resync
-        # its internal state (like the number of audio players) with the new track list.
-        was_running = self.jack_manager.is_running
-        if was_running:
-            self.jack_manager.stop()
-
         self.is_dirty = True
         self.invalidate_song_length_cache()
-
-        if was_running:
-            self.jack_manager.start()
-
         return {"status": "success", "message": f"Track '{track_name}' deleted."}
 
     def add_cc_event(self, track_index: int, position_str: str, control: int, value: int) -> str:
@@ -2274,32 +2229,22 @@ class Sequencer(EventDispatcher):
         try:
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
-
-            # --- CRITICAL FIX ---
-            # Instead of creating a new sequencer, we update the CURRENT one.
-            loaded_song = project_data.get("song", Song(name="New Song"))
-            if loaded_song:
-                self.song = loaded_song
-
+            self.song = project_data.get("song", Song(name="New Song"))
             self.audio_player_command = project_data.get("audio_player_command", self.DEFAULT_AUDIO_PLAYER_COMMAND)
             if "mplayer" in self.audio_player_command:
                 print("Warning: Old 'mplayer' command found in project. Updating to 'mpv' default.")
                 self.audio_player_command = self.DEFAULT_AUDIO_PLAYER_COMMAND
-
             self.close_virtual_ports()
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
-
             self.unset_control_port()
             control_port_name = project_data.get("control_port_name")
             if control_port_name:
                 self.set_control_port(control_port_name)
-
             self.is_dirty = False
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
-
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:
             return f"Error: Project file not found at '{project_filepath}'"

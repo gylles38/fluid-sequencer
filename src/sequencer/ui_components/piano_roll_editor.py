@@ -1,5 +1,4 @@
 from kivy.uix.modalview import ModalView
-from kivy.lang import Builder
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
@@ -14,7 +13,8 @@ from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
-
+from kivy.uix.label import Label
+from kivy.uix.button import Button
 
 # --- New Editable Grid Components (based on PianoRoll.py) ---
 
@@ -166,8 +166,6 @@ class EditablePianoRollViewer(ScrollView):
         self.grid.bind(width=self.setter('width'))
 
     def on_touch_move(self, touch):
-        # If the grid has grabbed the touch for a note drag/resize operation,
-        # we must not process it for scrolling. We consume the event by returning True.
         if touch.grab_current is self.grid:
             return True
         return super(EditablePianoRollViewer, self).on_touch_move(touch)
@@ -179,175 +177,6 @@ class EditablePianoRollViewer(ScrollView):
     def on_note_height(self, i, v): self.grid.note_height = v
 
 
-# --- Builder String ---
-Builder.load_string("""
-<PianoRollEditor>:
-    size_hint: 0.9, 0.9
-    auto_dismiss: False
-
-    MDBoxLayout:
-        orientation: 'vertical'
-
-        MDBoxLayout:
-            id: toolbar
-            size_hint_y: None
-            height: dp(56)
-            padding: dp(8)
-            spacing: dp(8)
-            md_bg_color: 0.2, 0.2, 0.2, 1
-
-            Label:
-                text: "Modes:"
-                size_hint_x: None
-                width: self.texture_size[0]
-
-            TooltipMDIconButton:
-                id: insert_button
-                icon: 'plus-box'
-                tooltip_text: "Insert Mode"
-                on_press: root.set_edit_mode('insert', self)
-            TooltipMDIconButton:
-                id: move_button
-                icon: 'drag-variant'
-                tooltip_text: "Move Mode"
-                on_press: root.set_edit_mode('move', self)
-            TooltipMDIconButton:
-                id: delete_button
-                icon: 'minus-box'
-                tooltip_text: "Delete Mode"
-                on_press: root.set_edit_mode('delete', self)
-
-            Widget:
-                size_hint_x: 1
-
-            Label:
-                text: "Duration:"
-                size_hint_x: None
-                width: self.texture_size[0]
-
-            TooltipMDIconButton:
-                id: whole_note_button
-                icon: 'music-note-whole'
-                tooltip_text: "Whole Note (4 beats)"
-                on_press: root.set_note_duration(4.0, self)
-            TooltipMDIconButton:
-                id: half_note_button
-                icon: 'music-note-half'
-                tooltip_text: "Half Note (2 beats)"
-                on_press: root.set_note_duration(2.0, self)
-            TooltipMDIconButton:
-                id: quarter_note_button
-                icon: 'music-note-quarter'
-                tooltip_text: "Quarter Note (1 beat)"
-                on_press: root.set_note_duration(1.0, self)
-            TooltipMDIconButton:
-                id: eighth_note_button
-                icon: 'music-note-eighth'
-                tooltip_text: "Eighth Note (0.5 beats)"
-                on_press: root.set_note_duration(0.5, self)
-
-            Widget:
-                size_hint_x: 1
-
-            TooltipMDIconButton:
-                id: rewind_button
-                icon: 'rewind'
-                tooltip_text: "Rewind to Start"
-                on_press: root.rewind_pressed()
-            TooltipMDIconButton:
-                id: play_button
-                icon: 'play'
-                tooltip_text: "Play / Pause"
-                on_press: root.play_pressed()
-            TooltipMDIconButton:
-                id: stop_button
-                icon: 'stop'
-                tooltip_text: "Stop"
-                on_press: root.stop_pressed()
-            TooltipMDIconButton:
-                id: record_button
-                icon: 'record'
-                tooltip_text: "Record"
-                on_press: root.record_pressed()
-
-            Widget:
-                size_hint_x: 0.5
-
-            Label:
-                id: pos_label
-                text: "Pos: 1:1"
-                size_hint_x: None
-                width: self.texture_size[0]
-
-        Ruler:
-            id: ruler
-            sequencer_layout: root.sequencer_layout
-            pixels_per_beat: root.pixels_per_beat
-            total_beats: root.total_beats
-            beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
-            size_hint_y: None
-            height: dp(30)
-            info_width: keyboard_sv.width
-            controls_width: 0
-            keyboard_width: 0
-            spacing: 0
-            padding: [0, dp(6), 0, dp(6)]
-
-        BoxLayout:
-            id: main_content
-            orientation: 'horizontal'
-            spacing: 0
-
-            BoundedScrollView:
-                id: keyboard_sv
-                size_hint_x: None
-                width: dp(60)
-                do_scroll_x: False
-
-                PianoKeyboard:
-                    id: piano_keyboard
-                    size_hint: (None, None)
-                    width: self.parent.width
-                    note_height: root.note_height
-
-            BoundedScrollView:
-                id: timeline_scroll
-                do_scroll_y: False
-
-                EditablePianoRollViewer:
-                    id: grid_viewer
-                    editor: root
-                    track: root.track_copy
-                    total_beats: root.total_beats
-                    pixels_per_beat: root.pixels_per_beat
-                    note_height: root.note_height
-
-        MDBoxLayout:
-            size_hint_y: None
-            height: dp(48)
-            padding: dp(8)
-            spacing: dp(8)
-            md_bg_color: 0.2, 0.2, 0.2, 1
-
-            Widget:
-                size_hint_x: 1
-            Button:
-                text: 'Save & Close'
-                size_hint_x: None
-                width: dp(120)
-                on_press: root.dismiss('save_and_close')
-            Button:
-                text: 'Discard & Close'
-                size_hint_x: None
-                width: dp(140)
-                on_press: root.dismiss('discard_and_close')
-            Button:
-                text: 'Cancel'
-                size_hint_x: None
-                width: dp(100)
-                on_press: root.dismiss()
-""")
-
 class PianoRollEditor(ModalView):
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
@@ -356,13 +185,17 @@ class PianoRollEditor(ModalView):
     total_beats = NumericProperty(128)
     note_height = NumericProperty(dp(14))
     edit_mode = StringProperty('insert')
-    note_duration = NumericProperty(2.0)
+    note_duration = NumericProperty(1.0)
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     _update_event = None
 
     def __init__(self, **kwargs):
         super(PianoRollEditor, self).__init__(**kwargs)
+        self.size_hint = (0.9, 0.9)
+        self.auto_dismiss = False
+
+        # --- Data Copy ---
         self.track_copy = MidiTrack(
             name=self.track.name,
             channel=self.track.channel,
@@ -374,10 +207,101 @@ class PianoRollEditor(ModalView):
             events=copy.deepcopy(self.track.events)
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
+
+        # --- Root Layout ---
+        root_layout = MDBoxLayout(orientation='vertical')
+        self.add_widget(root_layout)
+
+        # --- Toolbar ---
+        toolbar = MDBoxLayout(size_hint_y=None, height=dp(56), padding=dp(8), spacing=dp(8), md_bg_color=(0.2, 0.2, 0.2, 1))
+        root_layout.add_widget(toolbar)
+
+        # Edit Mode Buttons
+        toolbar.add_widget(Label(text="Modes:", size_hint_x=None, width=dp(50)))
+        self.ids.insert_button = TooltipMDIconButton(icon='plus-box', tooltip_text="Insert Mode", on_press=lambda x: self.set_edit_mode('insert', self.ids.insert_button))
+        self.ids.move_button = TooltipMDIconButton(icon='drag-variant', tooltip_text="Move Mode", on_press=lambda x: self.set_edit_mode('move', self.ids.move_button))
+        self.ids.delete_button = TooltipMDIconButton(icon='minus-box', tooltip_text="Delete Mode", on_press=lambda x: self.set_edit_mode('delete', self.ids.delete_button))
+        toolbar.add_widget(self.ids.insert_button)
+        toolbar.add_widget(self.ids.move_button)
+        toolbar.add_widget(self.ids.delete_button)
+        toolbar.add_widget(Widget(size_hint_x=1))
+
+        # Note Duration Buttons
+        toolbar.add_widget(Label(text="Duration:", size_hint_x=None, width=dp(60)))
+        self.ids.whole_note_button = TooltipMDIconButton(icon='music-note-whole', tooltip_text="Whole Note (4 beats)", on_press=lambda x: self.set_note_duration(4.0, self.ids.whole_note_button))
+        self.ids.half_note_button = TooltipMDIconButton(icon='music-note-half', tooltip_text="Half Note (2 beats)", on_press=lambda x: self.set_note_duration(2.0, self.ids.half_note_button))
+        self.ids.quarter_note_button = TooltipMDIconButton(icon='music-note-quarter', tooltip_text="Quarter Note (1 beat)", on_press=lambda x: self.set_note_duration(1.0, self.ids.quarter_note_button))
+        self.ids.eighth_note_button = TooltipMDIconButton(icon='music-note-eighth', tooltip_text="Eighth Note (0.5 beats)", on_press=lambda x: self.set_note_duration(0.5, self.ids.eighth_note_button))
+        toolbar.add_widget(self.ids.whole_note_button)
+        toolbar.add_widget(self.ids.half_note_button)
+        toolbar.add_widget(self.ids.quarter_note_button)
+        toolbar.add_widget(self.ids.eighth_note_button)
+        toolbar.add_widget(Widget(size_hint_x=1))
+
+        # Transport Controls
+        self.ids.rewind_button = TooltipMDIconButton(icon='rewind', tooltip_text="Rewind to Start", on_press=self.rewind_pressed)
+        self.ids.play_button = TooltipMDIconButton(icon='play', tooltip_text="Play / Pause", on_press=self.play_pressed)
+        self.ids.stop_button = TooltipMDIconButton(icon='stop', tooltip_text="Stop", on_press=self.stop_pressed)
+        self.ids.record_button = TooltipMDIconButton(icon='record', tooltip_text="Record", on_press=self.record_pressed)
+        toolbar.add_widget(self.ids.rewind_button)
+        toolbar.add_widget(self.ids.play_button)
+        toolbar.add_widget(self.ids.stop_button)
+        toolbar.add_widget(self.ids.record_button)
+        toolbar.add_widget(Widget(size_hint_x=0.5))
+        self.ids.pos_label = Label(text="Pos: 1:1", size_hint_x=None, width=dp(80))
+        toolbar.add_widget(self.ids.pos_label)
+
+        # --- Ruler ---
+        self.ids.ruler = Ruler(
+            sequencer_layout=self.sequencer_layout,
+            pixels_per_beat=self.pixels_per_beat,
+            total_beats=self.total_beats,
+            beats_per_measure=self.sequencer_layout.sequencer.song.time_signature_numerator,
+            size_hint_y=None, height=dp(30),
+            info_width=dp(60), # Same as keyboard_sv.width
+            controls_width=0,
+            keyboard_width=0,
+            spacing=0,
+            padding=[0, dp(6), 0, dp(6)]
+        )
+        root_layout.add_widget(self.ids.ruler)
+
+        # --- Main Content ---
+        main_content = BoxLayout(orientation='horizontal', spacing=0)
+        root_layout.add_widget(main_content)
+
+        # Keyboard
+        keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(60), do_scroll_x=False)
+        self.ids.piano_keyboard = PianoKeyboard(size_hint=(None, None), width=keyboard_sv.width, note_height=self.note_height)
+        keyboard_sv.add_widget(self.ids.piano_keyboard)
+        main_content.add_widget(keyboard_sv)
+        self.ids.keyboard_sv = keyboard_sv
+
+        # Timeline/Grid
+        timeline_scroll = BoundedScrollView(do_scroll_y=False)
+        self.ids.grid_viewer = EditablePianoRollViewer(
+            editor=self, track=self.track_copy, total_beats=self.total_beats,
+            pixels_per_beat=self.pixels_per_beat, note_height=self.note_height
+        )
+        timeline_scroll.add_widget(self.ids.grid_viewer)
+        main_content.add_widget(timeline_scroll)
+        self.ids.timeline_scroll = timeline_scroll
+
+        # --- Bottom Bar ---
+        bottom_bar = MDBoxLayout(size_hint_y=None, height=dp(48), padding=dp(8), spacing=dp(8), md_bg_color=(0.2, 0.2, 0.2, 1))
+        bottom_bar.add_widget(Widget(size_hint_x=1))
+        save_button = Button(text='Save & Close', size_hint_x=None, width=dp(120), on_press=lambda x: self.dismiss('save_and_close'))
+        discard_button = Button(text='Discard & Close', size_hint_x=None, width=dp(140), on_press=lambda x: self.dismiss('discard_and_close'))
+        cancel_button = Button(text='Cancel', size_hint_x=None, width=dp(100), on_press=self.dismiss)
+        bottom_bar.add_widget(save_button)
+        bottom_bar.add_widget(discard_button)
+        bottom_bar.add_widget(cancel_button)
+        root_layout.add_widget(bottom_bar)
+
+        # --- Bindings & Post-Init ---
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)
-        self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
-
+        self._update_event = Clock.schedule_interval(self.update_playhead, 1 / 30.0)
     def _post_kv_init(self, dt):
         keyboard_sv = self.ids.keyboard_sv
         grid_viewer = self.ids.grid_viewer
@@ -390,7 +314,6 @@ class PianoRollEditor(ModalView):
         self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
         self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
 
-        # Add the playback line here to ensure it's drawn on top
         self.ids.grid_viewer.grid.add_playback_line()
 
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
@@ -452,8 +375,6 @@ class PianoRollEditor(ModalView):
     def update_playhead(self, dt):
         current_beat = self.sequencer_layout.sequencer.current_beat
         self.set_playback_position(current_beat)
-
-        # Update position label
         pos_str = self.sequencer_layout.sequencer._format_beats_to_position(current_beat)
         self.ids.pos_label.text = f"Pos: {pos_str}"
 

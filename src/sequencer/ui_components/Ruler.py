@@ -121,7 +121,7 @@ class Ruler(BoxLayout):
         self.bind(label_padding_x=lambda i,v: setattr(self.ruler_content, 'label_padding_x', v))
 
     def on_sequencer_layout(self, instance, value):
-        if self.ruler_content:
+        if hasattr(self, 'ruler_content'):
             self.ruler_content.sequencer_layout = value
 
     def redraw(self, *args):

@@ -678,7 +678,10 @@ class JackManager:
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
 
         for i, track in enumerate(tracks):
-            if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
+            # Check for an overridden version of the track for live preview
+            track_to_play = self.sequencer.track_overrides.get(i, track)
+
+            if not isinstance(track_to_play, MidiTrack) or not track_to_play.output_port_name in self.open_ports:
                 continue
 
             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
@@ -940,6 +943,8 @@ class Sequencer(EventDispatcher):
         
         # Cache pour la longueur totale du morceau (dépend de l'audio)
         self._cached_song_length_beats: Optional[float] = None
+
+        self.track_overrides: Dict[int, MidiTrack] = {}
 
     def process_transport_command(self, command: str):
         """
@@ -1333,8 +1338,19 @@ class Sequencer(EventDispatcher):
                 return {"status": "cancelled", "message": "Deletion cancelled."}
 
         self.song.tracks.pop(track_index)
+
+        # After removing a track, the JACK client must be restarted to resync
+        # its internal state (like the number of audio players) with the new track list.
+        was_running = self.jack_manager.is_running
+        if was_running:
+            self.jack_manager.stop()
+
         self.is_dirty = True
         self.invalidate_song_length_cache()
+
+        if was_running:
+            self.jack_manager.start()
+
         return {"status": "success", "message": f"Track '{track_name}' deleted."}
 
     def add_cc_event(self, track_index: int, position_str: str, control: int, value: int) -> str:

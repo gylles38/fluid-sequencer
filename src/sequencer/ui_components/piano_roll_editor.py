@@ -178,7 +178,12 @@ class EditablePianoRollViewer(ScrollView):
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
-        self.grid.bind(width=self.setter('width'))
+
+        self.bind(total_beats=self.update_grid_width, pixels_per_beat=self.update_grid_width)
+
+    def update_grid_width(self, *args):
+        self.grid.width = self.total_beats * self.pixels_per_beat
+        self.width = self.grid.width
 
     def on_touch_move(self, touch):
         if touch.grab_current is self.grid:

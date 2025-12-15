@@ -684,8 +684,8 @@ class JackManager:
             if not isinstance(track_to_play, MidiTrack) or not track_to_play.output_port_name in self.open_ports:
                 continue
 
-            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-            port = self.open_ports[track.output_port_name]
+            should_be_audible = (track_to_play.is_solo or not is_any_track_soloed) and not track_to_play.is_muted
+            port = self.open_ports[track_to_play.output_port_name]
 
             if i >= len(self.next_event_indices):
                 self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
@@ -696,12 +696,12 @@ class JackManager:
                 if start_beat_of_block <= event.start_time < end_beat_of_block:
                     if should_be_audible:
                         for note in event.notes:
-                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
+                            note_on_msg = mido.Message('note_on', channel=track_to_play.channel, note=note.pitch, velocity=int(note.velocity * track_to_play.velocity))
                             port.send(note_on_msg)
                             note_end_beat = event.start_time + note.duration
                             self._active_notes[(i, note.pitch)] = note_end_beat
                         for cc in event.cc_messages:
-                            cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
+                            cc_msg = mido.Message('control_change', channel=track_to_play.channel, control=cc.control, value=cc.value)
                             port.send(cc_msg)
                     self.next_event_indices[i] += 1
                 elif event.start_time >= end_beat_of_block:
@@ -2245,22 +2245,32 @@ class Sequencer(EventDispatcher):
         try:
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
-            self.song = project_data.get("song", Song(name="New Song"))
+
+            # --- CRITICAL FIX ---
+            # Instead of creating a new sequencer, we update the CURRENT one.
+            loaded_song = project_data.get("song", Song(name="New Song"))
+            if loaded_song:
+                self.song = loaded_song
+
             self.audio_player_command = project_data.get("audio_player_command", self.DEFAULT_AUDIO_PLAYER_COMMAND)
             if "mplayer" in self.audio_player_command:
                 print("Warning: Old 'mplayer' command found in project. Updating to 'mpv' default.")
                 self.audio_player_command = self.DEFAULT_AUDIO_PLAYER_COMMAND
+
             self.close_virtual_ports()
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
+
             self.unset_control_port()
             control_port_name = project_data.get("control_port_name")
             if control_port_name:
                 self.set_control_port(control_port_name)
+
             self.is_dirty = False
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
+
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:
             return f"Error: Project file not found at '{project_filepath}'"

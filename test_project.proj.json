@@ -1,114 +1,25 @@
 {
     "song": {
-        "name": "New Song",
+        "name": "test_project",
         "tempo": 120,
         "time_signature_numerator": 4,
         "time_signature_denominator": 4,
         "ticks_per_beat": 480,
+        "sync_offset_sec": 1.0,
         "tracks": [
             {
-                "name": "drums",
-                "filepath": "Sheep-bass.ogg",
-                "is_muted": false,
-                "is_solo": false,
-                "start_time": 0.0
-            },
-            {
-                "name": "bass",
-                "is_muted": false,
-                "is_solo": false,
-                "channel": 0,
-                "events": [
-                    {
-                        "notes": [
-                            {
-                                "pitch": 40,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 0.0
-                    },
-                    {
-                        "notes": [
-                            {
-                                "pitch": 42,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 2.0
-                    },
-                    {
-                        "notes": [
-                            {
-                                "pitch": 40,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 4.0
-                    },
-                    {
-                        "notes": [
-                            {
-                                "pitch": 42,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 6.0
-                    },
-                    {
-                        "notes": [
-                            {
-                                "pitch": 40,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 8.0
-                    },
-                    {
-                        "notes": [
-                            {
-                                "pitch": 42,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 10.0
-                    },
-                    {
-                        "notes": [
-                            {
-                                "pitch": 40,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 12.0
-                    },
-                    {
-                        "notes": [
-                            {
-                                "pitch": 42,
-                                "velocity": 100,
-                                "duration": 1.0
-                            }
-                        ],
-                        "start_time": 14.0
-                    }
-                ],
-                "instrument": 33,
-                "bank_msb": null,
-                "bank_lsb": null,
-                "output_port_name": "test_vport"
+                "name": "Test MIDI Track",
+                "__type__": "MidiTrack"
             }
         ],
+        "midi_mappings": [],
         "metronome_enabled": false,
         "metronome_port_name": null,
+        "metronome_volume": 1.0,
+        "metronome_pan": 0.0,
         "__type__": "Song"
     },
-    "virtual_ports": []
+    "virtual_ports": [],
+    "control_port_name": null,
+    "audio_player_command": "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 }

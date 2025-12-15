@@ -374,7 +374,13 @@ class PianoRollEditor(ModalView):
             is_solo=self.track.is_solo,
             volume=self.track.volume,
             pan=self.track.pan,
-            events=copy.deepcopy(self.track.events)
+            events=copy.deepcopy(self.track.events),
+            output_port_name=self.track.output_port_name,
+            bank_msb=self.track.bank_msb,
+            bank_lsb=self.track.bank_lsb,
+            velocity=self.track.velocity,
+            is_metronome=self.track.is_metronome,
+            record_mode=self.track.record_mode,
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)

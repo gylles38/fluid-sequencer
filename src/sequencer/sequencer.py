@@ -690,8 +690,8 @@ class JackManager:
             if i >= len(self.next_event_indices):
                 self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
 
-            while self.next_event_indices[i] < len(track.events):
-                event = track.events[self.next_event_indices[i]]
+            while self.next_event_indices[i] < len(track_to_play.events):
+                event = track_to_play.events[self.next_event_indices[i]]
 
                 if start_beat_of_block <= event.start_time < end_beat_of_block:
                     if should_be_audible:

@@ -382,11 +382,6 @@ class PianoRollEditor(ModalView):
     _is_scrolling = False
     _update_event = None
 
-    @property
-    def original_track_index(self):
-        """Finds the index of the original track in the main sequencer song."""
-        return next((i for i, t in enumerate(self.sequencer_layout.sequencer.song.tracks) if t == self.track), None)
-
     def __init__(self, **kwargs):
         super(PianoRollEditor, self).__init__(**kwargs)
         self.track_copy = MidiTrack(

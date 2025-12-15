@@ -941,6 +941,8 @@ class Sequencer(EventDispatcher):
         # Cache pour la longueur totale du morceau (dépend de l'audio)
         self._cached_song_length_beats: Optional[float] = None
 
+        self.track_overrides: Dict[int, MidiTrack] = {}
+
     def process_transport_command(self, command: str):
         """
         Centralized method to handle all transport commands (play, pause, stop, record)

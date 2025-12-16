@@ -658,8 +658,17 @@ class PianoRollEditor(ModalView):
         Updates the visual state of a group of buttons to give a clear "pressed"
         or "active" look to one of them.
         """
-        # Active button: Use the theme's dark primary color for a "pressed" look.
-        active_color = App.get_running_app().theme_cls.primary_dark
+        # Active button: Darken the primary color for a "pressed" look.
+        # This is more robust than relying on `primary_dark` which may not exist
+        # in all KivyMD versions.
+        primary_color = App.get_running_app().theme_cls.primaryColor
+        active_color = [
+            max(0, primary_color[0] - 0.2),
+            max(0, primary_color[1] - 0.2),
+            max(0, primary_color[2] - 0.2),
+            primary_color[3]
+        ]
+
 
         # Inactive button: Make it completely transparent to blend with the toolbar.
         inactive_color = [0, 0, 0, 0] # Transparent

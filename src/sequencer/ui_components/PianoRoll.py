@@ -89,8 +89,8 @@ class PianoRoll(FloatLayout):
                         Rectangle(pos=(note_x, note_y), size=(note_width, self.note_height))
 
                         # Draw resize handles if the note is wide enough
-                        if note_width > dp(8):
-                            handle_width = min(dp(4), note_width / 4)
+                        if note_width > dp(16):
+                            handle_width = min(dp(8), note_width / 4)
                             handle_color = (min(1.0, note_color[0] * 1.2), min(1.0, note_color[1] * 1.2), min(1.0, note_color[2] * 1.2), 1.0)
                             Color(*handle_color)
                             # Left handle

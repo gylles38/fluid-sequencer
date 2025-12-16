@@ -61,17 +61,27 @@ class EditableMidiGrid(PianoRoll):
                     note_x = event.start_time * self.pixels_per_beat
                     note_y = note.pitch * self.note_height
                     note_width = note.duration * self.pixels_per_beat
-                    resize_handle_width = min(dp(20), note_width / 2)
+                    handle_width = min(dp(8), note_width / 4) if note_width > dp(16) else 0
 
-                    if note_x + note_width - resize_handle_width <= local_pos[0] <= note_x + note_width and \
+                    # Check for right handle resize
+                    if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
                        note_y <= local_pos[1] <= note_y + self.note_height:
                         self._dragged_note = note
                         self._drag_event = event
-                        self._drag_mode = 'resize'
-                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+                        self._drag_mode = 'resize_end'
                         touch.grab(self)
                         return True
 
+                    # Check for left handle resize
+                    elif note_x <= local_pos[0] <= note_x + handle_width and \
+                            note_y <= local_pos[1] <= note_y + self.note_height:
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'resize_start'
+                        touch.grab(self)
+                        return True
+
+                    # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
                         self._dragged_note = note
@@ -126,11 +136,23 @@ class EditableMidiGrid(PianoRoll):
         if self._dragged_note and touch.grab_current is self:
             local_pos = self.to_local(*touch.pos)
 
-            if self._drag_mode == 'resize':
+            if self._drag_mode == 'resize_end':
                 note_start_x = self._drag_event.start_time * self.pixels_per_beat
                 new_width = local_pos[0] - note_start_x
                 new_duration = max(0.1, round((new_width / self.pixels_per_beat) * 4) / 4) # Quantize to 16th notes
                 self._dragged_note.duration = new_duration
+
+            elif self._drag_mode == 'resize_start':
+                note_end_time = self._drag_event.start_time + self._dragged_note.duration
+
+                new_start_x = local_pos[0]
+                new_start_beat = round((new_start_x / self.pixels_per_beat) * 4) / 4
+
+                if new_start_beat < note_end_time:
+                    new_duration = note_end_time - new_start_beat
+                    if new_duration >= 0.1:
+                        self._drag_event.start_time = new_start_beat
+                        self._dragged_note.duration = new_duration
 
             elif self._drag_mode == 'move':
                 new_x = local_pos[0] - self._drag_offset[0]
@@ -521,7 +543,7 @@ class PianoRollEditor(ModalView):
     def _update_button_states(self, group, active_btn):
         for btn in group.values():
             is_active = btn == active_btn
-            btn.md_bg_color = [0.2, 0.6, 0.8, 1] if is_active else [1, 1, 1, 0.05]
+            btn.md_bg_color = [0.1, 0.5, 0.8, 1] if is_active else [0.2, 0.2, 0.2, 1]
             btn.icon_color = [1, 1, 1, 1] if is_active else [0.8, 0.8, 0.8, 1]
 
     def sync_horizontal_scroll(self, instance, value):

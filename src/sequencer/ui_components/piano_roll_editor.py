@@ -265,16 +265,19 @@ Builder.load_string("""
                 id: insert_button
                 icon: 'plus-box'
                 tooltip_text: "Insert Mode"
+                theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('insert', self)
             TooltipMDIconButton:
                 id: move_button
                 icon: 'drag-variant'
                 tooltip_text: "Move Mode"
+                theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('move', self)
             TooltipMDIconButton:
                 id: delete_button
                 icon: 'minus-box'
                 tooltip_text: "Delete Mode"
+                theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
 
             Widget:
@@ -289,21 +292,25 @@ Builder.load_string("""
                 id: whole_note_button
                 icon: 'music-note-whole'
                 tooltip_text: "Whole Note (4 beats)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(4.0, self)
             TooltipMDIconButton:
                 id: half_note_button
                 icon: 'music-note-half'
                 tooltip_text: "Half Note (2 beats)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(2.0, self)
             TooltipMDIconButton:
                 id: quarter_note_button
                 icon: 'music-note-quarter'
                 tooltip_text: "Quarter Note (1 beat)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(1.0, self)
             TooltipMDIconButton:
                 id: eighth_note_button
                 icon: 'music-note-eighth'
                 tooltip_text: "Eighth Note (0.5 beats)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(0.5, self)
 
             Widget:
@@ -568,13 +575,17 @@ class PianoRollEditor(ModalView):
 
     def _update_button_states(self, group, active_btn):
         """
-        Updates the visual state of a group of buttons by changing their background color,
-        similar to the main transport controls.
+        Updates the visual state of a group of buttons by changing their background color
+        to a fixed, high-contrast color to ensure visibility regardless of theme.
         """
-        active_bg_color = App.get_running_app().theme_cls.primaryColor
-        inactive_bg_color = [0.1, 0.1, 0.1, 1]  # Same as main transport buttons
-        active_icon_color = [1, 1, 1, 1]  # White icon on colored background
-        inactive_icon_color = [0.8, 0.8, 0.8, 1]  # Grey icon on dark background
+        # A bright yellow, similar to the main pause button, for high visibility.
+        active_bg_color = [0.9, 0.7, 0, 1]
+        # A neutral dark color for inactive buttons.
+        inactive_bg_color = [0.2, 0.2, 0.2, 1]
+        # A dark icon for good contrast on the yellow background.
+        active_icon_color = [0.1, 0.1, 0.1, 1]
+         # A light grey icon for the inactive state.
+        inactive_icon_color = [0.8, 0.8, 0.8, 1]
 
         for btn in group.values():
             is_active = btn == active_btn

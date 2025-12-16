@@ -678,6 +678,11 @@ class JackManager:
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
 
         for i, track in enumerate(tracks):
+            # --- Live Preview Override ---
+            # If a track is being edited, use the temporary version from the editor.
+            if i in self.sequencer.track_overrides:
+                track = self.sequencer.track_overrides[i]
+
             if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
                 continue
 

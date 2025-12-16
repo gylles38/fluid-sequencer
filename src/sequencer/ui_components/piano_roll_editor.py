@@ -416,6 +416,7 @@ Builder.load_string("""
 class PianoRollEditor(ModalView):
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
+    original_track_index = NumericProperty(None)
     track_copy = ObjectProperty()
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
@@ -430,6 +431,7 @@ class PianoRollEditor(ModalView):
 
     def __init__(self, **kwargs):
         super(PianoRollEditor, self).__init__(**kwargs)
+        self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
             name=self.track.name,
             channel=self.track.channel,
@@ -487,6 +489,10 @@ class PianoRollEditor(ModalView):
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
             self._update_event.cancel()
+        # Ensure the override is removed when the editor is closed
+        if self.original_track_index in self.sequencer_layout.sequencer.track_overrides:
+            del self.sequencer_layout.sequencer.track_overrides[self.original_track_index]
+
 
     def dismiss(self, action=None, *args):
         if action == 'save_and_close':
@@ -563,6 +569,16 @@ class PianoRollEditor(ModalView):
         play_button.tooltip_text = "Pause" if state in ('playing', 'recording') else "Play"
         record_button.icon_color = [1, 0.2, 0.2, 1] if state == 'recording' else [0.8, 0.8, 0.8, 1]
         record_button.md_bg_color = [0.5, 0.1, 0.1, 1] if state == 'recording' else [1, 1, 1, 0.05]
+
+        # --- Live Preview Logic ---
+        sequencer = self.sequencer_layout.sequencer
+        if state in ('playing', 'recording'):
+            # When playback starts, apply the edited track as an override
+            sequencer.track_overrides[self.original_track_index] = self.track_copy
+        else:
+            # When playback stops, remove the override
+            if self.original_track_index in sequencer.track_overrides:
+                del sequencer.track_overrides[self.original_track_index]
 
     def set_edit_mode(self, mode, btn): self.edit_mode = mode; self._update_button_states(self.mode_buttons, btn)
     def set_note_duration(self, dur, btn):

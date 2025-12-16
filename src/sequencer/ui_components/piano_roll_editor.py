@@ -1,5 +1,6 @@
 from kivy.uix.modalview import ModalView
 from kivy.lang import Builder
+from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
@@ -654,7 +655,7 @@ class PianoRollEditor(ModalView):
 
     def _update_button_states(self, group, active_btn):
         # Use theme colors for better consistency and visibility
-        active_color = self.sequencer_layout.app.theme_cls.primary_color[:]
+        active_color = App.get_running_app().theme_cls.primary_color[:]
         active_color[3] = 0.4  # Add some transparency to make it a highlight
 
         # Use the same subtle highlight for inactive buttons as the transport controls

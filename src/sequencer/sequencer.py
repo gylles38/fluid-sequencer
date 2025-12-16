@@ -532,6 +532,55 @@ class JackManager:
                 command = {"command": ["set_property", "pause", is_paused]}
                 self._send_ipc_command(ap.socket_path, command)
 
+    def launch_player_for_track(self, track: AudioTrack, track_index: int):
+        """Launches, waits for, and primes a player for a single audio track."""
+        print(f"Dynamically launching player for new track '{track.name}'...")
+        with self.process_lock:
+            # First, check if a process for this track index somehow already exists.
+            if any(p.track_index == track_index for p in self.active_audio_processes):
+                print(f"Warning: Player for track index {track_index} already exists. Aborting launch.")
+                return
+
+            # Launch the mpv process
+            self._launch_audio_track_player(track, track_index)
+
+            # Find the process we just launched
+            ap = next((p for p in self.active_audio_processes if p.track_index == track_index), None)
+            if not ap:
+                print(f"Error: Failed to find the newly launched process for track index {track_index}.")
+                return
+
+        # Wait for the socket to become responsive
+        max_wait_time = 5.0
+        start_time = time.time()
+        is_ready = False
+        while time.time() - start_time < max_wait_time:
+            if self._is_socket_responsive(ap.socket_path):
+                print(f"  - Socket for track '{track.name}' is responsive.")
+                is_ready = True
+                break
+            time.sleep(0.1)
+
+        if not is_ready:
+            print(f"Warning: Timed out waiting for audio player for track '{track.name}'.")
+            return
+
+        # Prime the new player with initial settings
+        print(f"  - Priming new track '{track.name}' with initial state...")
+        is_any_track_soloed = any(t.is_solo for t in self.sequencer.song.tracks if hasattr(t, 'is_solo'))
+        should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+
+        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
+        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
+
+        # If playback is active, seek the new track to the current position and unpause
+        if self.jack_client and self.jack_client.transport_state == jack.ROLLING:
+            current_beat = self.get_current_beat()
+            self.seek_audio_to_beat(current_beat)
+            self.set_all_audio_pause_state(False)
+            print(f"  - New track '{track.name}' synced to current playback position.")
+
     def _launch_audio_track_player(self, track: AudioTrack, track_index: int):
         import shlex
         socket_dir = tempfile.gettempdir()
@@ -1320,6 +1369,12 @@ class Sequencer(EventDispatcher):
             self.song.add_track(track)
             self.is_dirty = True
             self.invalidate_song_length_cache()
+
+            # If the sequencer is already running, launch the player for the new track immediately.
+            if self.jack_manager.is_running:
+                new_track_index = len(self.song.tracks) - 1
+                self.jack_manager.launch_player_for_track(track, new_track_index)
+
             return {"status": "success", "message": f"Audio track '{name}' added with file '{filepath}'."}
         else:
             return {"status": "error", "message": f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'."}

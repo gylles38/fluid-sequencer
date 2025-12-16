@@ -653,10 +653,18 @@ class PianoRollEditor(ModalView):
             self.ids.grid_viewer.grid.draw()
 
     def _update_button_states(self, group, active_btn):
+        # Use theme colors for better consistency and visibility
+        active_color = self.sequencer_layout.app.theme_cls.primary_color[:]
+        active_color[3] = 0.4  # Add some transparency to make it a highlight
+
+        # Use the same subtle highlight for inactive buttons as the transport controls
+        inactive_color = [1, 1, 1, 0.08]
+
         for btn in group.values():
             is_active = btn == active_btn
-            btn.md_bg_color = [0.1, 0.5, 0.8, 1] if is_active else [0.2, 0.2, 0.2, 1]
-            btn.icon_color = [1, 1, 1, 1] if is_active else [0.8, 0.8, 0.8, 1]
+            btn.md_bg_color = active_color if is_active else inactive_color
+            # Keep icon white on both states for better contrast against dark backgrounds
+            btn.icon_color = [1, 1, 1, 1]
 
     def sync_horizontal_scroll(self, instance, value):
         if self._is_scrolling: return

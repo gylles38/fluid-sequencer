@@ -46,93 +46,6 @@ class EditableMidiGrid(PianoRoll):
             self.playback_rect.pos = self.playback_line.pos
             self.playback_rect.size = self.playback_line.size
 
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return super(EditableMidiGrid, self).on_touch_down(touch)
-
-        local_pos = self.to_local(*touch.pos)
-        clicked_beat = local_pos[0] / self.pixels_per_beat
-        clicked_pitch = int(local_pos[1] / self.note_height)
-
-        edit_mode = self.editor.edit_mode
-        track = self.editor.track_copy
-
-        if edit_mode == 'move':
-            for event in reversed(track.events):
-                for note in reversed(event.notes):
-                    note_x = event.start_time * self.pixels_per_beat
-                    note_y = note.pitch * self.note_height
-                    note_width = note.duration * self.pixels_per_beat
-                    handle_width = min(dp(8), note_width / 4) if note_width > dp(16) else 0
-
-                    # Check for right handle resize
-                    if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
-                       note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'resize_end'
-                        touch.grab(self)
-                        return True
-
-                    # Check for left handle resize
-                    elif note_x <= local_pos[0] <= note_x + handle_width and \
-                            note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'resize_start'
-                        touch.grab(self)
-                        return True
-
-                    # Check for note move
-                    elif note_x <= local_pos[0] <= note_x + note_width and \
-                         note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'move'
-                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
-
-                        # Select the note
-                        self.editor.selected_note = note
-                        self.editor.selected_event = event
-                        self.draw()
-
-                        touch.grab(self)
-                        return True
-
-            # If no note was clicked, deselect
-            self.editor.selected_note = None
-            self.editor.selected_event = None
-            self.draw()
-
-        quantized_beat = round(clicked_beat)
-
-        if edit_mode == 'insert':
-            new_note = Note(pitch=clicked_pitch, velocity=100, duration=self.editor.note_duration)
-            target_event = next((e for e in track.events if abs(e.start_time - quantized_beat) < 0.001), None)
-
-            if target_event:
-                if not any(n.pitch == new_note.pitch for n in target_event.notes): target_event.notes.append(new_note)
-            else:
-                track.events.append(Event(start_time=quantized_beat, notes=[new_note]))
-                track.events.sort(key=lambda e: e.start_time)
-
-            self.editor.is_dirty = True
-            self.draw()
-            return True
-
-        elif edit_mode == 'delete':
-            for event in reversed(track.events):
-                max_duration = max((n.duration for n in event.notes), default=0)
-                if event.start_time <= clicked_beat < event.start_time + max_duration:
-                    for note in reversed(event.notes):
-                        if note.pitch == clicked_pitch:
-                            event.notes.remove(note)
-                            if not event.notes: track.events.remove(event)
-                            self.editor.is_dirty = True
-                            self.draw()
-                            return True
-
-        return super(EditableMidiGrid, self).on_touch_down(touch)
 
     def on_touch_move(self, touch):
         if self._dragged_note and touch.grab_current is self:
@@ -655,29 +568,21 @@ class PianoRollEditor(ModalView):
 
     def _update_button_states(self, group, active_btn):
         """
-        Updates the visual state of a group of buttons to give a clear "pressed"
-        or "active" look to one of them.
+        Updates the visual state of a group of buttons by changing the ICON color.
+        This is a more reliable method for TooltipMDIconButton.
         """
-        # Active button: Darken the primary color for a "pressed" look.
-        # This is more robust than relying on `primary_dark` which may not exist
-        # in all KivyMD versions.
-        primary_color = App.get_running_app().theme_cls.primaryColor
-        active_color = [
-            max(0, primary_color[0] - 0.2),
-            max(0, primary_color[1] - 0.2),
-            max(0, primary_color[2] - 0.2),
-            primary_color[3]
-        ]
+        # Active button: Use the theme's primary color for the icon.
+        active_color = App.get_running_app().theme_cls.primaryColor
 
-
-        # Inactive button: Make it completely transparent to blend with the toolbar.
-        inactive_color = [0, 0, 0, 0] # Transparent
+        # Inactive button: Use a standard grey color for the icon.
+        inactive_color = [0.8, 0.8, 0.8, 1]
 
         for btn in group.values():
             is_active = btn == active_btn
-            btn.md_bg_color = active_color if is_active else inactive_color
-            # Keep the icon color consistent for clarity
-            btn.icon_color = [1, 1, 1, 1]
+            # We change the icon_color, not the background color.
+            btn.icon_color = active_color if is_active else inactive_color
+            # Ensure background is transparent so only icon color changes are visible.
+            btn.md_bg_color = [0, 0, 0, 0]
 
     def sync_horizontal_scroll(self, instance, value):
         if self._is_scrolling: return

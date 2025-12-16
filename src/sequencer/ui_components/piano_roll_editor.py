@@ -655,7 +655,7 @@ class PianoRollEditor(ModalView):
 
     def _update_button_states(self, group, active_btn):
         # Use theme colors for better consistency and visibility
-        active_color = App.get_running_app().theme_cls.primary_color[:]
+        active_color = App.get_running_app().theme_cls.primaryColor[:]
         active_color[3] = 0.4  # Add some transparency to make it a highlight
 
         # Use the same subtle highlight for inactive buttons as the transport controls

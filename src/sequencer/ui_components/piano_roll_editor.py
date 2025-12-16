@@ -9,6 +9,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
 from kivy.metrics import dp
 from kivy.clock import Clock
+from kivy.core.window import Window
 import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
@@ -144,15 +145,34 @@ class EditableMidiGrid(PianoRoll):
 
             elif self._drag_mode == 'resize_start':
                 note_end_time = self._drag_event.start_time + self._dragged_note.duration
-
                 new_start_x = local_pos[0]
                 new_start_beat = round((new_start_x / self.pixels_per_beat) * 4) / 4
 
                 if new_start_beat < note_end_time:
                     new_duration = note_end_time - new_start_beat
                     if new_duration >= 0.1:
-                        self._drag_event.start_time = new_start_beat
-                        self._dragged_note.duration = new_duration
+                        # --- Isolate the note from its original event ---
+                        note_to_move = self._dragged_note
+                        self._drag_event.notes.remove(note_to_move)
+
+                        # If the original event is now empty, remove it
+                        if not self._drag_event.notes and not self._drag_event.cc_messages:
+                            self.editor.track_copy.events.remove(self._drag_event)
+
+                        # Update the note's properties
+                        note_to_move.duration = new_duration
+
+                        # Find or create a new event at the target beat
+                        target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_beat) < 0.001), None)
+                        if target_event:
+                            if note_to_move not in target_event.notes:
+                                target_event.notes.append(note_to_move)
+                        else:
+                            target_event = Event(start_time=new_start_beat, notes=[note_to_move])
+                            self.editor.track_copy.add_event(target_event)
+
+                        # Update the drag reference to the new event
+                        self._drag_event = target_event
 
             elif self._drag_mode == 'move':
                 new_x = local_pos[0] - self._drag_offset[0]
@@ -169,8 +189,100 @@ class EditableMidiGrid(PianoRoll):
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return super(EditableMidiGrid, self).on_touch_down(touch)
+
+        local_pos = self.to_local(*touch.pos)
+        clicked_beat = local_pos[0] / self.pixels_per_beat
+        clicked_pitch = int(local_pos[1] / self.note_height)
+
+        edit_mode = self.editor.edit_mode
+        track = self.editor.track_copy
+
+        if edit_mode == 'move':
+            for event in reversed(track.events):
+                for note in reversed(event.notes):
+                    note_x = event.start_time * self.pixels_per_beat
+                    note_y = note.pitch * self.note_height
+                    note_width = note.duration * self.pixels_per_beat
+                    handle_width = min(dp(8), note_width / 4) if note_width > dp(16) else 0
+
+                    # Check for right handle resize
+                    if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
+                       note_y <= local_pos[1] <= note_y + self.note_height:
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'resize_end'
+                        Window.set_system_cursor('size_we')
+                        touch.grab(self)
+                        return True
+
+                    # Check for left handle resize
+                    elif note_x <= local_pos[0] <= note_x + handle_width and \
+                            note_y <= local_pos[1] <= note_y + self.note_height:
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'resize_start'
+                        Window.set_system_cursor('size_we')
+                        touch.grab(self)
+                        return True
+
+                    # Check for note move
+                    elif note_x <= local_pos[0] <= note_x + note_width and \
+                         note_y <= local_pos[1] <= note_y + self.note_height:
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'move'
+                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+
+                        # Select the note
+                        self.editor.selected_note = note
+                        self.editor.selected_event = event
+                        self.draw()
+
+                        touch.grab(self)
+                        return True
+
+            # If no note was clicked, deselect
+            self.editor.selected_note = None
+            self.editor.selected_event = None
+            self.draw()
+
+        quantized_beat = round(clicked_beat)
+
+        if edit_mode == 'insert':
+            new_note = Note(pitch=clicked_pitch, velocity=100, duration=self.editor.note_duration)
+            target_event = next((e for e in track.events if abs(e.start_time - quantized_beat) < 0.001), None)
+
+            if target_event:
+                if not any(n.pitch == new_note.pitch for n in target_event.notes): target_event.notes.append(new_note)
+            else:
+                track.events.append(Event(start_time=quantized_beat, notes=[new_note]))
+                track.events.sort(key=lambda e: e.start_time)
+
+            self.editor.is_dirty = True
+            self.draw()
+            return True
+
+        elif edit_mode == 'delete':
+            for event in reversed(track.events):
+                max_duration = max((n.duration for n in event.notes), default=0)
+                if event.start_time <= clicked_beat < event.start_time + max_duration:
+                    for note in reversed(event.notes):
+                        if note.pitch == clicked_pitch:
+                            event.notes.remove(note)
+                            if not event.notes: track.events.remove(event)
+                            self.editor.is_dirty = True
+                            self.draw()
+                            return True
+
+        return super(EditableMidiGrid, self).on_touch_down(touch)
+
     def on_touch_up(self, touch):
         if self._dragged_note and touch.grab_current is self:
+            if self._drag_mode in ('resize_start', 'resize_end', 'move'):
+                Window.set_system_cursor('arrow')
             if self._drag_mode == 'move':
                 self.editor.track_copy.events.sort(key=lambda e: e.start_time)
 

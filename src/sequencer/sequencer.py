@@ -49,6 +49,38 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
+        if isinstance(o, MidiTrack):
+            return {
+                '__type__': 'MidiTrack',
+                'name': o.name,
+                'is_muted': o.is_muted,
+                'is_solo': o.is_solo,
+                'is_metronome': o.is_metronome,
+                'channel': o.channel,
+                'volume': o.volume,
+                'pan': o.pan,
+                'velocity': o.velocity,
+                'events': o.events,
+                'instrument': o.instrument,
+                'bank_msb': o.bank_msb,
+                'bank_lsb': o.bank_lsb,
+                'output_port_name': o.output_port_name,
+                'record_mode': o.record_mode,
+            }
+        if isinstance(o, AudioTrack):
+            return {
+                '__type__': 'AudioTrack',
+                'name': o.name,
+                'filepath': o.filepath,
+                'is_muted': o.is_muted,
+                'is_solo': o.is_solo,
+                'start_time': o.start_time,
+                'volume': o.volume,
+                'pan': o.pan,
+                'channels': o.channels,
+                'native_tempo': o.native_tempo,
+                'duration_beats': o.duration_beats,
+            }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__

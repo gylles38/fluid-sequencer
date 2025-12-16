@@ -1053,8 +1053,14 @@ class Sequencer(EventDispatcher):
                 print(f"Warning: Invalid rewind position '{start_pos_for_rewind}', defaulting to 0.")
                 self.rewind_beat = 0.0
 
-            # Use the *current* playhead position as the starting point.
-            start_beat = self.jack_manager.get_current_beat()
+            # --- MODIFIED: Prioritize the UI start position text field ---
+            # The start beat is now determined by the UI's 'start_pos' field,
+            # which is also updated by clicking on the ruler.
+            start_pos_str = self.ui_start_pos_str or "1:1"
+            start_beat = self.parse_position_to_beats(start_pos_str)
+            if start_beat is None:
+                print(f"Warning: Invalid start position '{start_pos_str}', defaulting to 0.")
+                start_beat = 0.0
 
             end_pos = self.ui_end_pos_str
             if self.loop_enabled:

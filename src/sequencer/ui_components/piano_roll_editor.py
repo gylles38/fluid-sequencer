@@ -568,21 +568,18 @@ class PianoRollEditor(ModalView):
 
     def _update_button_states(self, group, active_btn):
         """
-        Updates the visual state of a group of buttons by changing the ICON color.
-        This is a more reliable method for TooltipMDIconButton.
+        Updates the visual state of a group of buttons by changing their background color,
+        similar to the main transport controls.
         """
-        # Active button: Use the theme's primary color for the icon.
-        active_color = App.get_running_app().theme_cls.primaryColor
-
-        # Inactive button: Use a standard grey color for the icon.
-        inactive_color = [0.8, 0.8, 0.8, 1]
+        active_bg_color = App.get_running_app().theme_cls.primaryColor
+        inactive_bg_color = [0.1, 0.1, 0.1, 1]  # Same as main transport buttons
+        active_icon_color = [1, 1, 1, 1]  # White icon on colored background
+        inactive_icon_color = [0.8, 0.8, 0.8, 1]  # Grey icon on dark background
 
         for btn in group.values():
             is_active = btn == active_btn
-            # We change the icon_color, not the background color.
-            btn.icon_color = active_color if is_active else inactive_color
-            # Ensure background is transparent so only icon color changes are visible.
-            btn.md_bg_color = [0, 0, 0, 0]
+            btn.md_bg_color = active_bg_color if is_active else inactive_bg_color
+            btn.icon_color = active_icon_color if is_active else inactive_icon_color
 
     def sync_horizontal_scroll(self, instance, value):
         if self._is_scrolling: return

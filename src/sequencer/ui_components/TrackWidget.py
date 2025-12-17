@@ -183,17 +183,10 @@ class TrackWidget(BoxLayout):
             # 2. Grid ScrollView (expanding)
             self.timeline_scroll = BoundedScrollView(size_hint_x=None, do_scroll_y=False)
 
-            # Manually calculate and bind the width of the timeline_scroll to fill the remaining space.
-            # This is more robust than relying on size_hint in a complex BoxLayout.
-            def update_timeline_scroll_width(*args):
-                remaining_width = self.width - self.info_section.width - self.controls_section.width - keyboard_sv.width - self.spacing * 3
-                self.timeline_scroll.width = max(dp(50), remaining_width) # Ensure a minimum width
-
-            self.bind(width=update_timeline_scroll_width)
-            self.info_section.bind(width=update_timeline_scroll_width)
-            self.controls_section.bind(width=update_timeline_scroll_width)
-            keyboard_sv.bind(width=update_timeline_scroll_width)
-
+            # Bind the width calculation to the relevant properties
+            self.bind(width=self._update_timeline_scroll_width,
+                      padding=self._update_timeline_scroll_width,
+                      spacing=self._update_timeline_scroll_width)
 
             grid_sv = PianoRollViewer(
                 track=track,
@@ -493,6 +486,30 @@ class TrackWidget(BoxLayout):
     def on_set_as_metronome(self, instance):
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
+
+    def _update_timeline_scroll_width(self, *args):
+        """
+        Manually calculates and sets the width of the timeline scroll view to fill the
+        remaining space in the widget. This is a robust way to handle complex BoxLayouts
+        and prevent child widgets from overlapping.
+        """
+        if isinstance(self.track, MidiTrack):
+            # Sum of all fixed-width components
+            fixed_width = (self.info_section.width +
+                           self.controls_section.width +
+                           self.piano_keyboard.width)
+
+            # Total spacing between all main child widgets
+            total_spacing = self.spacing * 3
+
+            # Total padding (left and right) of the main widget
+            total_padding = self.padding[0] + self.padding[2]
+
+            # Calculate the remaining space
+            remaining_width = self.width - fixed_width - total_spacing - total_padding
+
+            # Set the width, ensuring a minimum size
+            self.timeline_scroll.width = max(dp(50), remaining_width)
 
     def open_piano_roll_editor(self, instance):
         """Creates and opens the piano roll editor popup for the current track."""

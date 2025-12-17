@@ -192,9 +192,11 @@ class TrackWidget(BoxLayout):
             self.measure_grid = grid_sv.grid
 
             # A ScrollView must have a single child.
-            # Using a simple Widget container, similar to Audio tracks, to prevent layout issues.
             self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
+
+            # Bind the container's width to the viewer's width.
+            grid_sv.bind(width=self.timeline_container.setter('width'))
 
             self.timeline_scroll.add_widget(self.timeline_container)
 

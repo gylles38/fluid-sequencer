@@ -1,11 +1,11 @@
-from kivy.uix.widget import Widget
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
 from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle, Line
 from sequencer.models import MidiTrack
 
-class PianoRoll(Widget):
+class PianoRoll(FloatLayout):
     """
     Represents the drawing area of the piano roll's grid and notes.
     This widget is intended to be placed inside a ScrollView.
@@ -65,7 +65,7 @@ class PianoRoll(Widget):
 
             current_beat = 0
             while current_beat < self.total_beats:
-                x_pos = current_beat * self.pixels_per_beat
+                x_pos = self.x + current_beat * self.pixels_per_beat
                 if current_beat % self.beat_per_measure == 0:
                     Color(0.8, 0.8, 0.8, 0.8)
                     Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1.5)
@@ -79,7 +79,7 @@ class PianoRoll(Widget):
             with self.canvas:
                 for event in self.track.events:
                     for note in event.notes:
-                        note_x = event.start_time * self.pixels_per_beat
+                        note_x = self.x + event.start_time * self.pixels_per_beat
                         note_y = self.y + note.pitch * self.note_height
                         note_width = note.duration * self.pixels_per_beat
                         note_color = self._velocity_to_color(note.velocity)

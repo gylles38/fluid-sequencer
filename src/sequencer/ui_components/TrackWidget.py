@@ -74,7 +74,7 @@ class TrackWidget(BoxLayout):
         self.info_section.add_widget(self.name_label)
         self.add_widget(self.info_section)
 
-        # --- Middle Section: Controls ---
+        # --- Right Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
 
         if isinstance(track, MidiTrack):
@@ -169,9 +169,7 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        self.add_widget(self.controls_section)
-
-        # --- Right Section: Timeline ---
+        # --- Middle Section: Timeline ---
         if isinstance(track, MidiTrack):
             note_height = dp(12)
 
@@ -274,6 +272,7 @@ class TrackWidget(BoxLayout):
 
             self.add_widget(icon_layout)
             self.add_widget(self.timeline_scroll)
+        self.add_widget(self.controls_section)
 
         # --- Playback Line (Cursor) ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))

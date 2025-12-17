@@ -181,7 +181,20 @@ class TrackWidget(BoxLayout):
             keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Grid ScrollView (expanding)
-            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=None, do_scroll_y=False)
+
+            # Manually calculate and bind the width of the timeline_scroll to fill the remaining space.
+            # This is more robust than relying on size_hint in a complex BoxLayout.
+            def update_timeline_scroll_width(*args):
+                remaining_width = self.width - self.info_section.width - self.controls_section.width - keyboard_sv.width - self.spacing * 3
+                self.timeline_scroll.width = max(dp(50), remaining_width) # Ensure a minimum width
+
+            self.bind(width=update_timeline_scroll_width)
+            self.info_section.bind(width=update_timeline_scroll_width)
+            self.controls_section.bind(width=update_timeline_scroll_width)
+            keyboard_sv.bind(width=update_timeline_scroll_width)
+
+
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -200,13 +213,8 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            # To fix the layout bug where the scrollview overlaps the controls,
-            # we wrap the keyboard and the timeline scrollview in their own BoxLayout.
-            # This makes the layout calculation less ambiguous for the parent layout.
-            timeline_layout = BoxLayout(orientation='horizontal', size_hint_x=1)
-            timeline_layout.add_widget(keyboard_sv)
-            timeline_layout.add_widget(self.timeline_scroll)
-            self.add_widget(timeline_layout)
+            self.add_widget(keyboard_sv)
+            self.add_widget(self.timeline_scroll)
 
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))

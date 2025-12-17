@@ -15,6 +15,7 @@ class PianoRoll(FloatLayout):
     track = ObjectProperty(None, allownone=True)
     beat_per_measure = NumericProperty(4)
     note_height = NumericProperty(dp(12))
+    editor = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kwargs):
         super(PianoRoll, self).__init__(**kwargs)
@@ -81,9 +82,26 @@ class PianoRoll(FloatLayout):
                         note_x = event.start_time * self.pixels_per_beat
                         note_y = self.y + note.pitch * self.note_height
                         note_width = note.duration * self.pixels_per_beat
+                        note_color = self._velocity_to_color(note.velocity)
 
-                        Color(*self._velocity_to_color(note.velocity))
+                        # Draw the main note body
+                        Color(*note_color)
                         Rectangle(pos=(note_x, note_y), size=(note_width, self.note_height))
+
+                        # Draw resize handles if the note is wide enough
+                        if note_width > dp(16):
+                            handle_width = min(dp(8), note_width / 4)
+                            handle_color = (min(1.0, note_color[0] * 1.2), min(1.0, note_color[1] * 1.2), min(1.0, note_color[2] * 1.2), 1.0)
+                            Color(*handle_color)
+                            # Left handle
+                            Rectangle(pos=(note_x, note_y), size=(handle_width, self.note_height))
+                            # Right handle
+                            Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
+
+                        # Draw outline for selected note
+                        if self.editor and self.editor.selected_note == note:
+                            Color(1, 1, 1, 1)  # White outline
+                            Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
 
 
 class PianoRollViewer(ScrollView):

@@ -49,6 +49,38 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
+        if isinstance(o, MidiTrack):
+            return {
+                '__type__': 'MidiTrack',
+                'name': o.name,
+                'is_muted': o.is_muted,
+                'is_solo': o.is_solo,
+                'is_metronome': o.is_metronome,
+                'channel': o.channel,
+                'volume': o.volume,
+                'pan': o.pan,
+                'velocity': o.velocity,
+                'events': o.events,
+                'instrument': o.instrument,
+                'bank_msb': o.bank_msb,
+                'bank_lsb': o.bank_lsb,
+                'output_port_name': o.output_port_name,
+                'record_mode': o.record_mode,
+            }
+        if isinstance(o, AudioTrack):
+            return {
+                '__type__': 'AudioTrack',
+                'name': o.name,
+                'filepath': o.filepath,
+                'is_muted': o.is_muted,
+                'is_solo': o.is_solo,
+                'start_time': o.start_time,
+                'volume': o.volume,
+                'pan': o.pan,
+                'channels': o.channels,
+                'native_tempo': o.native_tempo,
+                'duration_beats': o.duration_beats,
+            }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
@@ -500,6 +532,55 @@ class JackManager:
                 command = {"command": ["set_property", "pause", is_paused]}
                 self._send_ipc_command(ap.socket_path, command)
 
+    def launch_player_for_track(self, track: AudioTrack, track_index: int):
+        """Launches, waits for, and primes a player for a single audio track."""
+        print(f"Dynamically launching player for new track '{track.name}'...")
+        with self.process_lock:
+            # First, check if a process for this track index somehow already exists.
+            if any(p.track_index == track_index for p in self.active_audio_processes):
+                print(f"Warning: Player for track index {track_index} already exists. Aborting launch.")
+                return
+
+            # Launch the mpv process
+            self._launch_audio_track_player(track, track_index)
+
+            # Find the process we just launched
+            ap = next((p for p in self.active_audio_processes if p.track_index == track_index), None)
+            if not ap:
+                print(f"Error: Failed to find the newly launched process for track index {track_index}.")
+                return
+
+        # Wait for the socket to become responsive
+        max_wait_time = 5.0
+        start_time = time.time()
+        is_ready = False
+        while time.time() - start_time < max_wait_time:
+            if self._is_socket_responsive(ap.socket_path):
+                print(f"  - Socket for track '{track.name}' is responsive.")
+                is_ready = True
+                break
+            time.sleep(0.1)
+
+        if not is_ready:
+            print(f"Warning: Timed out waiting for audio player for track '{track.name}'.")
+            return
+
+        # Prime the new player with initial settings
+        print(f"  - Priming new track '{track.name}' with initial state...")
+        is_any_track_soloed = any(t.is_solo for t in self.sequencer.song.tracks if hasattr(t, 'is_solo'))
+        should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+
+        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]})
+        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
+        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
+
+        # If playback is active, seek the new track to the current position and unpause
+        if self.jack_client and self.jack_client.transport_state == jack.ROLLING:
+            current_beat = self.get_current_beat()
+            self.seek_audio_to_beat(current_beat)
+            self.set_all_audio_pause_state(False)
+            print(f"  - New track '{track.name}' synced to current playback position.")
+
     def _launch_audio_track_player(self, track: AudioTrack, track_index: int):
         import shlex
         socket_dir = tempfile.gettempdir()
@@ -678,6 +759,11 @@ class JackManager:
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
 
         for i, track in enumerate(tracks):
+            # --- Live Preview Override ---
+            # If a track is being edited, use the temporary version from the editor.
+            if i in self.sequencer.track_overrides:
+                track = self.sequencer.track_overrides[i]
+
             if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
                 continue
 
@@ -941,6 +1027,9 @@ class Sequencer(EventDispatcher):
         # Cache pour la longueur totale du morceau (dépend de l'audio)
         self._cached_song_length_beats: Optional[float] = None
 
+        self.track_overrides: Dict[int, MidiTrack] = {}
+        self.last_play_start_beat: Optional[float] = None
+
     def process_transport_command(self, command: str):
         """
         Centralized method to handle all transport commands (play, pause, stop, record)
@@ -965,8 +1054,14 @@ class Sequencer(EventDispatcher):
                 print(f"Warning: Invalid rewind position '{start_pos_for_rewind}', defaulting to 0.")
                 self.rewind_beat = 0.0
 
-            # Use the *current* playhead position as the starting point.
-            start_beat = self.jack_manager.get_current_beat()
+            # --- MODIFIED: Prioritize the UI start position text field ---
+            # The start beat is now determined by the UI's 'start_pos' field,
+            # which is also updated by clicking on the ruler.
+            start_pos_str = self.ui_start_pos_str or "1:1"
+            start_beat = self.parse_position_to_beats(start_pos_str)
+            if start_beat is None:
+                print(f"Warning: Invalid start position '{start_pos_str}', defaulting to 0.")
+                start_beat = 0.0
 
             end_pos = self.ui_end_pos_str
             if self.loop_enabled:
@@ -1281,6 +1376,12 @@ class Sequencer(EventDispatcher):
             self.song.add_track(track)
             self.is_dirty = True
             self.invalidate_song_length_cache()
+
+            # If the sequencer is already running, launch the player for the new track immediately.
+            if self.jack_manager.is_running:
+                new_track_index = len(self.song.tracks) - 1
+                self.jack_manager.launch_player_for_track(track, new_track_index)
+
             return {"status": "success", "message": f"Audio track '{name}' added with file '{filepath}'."}
         else:
             return {"status": "error", "message": f"Error: Unknown track type '{track_type}'. Must be 'midi' or 'audio'."}
@@ -2894,13 +2995,24 @@ class Sequencer(EventDispatcher):
 
     def _resync_all_at_beat(self, beat: float, force_play: bool = False):
         """
-        Resynchronizes all tracks to a specific beat by briefly stopping and repositioning
-        the master JACK transport, ensuring all clients are perfectly aligned.
+        Resynchronizes all tracks to a specific beat.
+        If JACK is running, it repositions the master transport. Otherwise, it just
+        updates the internal sequencer state.
         If `force_play` is True, it will start the transport even if it wasn't rolling before.
         """
         print(f"\n[DIAGNOSTIC] === _resync_all_at_beat START (target_beat={beat:.6f}) ===")
+
+        # --- Step 1: Update internal state (always) ---
+        # This is the crucial part for the headless test to work.
+        print("[DIAGNOSTIC] Syncing internal playhead...")
+        self.jack_manager._sync_playhead_to_beat(beat)
+        if self.gui_mode:
+            self.current_beat = beat # Update the Kivy property for the UI
+
+        # --- Step 2: Handle JACK and external processes (if running) ---
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
-            print("[DIAGNOSTIC] JACK not running, aborting resync.")
+            print("[DIAGNOSTIC] JACK not running. Skipping transport and audio sync.")
+            print(f"[DIAGNOSTIC] === _resync_all_at_beat END (No JACK) ===\n")
             return
 
         try:
@@ -2931,9 +3043,7 @@ class Sequencer(EventDispatcher):
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
                 print(f"[DIAGNOSTIC] Repositioning JACK transport from frame {original_frame} to {target_frame} (beat {beat:.6f})")
 
-            # 4. Synchroniser notre état interne et les lecteurs externes avec la nouvelle position
-            print("[DIAGNOSTIC] Syncing internal playhead...")
-            self.jack_manager._sync_playhead_to_beat(beat)
+            # 4. Synchroniser les lecteurs externes avec la nouvelle position (l'état interne est déjà à jour)
             print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
             self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
             print("[DIAGNOSTIC] Audio track seek complete.")
@@ -2964,16 +3074,21 @@ class Sequencer(EventDispatcher):
         except jack.JackError as e:
             print(f"Error during resynchronization: {e}", file=sys.stderr)
         finally:
-            print(f"[DIAGNOSTIC] === _resync_all_at_beat END ===\n")
+            print(f"[DIAGNOSTIC] === _resync_all_at_beat END (With JACK) ===\n")
 
     def play(self, start_beat: Optional[float] = None):
-        if not self.jack_manager.is_running:
+        if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             self.jack_manager.start()
             time.sleep(0.2) # Give JACK time to start and connect
 
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
+
+        # Store the beat from which playback is starting
+        effective_start_beat = start_beat if start_beat is not None else self.rewind_beat
+        self.last_play_start_beat = effective_start_beat
+
 
         # If a start beat is provided, reposition the transport
         if start_beat is not None:

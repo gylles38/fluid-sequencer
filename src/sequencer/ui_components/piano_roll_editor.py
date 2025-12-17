@@ -1,5 +1,6 @@
 from kivy.uix.modalview import ModalView
 from kivy.lang import Builder
+from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
@@ -9,6 +10,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
 from kivy.metrics import dp
 from kivy.clock import Clock
+from kivy.core.window import Window
 import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
@@ -44,6 +46,63 @@ class EditableMidiGrid(PianoRoll):
             self.playback_rect.pos = self.playback_line.pos
             self.playback_rect.size = self.playback_line.size
 
+
+    def on_touch_move(self, touch):
+        if self._dragged_note and touch.grab_current is self:
+            local_pos = self.to_local(*touch.pos)
+
+            if self._drag_mode == 'resize_end':
+                note_start_x = self._drag_event.start_time * self.pixels_per_beat
+                new_width = local_pos[0] - note_start_x
+                new_duration = max(0.1, round((new_width / self.pixels_per_beat) * 4) / 4) # Quantize to 16th notes
+                self._dragged_note.duration = new_duration
+
+            elif self._drag_mode == 'resize_start':
+                note_end_time = self._drag_event.start_time + self._dragged_note.duration
+                new_start_x = local_pos[0]
+                new_start_beat = round((new_start_x / self.pixels_per_beat) * 4) / 4
+
+                if new_start_beat < note_end_time:
+                    new_duration = note_end_time - new_start_beat
+                    if new_duration >= 0.1:
+                        # --- Isolate the note from its original event ---
+                        note_to_move = self._dragged_note
+                        self._drag_event.notes.remove(note_to_move)
+
+                        # If the original event is now empty, remove it
+                        if not self._drag_event.notes and not self._drag_event.cc_messages:
+                            self.editor.track_copy.events.remove(self._drag_event)
+
+                        # Update the note's properties
+                        note_to_move.duration = new_duration
+
+                        # Find or create a new event at the target beat
+                        target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_beat) < 0.001), None)
+                        if target_event:
+                            if note_to_move not in target_event.notes:
+                                target_event.notes.append(note_to_move)
+                        else:
+                            target_event = Event(start_time=new_start_beat, notes=[note_to_move])
+                            self.editor.track_copy.add_event(target_event)
+
+                        # Update the drag reference to the new event
+                        self._drag_event = target_event
+
+            elif self._drag_mode == 'move':
+                new_x = local_pos[0] - self._drag_offset[0]
+                new_y = local_pos[1] - self._drag_offset[1]
+
+                new_beat = round(new_x / self.pixels_per_beat)
+                new_pitch = max(0, min(127, int(new_y / self.note_height)))
+
+                self._drag_event.start_time = new_beat
+                self._dragged_note.pitch = new_pitch
+
+            self.editor.is_dirty = True
+            self.draw()
+            return True
+        return super(EditableMidiGrid, self).on_touch_move(touch)
+
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return super(EditableMidiGrid, self).on_touch_down(touch)
@@ -61,25 +120,48 @@ class EditableMidiGrid(PianoRoll):
                     note_x = event.start_time * self.pixels_per_beat
                     note_y = note.pitch * self.note_height
                     note_width = note.duration * self.pixels_per_beat
-                    resize_handle_width = min(dp(20), note_width / 2)
+                    handle_width = min(dp(8), note_width / 4) if note_width > dp(16) else 0
 
-                    if note_x + note_width - resize_handle_width <= local_pos[0] <= note_x + note_width and \
+                    # Check for right handle resize
+                    if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
                        note_y <= local_pos[1] <= note_y + self.note_height:
                         self._dragged_note = note
                         self._drag_event = event
-                        self._drag_mode = 'resize'
-                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+                        self._drag_mode = 'resize_end'
+                        Window.set_system_cursor('size_we')
                         touch.grab(self)
                         return True
 
+                    # Check for left handle resize
+                    elif note_x <= local_pos[0] <= note_x + handle_width and \
+                            note_y <= local_pos[1] <= note_y + self.note_height:
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'resize_start'
+                        Window.set_system_cursor('size_we')
+                        touch.grab(self)
+                        return True
+
+                    # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
                         self._dragged_note = note
                         self._drag_event = event
                         self._drag_mode = 'move'
                         self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+
+                        # Select the note
+                        self.editor.selected_note = note
+                        self.editor.selected_event = event
+                        self.draw()
+
                         touch.grab(self)
                         return True
+
+            # If no note was clicked, deselect
+            self.editor.selected_note = None
+            self.editor.selected_event = None
+            self.draw()
 
         quantized_beat = round(clicked_beat)
 
@@ -111,33 +193,10 @@ class EditableMidiGrid(PianoRoll):
 
         return super(EditableMidiGrid, self).on_touch_down(touch)
 
-    def on_touch_move(self, touch):
-        if self._dragged_note and touch.grab_current is self:
-            local_pos = self.to_local(*touch.pos)
-
-            if self._drag_mode == 'resize':
-                note_start_x = self._drag_event.start_time * self.pixels_per_beat
-                new_width = local_pos[0] - note_start_x
-                new_duration = max(0.1, round((new_width / self.pixels_per_beat) * 4) / 4) # Quantize to 16th notes
-                self._dragged_note.duration = new_duration
-
-            elif self._drag_mode == 'move':
-                new_x = local_pos[0] - self._drag_offset[0]
-                new_y = local_pos[1] - self._drag_offset[1]
-
-                new_beat = round(new_x / self.pixels_per_beat)
-                new_pitch = max(0, min(127, int(new_y / self.note_height)))
-
-                self._drag_event.start_time = new_beat
-                self._dragged_note.pitch = new_pitch
-
-            self.editor.is_dirty = True
-            self.draw()
-            return True
-        return super(EditableMidiGrid, self).on_touch_move(touch)
-
     def on_touch_up(self, touch):
         if self._dragged_note and touch.grab_current is self:
+            if self._drag_mode in ('resize_start', 'resize_end', 'move'):
+                Window.set_system_cursor('arrow')
             if self._drag_mode == 'move':
                 self.editor.track_copy.events.sort(key=lambda e: e.start_time)
 
@@ -162,6 +221,7 @@ class EditablePianoRollViewer(ScrollView):
         self.do_scroll_x = False
         self.do_scroll_y = True
         self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
+        self.grid.editor = self.editor # Pass the editor instance to the grid
         self.add_widget(self.grid)
         self.grid.bind(width=self.setter('width'))
 
@@ -205,16 +265,19 @@ Builder.load_string("""
                 id: insert_button
                 icon: 'plus-box'
                 tooltip_text: "Insert Mode"
+                theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('insert', self)
             TooltipMDIconButton:
                 id: move_button
                 icon: 'drag-variant'
                 tooltip_text: "Move Mode"
+                theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('move', self)
             TooltipMDIconButton:
                 id: delete_button
                 icon: 'minus-box'
                 tooltip_text: "Delete Mode"
+                theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
 
             Widget:
@@ -229,21 +292,25 @@ Builder.load_string("""
                 id: whole_note_button
                 icon: 'music-note-whole'
                 tooltip_text: "Whole Note (4 beats)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(4.0, self)
             TooltipMDIconButton:
                 id: half_note_button
                 icon: 'music-note-half'
                 tooltip_text: "Half Note (2 beats)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(2.0, self)
             TooltipMDIconButton:
                 id: quarter_note_button
                 icon: 'music-note-quarter'
                 tooltip_text: "Quarter Note (1 beat)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(1.0, self)
             TooltipMDIconButton:
                 id: eighth_note_button
                 icon: 'music-note-eighth'
                 tooltip_text: "Eighth Note (0.5 beats)"
+                theme_bg_color: "Custom"
                 on_press: root.set_note_duration(0.5, self)
 
             Widget:
@@ -349,6 +416,7 @@ Builder.load_string("""
 class PianoRollEditor(ModalView):
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
+    original_track_index = NumericProperty(None)
     track_copy = ObjectProperty()
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
@@ -358,9 +426,12 @@ class PianoRollEditor(ModalView):
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     _update_event = None
+    selected_note = ObjectProperty(None, allownone=True)
+    selected_event = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kwargs):
         super(PianoRollEditor, self).__init__(**kwargs)
+        self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
             name=self.track.name,
             channel=self.track.channel,
@@ -369,7 +440,13 @@ class PianoRollEditor(ModalView):
             is_solo=self.track.is_solo,
             volume=self.track.volume,
             pan=self.track.pan,
-            events=copy.deepcopy(self.track.events)
+            velocity=self.track.velocity,
+            events=copy.deepcopy(self.track.events),
+            bank_msb=self.track.bank_msb,
+            bank_lsb=self.track.bank_lsb,
+            output_port_name=self.track.output_port_name,
+            record_mode=self.track.record_mode,
+            is_metronome=self.track.is_metronome
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
@@ -418,6 +495,10 @@ class PianoRollEditor(ModalView):
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
             self._update_event.cancel()
+        # Ensure the override is removed when the editor is closed
+        if self.original_track_index in self.sequencer_layout.sequencer.track_overrides:
+            del self.sequencer_layout.sequencer.track_overrides[self.original_track_index]
+
 
     def dismiss(self, action=None, *args):
         if action == 'save_and_close':
@@ -495,13 +576,43 @@ class PianoRollEditor(ModalView):
         record_button.icon_color = [1, 0.2, 0.2, 1] if state == 'recording' else [0.8, 0.8, 0.8, 1]
         record_button.md_bg_color = [0.5, 0.1, 0.1, 1] if state == 'recording' else [1, 1, 1, 0.05]
 
+        # --- Live Preview Logic ---
+        sequencer = self.sequencer_layout.sequencer
+        if state in ('playing', 'recording'):
+            # When playback starts, apply the edited track as an override
+            sequencer.track_overrides[self.original_track_index] = self.track_copy
+        else:
+            # When playback stops, remove the override
+            if self.original_track_index in sequencer.track_overrides:
+                del sequencer.track_overrides[self.original_track_index]
+
     def set_edit_mode(self, mode, btn): self.edit_mode = mode; self._update_button_states(self.mode_buttons, btn)
-    def set_note_duration(self, dur, btn): self.note_duration = dur; self._update_button_states(self.duration_buttons, btn)
+    def set_note_duration(self, dur, btn):
+        self.note_duration = dur
+        self._update_button_states(self.duration_buttons, btn)
+        if self.selected_note:
+            self.selected_note.duration = dur
+            self.is_dirty = True
+            self.ids.grid_viewer.grid.draw()
 
     def _update_button_states(self, group, active_btn):
+        """
+        Updates the visual state of a group of buttons by changing their background color
+        to a fixed, high-contrast color to ensure visibility regardless of theme.
+        """
+        # A bright yellow, similar to the main pause button, for high visibility.
+        active_bg_color = [0.9, 0.7, 0, 1]
+        # A neutral dark color for inactive buttons.
+        inactive_bg_color = [0.2, 0.2, 0.2, 1]
+        # A dark icon for good contrast on the yellow background.
+        active_icon_color = [0.1, 0.1, 0.1, 1]
+         # A light grey icon for the inactive state.
+        inactive_icon_color = [0.8, 0.8, 0.8, 1]
+
         for btn in group.values():
-            btn.md_bg_color = [0.4, 0.4, 0.8, 1] if btn == active_btn else [1, 1, 1, 0.05]
-            btn.icon_color = [1, 1, 1, 1] if btn == active_btn else [0.8, 0.8, 0.8, 1]
+            is_active = btn == active_btn
+            btn.md_bg_color = active_bg_color if is_active else inactive_bg_color
+            btn.icon_color = active_icon_color if is_active else inactive_icon_color
 
     def sync_horizontal_scroll(self, instance, value):
         if self._is_scrolling: return

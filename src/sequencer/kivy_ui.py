@@ -1486,10 +1486,17 @@ class SequencerLayout(BoxLayout):
     def on_start_position_validate(self, instance=None):
         """Valide la position de début"""
         position = self.start_pos_input.text
-        print(f"Start position validated: {position}")
-        # Ici vous pouvez ajouter la logique pour traiter la nouvelle position de début
-        # Par exemple :
-        # self.process_command_ui(f'startpos "{position}"')
+
+        # Parse the position string to beats
+        start_beat = self.sequencer.parse_position_to_beats(position)
+
+        if start_beat is not None:
+            # Force the sequencer's playhead to the new position
+            self.sequencer._resync_all_at_beat(start_beat)
+        else:
+            # If parsing fails, revert to a safe default to avoid errors
+            self.start_pos_input.text = "1:1"
+            self.sequencer._resync_all_at_beat(0.0)
 
     def on_end_position_validate(self, instance=None):
         """Valide la position de fin"""

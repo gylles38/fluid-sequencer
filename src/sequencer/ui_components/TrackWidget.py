@@ -175,17 +175,13 @@ class TrackWidget(BoxLayout):
         if isinstance(track, MidiTrack):
             note_height = dp(12)
 
-            # Create a dedicated layout for the timeline components (keyboard + grid)
-            # This layout will expand to fill the available space.
-            timeline_layout = BoxLayout(orientation='horizontal', size_hint_x=1)
-
             # 1. Keyboard (fixed width)
             keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             keyboard_sv.add_widget(self.piano_keyboard)
 
-            # 2. Grid ScrollView (should fill the rest of timeline_layout)
-            self.timeline_scroll = BoundedScrollView(do_scroll_y=False)
+            # 2. Grid ScrollView (expanding)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -196,20 +192,14 @@ class TrackWidget(BoxLayout):
             self.measure_grid = grid_sv.grid
 
             # A ScrollView must have a single child.
-            self.timeline_container = FloatLayout(size_hint=(None, 1))
+            # Using a simple Widget container, similar to Audio tracks, to prevent layout issues.
+            self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
-
-            # Bind the container's width to the viewer's width.
-            grid_sv.bind(width=self.timeline_container.setter('width'))
 
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            # Add keyboard and grid to the timeline layout
-            timeline_layout.add_widget(keyboard_sv)
-            timeline_layout.add_widget(self.timeline_scroll)
-
-            # Add the container layout to the main widget
-            self.add_widget(timeline_layout)
+            self.add_widget(keyboard_sv)
+            self.add_widget(self.timeline_scroll)
 
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))

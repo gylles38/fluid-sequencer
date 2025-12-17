@@ -75,6 +75,7 @@ class RulerContent(Widget):
                 # --- NEW: Update the UI start position as well ---
                 new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
                 self.sequencer_layout.sequencer.ui_start_pos_str = new_pos_str
+                self.sequencer_layout.start_pos_input.text = new_pos_str
 
             return True
         return super().on_touch_down(touch)

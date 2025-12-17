@@ -1028,6 +1028,7 @@ class Sequencer(EventDispatcher):
         self._cached_song_length_beats: Optional[float] = None
 
         self.track_overrides: Dict[int, MidiTrack] = {}
+        self.last_play_start_beat: Optional[float] = None
 
     def process_transport_command(self, command: str):
         """
@@ -2994,13 +2995,24 @@ class Sequencer(EventDispatcher):
 
     def _resync_all_at_beat(self, beat: float, force_play: bool = False):
         """
-        Resynchronizes all tracks to a specific beat by briefly stopping and repositioning
-        the master JACK transport, ensuring all clients are perfectly aligned.
+        Resynchronizes all tracks to a specific beat.
+        If JACK is running, it repositions the master transport. Otherwise, it just
+        updates the internal sequencer state.
         If `force_play` is True, it will start the transport even if it wasn't rolling before.
         """
         print(f"\n[DIAGNOSTIC] === _resync_all_at_beat START (target_beat={beat:.6f}) ===")
+
+        # --- Step 1: Update internal state (always) ---
+        # This is the crucial part for the headless test to work.
+        print("[DIAGNOSTIC] Syncing internal playhead...")
+        self.jack_manager._sync_playhead_to_beat(beat)
+        if self.gui_mode:
+            self.current_beat = beat # Update the Kivy property for the UI
+
+        # --- Step 2: Handle JACK and external processes (if running) ---
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
-            print("[DIAGNOSTIC] JACK not running, aborting resync.")
+            print("[DIAGNOSTIC] JACK not running. Skipping transport and audio sync.")
+            print(f"[DIAGNOSTIC] === _resync_all_at_beat END (No JACK) ===\n")
             return
 
         try:
@@ -3031,9 +3043,7 @@ class Sequencer(EventDispatcher):
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
                 print(f"[DIAGNOSTIC] Repositioning JACK transport from frame {original_frame} to {target_frame} (beat {beat:.6f})")
 
-            # 4. Synchroniser notre état interne et les lecteurs externes avec la nouvelle position
-            print("[DIAGNOSTIC] Syncing internal playhead...")
-            self.jack_manager._sync_playhead_to_beat(beat)
+            # 4. Synchroniser les lecteurs externes avec la nouvelle position (l'état interne est déjà à jour)
             print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
             self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
             print("[DIAGNOSTIC] Audio track seek complete.")
@@ -3064,16 +3074,21 @@ class Sequencer(EventDispatcher):
         except jack.JackError as e:
             print(f"Error during resynchronization: {e}", file=sys.stderr)
         finally:
-            print(f"[DIAGNOSTIC] === _resync_all_at_beat END ===\n")
+            print(f"[DIAGNOSTIC] === _resync_all_at_beat END (With JACK) ===\n")
 
     def play(self, start_beat: Optional[float] = None):
-        if not self.jack_manager.is_running:
+        if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             self.jack_manager.start()
             time.sleep(0.2) # Give JACK time to start and connect
 
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
+
+        # Store the beat from which playback is starting
+        effective_start_beat = start_beat if start_beat is not None else self.rewind_beat
+        self.last_play_start_beat = effective_start_beat
+
 
         # If a start beat is provided, reposition the transport
         if start_beat is not None:

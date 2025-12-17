@@ -1486,6 +1486,7 @@ class SequencerLayout(BoxLayout):
     def on_start_position_validate(self, instance=None):
         """Valide la position de début"""
         position = self.start_pos_input.text
+        self.sequencer.ui_start_pos_str = position # Ensure the backend variable is updated
 
         # Parse the position string to beats
         start_beat = self.sequencer.parse_position_to_beats(position)
@@ -1496,6 +1497,7 @@ class SequencerLayout(BoxLayout):
         else:
             # If parsing fails, revert to a safe default to avoid errors
             self.start_pos_input.text = "1:1"
+            self.sequencer.ui_start_pos_str = "1:1"
             self.sequencer._resync_all_at_beat(0.0)
 
     def on_end_position_validate(self, instance=None):

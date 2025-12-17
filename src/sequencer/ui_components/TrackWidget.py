@@ -74,7 +74,7 @@ class TrackWidget(BoxLayout):
         self.info_section.add_widget(self.name_label)
         self.add_widget(self.info_section)
 
-        # --- Right Section: Controls ---
+        # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
 
         if isinstance(track, MidiTrack):
@@ -169,17 +169,23 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        # --- Middle Section: Timeline ---
+        self.add_widget(self.controls_section)
+
+        # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
             note_height = dp(12)
+
+            # Create a dedicated layout for the timeline components (keyboard + grid)
+            # This layout will expand to fill the available space.
+            timeline_layout = BoxLayout(orientation='horizontal', size_hint_x=1)
 
             # 1. Keyboard (fixed width)
             keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             keyboard_sv.add_widget(self.piano_keyboard)
 
-            # 2. Grid ScrollView (expanding)
-            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+            # 2. Grid ScrollView (should fill the rest of timeline_layout)
+            self.timeline_scroll = BoundedScrollView(do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -198,8 +204,12 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(keyboard_sv)
-            self.add_widget(self.timeline_scroll)
+            # Add keyboard and grid to the timeline layout
+            timeline_layout.add_widget(keyboard_sv)
+            timeline_layout.add_widget(self.timeline_scroll)
+
+            # Add the container layout to the main widget
+            self.add_widget(timeline_layout)
 
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
@@ -272,7 +282,6 @@ class TrackWidget(BoxLayout):
 
             self.add_widget(icon_layout)
             self.add_widget(self.timeline_scroll)
-        self.add_widget(self.controls_section)
 
         # --- Playback Line (Cursor) ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))

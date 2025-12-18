@@ -181,7 +181,7 @@ class TrackWidget(BoxLayout):
             keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Grid ScrollView (expanding)
-            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=None, do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -304,7 +304,34 @@ class TrackWidget(BoxLayout):
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
         self.update_timeline_size()
 
+        if isinstance(track, MidiTrack):
+            self.keyboard_sv = keyboard_sv
+            self.bind(width=self._update_timeline_width)
+
         self.track.bind(is_solo=self.on_solo_changed)
+
+    def _update_timeline_width(self, *args):
+        """
+        Explicitly calculates and sets the width of the timeline ScrollView to prevent
+        layout ambiguity and event-stealing.
+        """
+        if not hasattr(self, 'timeline_scroll'):
+            return
+
+        # Total width available
+        total_width = self.width
+        # Total width of all fixed components
+        fixed_width = (self.info_section.width +
+                       self.controls_section.width +
+                       self.keyboard_sv.width)
+        # Total horizontal padding and spacing
+        # Padding is left + right. Spacing is between the 4 main components (3 gaps).
+        spacing_and_padding = self.padding[0] + self.padding[2] + (self.spacing * 3)
+
+        timeline_width = total_width - fixed_width - spacing_and_padding
+
+        # Ensure the width is not negative
+        self.timeline_scroll.width = max(0, timeline_width)
 
     def on_solo_changed(self, instance, value):
         self.update_mute_solo_appearance()

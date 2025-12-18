@@ -73,6 +73,14 @@ class TrackWidget(BoxLayout):
         )
         self.info_section.add_widget(self.name_label)
 
+        # Create a container for the fixed-width panels to resolve layout ambiguity
+        self.left_panel = BoxLayout(
+            orientation='horizontal',
+            size_hint_x=None,
+            spacing=self.spacing
+        )
+        self.left_panel.add_widget(self.info_section)
+
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
 
@@ -168,18 +176,7 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        # --- Container for all fixed-width panels ---
-        fixed_panel_container = BoxLayout(
-            size_hint_x=None,
-            orientation='horizontal',
-            spacing=self.spacing # Use the same spacing as the parent
-        )
-        # The width is the sum of children widths plus the spacing between them
-        fixed_panel_container.width = self.info_width + self.controls_width + self.spacing
-        fixed_panel_container.add_widget(self.info_section)
-        fixed_panel_container.add_widget(self.controls_section)
-        self.add_widget(fixed_panel_container)
-
+        self.left_panel.add_widget(self.controls_section)
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
@@ -202,7 +199,7 @@ class TrackWidget(BoxLayout):
             self.measure_grid = grid_sv.grid
 
             # A ScrollView must have a single child.
-            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container = FloatLayout(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
 
             # Bind the container's width to the viewer's width.
@@ -210,7 +207,11 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(keyboard_sv)
+            # Add the keyboard to the left panel to keep all fixed-size widgets together
+            self.left_panel.add_widget(keyboard_sv)
+            self.left_panel.width = self.info_width + self.controls_width + keyboard_sv.width + (self.spacing * 2)
+
+            self.add_widget(self.left_panel)
             self.add_widget(self.timeline_scroll)
 
             # Link vertical scrolling
@@ -282,7 +283,11 @@ class TrackWidget(BoxLayout):
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(icon_layout)
+            # Add the icon to the left panel
+            self.left_panel.add_widget(icon_layout)
+            self.left_panel.width = self.info_width + self.controls_width + icon_layout.width + (self.spacing * 2)
+
+            self.add_widget(self.left_panel)
             self.add_widget(self.timeline_scroll)
 
         # --- Playback Line (Cursor) ---

@@ -72,7 +72,6 @@ class TrackWidget(BoxLayout):
             text_size=(self.info_width - dp(50), None) # Allow text to wrap if needed
         )
         self.info_section.add_widget(self.name_label)
-        self.add_widget(self.info_section)
 
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
@@ -169,7 +168,18 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        self.add_widget(self.controls_section)
+        # --- Container for all fixed-width panels ---
+        fixed_panel_container = BoxLayout(
+            size_hint_x=None,
+            orientation='horizontal',
+            spacing=self.spacing # Use the same spacing as the parent
+        )
+        # The width is the sum of children widths plus the spacing between them
+        fixed_panel_container.width = self.info_width + self.controls_width + self.spacing
+        fixed_panel_container.add_widget(self.info_section)
+        fixed_panel_container.add_widget(self.controls_section)
+        self.add_widget(fixed_panel_container)
+
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):

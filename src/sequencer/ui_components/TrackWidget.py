@@ -201,7 +201,11 @@ class TrackWidget(BoxLayout):
             self.timeline_scroll.add_widget(self.timeline_container)
 
             self.add_widget(keyboard_sv)
-            self.add_widget(self.timeline_scroll)
+
+            # Create a container for the timeline to constrain its size
+            timeline_container_layout = BoxLayout(size_hint_x=1)
+            timeline_container_layout.add_widget(self.timeline_scroll)
+            self.add_widget(timeline_container_layout)
 
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
@@ -273,7 +277,12 @@ class TrackWidget(BoxLayout):
             self.timeline_scroll.add_widget(self.timeline_container)
 
             self.add_widget(icon_layout)
-            self.add_widget(self.timeline_scroll)
+
+            # Create a container for the timeline to constrain its size
+            timeline_container_layout = BoxLayout(size_hint_x=1)
+            timeline_container_layout.add_widget(self.timeline_scroll)
+            self.add_widget(timeline_container_layout)
+
 
         # --- Playback Line (Cursor) ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))

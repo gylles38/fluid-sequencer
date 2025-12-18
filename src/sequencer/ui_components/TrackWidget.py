@@ -297,8 +297,9 @@ class TrackWidget(BoxLayout):
         self.update_timeline_size()
 
         # --- Manual width management for the expanding timeline ---
-        self.bind(size=self._update_timeline_width)
+        self.bind(size=self._update_timeline_width, pos=self._update_timeline_width)
         self._update_timeline_width()
+
 
         self.track.bind(is_solo=self.on_solo_changed)
 
@@ -307,7 +308,12 @@ class TrackWidget(BoxLayout):
         Manually calculates and sets the width of the timeline_scroll to fill
         the available space, preventing layout ambiguity.
         """
-        fixed_width = self.info_section.width + self.controls_section.width + (self.spacing * 2) + self.padding[0] + self.padding[2]
+        # The total number of spacing gaps is the number of children minus 1.
+        num_children = len(self.children)
+        total_spacing = self.spacing * (num_children - 1) if num_children > 1 else 0
+
+        fixed_width = self.info_section.width + self.controls_section.width + total_spacing + self.padding[0] + self.padding[2]
+
         if isinstance(self.track, MidiTrack):
             fixed_width += self.keyboard_sv.width
         else:

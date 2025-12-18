@@ -72,7 +72,6 @@ class TrackWidget(BoxLayout):
             text_size=(self.info_width - dp(50), None) # Allow text to wrap if needed
         )
         self.info_section.add_widget(self.name_label)
-        self.add_widget(self.info_section)
 
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
@@ -169,7 +168,15 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        self.add_widget(self.controls_section)
+        # --- New Container for all fixed-width elements ---
+        fixed_width_container = BoxLayout(
+            orientation='horizontal',
+            size_hint_x=None,
+            spacing=self.spacing # Use the parent's spacing
+        )
+        # We manually set the width later
+        fixed_width_container.add_widget(self.info_section)
+        fixed_width_container.add_widget(self.controls_section)
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
@@ -181,7 +188,7 @@ class TrackWidget(BoxLayout):
             keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Grid ScrollView (expanding)
-            self.timeline_scroll = BoundedScrollView(size_hint_x=None, do_scroll_y=False)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -191,18 +198,22 @@ class TrackWidget(BoxLayout):
             self.piano_roll_viewer = grid_sv
             self.measure_grid = grid_sv.grid
 
+            # A ScrollView must have a single child.
             # A ScrollView must have a single child. We use a simple Widget
             # as a container to avoid the event-stealing issues of FloatLayout.
             self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
 
-            # The container's width is now set explicitly in update_timeline_size.
-            # The PianoRollViewer (grid_sv) will fill this container.
+            # Bind the container's width to the viewer's width.
+            grid_sv.bind(width=self.timeline_container.setter('width'))
 
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(keyboard_sv)
+            fixed_width_container.add_widget(keyboard_sv)
+            fixed_width_container.width = self.info_width + self.controls_width + keyboard_sv.width + (self.spacing * 2)
+            self.add_widget(fixed_width_container)
             self.add_widget(self.timeline_scroll)
+
 
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
@@ -260,7 +271,7 @@ class TrackWidget(BoxLayout):
             )
             icon_layout.add_widget(icon)
 
-            self.timeline_scroll = BoundedScrollView(size_hint_x=None, do_scroll_y=False)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
 
             # A ScrollView must have a single child.
             self.timeline_container = Widget(size_hint=(None, 1))
@@ -273,7 +284,9 @@ class TrackWidget(BoxLayout):
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(icon_layout)
+            fixed_width_container.add_widget(icon_layout)
+            fixed_width_container.width = self.info_width + self.controls_width + icon_layout.width + (self.spacing * 2)
+            self.add_widget(fixed_width_container)
             self.add_widget(self.timeline_scroll)
 
 
@@ -296,48 +309,7 @@ class TrackWidget(BoxLayout):
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
         self.update_timeline_size()
 
-        if isinstance(track, MidiTrack):
-            self.keyboard_sv = keyboard_sv
-        else:
-            self.icon_layout = icon_layout
-        self.bind(width=self._update_timeline_width)
-
         self.track.bind(is_solo=self.on_solo_changed)
-
-    def _update_timeline_width(self, *args):
-        """
-        Explicitly calculates and sets the width of the timeline ScrollView to prevent
-        layout ambiguity and event-stealing. This logic is now consistent for all
-        track types.
-        """
-        if not hasattr(self, 'timeline_scroll'):
-            return
-
-        # Determine the fixed width based on track type
-        fixed_width = 0
-        num_gaps = 0
-        if isinstance(self.track, MidiTrack):
-            # 4 components: info, controls, keyboard, timeline
-            fixed_width = (self.info_section.width +
-                           self.controls_section.width +
-                           self.keyboard_sv.width)
-            num_gaps = 3
-        else:
-            # 4 components: info, controls, icon, timeline
-            fixed_width = (self.info_section.width +
-                           self.controls_section.width +
-                           self.icon_layout.width)
-            num_gaps = 3
-
-        # Total width available
-        total_width = self.width
-        # Total horizontal padding and spacing
-        spacing_and_padding = self.padding[0] + self.padding[2] + (self.spacing * num_gaps)
-
-        timeline_width = total_width - fixed_width - spacing_and_padding
-
-        # Ensure the width is not negative
-        self.timeline_scroll.width = max(0, timeline_width)
 
     def on_solo_changed(self, instance, value):
         self.update_mute_solo_appearance()
@@ -356,16 +328,17 @@ class TrackWidget(BoxLayout):
         if not hasattr(self, 'timeline_container'):
             return
 
-        # This logic should be consistent for all track types. The container's width
-        # determines the scrollable area.
-        content_width = self.total_beats * self.pixels_per_beat
-        self.timeline_container.width = content_width
-
+        # For MIDI tracks, the width is now controlled by the content ("content-out").
+        # We just need to pass the new parameters down to the PianoRollViewer,
+        # which will trigger the chain of width updates.
         if isinstance(self.track, MidiTrack):
-            # Pass the parameters down to the PianoRollViewer so it can update its own grid.
             self.piano_roll_viewer.total_beats = self.total_beats
             self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
         else:
+            # For other track types, we still use the "top-down" sizing model.
+            content_width = self.total_beats * self.pixels_per_beat
+            self.timeline_container.width = content_width
+
             # The MeasureGrid is not a layout, so it doesn't automatically resize its canvas.
             # We must explicitly tell it to redraw by passing down the parameters.
             self.measure_grid.total_beats = self.total_beats

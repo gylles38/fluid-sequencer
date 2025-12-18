@@ -72,7 +72,7 @@ class TrackWidget(BoxLayout):
             text_size=(self.info_width - dp(50), None) # Allow text to wrap if needed
         )
         self.info_section.add_widget(self.name_label)
-        self.add_widget(self.info_section)
+        # self.add_widget(self.info_section) # DEFERRED
 
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
@@ -169,7 +169,7 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        self.add_widget(self.controls_section)
+        # self.add_widget(self.controls_section) # DEFERRED
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
@@ -179,10 +179,9 @@ class TrackWidget(BoxLayout):
             keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             keyboard_sv.add_widget(self.piano_keyboard)
-            self.keyboard_sv = keyboard_sv
 
-            # 2. Grid ScrollView (expanding) - its width will be managed manually
-            self.timeline_scroll = BoundedScrollView(size_hint_x=None, do_scroll_y=False)
+            # 2. Grid ScrollView (expanding)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
             grid_sv = PianoRollViewer(
                 track=track,
                 total_beats=self.total_beats,
@@ -201,8 +200,12 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(keyboard_sv)
+            # *** THE FIX: Add timeline FIRST, then fixed panels ***
             self.add_widget(self.timeline_scroll)
+            self.add_widget(self.info_section)
+            self.add_widget(self.controls_section)
+            self.add_widget(keyboard_sv)
+
 
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
@@ -259,9 +262,8 @@ class TrackWidget(BoxLayout):
                 valign='center'
             )
             icon_layout.add_widget(icon)
-            self.icon_layout = icon_layout
 
-            self.timeline_scroll = BoundedScrollView(size_hint_x=None, do_scroll_y=False)
+            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
 
             # A ScrollView must have a single child.
             self.timeline_container = Widget(size_hint=(None, 1))
@@ -274,8 +276,11 @@ class TrackWidget(BoxLayout):
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            self.add_widget(icon_layout)
+            # *** THE FIX: Add timeline FIRST, then fixed panels ***
             self.add_widget(self.timeline_scroll)
+            self.add_widget(self.info_section)
+            self.add_widget(self.controls_section)
+            self.add_widget(icon_layout)
 
         # --- Playback Line (Cursor) ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -296,30 +301,11 @@ class TrackWidget(BoxLayout):
         self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
         self.update_timeline_size()
 
-        # --- Manual width management for the expanding timeline ---
-        self.bind(size=self._update_timeline_width, pos=self._update_timeline_width)
-        self._update_timeline_width()
-
-
         self.track.bind(is_solo=self.on_solo_changed)
 
-    def _update_timeline_width(self, *args):
-        """
-        Manually calculates and sets the width of the timeline_scroll to fill
-        the available space, preventing layout ambiguity.
-        """
-        # The total number of spacing gaps is the number of children minus 1.
-        num_children = len(self.children)
-        total_spacing = self.spacing * (num_children - 1) if num_children > 1 else 0
-
-        fixed_width = self.info_section.width + self.controls_section.width + total_spacing + self.padding[0] + self.padding[2]
-
-        if isinstance(self.track, MidiTrack):
-            fixed_width += self.keyboard_sv.width
-        else:
-            fixed_width += self.icon_layout.width
-
-        self.timeline_scroll.width = self.width - fixed_width
+        # Reverse children to get the correct visual order [fixed, timeline]
+        # while maintaining the correct drawing order (timeline drawn first)
+        self.children = self.children[::-1]
 
     def on_solo_changed(self, instance, value):
         self.update_mute_solo_appearance()

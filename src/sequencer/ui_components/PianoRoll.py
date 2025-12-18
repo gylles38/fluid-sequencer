@@ -1,11 +1,11 @@
-from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
 from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle, Line
 from sequencer.models import MidiTrack
 
-class PianoRoll(FloatLayout):
+class PianoRoll(Widget):
     """
     Represents the drawing area of the piano roll's grid and notes.
     This widget is intended to be placed inside a ScrollView.

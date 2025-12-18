@@ -191,8 +191,9 @@ class TrackWidget(BoxLayout):
             self.piano_roll_viewer = grid_sv
             self.measure_grid = grid_sv.grid
 
-            # A ScrollView must have a single child.
-            self.timeline_container = FloatLayout(size_hint=(None, 1))
+            # A ScrollView must have a single child. We use a simple Widget
+            # as a container to avoid the event-stealing issues of FloatLayout.
+            self.timeline_container = Widget(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
 
             # Bind the container's width to the viewer's width.

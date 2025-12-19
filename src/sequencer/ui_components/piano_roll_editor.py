@@ -426,6 +426,7 @@ Builder.load_string("""
                 do_scroll_y: False
                 bar_width: dp(20)
                 scroll_type: ['bars']
+                padding: [0, 0, 0, dp(20)]
 
                 EditablePianoRollViewer:
                     id: grid_viewer
@@ -549,6 +550,7 @@ class PianoRollEditor(ModalView):
             self.selected_note = self.selected_notes[0]
         else:
             self.selected_note = None
+            self.selected_event = None
 
     def on_dismiss(self):
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)

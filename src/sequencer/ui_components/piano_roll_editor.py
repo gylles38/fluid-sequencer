@@ -262,7 +262,7 @@ class EditablePianoRollViewer(ScrollView):
 
     def __init__(self, **kwargs):
         super(EditablePianoRollViewer, self).__init__(**kwargs)
-        self.scroll_type = [] # Disable content scrolling
+        self.scroll_type = ['bars'] # Disable content scrolling
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True

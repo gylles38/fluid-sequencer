@@ -59,7 +59,6 @@ class EditableMidiGrid(PianoRoll):
             if self._selection_rect:
                 self._selection_rect.size = (local_pos[0] - self._selection_start_pos[0], local_pos[1] - self._selection_start_pos[1])
 
-                # Update selected notes based on the rectangle
                 newly_selected = []
                 x1, y1 = self._selection_start_pos
                 x2, y2 = local_pos
@@ -78,7 +77,6 @@ class EditableMidiGrid(PianoRoll):
                             newly_selected.append(note)
 
                 self.editor.selected_notes = newly_selected
-                self.draw()
             return True
 
 
@@ -97,18 +95,14 @@ class EditableMidiGrid(PianoRoll):
                 if new_start_beat < note_end_time:
                     new_duration = note_end_time - new_start_beat
                     if new_duration >= 0.1:
-                        # --- Isolate the note from its original event ---
                         note_to_move = self._dragged_note
                         self._drag_event.notes.remove(note_to_move)
 
-                        # If the original event is now empty, remove it
                         if not self._drag_event.notes and not self._drag_event.cc_messages:
                             self.editor.track_copy.events.remove(self._drag_event)
 
-                        # Update the note's properties
                         note_to_move.duration = new_duration
 
-                        # Find or create a new event at the target beat
                         target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_beat) < 0.001), None)
                         if target_event:
                             if note_to_move not in target_event.notes:
@@ -117,7 +111,6 @@ class EditableMidiGrid(PianoRoll):
                             target_event = Event(start_time=new_start_beat, notes=[note_to_move])
                             self.editor.track_copy.add_event(target_event)
 
-                        # Update the drag reference to the new event
                         self._drag_event = target_event
 
             elif self._drag_mode == 'move':
@@ -131,7 +124,7 @@ class EditableMidiGrid(PianoRoll):
                 self._dragged_note.pitch = new_pitch
 
             self.editor.is_dirty = True
-            self.draw()
+            self.draw() # Redraw on drag
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
@@ -154,7 +147,6 @@ class EditableMidiGrid(PianoRoll):
                     note_width = note.duration * self.pixels_per_beat
                     handle_width = min(dp(8), note_width / 4) if note_width > dp(16) else 0
 
-                    # Check for right handle resize
                     if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
                        note_y <= local_pos[1] <= note_y + self.note_height:
                         self._dragged_note = note
@@ -164,7 +156,6 @@ class EditableMidiGrid(PianoRoll):
                         touch.grab(self)
                         return True
 
-                    # Check for left handle resize
                     elif note_x <= local_pos[0] <= note_x + handle_width and \
                             note_y <= local_pos[1] <= note_y + self.note_height:
                         self._dragged_note = note
@@ -174,7 +165,6 @@ class EditableMidiGrid(PianoRoll):
                         touch.grab(self)
                         return True
 
-                    # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
                         self._dragged_note = note
@@ -182,23 +172,19 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_mode = 'move'
                         self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
 
-                        # Select the note
                         self.editor.selected_notes = [note]
                         self.editor.selected_event = event
-                        self.draw()
-
                         touch.grab(self)
                         return True
 
-            # If no note was clicked, start a selection drag (rubber-band)
             self.editor.selected_notes.clear()
+            self.editor.selected_event = None
             self._drag_mode = 'select'
             self._selection_start_pos = local_pos
             with self.canvas.after:
                 Color(1, 1, 1, 0.3)
                 self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
             touch.grab(self)
-            self.draw()
             return True
 
         quantized_beat = round(clicked_beat)
@@ -252,6 +238,28 @@ class EditableMidiGrid(PianoRoll):
         touch.ungrab(self)
         return True
 
+    def draw(self, *args):
+        # First, call the parent's draw method to draw the grid and all notes
+        super().draw(*args)
+
+        # Now, draw the selection borders on top
+        with self.canvas:
+            for note in self.editor.selected_notes:
+                # Find the event this note belongs to in the track_copy
+                event_for_note = None
+                for ev in self.editor.track_copy.events:
+                    if note in ev.notes:
+                        event_for_note = ev
+                        break
+
+                if event_for_note:
+                    note_x = event_for_note.start_time * self.pixels_per_beat
+                    note_y = self.y + note.pitch * self.note_height
+                    note_width = note.duration * self.pixels_per_beat
+
+                    Color(1, 1, 1, 1) # White border for selection
+                    Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
+
 
 class EditablePianoRollViewer(ScrollView):
     editor = ObjectProperty()
@@ -262,14 +270,29 @@ class EditablePianoRollViewer(ScrollView):
 
     def __init__(self, **kwargs):
         super(EditablePianoRollViewer, self).__init__(**kwargs)
-        self.scroll_type = ['bars'] # Disable content scrolling
+        self.scroll_type = ['bars']
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
-        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
-        self.grid.editor = self.editor # Pass the editor instance to the grid
-        self.add_widget(self.grid)
-        self.grid.bind(width=self.setter('width'))
+
+        # New container with padding for the scrollbar
+        container = BoxLayout(
+            size_hint=(None, 1),
+            padding=[0, 0, 0, dp(20)] # Reserve space at the bottom
+        )
+        container.bind(width=self.setter('width'))
+
+        self.grid = EditableMidiGrid(
+            editor=self.editor,
+            track=self.track,
+            total_beats=self.total_beats,
+            pixels_per_beat=self.pixels_per_beat,
+            note_height=self.note_height
+        )
+        self.grid.editor = self.editor
+        container.add_widget(self.grid)
+        self.add_widget(container)
+
 
     def on_touch_move(self, touch):
         # If the grid has grabbed the touch for a note drag/resize operation,
@@ -424,9 +447,6 @@ Builder.load_string("""
             BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: False
-                bar_width: dp(20)
-                scroll_type: ['bars']
-                padding: [0, 0, 0, dp(20)]
 
                 EditablePianoRollViewer:
                     id: grid_viewer
@@ -475,7 +495,7 @@ class PianoRollEditor(ModalView):
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     _update_event = None
-    selected_note = ObjectProperty(None, allownone=True) # Will be deprecated in favor of selected_notes
+    selected_note = ObjectProperty(None, allownone=True)
     selected_notes = ListProperty([])
     selected_event = ObjectProperty(None, allownone=True)
 
@@ -540,17 +560,6 @@ class PianoRollEditor(ModalView):
         self.set_note_duration(self.note_duration, self.duration_buttons[self.note_duration])
         self.on_playback_state_change(None, self.sequencer_layout.sequencer.playback_state)
         self.ids.ruler.redraw()
-
-        # Bind selected_notes properties
-        self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
-        self.bind(selected_notes=self._update_legacy_selection)
-
-    def _update_legacy_selection(self, *args):
-        if self.selected_notes:
-            self.selected_note = self.selected_notes[0]
-        else:
-            self.selected_note = None
-            self.selected_event = None
 
     def on_dismiss(self):
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
@@ -647,15 +656,7 @@ class PianoRollEditor(ModalView):
             if self.original_track_index in sequencer.track_overrides:
                 del sequencer.track_overrides[self.original_track_index]
 
-    def set_edit_mode(self, mode, btn):
-        self.edit_mode = mode
-        self._update_button_states(self.mode_buttons, btn)
-        # If switching away from the selection-enabled mode, clear selection
-        if mode != 'move':
-            if self.selected_notes:
-                self.selected_notes.clear()
-                self.ids.grid_viewer.grid.draw()
-
+    def set_edit_mode(self, mode, btn): self.edit_mode = mode; self._update_button_states(self.mode_buttons, btn)
     def set_note_duration(self, dur, btn):
         self.note_duration = dur
         self._update_button_states(self.duration_buttons, btn)

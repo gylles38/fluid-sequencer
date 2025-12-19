@@ -72,8 +72,7 @@ class RulerContent(Widget):
             if self.sequencer_layout.sequencer.playback_state == 'stopped':
                 self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
 
-                # --- FIX: Update the internal rewind position as well ---
-                self.sequencer_layout.sequencer.rewind_beat = clicked_beat
+                # --- NEW: Update the UI start position as well ---
                 new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
                 self.sequencer_layout.sequencer.ui_start_pos_str = new_pos_str
                 self.sequencer_layout.start_pos_input.text = new_pos_str

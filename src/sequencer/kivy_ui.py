@@ -1437,8 +1437,8 @@ class SequencerLayout(BoxLayout):
                 # Bind width for dynamic changes if ever needed
                 first_track_widget.piano_keyboard.fbind('width', lambda i, v: setattr(self.ruler, 'keyboard_width', v))
                 # Ensure ruler content width matches the grid part of the piano roll
-                self.ruler.ruler_content.width = first_track_widget.piano_roll_viewer.width
-                first_track_widget.piano_roll_viewer.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
+                self.ruler.ruler_content.width = first_track_widget.piano_roll.width
+                first_track_widget.piano_roll.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
             else:
                 self.ruler.keyboard_width = dp(40) # Set to the same as keyboard width for alignment
                 self.ruler.ruler_content.width = first_track_widget.timeline_container.width

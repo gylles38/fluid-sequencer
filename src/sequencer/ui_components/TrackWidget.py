@@ -7,8 +7,12 @@ from kivy.properties import NumericProperty, ObjectProperty
 from kivy.uix.label import Label 
 from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
-from .PianoRoll import PianoRollViewer
+from .PianoRoll import PianoRoll
 from .PianoKeyboard import PianoKeyboard
+from kivy.effects.scroll import ScrollEffect
+from kivy.clock import Clock
+from kivy.uix.widget import Widget
+from kivy.graphics import Color, Rectangle
 
 
 class TrackWidget(BoxLayout):
@@ -72,7 +76,6 @@ class TrackWidget(BoxLayout):
             text_size=(self.info_width - dp(50), None) # Allow text to wrap if needed
         )
         self.info_section.add_widget(self.name_label)
-        self.add_widget(self.info_section)
 
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
@@ -169,69 +172,88 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        self.add_widget(self.controls_section)
+        # --- Left Panel Container ---
+        left_panel = BoxLayout(
+            orientation='horizontal',
+            size_hint_x=None,
+            spacing=self.spacing
+        )
+        left_panel.add_widget(self.info_section)
+        left_panel.add_widget(self.controls_section)
+        left_panel.width = self.info_width + self.controls_width + self.spacing
+        self.add_widget(left_panel)
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
             note_height = dp(12)
 
             # 1. Keyboard (fixed width)
-            keyboard_sv = BoundedScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False)
+            keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
+            keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             keyboard_sv.add_widget(self.piano_keyboard)
 
-            # 2. Grid ScrollView (expanding)
-            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
-            grid_sv = PianoRollViewer(
+            # 2. Timeline ScrollView (expanding, with both x and y scroll)
+            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
+            self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
+            self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
+
+            # Content container (FloatLayout for overlaying playback line)
+            self.content = FloatLayout(size_hint=(None, None))
+            self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
+            self.timeline_container = self.content  # For compatibility with other methods
+
+            # Piano roll grid/notes
+            self.piano_roll = PianoRoll(
                 track=track,
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat,
-                note_height=note_height
+                note_height=note_height,
+                size_hint=(None, None)
             )
-            self.piano_roll_viewer = grid_sv
-            self.measure_grid = grid_sv.grid
+            self.piano_roll.size = self.content.size
+            self.piano_roll.pos = (0, 0)
+            self.content.add_widget(self.piano_roll)
 
-            # A ScrollView must have a single child.
-            self.timeline_container = FloatLayout(size_hint=(None, 1))
-            self.timeline_container.add_widget(grid_sv)
+            # Playback line (spans full content height)
+            self.playback_line = Widget(size_hint_x=None, width=dp(2))
+            self.playback_line.height = self.content.height
+            self.playback_line.y = 0
+            with self.playback_line.canvas:
+                Color(1, 0, 0, 0.8)
+                self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
+            self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
+            self.content.add_widget(self.playback_line)
 
-            # Bind the container's width to the viewer's width.
-            grid_sv.bind(width=self.timeline_container.setter('width'))
+            self.timeline_scroll.add_widget(self.content)
 
-            self.timeline_scroll.add_widget(self.timeline_container)
+            # Bind for size/zoom updates
+            self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
 
+            # Link vertical scrolling between keyboard and timeline
+            keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
+            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+
+            # Center on C4 (note 60) by default
+            def set_default_scroll(dt):
+                total_height = 128 * note_height
+                view_height = self.height
+                note_center_y = 60 * note_height + note_height / 2
+                desired_top_y = note_center_y - view_height / 2
+                max_top_y = total_height - view_height
+                desired_top_y = max(0, min(desired_top_y, max_top_y))
+                if max_top_y > 0:
+                    scroll_y = 1 - (desired_top_y / max_top_y)
+                else:
+                    scroll_y = 0
+                keyboard_sv.scroll_y = scroll_y
+            Clock.schedule_once(set_default_scroll)
+
+            # Add to main layout
             self.add_widget(keyboard_sv)
             self.add_widget(self.timeline_scroll)
 
-            # Link vertical scrolling
-            keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
-            grid_sv.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
-
-            # Center the view on C4 by default
-            def set_default_scroll(dt):
-                # MIDI note for C4 is 60. Total notes are 128.
-                # ScrollY is from 0 (bottom) to 1 (top).
-                # To center on C4, we want C4 to be at the middle of the viewport.
-                # The total height is 128 * note_height.
-                # The position of C4 is 60 * note_height.
-                # The visible height is self.height.
-                # We want to scroll to (60 * note_height) - (self.height / 2)
-                # Normalize this value.
-                total_height = 128 * note_height
-                scroll_pos_pixels = (60 * note_height) - (self.height / 2)
-
-                # The maximum scroll value in pixels is the total content height minus the viewport height
-                max_scroll_pixels = total_height - self.height
-
-                if max_scroll_pixels > 0:
-                    normalized_scroll = scroll_pos_pixels / max_scroll_pixels
-                    # Clamp the value between 0 and 1
-                    grid_sv.scroll_y = max(0.0, min(1.0, normalized_scroll))
-
-
-            Clock.schedule_once(set_default_scroll)
-
-        else:  # Audio and Automation tracks
+        else:  # Audio and Automation tracks (unchanged, no vertical scroll)
             # Create a layout for the track type icon, replacing the old spacer
             icon_layout = BoxLayout(
                 size_hint_x=None,
@@ -259,7 +281,8 @@ class TrackWidget(BoxLayout):
             )
             icon_layout.add_widget(icon)
 
-            self.timeline_scroll = BoundedScrollView(size_hint_x=1, do_scroll_y=False)
+            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
+            self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
 
             # A ScrollView must have a single child.
             self.timeline_container = Widget(size_hint=(None, 1))
@@ -272,22 +295,17 @@ class TrackWidget(BoxLayout):
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
 
+            # Add the icon and timeline directly to the main layout
             self.add_widget(icon_layout)
             self.add_widget(self.timeline_scroll)
 
-        # --- Playback Line (Cursor) ---
-        self.playback_line = Widget(size_hint_x=None, width=dp(2))
-        with self.playback_line.canvas:
-            Color(1, 0, 0, 0.8)
-            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
-        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
+            # --- Playback Line (Cursor) ---
+            self.playback_line = Widget(size_hint_x=None, width=dp(2))
+            with self.playback_line.canvas:
+                Color(1, 0, 0, 0.8)
+                self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
+            self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
 
-        # The playback line is added to the timeline_container, which exists for all track types.
-        if isinstance(track, MidiTrack):
-            self.timeline_container.add_widget(self.playback_line)
-            self.playback_line.size_hint_y = None
-            self.playback_line.height = self.piano_roll_viewer.grid.height
-        else:
             self.timeline_container.add_widget(self.playback_line)
             self.playback_line.size_hint_y = 1
 
@@ -296,39 +314,29 @@ class TrackWidget(BoxLayout):
 
         self.track.bind(is_solo=self.on_solo_changed)
 
+    def update_timeline_size(self, *args):
+        if hasattr(self, 'content'):
+            # For MIDI tracks
+            self.content.width = self.total_beats * self.pixels_per_beat
+            self.piano_roll.width = self.content.width
+            self.piano_roll.draw()
+        else:
+            # For other tracks (unchanged)
+            content_width = self.total_beats * self.pixels_per_beat
+            self.timeline_container.width = content_width
+            self.measure_grid.total_beats = self.total_beats
+            self.measure_grid.pixels_per_beat = self.pixels_per_beat
+
+    def update_playback_rect(self, *args):
+        self.playback_rect.pos = self.playback_line.pos
+        self.playback_rect.size = self.playback_line.size
+
+    # ... (le reste de la classe reste inchangé : set_playback_position, update_grid_parameters, etc.)
+
     def on_solo_changed(self, instance, value):
         self.update_mute_solo_appearance()
 
-    def update_playback_rect(self, *args):
-        """Callback to update the position and size of the playback line's graphical representation."""
-        if self.playback_rect:
-            self.playback_rect.pos = self.playback_line.pos
-            self.playback_rect.size = self.playback_line.size
 
-    def update_timeline_size(self, *args):
-        """
-        Updates the width of the timeline content based on the total beats and zoom level (pixels_per_beat).
-        This is crucial for ensuring the scroll view has the correct scrollable area.
-        """
-        if not hasattr(self, 'timeline_container'):
-            return
-
-        # For MIDI tracks, the width is now controlled by the content ("content-out").
-        # We just need to pass the new parameters down to the PianoRollViewer,
-        # which will trigger the chain of width updates.
-        if isinstance(self.track, MidiTrack):
-            self.piano_roll_viewer.total_beats = self.total_beats
-            self.piano_roll_viewer.pixels_per_beat = self.pixels_per_beat
-        else:
-            # For other track types, we still use the "top-down" sizing model.
-            content_width = self.total_beats * self.pixels_per_beat
-            self.timeline_container.width = content_width
-
-            # The MeasureGrid is not a layout, so it doesn't automatically resize its canvas.
-            # We must explicitly tell it to redraw by passing down the parameters.
-            self.measure_grid.total_beats = self.total_beats
-            self.measure_grid.pixels_per_beat = self.pixels_per_beat
-        
     def set_playback_position(self, current_beat: float):
         """
         Updates the visual position of the playback line (cursor) and handles automatic

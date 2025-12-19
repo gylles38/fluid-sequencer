@@ -168,15 +168,17 @@ class TrackWidget(BoxLayout):
         self.pan_slider.bind(value=self.on_pan_change)
         self.controls_section.add_widget(pan_layout)
 
-        # --- New Container for all fixed-width elements ---
-        fixed_width_container = BoxLayout(
+        # --- Left Panel Container ---
+        left_panel = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
-            spacing=self.spacing # Use the parent's spacing
+            spacing=self.spacing
         )
-        # We manually set the width later
-        fixed_width_container.add_widget(self.info_section)
-        fixed_width_container.add_widget(self.controls_section)
+        left_panel.add_widget(self.info_section)
+        left_panel.add_widget(self.controls_section)
+        left_panel.width = self.info_width + self.controls_width + self.spacing
+        self.add_widget(left_panel)
+
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
@@ -199,9 +201,7 @@ class TrackWidget(BoxLayout):
             self.measure_grid = grid_sv.grid
 
             # A ScrollView must have a single child.
-            # A ScrollView must have a single child. We use a simple Widget
-            # as a container to avoid the event-stealing issues of FloatLayout.
-            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container = FloatLayout(size_hint=(None, 1))
             self.timeline_container.add_widget(grid_sv)
 
             # Bind the container's width to the viewer's width.
@@ -209,11 +209,10 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            fixed_width_container.add_widget(keyboard_sv)
-            fixed_width_container.width = self.info_width + self.controls_width + keyboard_sv.width + (self.spacing * 2)
-            self.add_widget(fixed_width_container)
-            self.add_widget(self.timeline_scroll)
-
+            right_panel = BoxLayout(orientation='horizontal', spacing=self.spacing)
+            right_panel.add_widget(keyboard_sv)
+            right_panel.add_widget(self.timeline_scroll)
+            self.add_widget(right_panel)
 
             # Link vertical scrolling
             keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_sv, 'scroll_y', v))
@@ -284,11 +283,10 @@ class TrackWidget(BoxLayout):
             self.timeline_container.add_widget(self.measure_grid)
             self.timeline_scroll.add_widget(self.timeline_container)
 
-            fixed_width_container.add_widget(icon_layout)
-            fixed_width_container.width = self.info_width + self.controls_width + icon_layout.width + (self.spacing * 2)
-            self.add_widget(fixed_width_container)
-            self.add_widget(self.timeline_scroll)
-
+            right_panel = BoxLayout(orientation='horizontal', spacing=self.spacing)
+            right_panel.add_widget(icon_layout)
+            right_panel.add_widget(self.timeline_scroll)
+            self.add_widget(right_panel)
 
         # --- Playback Line (Cursor) ---
         self.playback_line = Widget(size_hint_x=None, width=dp(2))

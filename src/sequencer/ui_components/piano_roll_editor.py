@@ -241,16 +241,16 @@ class EditableMidiGrid(PianoRoll):
                     # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'move'
-                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
-
                         # --- MODIFICATION ICI ---
                         # Si la note n'est pas déjà sélectionnée, on crée une nouvelle sélection.
                         # Sinon, on garde la sélection actuelle (ce qui permet de déplacer le groupe).
                         if note not in self.editor.selected_notes:
                             self.editor.selected_notes = [note]
+
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'move'
+                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
 
                         self._store_selection_states_if_needed(note)
                         
@@ -326,7 +326,6 @@ class EditableMidiGrid(PianoRoll):
             self._dragged_note = None
             self._drag_event = None
 
-            # A state should only be recorded if a note was actually modified.
             self.editor._record_state()
 
         self._drag_mode = None
@@ -704,6 +703,9 @@ class PianoRollEditor(ModalView):
         self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
         self.bind(selected_notes=self._update_legacy_selection)
 
+        # Ensure the grid's selection list is always in sync with the editor's
+        self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
+
         # Record the initial state
         self._record_state()
         # Set initial button state
@@ -755,6 +757,8 @@ class PianoRollEditor(ModalView):
                     new_selection.append(event.notes[note_index])
 
         self.selected_notes = new_selection
+        # Explicitly update the grid's property to ensure the visual update.
+        self.ids.grid_viewer.grid.selected_notes = self.selected_notes
         self.ids.grid_viewer.grid.draw()
         self._update_undo_redo_buttons_state()
         self.is_dirty = True

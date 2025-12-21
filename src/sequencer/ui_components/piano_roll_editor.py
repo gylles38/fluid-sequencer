@@ -34,7 +34,12 @@ class EditHistoryManager:
             # Create a new deque from the truncated history
             self.history = deque(list(self.history)[:self.index + 1], maxlen=self.history.maxlen)
 
-        self.history.append(copy.deepcopy(state))
+        # Deepcopy the events, but the selection identifiers are immutable tuples
+        history_entry = {
+            'events': copy.deepcopy(state['events']),
+            'selection': state['selection']
+        }
+        self.history.append(history_entry)
         self.index = len(self.history) - 1
 
     def undo(self):
@@ -714,10 +719,10 @@ class PianoRollEditor(ModalView):
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         """Handle keyboard shortcuts for undo/redo."""
         if 'ctrl' in modifiers:
-            if keycode == 122:  # 'z'
+            if text == 'z':
                 self.undo()
                 return True
-            elif keycode == 121:  # 'y'
+            elif text == 'y':
                 self.redo()
                 return True
         return False
@@ -726,19 +731,31 @@ class PianoRollEditor(ModalView):
         """Restores the previous state from the history manager."""
         previous_state = self.history.undo()
         if previous_state is not None:
-            self.track_copy.events = previous_state
-            self.ids.grid_viewer.grid.draw()
-            self._update_undo_redo_buttons_state()
-            self.is_dirty = True
+            self._apply_state(previous_state)
 
     def redo(self):
         """Restores the next state from the history manager."""
         next_state = self.history.redo()
         if next_state is not None:
-            self.track_copy.events = next_state
-            self.ids.grid_viewer.grid.draw()
-            self._update_undo_redo_buttons_state()
-            self.is_dirty = True
+            self._apply_state(next_state)
+
+    def _apply_state(self, state):
+        """Applies a given state (events and selection) to the editor."""
+        self.track_copy.events = state['events']
+
+        # Restore selection
+        new_selection = []
+        selection_ids = state.get('selection', [])
+        for event_index, note_index in selection_ids:
+            if event_index < len(self.track_copy.events):
+                event = self.track_copy.events[event_index]
+                if note_index < len(event.notes):
+                    new_selection.append(event.notes[note_index])
+
+        self.selected_notes = new_selection
+        self.ids.grid_viewer.grid.draw()
+        self._update_undo_redo_buttons_state()
+        self.is_dirty = True
 
     def _update_undo_redo_buttons_state(self):
         """Enables/disables the undo/redo buttons based on history."""
@@ -746,8 +763,27 @@ class PianoRollEditor(ModalView):
         self.ids.redo_button.disabled = not self.history.can_redo()
 
     def _record_state(self):
-        """Records the current state of the track for undo/redo."""
-        self.history.record_state(self.track_copy.events)
+        """Records the current state of the track (events and selection) for undo/redo."""
+        # Create a list of stable identifiers for the selected notes.
+        # A tuple of (event_index, note_index) is a reliable identifier.
+        note_to_event_map = {id(note): event for event in self.track_copy.events for note in event.notes}
+        selection_ids = []
+        for note in self.selected_notes:
+            event = note_to_event_map.get(id(note))
+            if event:
+                try:
+                    event_index = self.track_copy.events.index(event)
+                    note_index = event.notes.index(note)
+                    selection_ids.append((event_index, note_index))
+                except ValueError:
+                    # This can happen if the note/event structure is inconsistent. Skip.
+                    pass
+
+        state = {
+            'events': self.track_copy.events,
+            'selection': selection_ids
+        }
+        self.history.record_state(state)
         self._update_undo_redo_buttons_state()
 
     def _update_legacy_selection(self, *args):

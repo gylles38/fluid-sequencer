@@ -16,6 +16,45 @@ from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
+from collections import deque
+import copy
+
+
+class EditHistoryManager:
+    """Manages undo/redo history using a single list and an index."""
+    def __init__(self, max_history=31):  # 30 undo steps + initial state
+        self.history = deque(maxlen=max_history)
+        self.index = -1
+
+    def record_state(self, state):
+        """Records a new state and invalidates any future 'redo' states."""
+        # If we undo and then make a new change, the old redo history is gone.
+        if self.index < len(self.history) - 1:
+            # Create a new deque from the truncated history
+            self.history = deque(list(self.history)[:self.index + 1], maxlen=self.history.maxlen)
+
+        self.history.append(copy.deepcopy(state))
+        self.index = len(self.history) - 1
+
+    def undo(self):
+        """Moves the index back and returns the state at that position."""
+        if self.can_undo():
+            self.index -= 1
+            return copy.deepcopy(self.history[self.index])
+        return None
+
+    def redo(self):
+        """Moves the index forward and returns the state at that position."""
+        if self.can_redo():
+            self.index += 1
+            return copy.deepcopy(self.history[self.index])
+        return None
+
+    def can_undo(self):
+        return self.index > 0
+
+    def can_redo(self):
+        return self.index < len(self.history) - 1
 
 
 # --- New Editable Grid Components (based on PianoRoll.py) ---
@@ -244,6 +283,7 @@ class EditableMidiGrid(PianoRoll):
 
             self.editor.is_dirty = True
             self.draw()
+            self.editor._record_state()
             return True
 
         elif edit_mode == 'delete':
@@ -256,6 +296,7 @@ class EditableMidiGrid(PianoRoll):
                             if not event.notes: track.events.remove(event)
                             self.editor.is_dirty = True
                             self.draw()
+                            self.editor._record_state()
                             return True
 
         return super(EditableMidiGrid, self).on_touch_down(touch)
@@ -285,6 +326,7 @@ class EditableMidiGrid(PianoRoll):
         self._drag_mode = None
         touch.ungrab(self)
         self.draw() # Redessine la grille pour afficher l'état final
+        self.editor._record_state()
         return True
 
     def _apply_multi_selection_changes(self):
@@ -419,6 +461,22 @@ Builder.load_string("""
                 tooltip_text: "Delete Mode"
                 theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
+
+            MDSeparator:
+                orientation: 'vertical'
+
+            TooltipMDIconButton:
+                id: undo_button
+                icon: 'undo'
+                tooltip_text: "Undo (Ctrl+Z)"
+                on_press: root.undo()
+                disabled: True
+            TooltipMDIconButton:
+                id: redo_button
+                icon: 'redo'
+                tooltip_text: "Redo (Ctrl+Y)"
+                on_press: root.redo()
+                disabled: True
 
             Widget:
                 size_hint_x: 1
@@ -572,8 +630,10 @@ class PianoRollEditor(ModalView):
     selected_note = ObjectProperty(None, allownone=True) # Will be deprecated in favor of selected_notes
     selected_notes = ListProperty([])
     selected_event = ObjectProperty(None, allownone=True)
+    history = ObjectProperty(None)
 
     def __init__(self, **kwargs):
+        self.history = EditHistoryManager()
         super(PianoRollEditor, self).__init__(**kwargs)
         self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
@@ -639,6 +699,53 @@ class PianoRollEditor(ModalView):
         self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
         self.bind(selected_notes=self._update_legacy_selection)
 
+        # Record the initial state
+        self._record_state(initial=True)
+        # Set initial button state
+        self._update_undo_redo_buttons_state()
+
+        # Keyboard shortcuts
+        Window.bind(on_key_down=self._on_key_down)
+
+    def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
+        """Handle keyboard shortcuts for undo/redo."""
+        if 'ctrl' in modifiers:
+            if keycode == 122:  # 'z'
+                self.undo()
+                return True
+            elif keycode == 121:  # 'y'
+                self.redo()
+                return True
+        return False
+
+    def undo(self):
+        """Restores the previous state from the history manager."""
+        previous_state = self.history.undo()
+        if previous_state is not None:
+            self.track_copy.events = previous_state
+            self.ids.grid_viewer.grid.draw()
+            self._update_undo_redo_buttons_state()
+            self.is_dirty = True
+
+    def redo(self):
+        """Restores the next state from the history manager."""
+        next_state = self.history.redo()
+        if next_state is not None:
+            self.track_copy.events = next_state
+            self.ids.grid_viewer.grid.draw()
+            self._update_undo_redo_buttons_state()
+            self.is_dirty = True
+
+    def _update_undo_redo_buttons_state(self):
+        """Enables/disables the undo/redo buttons based on history."""
+        self.ids.undo_button.disabled = not self.history.can_undo()
+        self.ids.redo_button.disabled = not self.history.can_redo()
+
+    def _record_state(self, initial=False):
+        """Records the current state of the track for undo/redo."""
+        self.history.record_state(self.track_copy.events)
+        self._update_undo_redo_buttons_state()
+
     def _update_legacy_selection(self, *args):
         if self.selected_notes:
             self.selected_note = self.selected_notes[0]
@@ -647,6 +754,7 @@ class PianoRollEditor(ModalView):
             self.selected_event = None
 
     def on_dismiss(self):
+        Window.unbind(on_key_down=self._on_key_down)
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
             self._update_event.cancel()

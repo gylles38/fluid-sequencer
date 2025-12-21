@@ -2,7 +2,7 @@ from kivy.uix.modalview import ModalView
 from kivy.lang import Builder
 from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.separator import MDSeparator
+from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
 from sequencer.ui_components.PianoRoll import PianoRoll
@@ -284,6 +284,7 @@ class EditableMidiGrid(PianoRoll):
 
             self.editor.is_dirty = True
             self.draw()
+            # This was the missing call from the review
             self.editor._record_state()
             return True
 
@@ -465,7 +466,7 @@ Builder.load_string("""
                 theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
 
-            MDSeparator:
+            MDDivider:
                 orientation: 'vertical'
 
             TooltipMDIconButton:
@@ -703,7 +704,7 @@ class PianoRollEditor(ModalView):
         self.bind(selected_notes=self._update_legacy_selection)
 
         # Record the initial state
-        self._record_state(initial=True)
+        self._record_state()
         # Set initial button state
         self._update_undo_redo_buttons_state()
 
@@ -744,7 +745,7 @@ class PianoRollEditor(ModalView):
         self.ids.undo_button.disabled = not self.history.can_undo()
         self.ids.redo_button.disabled = not self.history.can_redo()
 
-    def _record_state(self, initial=False):
+    def _record_state(self):
         """Records the current state of the track for undo/redo."""
         self.history.record_state(self.track_copy.events)
         self._update_undo_redo_buttons_state()

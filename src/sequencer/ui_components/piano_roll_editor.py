@@ -125,7 +125,8 @@ class EditableMidiGrid(PianoRoll):
                 new_x = local_pos[0] - self._drag_offset[0]
                 new_y = local_pos[1] - self._drag_offset[1]
 
-                new_beat = round(new_x / self.pixels_per_beat)
+                # Quantize to 16th notes (4 positions per beat), same as resizing
+                new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
                 new_pitch = max(0, min(127, int(new_y / self.note_height)))
 
                 self._drag_event.start_time = new_beat

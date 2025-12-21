@@ -140,13 +140,15 @@ class EditableMidiGrid(PianoRoll):
         """If multiple notes are selected, store their initial states for group operations."""
         if len(self.editor.selected_notes) > 1 and dragged_note in self.editor.selected_notes:
             self._selection_initial_states = {}
-            # We need to find the event for each note to get its start_time
-            note_to_event_map = {note: event for event in self.editor.track_copy.events for note in event.notes}
+            # Use the note's id() as the key, since Note objects are not hashable
+            note_to_event_map = {id(note): event for event in self.editor.track_copy.events for note in event.notes}
 
             for note in self.editor.selected_notes:
-                if note in note_to_event_map:
-                    event = note_to_event_map[note]
-                    self._selection_initial_states[note] = {
+                note_id = id(note)
+                if note_id in note_to_event_map:
+                    event = note_to_event_map[note_id]
+                    self._selection_initial_states[note_id] = {
+                        'note_obj': note,
                         'pitch': note.pitch,
                         'duration': note.duration,
                         'start_time': event.start_time,
@@ -286,7 +288,8 @@ class EditableMidiGrid(PianoRoll):
 
     def _apply_multi_selection_changes(self):
         """Apply the final transformation to all selected notes based on the dragged note."""
-        dragged_note_initial_state = self._selection_initial_states.get(self._dragged_note)
+        dragged_note_id = id(self._dragged_note)
+        dragged_note_initial_state = self._selection_initial_states.get(dragged_note_id)
         if not dragged_note_initial_state:
             return
 
@@ -300,9 +303,11 @@ class EditableMidiGrid(PianoRoll):
         new_duration = self._dragged_note.duration
 
         # --- Appliquer les transformations aux autres notes ---
-        for note, initial_state in self._selection_initial_states.items():
-            if note is self._dragged_note:
+        for note_id, initial_state in self._selection_initial_states.items():
+            if note_id == dragged_note_id:
                 continue # Déjà modifié par l'interaction directe
+
+            note = initial_state['note_obj']
 
             # Appliquer les deltas
             new_pitch = initial_state['pitch'] + pitch_delta

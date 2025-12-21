@@ -2,6 +2,7 @@ from kivy.uix.modalview import ModalView
 from kivy.lang import Builder
 from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
+from kivymd.uix.separator import MDSeparator
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
 from sequencer.ui_components.PianoRoll import PianoRoll
@@ -323,10 +324,12 @@ class EditableMidiGrid(PianoRoll):
             self._dragged_note = None
             self._drag_event = None
 
+            # A state should only be recorded if a note was actually modified.
+            self.editor._record_state()
+
         self._drag_mode = None
         touch.ungrab(self)
         self.draw() # Redessine la grille pour afficher l'état final
-        self.editor._record_state()
         return True
 
     def _apply_multi_selection_changes(self):

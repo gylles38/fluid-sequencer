@@ -317,8 +317,12 @@ class EditableMidiGrid(PianoRoll):
                 note.pitch = max(0, min(127, new_pitch))
                 # Déplacer la note vers un nouvel événement
                 self._move_note_to_new_time(note, initial_state['event'], new_start_time)
-            elif self._drag_mode in ('resize_start', 'resize_end'):
+            elif self._drag_mode == 'resize_end':
                 note.duration = new_duration
+            elif self._drag_mode == 'resize_start':
+                # Pour un redimensionnement par le début, la durée et la position changent.
+                note.duration = new_duration
+                self._move_note_to_new_time(note, initial_state['event'], new_start_time)
 
         self.editor.is_dirty = True
 

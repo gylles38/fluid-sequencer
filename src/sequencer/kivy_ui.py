@@ -22,6 +22,7 @@ from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.logger import Logger
 from kivy.graphics import Color, Rectangle, Line
+from kivy.properties import ObjectProperty
 
 # === External UI Components (modularized) ===
 from sequencer.ui_components.ConfirmationPopup import ConfirmationPopup
@@ -42,13 +43,15 @@ from typing import Optional
 import sys, os, time
 
 class SequencerLayout(BoxLayout):
-    
+    sequencer = ObjectProperty(None)
+
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
-        self.sequencer = Sequencer(gui_mode=True)
+        if not self.sequencer:
+            self.sequencer = Sequencer(gui_mode=True)
         self.sequencer.bind(playback_state=self.on_playback_state_change)
-        self._transport_update_event = None # Pour stocker l'événement Clock        
+        self._transport_update_event = None # Pour stocker l'événement Clock
         self.current_command = ""
         self.end_pos_manual_override = False
         self.is_looping = False

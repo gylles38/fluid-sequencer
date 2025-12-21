@@ -246,6 +246,7 @@ class EditableMidiGrid(PianoRoll):
                         # Sinon, on garde la sélection actuelle (ce qui permet de déplacer le groupe).
                         if note not in self.editor.selected_notes:
                             self.editor.selected_notes = [note]
+                            self.editor._record_state()
 
                         self._dragged_note = note
                         self._drag_event = event
@@ -312,6 +313,8 @@ class EditableMidiGrid(PianoRoll):
             if self._selection_rect:
                 self.canvas.after.remove(self._selection_rect)
                 self._selection_rect = None
+            # Record the state after the selection is finalized.
+            self.editor._record_state()
 
         if self._dragged_note:
             if self._selection_initial_states:
@@ -702,9 +705,6 @@ class PianoRollEditor(ModalView):
         # Bind selected_notes properties
         self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
         self.bind(selected_notes=self._update_legacy_selection)
-
-        # Ensure the grid's selection list is always in sync with the editor's
-        self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
 
         # Record the initial state
         self._record_state()

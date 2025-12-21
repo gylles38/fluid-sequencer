@@ -1,0 +1,44 @@
+{
+    "song": {
+        "project_name": "Test Project",
+        "tempo": 120.0,
+        "time_signature_numerator": 4,
+        "time_signature_denominator": 4,
+        "tracks": [
+            {
+                "track_type": "MidiTrack",
+                "name": "Piano",
+                "channel": 0,
+                "instrument": 0,
+                "is_muted": false,
+                "is_solo": false,
+                "volume": 1.0,
+                "pan": 0.5,
+                "velocity": 1.0,
+                "events": [
+                    {
+                        "start_time": 0.0,
+                        "notes": [
+                            {"pitch": 60, "velocity": 100, "duration": 1.0},
+                            {"pitch": 64, "velocity": 100, "duration": 1.0}
+                        ],
+                        "cc_messages": []
+                    },
+                    {
+                        "start_time": 2.0,
+                        "notes": [
+                            {"pitch": 62, "velocity": 100, "duration": 0.5},
+                            {"pitch": 65, "velocity": 100, "duration": 0.5}
+                        ],
+                        "cc_messages": []
+                    }
+                ],
+                "bank_msb": 0,
+                "bank_lsb": 0,
+                "output_port_name": null,
+                "record_mode": "OVERWRITE",
+                "is_metronome": false
+            }
+        ]
+    }
+}

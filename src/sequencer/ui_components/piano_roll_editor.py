@@ -28,6 +28,7 @@ class EditableMidiGrid(PianoRoll):
     _drag_offset = (0, 0)
     _selection_start_pos = (0, 0)
     _selection_rect = None
+    _selection_initial_states = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -135,6 +136,23 @@ class EditableMidiGrid(PianoRoll):
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
+    def _store_selection_states_if_needed(self, dragged_note):
+        """If multiple notes are selected, store their initial states for group operations."""
+        if len(self.editor.selected_notes) > 1 and dragged_note in self.editor.selected_notes:
+            self._selection_initial_states = {}
+            # We need to find the event for each note to get its start_time
+            note_to_event_map = {note: event for event in self.editor.track_copy.events for note in event.notes}
+
+            for note in self.editor.selected_notes:
+                if note in note_to_event_map:
+                    event = note_to_event_map[note]
+                    self._selection_initial_states[note] = {
+                        'pitch': note.pitch,
+                        'duration': note.duration,
+                        'start_time': event.start_time,
+                        'event': event
+                    }
+
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return super(EditableMidiGrid, self).on_touch_down(touch)
@@ -160,6 +178,7 @@ class EditableMidiGrid(PianoRoll):
                         self._dragged_note = note
                         self._drag_event = event
                         self._drag_mode = 'resize_end'
+                        self._store_selection_states_if_needed(note)
                         Window.set_system_cursor('size_we')
                         touch.grab(self)
                         return True
@@ -170,6 +189,7 @@ class EditableMidiGrid(PianoRoll):
                         self._dragged_note = note
                         self._drag_event = event
                         self._drag_mode = 'resize_start'
+                        self._store_selection_states_if_needed(note)
                         Window.set_system_cursor('size_we')
                         touch.grab(self)
                         return True
@@ -187,6 +207,8 @@ class EditableMidiGrid(PianoRoll):
                         # Sinon, on garde la sélection actuelle (ce qui permet de déplacer le groupe).
                         if note not in self.editor.selected_notes:
                             self.editor.selected_notes = [note]
+
+                        self._store_selection_states_if_needed(note)
                         
                         self.editor.selected_event = event # Gardé pour compatibilité, mais moins utile en multi-select
                         self.draw()
@@ -245,16 +267,74 @@ class EditableMidiGrid(PianoRoll):
                 self._selection_rect = None
 
         if self._dragged_note:
+            if self._selection_initial_states:
+                self._apply_multi_selection_changes()
+                self._selection_initial_states = None
+
             if self._drag_mode in ('resize_start', 'resize_end', 'move'):
                 Window.set_system_cursor('arrow')
             if self._drag_mode == 'move':
+                # Tri final pour s'assurer que les événements déplacés sont dans le bon ordre
                 self.editor.track_copy.events.sort(key=lambda e: e.start_time)
             self._dragged_note = None
             self._drag_event = None
 
         self._drag_mode = None
         touch.ungrab(self)
+        self.draw() # Redessine la grille pour afficher l'état final
         return True
+
+    def _apply_multi_selection_changes(self):
+        """Apply the final transformation to all selected notes based on the dragged note."""
+        dragged_note_initial_state = self._selection_initial_states.get(self._dragged_note)
+        if not dragged_note_initial_state:
+            return
+
+        dragged_note_final_event = next((e for e in self.editor.track_copy.events if self._dragged_note in e.notes), None)
+        if not dragged_note_final_event:
+            return
+
+        # --- Calculer les deltas ---
+        pitch_delta = self._dragged_note.pitch - dragged_note_initial_state['pitch']
+        time_delta = dragged_note_final_event.start_time - dragged_note_initial_state['start_time']
+        new_duration = self._dragged_note.duration
+
+        # --- Appliquer les transformations aux autres notes ---
+        for note, initial_state in self._selection_initial_states.items():
+            if note is self._dragged_note:
+                continue # Déjà modifié par l'interaction directe
+
+            # Appliquer les deltas
+            new_pitch = initial_state['pitch'] + pitch_delta
+            new_start_time = initial_state['start_time'] + time_delta
+
+            if self._drag_mode == 'move':
+                note.pitch = max(0, min(127, new_pitch))
+                # Déplacer la note vers un nouvel événement
+                self._move_note_to_new_time(note, initial_state['event'], new_start_time)
+            elif self._drag_mode in ('resize_start', 'resize_end'):
+                note.duration = new_duration
+
+        self.editor.is_dirty = True
+
+    def _move_note_to_new_time(self, note, original_event, new_start_time):
+        """Helper to move a note from its original event to an event at the new start time."""
+        # Retirer la note de l'événement d'origine
+        if note in original_event.notes:
+            original_event.notes.remove(note)
+            # Si l'événement d'origine est vide, le supprimer
+            if not original_event.notes and not original_event.cc_messages:
+                if original_event in self.editor.track_copy.events:
+                    self.editor.track_copy.events.remove(original_event)
+
+        # Trouver ou créer un événement à la nouvelle position
+        target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_time) < 0.001), None)
+        if target_event:
+            if note not in target_event.notes:
+                target_event.notes.append(note)
+        else:
+            new_event = Event(start_time=new_start_time, notes=[note])
+            self.editor.track_copy.add_event(new_event)
 
 
 class EditablePianoRollViewer(ScrollView):

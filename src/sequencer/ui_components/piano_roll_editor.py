@@ -34,26 +34,22 @@ class EditHistoryManager:
             # Create a new deque from the truncated history
             self.history = deque(list(self.history)[:self.index + 1], maxlen=self.history.maxlen)
 
-        # Deepcopy the events, but the selection identifiers are immutable tuples
-        history_entry = {
-            'events': copy.deepcopy(state['events']),
-            'selection': state['selection']
-        }
-        self.history.append(history_entry)
+        # The state is now a pre-serialized snapshot, no deepcopy needed.
+        self.history.append(state)
         self.index = len(self.history) - 1
 
     def undo(self):
         """Moves the index back and returns the state at that position."""
         if self.can_undo():
             self.index -= 1
-            return copy.deepcopy(self.history[self.index])
+            return self.history[self.index]
         return None
 
     def redo(self):
         """Moves the index forward and returns the state at that position."""
         if self.can_redo():
             self.index += 1
-            return copy.deepcopy(self.history[self.index])
+            return self.history[self.index]
         return None
 
     def can_undo(self):
@@ -741,9 +737,15 @@ class PianoRollEditor(ModalView):
 
     def _apply_state(self, state):
         """Applies a given state (events and selection) to the editor."""
-        self.track_copy.events = state['events']
+        # Reconstruct the events and notes from the snapshot.
+        new_events = []
+        for event_data in state['events']:
+            new_notes = [Note(**note_data) for note_data in event_data['notes']]
+            new_events.append(Event(start_time=event_data['start_time'], notes=new_notes))
 
-        # Restore selection
+        self.track_copy.events = new_events
+
+        # Restore selection using the newly created note objects.
         new_selection = []
         selection_ids = state.get('selection', [])
         for event_index, note_index in selection_ids:
@@ -764,23 +766,34 @@ class PianoRollEditor(ModalView):
 
     def _record_state(self):
         """Records the current state of the track (events and selection) for undo/redo."""
+        # Create a serializable snapshot of the events to avoid deepcopy issues with Kivy objects.
+        events_snapshot = [
+            {
+                'start_time': event.start_time,
+                'notes': [
+                    {'pitch': note.pitch, 'velocity': note.velocity, 'duration': note.duration}
+                    for note in event.notes
+                ]
+            }
+            for event in self.track_copy.events
+        ]
+
         # Create a list of stable identifiers for the selected notes.
-        # A tuple of (event_index, note_index) is a reliable identifier.
         note_to_event_map = {id(note): event for event in self.track_copy.events for note in event.notes}
         selection_ids = []
         for note in self.selected_notes:
             event = note_to_event_map.get(id(note))
             if event:
                 try:
+                    # Find the index of the event *in the original list*
                     event_index = self.track_copy.events.index(event)
                     note_index = event.notes.index(note)
                     selection_ids.append((event_index, note_index))
                 except ValueError:
-                    # This can happen if the note/event structure is inconsistent. Skip.
-                    pass
+                    pass  # Should not happen in a consistent state
 
         state = {
-            'events': self.track_copy.events,
+            'events': events_snapshot,
             'selection': selection_ids
         }
         self.history.record_state(state)

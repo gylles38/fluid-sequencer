@@ -313,17 +313,26 @@ class TrackWidget(BoxLayout):
         self.update_timeline_size()
 
         self.track.bind(is_solo=self.on_solo_changed)
-
+        
     def update_timeline_size(self, *args):
         if hasattr(self, 'content'):
             # For MIDI tracks
             self.content.width = self.total_beats * self.pixels_per_beat
             self.piano_roll.width = self.content.width
+            
+            # --- CORRECTION ICI ---
+            # Il faut propager les nouvelles valeurs à l'instance piano_roll
+            # avant d'appeler draw()
+            self.piano_roll.total_beats = self.total_beats
+            self.piano_roll.pixels_per_beat = self.pixels_per_beat
+            # ----------------------
+            
             self.piano_roll.draw()
         else:
             # For other tracks (unchanged)
             content_width = self.total_beats * self.pixels_per_beat
             self.timeline_container.width = content_width
+            # Vous le faisiez déjà ici pour measure_grid, mais pas pour piano_roll !
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
 
@@ -492,11 +501,19 @@ class TrackWidget(BoxLayout):
     def open_piano_roll_editor(self, instance):
         """Creates and opens the piano roll editor popup for the current track."""
         if isinstance(self.track, MidiTrack):
-            # Stop playback if it's running
-            if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
-                self.sequencer_layout.sequencer.stop()
-                # We might want to add a small delay or callback to ensure the transport
-                # is fully stopped before opening the editor, but for now, this is direct.
+            sequencer = self.sequencer_layout.sequencer
+            
+            # 1. Capturer la position actuelle AVANT d'arrêter
+            captured_beat = sequencer.current_beat
+
+            # 2. Arrêter la lecture
+            if sequencer.playback_state in ['playing', 'recording']:
+                sequencer.stop()
+
+            # 3. Restaurer la position dans le séquenceur
+            # (Car sequencer.stop() l'a probablement remise à 0)
+            if captured_beat > 0:
+                sequencer.current_beat = captured_beat
 
             editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
             editor.open()

@@ -760,15 +760,18 @@ class PianoRollEditor(ModalView):
                 return True
 
         # --- Non-Modifier Shortcuts ---
-        key_name = keycode[1]
+        # Note: 'keyboard' argument is the integer keycode from Kivy
 
         # Duration Shortcuts (Numpad)
         duration_map = {
-            'numpad0': 4.0, 'numpad1': 2.0, 'numpad2': 1.0,
-            'numpad3': 0.5, 'numpad4': 0.25,
+            256: 4.0,  # Numpad 0 -> Whole
+            257: 2.0,  # Numpad 1 -> Half
+            258: 1.0,  # Numpad 2 -> Quarter
+            259: 0.5,  # Numpad 3 -> Eighth
+            260: 0.25, # Numpad 4 -> Sixteenth
         }
-        if key_name in duration_map:
-            duration = duration_map[key_name]
+        if keyboard in duration_map:
+            duration = duration_map[keyboard]
             button = self.duration_buttons.get(duration)
             if button and self.selected_notes:
                 self.set_note_duration(duration, button)
@@ -776,15 +779,15 @@ class PianoRollEditor(ModalView):
                 return True
 
         # Dotted Note Shortcut (Numpad Decimal)
-        if key_name == 'numpaddecimal' or text == '.':
+        if keyboard == 266:
             if self.selected_notes:
                 self.toggle_dotted_mode()
                 self._record_state()
                 return True
 
         # Grid Navigation (Arrow Keys)
-        if key_name in ('up', 'down', 'left', 'right'):
-            if key_name in ('left', 'right'):
+        if keyboard in (273, 274, 275, 276): # Up, Down, Right, Left
+            if keyboard in (276, 275): # Left, Right
                 timeline_scroll = self.ids.timeline_scroll
                 grid = self.ids.grid_viewer.grid
                 beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
@@ -792,20 +795,20 @@ class PianoRollEditor(ModalView):
                 max_scroll_pixels = grid.width - timeline_scroll.width
                 if max_scroll_pixels > 0:
                     current_scroll_pixels = timeline_scroll.scroll_x * max_scroll_pixels
-                    direction = 1 if key_name == 'right' else -1
+                    direction = 1 if keyboard == 275 else -1 # Right is +, Left is -
                     new_scroll_pixels = current_scroll_pixels + (measure_width_pixels * direction)
                     new_scroll_pixels = max(0, min(new_scroll_pixels, max_scroll_pixels))
                     timeline_scroll.scroll_x = new_scroll_pixels / max_scroll_pixels
                 return True
 
-            if key_name in ('up', 'down'):
+            if keyboard in (273, 274): # Up, Down
                 grid_viewer = self.ids.grid_viewer
                 grid = self.ids.grid_viewer.grid
                 octave_height_pixels = 12 * self.note_height
                 max_scroll_pixels = grid.height - grid_viewer.height
                 if max_scroll_pixels > 0:
                     current_scroll_pixels = grid_viewer.scroll_y * max_scroll_pixels
-                    direction = 1 if key_name == 'up' else -1
+                    direction = 1 if keyboard == 273 else -1 # Up is +, Down is -
                     new_scroll_pixels = current_scroll_pixels + (octave_height_pixels * direction)
                     new_scroll_pixels = max(0, min(new_scroll_pixels, max_scroll_pixels))
                     grid_viewer.scroll_y = new_scroll_pixels / max_scroll_pixels

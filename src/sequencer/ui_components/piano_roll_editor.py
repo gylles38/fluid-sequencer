@@ -272,9 +272,9 @@ class EditableMidiGrid(PianoRoll):
             self.draw()
             return True
 
-        quantized_beat = round(clicked_beat)
-
         if edit_mode == 'insert':
+            # Quantize to 16th notes, which is a common default for piano rolls
+            quantized_beat = round(clicked_beat * 4) / 4
             new_note = Note(pitch=clicked_pitch, velocity=100, duration=self.editor.note_duration)
             target_event = next((e for e in track.events if abs(e.start_time - quantized_beat) < 0.001), None)
 

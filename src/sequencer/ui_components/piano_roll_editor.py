@@ -241,10 +241,11 @@ class EditableMidiGrid(PianoRoll):
                     # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
-                        # --- MODIFICATION ICI ---
-                        # Si la note n'est pas déjà sélectionnée, on crée une nouvelle sélection.
-                        # Sinon, on garde la sélection actuelle (ce qui permet de déplacer le groupe).
-                        if note not in self.editor.selected_notes:
+                        # --- CORRECTED SELECTION LOGIC ---
+                        # Use an identity check (`is`) to see if the *exact* note instance is already selected.
+                        # The `in` operator uses equality (`==`), which fails for identical but distinct notes.
+                        is_already_selected = any(note is sel_note for sel_note in self.editor.selected_notes)
+                        if not is_already_selected:
                             self.editor.selected_notes = [note]
                             self.editor._record_state()
 

@@ -517,6 +517,28 @@ Builder.load_string("""
                 tooltip_text: "Eighth Note (0.5 beats)"
                 theme_bg_color: "Custom"
                 on_press: root.set_note_duration(0.5, self)
+            TooltipMDIconButton:
+                id: sixteenth_note_button
+                icon: 'music-note-sixteenth'
+                tooltip_text: "Sixteenth Note (0.25 beats)"
+                theme_bg_color: "Custom"
+                on_press: root.set_note_duration(0.25, self)
+            TooltipMDIconButton:
+                id: thirty_second_note_button
+                icon: 'music-note-thirty-second'
+                tooltip_text: "Thirty-second Note (0.125 beats)"
+                theme_bg_color: "Custom"
+                on_press: root.set_note_duration(0.125, self)
+
+            MDDivider:
+                orientation: 'vertical'
+
+            TooltipMDIconButton:
+                id: dotted_button
+                icon: 'circle-small'
+                tooltip_text: "Dotted Note (Toggle)"
+                theme_bg_color: "Custom"
+                on_press: root.toggle_dotted_mode()
 
             Widget:
                 size_hint_x: 1
@@ -630,7 +652,9 @@ class PianoRollEditor(ModalView):
     total_beats = NumericProperty(128)
     note_height = NumericProperty(dp(14))
     edit_mode = StringProperty('insert')
-    note_duration = NumericProperty(2.0)
+    note_duration = NumericProperty(1.0) # Default to quarter note
+    base_note_duration = NumericProperty(1.0)
+    dotted_mode = BooleanProperty(False)
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     _update_event = None
@@ -695,10 +719,11 @@ class PianoRollEditor(ModalView):
         }
         self.duration_buttons = {
             4.0: self.ids.whole_note_button, 2.0: self.ids.half_note_button,
-            1.0: self.ids.quarter_note_button, 0.5: self.ids.eighth_note_button
+            1.0: self.ids.quarter_note_button, 0.5: self.ids.eighth_note_button,
+            0.25: self.ids.sixteenth_note_button, 0.125: self.ids.thirty_second_note_button
         }
         self.set_edit_mode(self.edit_mode, self.mode_buttons[self.edit_mode])
-        self.set_note_duration(self.note_duration, self.duration_buttons[self.note_duration])
+        self.set_note_duration(self.base_note_duration, self.duration_buttons[self.base_note_duration])
         self.on_playback_state_change(None, self.sequencer_layout.sequencer.playback_state)
         self.ids.ruler.redraw()
 
@@ -916,10 +941,32 @@ class PianoRollEditor(ModalView):
                 self.ids.grid_viewer.grid.draw()
 
     def set_note_duration(self, dur, btn):
-        self.note_duration = dur
+        self.base_note_duration = dur
+        self._update_note_duration()
         self._update_button_states(self.duration_buttons, btn)
-        if self.selected_note:
-            self.selected_note.duration = dur
+
+    def toggle_dotted_mode(self):
+        self.dotted_mode = not self.dotted_mode
+        self._update_note_duration()
+
+        # Update button appearance
+        dotted_button = self.ids.dotted_button
+        if self.dotted_mode:
+            dotted_button.md_bg_color = [0.9, 0.7, 0, 1] # Active color
+            dotted_button.icon_color = [0.1, 0.1, 0.1, 1]
+        else:
+            dotted_button.md_bg_color = [0.2, 0.2, 0.2, 1] # Inactive color
+            dotted_button.icon_color = [0.8, 0.8, 0.8, 1]
+
+    def _update_note_duration(self):
+        """Calculates the final note duration and applies it to all selected notes."""
+        multiplier = 1.5 if self.dotted_mode else 1.0
+        new_duration = self.base_note_duration * multiplier
+        self.note_duration = new_duration
+
+        if self.selected_notes:
+            for note in self.selected_notes:
+                note.duration = new_duration
             self.is_dirty = True
             self.ids.grid_viewer.grid.draw()
 

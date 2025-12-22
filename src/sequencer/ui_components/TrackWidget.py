@@ -498,7 +498,7 @@ class TrackWidget(BoxLayout):
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
 
-    def open_piano_roll_editor(self, instance):
+    def open_piano_roll_editor(self, instance=None):
         """Creates and opens the piano roll editor popup for the current track."""
         if isinstance(self.track, MidiTrack):
             sequencer = self.sequencer_layout.sequencer

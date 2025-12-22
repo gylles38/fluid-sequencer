@@ -2,6 +2,7 @@ from kivy.uix.modalview import ModalView
 from kivy.lang import Builder
 from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
+from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
 from sequencer.ui_components.PianoRoll import PianoRoll
@@ -16,6 +17,46 @@ from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
+from collections import deque
+import copy
+
+
+class EditHistoryManager:
+    """Manages undo/redo history using a single list and an index."""
+    def __init__(self, max_history=31):  # 30 undo steps + initial state
+        self.history = deque(maxlen=max_history)
+        self.index = -1
+
+    def record_state(self, state):
+        """Records a new state and invalidates any future 'redo' states."""
+        # If we undo and then make a new change, the old redo history is gone.
+        if self.index < len(self.history) - 1:
+            # Create a new deque from the truncated history
+            self.history = deque(list(self.history)[:self.index + 1], maxlen=self.history.maxlen)
+
+        # The state is now a pre-serialized snapshot, no deepcopy needed.
+        self.history.append(state)
+        self.index = len(self.history) - 1
+
+    def undo(self):
+        """Moves the index back and returns the state at that position."""
+        if self.can_undo():
+            self.index -= 1
+            return self.history[self.index]
+        return None
+
+    def redo(self):
+        """Moves the index forward and returns the state at that position."""
+        if self.can_redo():
+            self.index += 1
+            return self.history[self.index]
+        return None
+
+    def can_undo(self):
+        return self.index > 0
+
+    def can_redo(self):
+        return self.index < len(self.history) - 1
 
 
 # --- New Editable Grid Components (based on PianoRoll.py) ---
@@ -28,6 +69,7 @@ class EditableMidiGrid(PianoRoll):
     _drag_offset = (0, 0)
     _selection_start_pos = (0, 0)
     _selection_rect = None
+    _selection_initial_states = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -124,7 +166,8 @@ class EditableMidiGrid(PianoRoll):
                 new_x = local_pos[0] - self._drag_offset[0]
                 new_y = local_pos[1] - self._drag_offset[1]
 
-                new_beat = round(new_x / self.pixels_per_beat)
+                # Quantize to 16th notes (4 positions per beat), same as resizing
+                new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
                 new_pitch = max(0, min(127, int(new_y / self.note_height)))
 
                 self._drag_event.start_time = new_beat
@@ -134,6 +177,25 @@ class EditableMidiGrid(PianoRoll):
             self.draw()
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
+
+    def _store_selection_states_if_needed(self, dragged_note):
+        """If multiple notes are selected, store their initial states for group operations."""
+        if len(self.editor.selected_notes) > 1 and dragged_note in self.editor.selected_notes:
+            self._selection_initial_states = {}
+            # Use the note's id() as the key, since Note objects are not hashable
+            note_to_event_map = {id(note): event for event in self.editor.track_copy.events for note in event.notes}
+
+            for note in self.editor.selected_notes:
+                note_id = id(note)
+                if note_id in note_to_event_map:
+                    event = note_to_event_map[note_id]
+                    self._selection_initial_states[note_id] = {
+                        'note_obj': note,
+                        'pitch': note.pitch,
+                        'duration': note.duration,
+                        'start_time': event.start_time,
+                        'event': event
+                    }
 
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
@@ -160,6 +222,7 @@ class EditableMidiGrid(PianoRoll):
                         self._dragged_note = note
                         self._drag_event = event
                         self._drag_mode = 'resize_end'
+                        self._store_selection_states_if_needed(note)
                         Window.set_system_cursor('size_we')
                         touch.grab(self)
                         return True
@@ -170,6 +233,7 @@ class EditableMidiGrid(PianoRoll):
                         self._dragged_note = note
                         self._drag_event = event
                         self._drag_mode = 'resize_start'
+                        self._store_selection_states_if_needed(note)
                         Window.set_system_cursor('size_we')
                         touch.grab(self)
                         return True
@@ -177,16 +241,19 @@ class EditableMidiGrid(PianoRoll):
                     # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'move'
-                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
-
                         # --- MODIFICATION ICI ---
                         # Si la note n'est pas déjà sélectionnée, on crée une nouvelle sélection.
                         # Sinon, on garde la sélection actuelle (ce qui permet de déplacer le groupe).
                         if note not in self.editor.selected_notes:
                             self.editor.selected_notes = [note]
+                            self.editor._record_state()
+
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'move'
+                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+
+                        self._store_selection_states_if_needed(note)
                         
                         self.editor.selected_event = event # Gardé pour compatibilité, mais moins utile en multi-select
                         self.draw()
@@ -219,6 +286,8 @@ class EditableMidiGrid(PianoRoll):
 
             self.editor.is_dirty = True
             self.draw()
+            # This was the missing call from the review
+            self.editor._record_state()
             return True
 
         elif edit_mode == 'delete':
@@ -231,6 +300,7 @@ class EditableMidiGrid(PianoRoll):
                             if not event.notes: track.events.remove(event)
                             self.editor.is_dirty = True
                             self.draw()
+                            self.editor._record_state()
                             return True
 
         return super(EditableMidiGrid, self).on_touch_down(touch)
@@ -243,18 +313,87 @@ class EditableMidiGrid(PianoRoll):
             if self._selection_rect:
                 self.canvas.after.remove(self._selection_rect)
                 self._selection_rect = None
+            # Record the state after the selection is finalized.
+            self.editor._record_state()
 
         if self._dragged_note:
+            if self._selection_initial_states:
+                self._apply_multi_selection_changes()
+                self._selection_initial_states = None
+
             if self._drag_mode in ('resize_start', 'resize_end', 'move'):
                 Window.set_system_cursor('arrow')
             if self._drag_mode == 'move':
+                # Tri final pour s'assurer que les événements déplacés sont dans le bon ordre
                 self.editor.track_copy.events.sort(key=lambda e: e.start_time)
             self._dragged_note = None
             self._drag_event = None
 
+            self.editor._record_state()
+
         self._drag_mode = None
         touch.ungrab(self)
+        self.draw() # Redessine la grille pour afficher l'état final
         return True
+
+    def _apply_multi_selection_changes(self):
+        """Apply the final transformation to all selected notes based on the dragged note."""
+        dragged_note_id = id(self._dragged_note)
+        dragged_note_initial_state = self._selection_initial_states.get(dragged_note_id)
+        if not dragged_note_initial_state:
+            return
+
+        dragged_note_final_event = next((e for e in self.editor.track_copy.events if self._dragged_note in e.notes), None)
+        if not dragged_note_final_event:
+            return
+
+        # --- Calculer les deltas ---
+        pitch_delta = self._dragged_note.pitch - dragged_note_initial_state['pitch']
+        time_delta = dragged_note_final_event.start_time - dragged_note_initial_state['start_time']
+        new_duration = self._dragged_note.duration
+
+        # --- Appliquer les transformations aux autres notes ---
+        for note_id, initial_state in self._selection_initial_states.items():
+            if note_id == dragged_note_id:
+                continue # Déjà modifié par l'interaction directe
+
+            note = initial_state['note_obj']
+
+            # Appliquer les deltas
+            new_pitch = initial_state['pitch'] + pitch_delta
+            new_start_time = initial_state['start_time'] + time_delta
+
+            if self._drag_mode == 'move':
+                note.pitch = max(0, min(127, new_pitch))
+                # Déplacer la note vers un nouvel événement
+                self._move_note_to_new_time(note, initial_state['event'], new_start_time)
+            elif self._drag_mode == 'resize_end':
+                note.duration = new_duration
+            elif self._drag_mode == 'resize_start':
+                # Pour un redimensionnement par le début, la durée et la position changent.
+                note.duration = new_duration
+                self._move_note_to_new_time(note, initial_state['event'], new_start_time)
+
+        self.editor.is_dirty = True
+
+    def _move_note_to_new_time(self, note, original_event, new_start_time):
+        """Helper to move a note from its original event to an event at the new start time."""
+        # Retirer la note de l'événement d'origine
+        if note in original_event.notes:
+            original_event.notes.remove(note)
+            # Si l'événement d'origine est vide, le supprimer
+            if not original_event.notes and not original_event.cc_messages:
+                if original_event in self.editor.track_copy.events:
+                    self.editor.track_copy.events.remove(original_event)
+
+        # Trouver ou créer un événement à la nouvelle position
+        target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_time) < 0.001), None)
+        if target_event:
+            if note not in target_event.notes:
+                target_event.notes.append(note)
+        else:
+            new_event = Event(start_time=new_start_time, notes=[note])
+            self.editor.track_copy.add_event(new_event)
 
 
 class EditablePianoRollViewer(ScrollView):
@@ -330,6 +469,22 @@ Builder.load_string("""
                 theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
 
+            MDDivider:
+                orientation: 'vertical'
+
+            TooltipMDIconButton:
+                id: undo_button
+                icon: 'undo'
+                tooltip_text: "Undo (Ctrl+Z)"
+                on_press: root.undo()
+                disabled: True
+            TooltipMDIconButton:
+                id: redo_button
+                icon: 'redo'
+                tooltip_text: "Redo (Ctrl+Y)"
+                on_press: root.redo()
+                disabled: True
+
             Widget:
                 size_hint_x: 1
 
@@ -362,6 +517,28 @@ Builder.load_string("""
                 tooltip_text: "Eighth Note (0.5 beats)"
                 theme_bg_color: "Custom"
                 on_press: root.set_note_duration(0.5, self)
+            TooltipMDIconButton:
+                id: sixteenth_note_button
+                icon: 'music-note-sixteenth'
+                tooltip_text: "Sixteenth Note (0.25 beats)"
+                theme_bg_color: "Custom"
+                on_press: root.set_note_duration(0.25, self)
+            TooltipMDIconButton:
+                id: thirty_second_note_button
+                icon: 'music-note-thirty-second'
+                tooltip_text: "Thirty-second Note (0.125 beats)"
+                theme_bg_color: "Custom"
+                on_press: root.set_note_duration(0.125, self)
+
+            MDDivider:
+                orientation: 'vertical'
+
+            TooltipMDIconButton:
+                id: dotted_button
+                icon: 'circle-small'
+                tooltip_text: "Dotted Note (Toggle)"
+                theme_bg_color: "Custom"
+                on_press: root.toggle_dotted_mode()
 
             Widget:
                 size_hint_x: 1
@@ -475,15 +652,19 @@ class PianoRollEditor(ModalView):
     total_beats = NumericProperty(128)
     note_height = NumericProperty(dp(14))
     edit_mode = StringProperty('insert')
-    note_duration = NumericProperty(2.0)
+    note_duration = NumericProperty(1.0) # Default to quarter note
+    base_note_duration = NumericProperty(1.0)
+    dotted_mode = BooleanProperty(False)
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     _update_event = None
     selected_note = ObjectProperty(None, allownone=True) # Will be deprecated in favor of selected_notes
     selected_notes = ListProperty([])
     selected_event = ObjectProperty(None, allownone=True)
+    history = ObjectProperty(None)
 
     def __init__(self, **kwargs):
+        self.history = EditHistoryManager()
         super(PianoRollEditor, self).__init__(**kwargs)
         self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
@@ -538,16 +719,114 @@ class PianoRollEditor(ModalView):
         }
         self.duration_buttons = {
             4.0: self.ids.whole_note_button, 2.0: self.ids.half_note_button,
-            1.0: self.ids.quarter_note_button, 0.5: self.ids.eighth_note_button
+            1.0: self.ids.quarter_note_button, 0.5: self.ids.eighth_note_button,
+            0.25: self.ids.sixteenth_note_button, 0.125: self.ids.thirty_second_note_button
         }
         self.set_edit_mode(self.edit_mode, self.mode_buttons[self.edit_mode])
-        self.set_note_duration(self.note_duration, self.duration_buttons[self.note_duration])
+        self.set_note_duration(self.base_note_duration, self.duration_buttons[self.base_note_duration])
         self.on_playback_state_change(None, self.sequencer_layout.sequencer.playback_state)
         self.ids.ruler.redraw()
 
         # Bind selected_notes properties
         self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
         self.bind(selected_notes=self._update_legacy_selection)
+
+        # Record the initial state
+        self._record_state()
+        # Set initial button state
+        self._update_undo_redo_buttons_state()
+
+        # Keyboard shortcuts
+        Window.bind(on_key_down=self._on_key_down)
+
+    def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
+        """Handle keyboard shortcuts for undo/redo."""
+        if 'ctrl' in modifiers:
+            if text == 'z':
+                self.undo()
+                return True
+            elif text == 'y':
+                self.redo()
+                return True
+        return False
+
+    def undo(self):
+        """Restores the previous state from the history manager."""
+        previous_state = self.history.undo()
+        if previous_state is not None:
+            self._apply_state(previous_state)
+
+    def redo(self):
+        """Restores the next state from the history manager."""
+        next_state = self.history.redo()
+        if next_state is not None:
+            self._apply_state(next_state)
+
+    def _apply_state(self, state):
+        """Applies a given state (events and selection) to the editor."""
+        # Reconstruct the events and notes from the snapshot.
+        new_events = []
+        for event_data in state['events']:
+            new_notes = [Note(**note_data) for note_data in event_data['notes']]
+            new_events.append(Event(start_time=event_data['start_time'], notes=new_notes))
+
+        self.track_copy.events = new_events
+
+        # Restore selection using the newly created note objects.
+        new_selection = []
+        selection_ids = state.get('selection', [])
+        for event_index, note_index in selection_ids:
+            if event_index < len(self.track_copy.events):
+                event = self.track_copy.events[event_index]
+                if note_index < len(event.notes):
+                    new_selection.append(event.notes[note_index])
+
+        self.selected_notes = new_selection
+        # Explicitly update the grid's property to ensure the visual update.
+        self.ids.grid_viewer.grid.selected_notes = self.selected_notes
+        self.ids.grid_viewer.grid.draw()
+        self._update_undo_redo_buttons_state()
+        self.is_dirty = True
+
+    def _update_undo_redo_buttons_state(self):
+        """Enables/disables the undo/redo buttons based on history."""
+        self.ids.undo_button.disabled = not self.history.can_undo()
+        self.ids.redo_button.disabled = not self.history.can_redo()
+
+    def _record_state(self):
+        """Records the current state of the track (events and selection) for undo/redo."""
+        # Create a serializable snapshot of the events to avoid deepcopy issues with Kivy objects.
+        events_snapshot = [
+            {
+                'start_time': event.start_time,
+                'notes': [
+                    {'pitch': note.pitch, 'velocity': note.velocity, 'duration': note.duration}
+                    for note in event.notes
+                ]
+            }
+            for event in self.track_copy.events
+        ]
+
+        # Create a list of stable identifiers for the selected notes.
+        note_to_event_map = {id(note): event for event in self.track_copy.events for note in event.notes}
+        selection_ids = []
+        for note in self.selected_notes:
+            event = note_to_event_map.get(id(note))
+            if event:
+                try:
+                    # Find the index of the event *in the original list*
+                    event_index = self.track_copy.events.index(event)
+                    note_index = event.notes.index(note)
+                    selection_ids.append((event_index, note_index))
+                except ValueError:
+                    pass  # Should not happen in a consistent state
+
+        state = {
+            'events': events_snapshot,
+            'selection': selection_ids
+        }
+        self.history.record_state(state)
+        self._update_undo_redo_buttons_state()
 
     def _update_legacy_selection(self, *args):
         if self.selected_notes:
@@ -557,6 +836,7 @@ class PianoRollEditor(ModalView):
             self.selected_event = None
 
     def on_dismiss(self):
+        Window.unbind(on_key_down=self._on_key_down)
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
             self._update_event.cancel()
@@ -661,10 +941,32 @@ class PianoRollEditor(ModalView):
                 self.ids.grid_viewer.grid.draw()
 
     def set_note_duration(self, dur, btn):
-        self.note_duration = dur
+        self.base_note_duration = dur
+        self._update_note_duration()
         self._update_button_states(self.duration_buttons, btn)
-        if self.selected_note:
-            self.selected_note.duration = dur
+
+    def toggle_dotted_mode(self):
+        self.dotted_mode = not self.dotted_mode
+        self._update_note_duration()
+
+        # Update button appearance
+        dotted_button = self.ids.dotted_button
+        if self.dotted_mode:
+            dotted_button.md_bg_color = [0.9, 0.7, 0, 1] # Active color
+            dotted_button.icon_color = [0.1, 0.1, 0.1, 1]
+        else:
+            dotted_button.md_bg_color = [0.2, 0.2, 0.2, 1] # Inactive color
+            dotted_button.icon_color = [0.8, 0.8, 0.8, 1]
+
+    def _update_note_duration(self):
+        """Calculates the final note duration and applies it to all selected notes."""
+        multiplier = 1.5 if self.dotted_mode else 1.0
+        new_duration = self.base_note_duration * multiplier
+        self.note_duration = new_duration
+
+        if self.selected_notes:
+            for note in self.selected_notes:
+                note.duration = new_duration
             self.is_dirty = True
             self.ids.grid_viewer.grid.draw()
 

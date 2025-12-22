@@ -773,17 +773,18 @@ class PianoRollEditor(ModalView):
         if keyboard in duration_map:
             duration = duration_map[keyboard]
             button = self.duration_buttons.get(duration)
-            if button and self.selected_notes:
+            if button:
                 self.set_note_duration(duration, button)
-                self._record_state()
+                if self.selected_notes:
+                    self._record_state()
                 return True
 
         # Dotted Note Shortcut (Numpad Decimal)
         if keyboard == 266:
+            self.toggle_dotted_mode()
             if self.selected_notes:
-                self.toggle_dotted_mode()
                 self._record_state()
-                return True
+            return True
 
         # Grid Navigation (Arrow Keys)
         if keyboard in (273, 274, 275, 276): # Up, Down, Right, Left

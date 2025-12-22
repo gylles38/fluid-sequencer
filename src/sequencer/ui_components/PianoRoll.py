@@ -100,7 +100,9 @@ class PianoRoll(Widget):
                             Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
 
                         # Draw outline for selected note
-                        if note in self.selected_notes or (self.editor and self.editor.selected_note == note):
+                        # Use 'is' for the legacy single-selection to ensure object identity.
+                        # 'in' for multi-selection already checks for identity.
+                        if note in self.selected_notes or (self.editor and self.editor.selected_note is note):
                             Color(1, 1, 1, 1)  # White outline
                             Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
 

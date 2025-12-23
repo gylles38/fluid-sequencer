@@ -909,6 +909,8 @@ class PianoRollEditor(ModalView):
             self.selected_event = None
 
     def on_dismiss(self):
+        # Reset the cursor to default when the editor closes
+        Window.set_system_cursor('arrow')
         Window.unbind(on_key_down=self._on_key_down)
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
@@ -1007,10 +1009,17 @@ class PianoRollEditor(ModalView):
     def set_edit_mode(self, mode, btn):
         self.edit_mode = mode
         self._update_button_states(self.mode_buttons, btn)
+
+        # Update the system cursor based on the new mode
+        if mode in ('insert', 'delete'):
+            Window.set_system_cursor('crosshair')
+        else: # 'move' mode
+            Window.set_system_cursor('arrow')
+
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':
             if self.selected_notes:
-                self.selected_notes.clear()
+                self.selected_notes = []
                 self.ids.grid_viewer.grid.draw()
 
     def set_note_duration(self, dur, btn):

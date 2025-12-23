@@ -94,13 +94,9 @@ class EditableMidiGrid(PianoRoll):
         if mode == 'insert':
             Window.set_system_cursor('crosshair')
         elif mode == 'delete':
-            # A 'no' or 'forbidden' cursor might be more intuitive for deletion
-            # but crosshair is fine as per the user's implicit symbols (+/-)
-            Window.set_system_cursor('crosshair')
+            Window.set_system_cursor('no')
         elif mode == 'move':
-            # Kivy doesn't have a 'hand' cursor by default.
-            # We will use 'arrow' for now, as it's the standard for dragging.
-            Window.set_system_cursor('arrow')
+            Window.set_system_cursor('hand')
         else:
             Window.set_system_cursor('arrow')
 

@@ -408,11 +408,9 @@ class EditablePianoRollViewer(ScrollView):
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
     note_height = NumericProperty(dp(12))
-    _is_hovering = False
 
     def __init__(self, **kwargs):
         super(EditablePianoRollViewer, self).__init__(**kwargs)
-        Window.bind(mouse_pos=self._on_mouse_pos)
         self.scroll_type = ['bars'] # Disable content scrolling
         self.size_hint_x = None
         self.do_scroll_x = False
@@ -422,61 +420,6 @@ class EditablePianoRollViewer(ScrollView):
         self.add_widget(self.grid)
         self.grid.bind(width=self.setter('width'))
 
-    def on_enter(self):
-        """Called when mouse enters the widget area."""
-        self._update_cursor()
-
-    def on_leave(self):
-        """Called when mouse leaves the widget area."""
-        Window.set_system_cursor('arrow')
-
-    def _update_cursor(self):
-        """Sets the cursor based on the current edit mode, but only if hovering."""
-        if not self._is_hovering:
-            Window.set_system_cursor('arrow')
-            return
-
-        mode = self.editor.edit_mode
-        if mode == 'insert':
-            Window.set_system_cursor('crosshair')
-        elif mode == 'delete':
-            Window.set_system_cursor('no')
-        elif mode == 'move':
-            Window.set_system_cursor('hand')
-        else:
-            Window.set_system_cursor('arrow')
-
-    def _on_mouse_pos(self, instance, pos):
-        """
-        Checks if the mouse is truly over the grid content within the visible viewport.
-        This prevents the hover effect from leaking to other UI elements when the
-        grid is scrolled, and from activating in empty space within the viewport.
-        """
-        if not self.get_root_window():
-            return
-
-        # Convert window coordinates to the ScrollView's local space.
-        local_pos = self.to_widget(*pos)
-
-        # Condition 1: Is the mouse within the visible bounds of the ScrollView widget itself?
-        # This prevents the hover from leaking out to the ruler or toolbars.
-        is_over_viewport = self.collide_point(*local_pos)
-
-        # Condition 2: Is the mouse over the actual grid widget content?
-        # The grid's coordinates are relative to the ScrollView, so this check
-        # correctly accounts for the scroll position.
-        is_over_grid_content = self.grid.collide_point(*local_pos)
-
-        # Final determination: The hover is only active if BOTH conditions are true.
-        is_truly_over = is_over_viewport and is_over_grid_content
-
-        if is_truly_over and not self._is_hovering:
-            self._is_hovering = True
-            self.on_enter()
-        elif not is_truly_over and self._is_hovering:
-            self._is_hovering = False
-            self.on_leave()
-
     def on_touch_move(self, touch):
         # If the grid has grabbed the touch for a note drag/resize operation,
         # we must not process it for scrolling. We consume the event by returning True.
@@ -484,16 +427,11 @@ class EditablePianoRollViewer(ScrollView):
             return True
         return super(EditablePianoRollViewer, self).on_touch_move(touch)
 
-    def on_editor(self, i, v):
-        if hasattr(self, 'grid'): self.grid.editor = v
-    def on_track(self, i, v):
-        if hasattr(self, 'grid'): self.grid.track = v
-    def on_total_beats(self, i, v):
-        if hasattr(self, 'grid'): self.grid.total_beats = v
-    def on_pixels_per_beat(self, i, v):
-        if hasattr(self, 'grid'): self.grid.pixels_per_beat = v
-    def on_note_height(self, i, v):
-        if hasattr(self, 'grid'): self.grid.note_height = v
+    def on_editor(self, i, v): self.grid.editor = v
+    def on_track(self, i, v): self.grid.track = v
+    def on_total_beats(self, i, v): self.grid.total_beats = v
+    def on_pixels_per_beat(self, i, v): self.grid.pixels_per_beat = v
+    def on_note_height(self, i, v): self.grid.note_height = v
 
 
 # --- Builder String ---
@@ -806,6 +744,34 @@ class PianoRollEditor(ModalView):
 
         # Keyboard shortcuts
         Window.bind(on_key_down=self._on_key_down)
+        Window.bind(mouse_pos=self._on_mouse_pos)
+
+    def _update_cursor(self):
+        """Helper to set the cursor based on the current edit mode."""
+        mode = self.edit_mode
+        if mode == 'insert':
+            Window.set_system_cursor('crosshair')
+        elif mode == 'delete':
+            Window.set_system_cursor('no')
+        elif mode == 'move':
+            Window.set_system_cursor('hand')
+        else:
+            Window.set_system_cursor('arrow')
+
+    def _on_mouse_pos(self, instance, pos):
+        """
+        Globally bound method to check mouse position and set the editor cursor.
+        It sets the special cursor only when hovering over the main grid viewport area.
+        """
+        grid_viewer = self.ids.get('grid_viewer')
+        if not grid_viewer:
+            return
+
+        # Check if the mouse position falls inside the bounds of the 'grid_viewer' widget.
+        if grid_viewer.collide_point(*grid_viewer.to_widget(*pos)):
+            self._update_cursor()
+        else:
+            Window.set_system_cursor('arrow')
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         """Handle keyboard shortcuts for the editor."""
@@ -973,8 +939,8 @@ class PianoRollEditor(ModalView):
     def on_dismiss(self):
         # --- Cleanup ---
         # Unbind all global window events to prevent memory leaks
-        Window.unbind(mouse_pos=self.ids.grid_viewer._on_mouse_pos)
         Window.unbind(on_key_down=self._on_key_down)
+        Window.unbind(mouse_pos=self._on_mouse_pos)
 
         # Reset the cursor to default one last time to be safe
         Window.set_system_cursor('arrow')
@@ -1077,8 +1043,9 @@ class PianoRollEditor(ModalView):
         self.edit_mode = mode
         self._update_button_states(self.mode_buttons, btn)
 
-        # Trigger a cursor update in case the mouse is already over the grid
-        self.ids.grid_viewer._update_cursor()
+        # Manually trigger the mouse pos check to update the cursor immediately
+        # in case the mouse is already over the grid when the mode is changed.
+        self._on_mouse_pos(Window, Window.mouse_pos)
 
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':

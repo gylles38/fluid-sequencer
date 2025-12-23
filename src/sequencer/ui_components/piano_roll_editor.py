@@ -8,7 +8,7 @@ from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.behaviors import HoverBehavior
+from kivy.uix.behaviors.hover import HoverBehavior
 from kivy.uix.floatlayout import FloatLayout
 from kivy.metrics import dp
 from kivy.clock import Clock

@@ -414,6 +414,13 @@ class EditablePianoRollViewer(ScrollView):
         super(EditablePianoRollViewer, self).__init__(**kwargs)
         Window.bind(mouse_pos=self._on_mouse_pos)
         self.scroll_type = ['bars'] # Disable content scrolling
+        self.size_hint_x = None
+        self.do_scroll_x = False
+        self.do_scroll_y = True
+        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
+        self.grid.editor = self.editor # Pass the editor instance to the grid
+        self.add_widget(self.grid)
+        self.grid.bind(width=self.setter('width'))
 
     def on_enter(self):
         """Called when mouse enters the widget area."""
@@ -448,7 +455,7 @@ class EditablePianoRollViewer(ScrollView):
         # `to_widget` is the correct method for this conversion. The child grid's
         # `collide_point` method expects coordinates in its parent's (the ScrollView's) space.
         local_pos = self.to_widget(*pos)
-        is_over = self.ids.grid.collide_point(*local_pos)
+        is_over = self.grid.collide_point(*local_pos)
 
         if is_over and not self._is_hovering:
             self._is_hovering = True
@@ -456,13 +463,6 @@ class EditablePianoRollViewer(ScrollView):
         elif not is_over and self._is_hovering:
             self._is_hovering = False
             self.on_leave()
-        self.size_hint_x = None
-        self.do_scroll_x = False
-        self.do_scroll_y = True
-        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
-        self.grid.editor = self.editor # Pass the editor instance to the grid
-        self.add_widget(self.grid)
-        self.grid.bind(width=self.setter('width'))
 
     def on_touch_move(self, touch):
         # If the grid has grabbed the touch for a note drag/resize operation,

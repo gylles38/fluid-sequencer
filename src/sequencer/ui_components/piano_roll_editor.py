@@ -404,7 +404,12 @@ class EditableMidiGrid(PianoRoll):
 
 class EditablePianoRollViewer(ScrollView):
     editor = ObjectProperty()
+    total_beats = NumericProperty(128.0)
+    pixels_per_beat = NumericProperty(dp(100))
+    track = ObjectProperty(None, allownone=True)
+    note_height = NumericProperty(dp(12))
     _is_hovering = False
+    _is_scrolling = False
 
     def on_enter(self):
         """Called when mouse enters the widget area."""
@@ -430,8 +435,19 @@ class EditablePianoRollViewer(ScrollView):
         else:
             Window.set_system_cursor('arrow')
 
+    def _on_scroll_start(self, *args):
+        self._is_scrolling = True
+
+    def _on_scroll_stop(self, *args):
+        self._is_scrolling = False
+        # Force a cursor update after scrolling stops
+        self._on_mouse_pos(Window, Window.mouse_pos)
+
     def _on_mouse_pos(self, instance, pos):
         """Checks if the mouse is over this widget and calls on_enter/on_leave."""
+        if self._is_scrolling:
+            return
+
         if self.get_root_window():
             is_over = self.collide_point(*self.to_widget(*pos))
             if is_over and not self._is_hovering:
@@ -441,15 +457,11 @@ class EditablePianoRollViewer(ScrollView):
                 self._is_hovering = False
                 self.on_leave()
 
-    total_beats = NumericProperty(128.0)
-    pixels_per_beat = NumericProperty(dp(100))
-    track = ObjectProperty(None, allownone=True)
-    note_height = NumericProperty(dp(12))
-
     def __init__(self, **kwargs):
         super(EditablePianoRollViewer, self).__init__(**kwargs)
         Window.bind(mouse_pos=self._on_mouse_pos)
-        self.scroll_type = ['bars']
+        self.bind(on_scroll_start=self._on_scroll_start, on_scroll_stop=self._on_scroll_stop)
+        self.scroll_type = ['bars', 'content']
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True

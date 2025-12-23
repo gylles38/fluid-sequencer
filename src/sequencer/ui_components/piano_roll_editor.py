@@ -8,6 +8,7 @@ from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.behaviors import HoverBehavior
 from kivy.uix.floatlayout import FloatLayout
 from kivy.metrics import dp
 from kivy.clock import Clock
@@ -74,26 +75,6 @@ class EditableMidiGrid(PianoRoll):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.playback_line = None
-
-    def on_enter(self):
-        """Called when mouse enters the widget area."""
-        self._update_cursor()
-
-    def on_leave(self):
-        """Called when mouse leaves the widget area."""
-        Window.set_system_cursor('arrow')
-
-    def _update_cursor(self):
-        """Sets the cursor based on the current edit mode."""
-        mode = self.editor.edit_mode
-        if mode == 'insert':
-            Window.set_system_cursor('crosshair')
-        elif mode == 'delete':
-            Window.set_system_cursor('no')
-        elif mode == 'move':
-            Window.set_system_cursor('hand')
-        else:
-            Window.set_system_cursor('arrow')
 
     def add_playback_line(self):
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -422,8 +403,31 @@ class EditableMidiGrid(PianoRoll):
             self.editor.track_copy.add_event(new_event)
 
 
-class EditablePianoRollViewer(ScrollView):
+class EditablePianoRollViewer(HoverBehavior, ScrollView):
     editor = ObjectProperty()
+
+    def on_enter(self, *args):
+        """Called when mouse enters the widget area."""
+        self._update_cursor()
+
+    def on_leave(self, *args):
+        """Called when mouse leaves the widget area."""
+        Window.set_system_cursor('arrow')
+
+    def _update_cursor(self):
+        """Sets the cursor based on the current edit mode."""
+        if not hasattr(self, 'editor') or not self.editor:
+            return
+        mode = self.editor.edit_mode
+        if mode == 'insert':
+            Window.set_system_cursor('crosshair')
+        elif mode == 'delete':
+            Window.set_system_cursor('no')
+        elif mode == 'move':
+            Window.set_system_cursor('hand')
+        else:
+            Window.set_system_cursor('arrow')
+
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
@@ -1035,7 +1039,7 @@ class PianoRollEditor(ModalView):
         self._update_button_states(self.mode_buttons, btn)
 
         # Trigger a cursor update in case the mouse is already over the grid
-        self.ids.grid_viewer.grid._update_cursor()
+        self.ids.grid_viewer._update_cursor()
 
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':

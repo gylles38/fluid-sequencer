@@ -70,10 +70,48 @@ class EditableMidiGrid(PianoRoll):
     _selection_start_pos = (0, 0)
     _selection_rect = None
     _selection_initial_states = None
+    _is_hovering = False
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.playback_line = None
+        Window.bind(mouse_pos=self._on_mouse_pos)
+
+    def on_enter(self):
+        """Called when mouse enters the widget area."""
+        self._update_cursor()
+
+    def on_leave(self):
+        """Called when mouse leaves the widget area."""
+        Window.set_system_cursor('arrow')
+
+    def _update_cursor(self):
+        """Sets the cursor based on the current edit mode, but only if hovering."""
+        if not self._is_hovering:
+            return
+
+        mode = self.editor.edit_mode
+        if mode == 'insert':
+            Window.set_system_cursor('crosshair')
+        elif mode == 'delete':
+            Window.set_system_cursor('no')
+        elif mode == 'move':
+            Window.set_system_cursor('hand')
+        else:
+            Window.set_system_cursor('arrow')
+
+    def _on_mouse_pos(self, instance, pos):
+        """Checks if the mouse is over this widget and calls on_enter/on_leave."""
+        # The mouse position is in window coordinates. We need to check if that
+        # point is within the widget's boundaries.
+        if self.get_root_window(): # Ensure the widget is on screen
+            is_over = self.collide_point(*self.to_widget(*pos))
+            if is_over and not self._is_hovering:
+                self._is_hovering = True
+                self.on_enter()
+            elif not is_over and self._is_hovering:
+                self._is_hovering = False
+                self.on_leave()
 
     def add_playback_line(self):
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -241,10 +279,11 @@ class EditableMidiGrid(PianoRoll):
                     # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
-                        # --- MODIFICATION ICI ---
-                        # Si la note n'est pas déjà sélectionnée, on crée une nouvelle sélection.
-                        # Sinon, on garde la sélection actuelle (ce qui permet de déplacer le groupe).
-                        if note not in self.editor.selected_notes:
+                        # --- CORRECTED SELECTION LOGIC ---
+                        # Use an identity check (`is`) to see if the *exact* note instance is already selected.
+                        # The `in` operator uses equality (`==`), which fails for identical but distinct notes.
+                        is_already_selected = any(note is sel_note for sel_note in self.editor.selected_notes)
+                        if not is_already_selected:
                             self.editor.selected_notes = [note]
                             self.editor._record_state()
 
@@ -261,8 +300,13 @@ class EditableMidiGrid(PianoRoll):
                         touch.grab(self)
                         return True
 
-            # If no note was clicked, start a selection drag (rubber-band)
-            self.editor.selected_notes.clear()
+            # If no note was clicked, it's a click on an empty space.
+            # This action should clear any existing selection. To ensure the UI
+            # updates, we must re-assign the list, not clear it in-place.
+            if self.editor.selected_notes:
+                self.editor.selected_notes = []
+
+            # After clearing selection (if any), prepare for a potential rubber-band selection.
             self._drag_mode = 'select'
             self._selection_start_pos = local_pos
             with self.canvas.after:
@@ -272,9 +316,9 @@ class EditableMidiGrid(PianoRoll):
             self.draw()
             return True
 
-        quantized_beat = round(clicked_beat)
-
         if edit_mode == 'insert':
+            # Quantize to 16th notes, which is a common default for piano rolls
+            quantized_beat = round(clicked_beat * 4) / 4
             new_note = Note(pitch=clicked_pitch, velocity=100, duration=self.editor.note_duration)
             target_event = next((e for e in track.events if abs(e.start_time - quantized_beat) < 0.001), None)
 
@@ -740,7 +784,8 @@ class PianoRollEditor(ModalView):
         Window.bind(on_key_down=self._on_key_down)
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
-        """Handle keyboard shortcuts for undo/redo."""
+        """Handle keyboard shortcuts for the editor."""
+        # --- Modifier Shortcuts (Ctrl) ---
         if 'ctrl' in modifiers:
             if text == 'z':
                 self.undo()
@@ -748,6 +793,72 @@ class PianoRollEditor(ModalView):
             elif text == 'y':
                 self.redo()
                 return True
+            elif text == 'i':
+                self.set_edit_mode('insert', self.mode_buttons['insert'])
+                return True
+            elif text == 'd':
+                self.set_edit_mode('delete', self.mode_buttons['delete'])
+                return True
+            elif text == 'm':
+                self.set_edit_mode('move', self.mode_buttons['move'])
+                return True
+
+        # --- Non-Modifier Shortcuts ---
+        # Note: 'keyboard' argument is the integer keycode from Kivy
+
+        # Duration Shortcuts (Numpad)
+        duration_map = {
+            256: 4.0,  # Numpad 0 -> Whole
+            257: 2.0,  # Numpad 1 -> Half
+            258: 1.0,  # Numpad 2 -> Quarter
+            259: 0.5,  # Numpad 3 -> Eighth
+            260: 0.25, # Numpad 4 -> Sixteenth
+        }
+        if keyboard in duration_map:
+            duration = duration_map[keyboard]
+            button = self.duration_buttons.get(duration)
+            if button:
+                self.set_note_duration(duration, button)
+                if self.selected_notes:
+                    self._record_state()
+                return True
+
+        # Dotted Note Shortcut (Numpad Decimal)
+        if keyboard == 266:
+            self.toggle_dotted_mode()
+            if self.selected_notes:
+                self._record_state()
+            return True
+
+        # Grid Navigation (Arrow Keys)
+        if keyboard in (273, 274, 275, 276): # Up, Down, Right, Left
+            if keyboard in (276, 275): # Left, Right
+                timeline_scroll = self.ids.timeline_scroll
+                grid = self.ids.grid_viewer.grid
+                beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
+                measure_width_pixels = beats_per_measure * self.pixels_per_beat
+                max_scroll_pixels = grid.width - timeline_scroll.width
+                if max_scroll_pixels > 0:
+                    current_scroll_pixels = timeline_scroll.scroll_x * max_scroll_pixels
+                    direction = 1 if keyboard == 275 else -1 # Right is +, Left is -
+                    new_scroll_pixels = current_scroll_pixels + (measure_width_pixels * direction)
+                    new_scroll_pixels = max(0, min(new_scroll_pixels, max_scroll_pixels))
+                    timeline_scroll.scroll_x = new_scroll_pixels / max_scroll_pixels
+                return True
+
+            if keyboard in (273, 274): # Up, Down
+                grid_viewer = self.ids.grid_viewer
+                grid = self.ids.grid_viewer.grid
+                octave_height_pixels = 12 * self.note_height
+                max_scroll_pixels = grid.height - grid_viewer.height
+                if max_scroll_pixels > 0:
+                    current_scroll_pixels = grid_viewer.scroll_y * max_scroll_pixels
+                    direction = 1 if keyboard == 273 else -1 # Up is +, Down is -
+                    new_scroll_pixels = current_scroll_pixels + (octave_height_pixels * direction)
+                    new_scroll_pixels = max(0, min(new_scroll_pixels, max_scroll_pixels))
+                    grid_viewer.scroll_y = new_scroll_pixels / max_scroll_pixels
+                return True
+
         return False
 
     def undo(self):
@@ -836,7 +947,14 @@ class PianoRollEditor(ModalView):
             self.selected_event = None
 
     def on_dismiss(self):
+        # --- Cleanup ---
+        # Unbind all global window events to prevent memory leaks
+        Window.unbind(mouse_pos=self.ids.grid_viewer.grid._on_mouse_pos)
         Window.unbind(on_key_down=self._on_key_down)
+
+        # Reset the cursor to default one last time to be safe
+        Window.set_system_cursor('arrow')
+
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
             self._update_event.cancel()
@@ -934,10 +1052,14 @@ class PianoRollEditor(ModalView):
     def set_edit_mode(self, mode, btn):
         self.edit_mode = mode
         self._update_button_states(self.mode_buttons, btn)
+
+        # Trigger a cursor update in case the mouse is already over the grid
+        self.ids.grid_viewer.grid._update_cursor()
+
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':
             if self.selected_notes:
-                self.selected_notes.clear()
+                self.selected_notes = []
                 self.ids.grid_viewer.grid.draw()
 
     def set_note_duration(self, dur, btn):

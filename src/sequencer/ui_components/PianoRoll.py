@@ -99,8 +99,13 @@ class PianoRoll(Widget):
                             # Right handle
                             Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
 
-                        # Draw outline for selected note
-                        if note in self.selected_notes or (self.editor and self.editor.selected_note == note):
+                        # Draw outline for selected note.
+                        # Both the legacy `selected_note` and the new `selected_notes` list must be
+                        # checked using identity (`is`) to handle identical-looking but distinct note objects.
+                        is_in_multi_select = any(note is sel_note for sel_note in self.selected_notes)
+                        is_the_single_select = self.editor and self.editor.selected_note is note
+
+                        if is_in_multi_select or is_the_single_select:
                             Color(1, 1, 1, 1)  # White outline
                             Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
 

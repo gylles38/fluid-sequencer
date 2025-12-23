@@ -70,10 +70,52 @@ class EditableMidiGrid(PianoRoll):
     _selection_start_pos = (0, 0)
     _selection_rect = None
     _selection_initial_states = None
+    _is_hovering = False
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.playback_line = None
+        Window.bind(mouse_pos=self._on_mouse_pos)
+
+    def on_enter(self):
+        """Called when mouse enters the widget area."""
+        self._update_cursor()
+
+    def on_leave(self):
+        """Called when mouse leaves the widget area."""
+        Window.set_system_cursor('arrow')
+
+    def _update_cursor(self):
+        """Sets the cursor based on the current edit mode, but only if hovering."""
+        if not self._is_hovering:
+            return
+
+        mode = self.editor.edit_mode
+        if mode == 'insert':
+            Window.set_system_cursor('crosshair')
+        elif mode == 'delete':
+            # A 'no' or 'forbidden' cursor might be more intuitive for deletion
+            # but crosshair is fine as per the user's implicit symbols (+/-)
+            Window.set_system_cursor('crosshair')
+        elif mode == 'move':
+            # Kivy doesn't have a 'hand' cursor by default.
+            # We will use 'arrow' for now, as it's the standard for dragging.
+            Window.set_system_cursor('arrow')
+        else:
+            Window.set_system_cursor('arrow')
+
+    def _on_mouse_pos(self, instance, pos):
+        """Checks if the mouse is over this widget and calls on_enter/on_leave."""
+        # The mouse position is in window coordinates. We need to check if that
+        # point is within the widget's boundaries.
+        if self.get_root_window(): # Ensure the widget is on screen
+            is_over = self.collide_point(*self.to_widget(*pos))
+            if is_over and not self._is_hovering:
+                self._is_hovering = True
+                self.on_enter()
+            elif not is_over and self._is_hovering:
+                self._is_hovering = False
+                self.on_leave()
 
     def add_playback_line(self):
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -909,9 +951,14 @@ class PianoRollEditor(ModalView):
             self.selected_event = None
 
     def on_dismiss(self):
-        # Reset the cursor to default when the editor closes
-        Window.set_system_cursor('arrow')
+        # --- Cleanup ---
+        # Unbind all global window events to prevent memory leaks
+        Window.unbind(mouse_pos=self.ids.grid_viewer.grid._on_mouse_pos)
         Window.unbind(on_key_down=self._on_key_down)
+
+        # Reset the cursor to default one last time to be safe
+        Window.set_system_cursor('arrow')
+
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
         if self._update_event:
             self._update_event.cancel()
@@ -1010,11 +1057,8 @@ class PianoRollEditor(ModalView):
         self.edit_mode = mode
         self._update_button_states(self.mode_buttons, btn)
 
-        # Update the system cursor based on the new mode
-        if mode in ('insert', 'delete'):
-            Window.set_system_cursor('crosshair')
-        else: # 'move' mode
-            Window.set_system_cursor('arrow')
+        # Trigger a cursor update in case the mouse is already over the grid
+        self.ids.grid_viewer.grid._update_cursor()
 
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':

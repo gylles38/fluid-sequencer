@@ -262,8 +262,12 @@ class EditableMidiGrid(PianoRoll):
                         touch.grab(self)
                         return True
 
-            # If no note was clicked, start a selection drag (rubber-band)
-            self.editor.selected_notes.clear()
+            # If no note was clicked, it's a click on an empty space.
+            # This action should clear any existing selection.
+            if self.editor.selected_notes:
+                self.editor.selected_notes.clear()
+
+            # After clearing selection (if any), prepare for a potential rubber-band selection.
             self._drag_mode = 'select'
             self._selection_start_pos = local_pos
             with self.canvas.after:

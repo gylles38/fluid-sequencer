@@ -447,20 +447,35 @@ class EditablePianoRollViewer(ScrollView):
             Window.set_system_cursor('arrow')
 
     def _on_mouse_pos(self, instance, pos):
-        """Checks if the mouse is over the grid and calls on_enter/on_leave."""
-        if not self.get_root_window(): # Ensure the widget is on screen
+        """
+        Checks if the mouse is over the visible, non-scrollbar area of the grid.
+        This prevents the hover effect from leaking out to other UI elements
+        (like the ruler) when the grid is scrolled, and also ensures the cursor
+        is normal when hovering over the scrollbar.
+        """
+        if not self.get_root_window():
             return
 
-        # We must convert the window coordinates to the ScrollView's local space.
-        # `to_widget` is the correct method for this conversion. The child grid's
-        # `collide_point` method expects coordinates in its parent's (the ScrollView's) space.
+        # Convert window coordinates to this widget's local coordinate space.
         local_pos = self.to_widget(*pos)
-        is_over = self.grid.collide_point(*local_pos)
 
-        if is_over and not self._is_hovering:
+        # 1. Check if the mouse is within the main visible area of the ScrollView.
+        is_over_widget = self.collide_point(*local_pos)
+
+        # 2. Check if the mouse is within the vertical scrollbar area on the right.
+        is_over_scrollbar = False
+        if self.bar_width > 0 and self.do_scroll_y:
+            scrollbar_x = self.width - self.bar_width
+            if local_pos[0] > scrollbar_x:
+                is_over_scrollbar = True
+
+        # The cursor should only change if it's over the widget but NOT the scrollbar.
+        is_truly_over = is_over_widget and not is_over_scrollbar
+
+        if is_truly_over and not self._is_hovering:
             self._is_hovering = True
             self.on_enter()
-        elif not is_over and self._is_hovering:
+        elif not is_truly_over and self._is_hovering:
             self._is_hovering = False
             self.on_leave()
 

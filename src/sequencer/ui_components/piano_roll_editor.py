@@ -8,7 +8,6 @@ from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.behaviors.hover import HoverBehavior
 from kivy.uix.floatlayout import FloatLayout
 from kivy.metrics import dp
 from kivy.clock import Clock
@@ -403,19 +402,22 @@ class EditableMidiGrid(PianoRoll):
             self.editor.track_copy.add_event(new_event)
 
 
-class EditablePianoRollViewer(HoverBehavior, ScrollView):
+class EditablePianoRollViewer(ScrollView):
     editor = ObjectProperty()
+    _is_hovering = False
 
-    def on_enter(self, *args):
+    def on_enter(self):
         """Called when mouse enters the widget area."""
         self._update_cursor()
 
-    def on_leave(self, *args):
+    def on_leave(self):
         """Called when mouse leaves the widget area."""
         Window.set_system_cursor('arrow')
 
     def _update_cursor(self):
-        """Sets the cursor based on the current edit mode."""
+        """Sets the cursor based on the current edit mode, but only if hovering."""
+        if not self._is_hovering:
+            return
         if not hasattr(self, 'editor') or not self.editor:
             return
         mode = self.editor.edit_mode
@@ -428,6 +430,17 @@ class EditablePianoRollViewer(HoverBehavior, ScrollView):
         else:
             Window.set_system_cursor('arrow')
 
+    def _on_mouse_pos(self, instance, pos):
+        """Checks if the mouse is over this widget and calls on_enter/on_leave."""
+        if self.get_root_window():
+            is_over = self.collide_point(*self.to_widget(*pos))
+            if is_over and not self._is_hovering:
+                self._is_hovering = True
+                self.on_enter()
+            elif not is_over and self._is_hovering:
+                self._is_hovering = False
+                self.on_leave()
+
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
@@ -435,7 +448,8 @@ class EditablePianoRollViewer(HoverBehavior, ScrollView):
 
     def __init__(self, **kwargs):
         super(EditablePianoRollViewer, self).__init__(**kwargs)
-        self.scroll_type = ['bars'] # Disable content scrolling
+        Window.bind(mouse_pos=self._on_mouse_pos)
+        self.scroll_type = ['bars']
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
@@ -935,6 +949,7 @@ class PianoRollEditor(ModalView):
     def on_dismiss(self):
         # --- Cleanup ---
         # Unbind all global window events to prevent memory leaks
+        Window.unbind(mouse_pos=self.ids.grid_viewer._on_mouse_pos)
         Window.unbind(on_key_down=self._on_key_down)
 
         # Reset the cursor to default one last time to be safe

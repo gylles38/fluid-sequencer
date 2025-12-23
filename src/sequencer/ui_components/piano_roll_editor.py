@@ -444,9 +444,11 @@ class EditablePianoRollViewer(ScrollView):
         if not self.get_root_window(): # Ensure the widget is on screen
             return
 
-        # We check collision against the actual grid, not the scroll view wrapper
-        # The coordinates need to be in the scrollview's (the parent's) space
-        is_over = self.ids.grid.collide_point(*self.to_local(*pos))
+        # We must convert the window coordinates to the ScrollView's local space.
+        # `to_widget` is the correct method for this conversion. The child grid's
+        # `collide_point` method expects coordinates in its parent's (the ScrollView's) space.
+        local_pos = self.to_widget(*pos)
+        is_over = self.ids.grid.collide_point(*local_pos)
 
         if is_over and not self._is_hovering:
             self._is_hovering = True
@@ -469,11 +471,16 @@ class EditablePianoRollViewer(ScrollView):
             return True
         return super(EditablePianoRollViewer, self).on_touch_move(touch)
 
-    def on_editor(self, i, v): self.grid.editor = v
-    def on_track(self, i, v): self.grid.track = v
-    def on_total_beats(self, i, v): self.grid.total_beats = v
-    def on_pixels_per_beat(self, i, v): self.grid.pixels_per_beat = v
-    def on_note_height(self, i, v): self.grid.note_height = v
+    def on_editor(self, i, v):
+        if hasattr(self, 'grid'): self.grid.editor = v
+    def on_track(self, i, v):
+        if hasattr(self, 'grid'): self.grid.track = v
+    def on_total_beats(self, i, v):
+        if hasattr(self, 'grid'): self.grid.total_beats = v
+    def on_pixels_per_beat(self, i, v):
+        if hasattr(self, 'grid'): self.grid.pixels_per_beat = v
+    def on_note_height(self, i, v):
+        if hasattr(self, 'grid'): self.grid.note_height = v
 
 
 # --- Builder String ---

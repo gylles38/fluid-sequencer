@@ -70,7 +70,6 @@ class EditableMidiGrid(PianoRoll):
     _selection_start_pos = (0, 0)
     _selection_rect = None
     _selection_initial_states = None
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.playback_line = None
@@ -744,34 +743,9 @@ class PianoRollEditor(ModalView):
 
         # Keyboard shortcuts
         Window.bind(on_key_down=self._on_key_down)
+
+        # Mouse cursor logic
         Window.bind(mouse_pos=self._on_mouse_pos)
-
-    def _update_cursor(self):
-        """Helper to set the cursor based on the current edit mode."""
-        mode = self.edit_mode
-        if mode == 'insert':
-            Window.set_system_cursor('crosshair')
-        elif mode == 'delete':
-            Window.set_system_cursor('no')
-        elif mode == 'move':
-            Window.set_system_cursor('hand')
-        else:
-            Window.set_system_cursor('arrow')
-
-    def _on_mouse_pos(self, instance, pos):
-        """
-        Globally bound method to check mouse position and set the editor cursor.
-        It sets the special cursor only when hovering over the main grid viewport area.
-        """
-        grid_viewer = self.ids.get('grid_viewer')
-        if not grid_viewer:
-            return
-
-        # Check if the mouse position falls inside the bounds of the 'grid_viewer' widget.
-        if grid_viewer.collide_point(*grid_viewer.to_widget(*pos)):
-            self._update_cursor()
-        else:
-            Window.set_system_cursor('arrow')
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         """Handle keyboard shortcuts for the editor."""
@@ -936,6 +910,34 @@ class PianoRollEditor(ModalView):
             self.selected_note = None
             self.selected_event = None
 
+    def _on_mouse_pos(self, instance, pos):
+        """
+        Checks if the mouse cursor is over the grid viewer and updates the
+        system cursor accordingly.
+        """
+        grid_viewer = self.ids.get('grid_viewer')
+        if not grid_viewer:
+            return
+
+        # Convert window coordinates to the coordinate system of the grid_viewer's parent.
+        if not grid_viewer.parent:
+            return
+        local_to_parent = grid_viewer.parent.to_widget(*pos)
+
+        # Now check for collision using the parent's coordinate system.
+        if grid_viewer.collide_point(*local_to_parent):
+            mode = self.edit_mode
+            if mode == 'insert':
+                Window.set_system_cursor('crosshair')
+            elif mode == 'delete':
+                Window.set_system_cursor('no')
+            elif mode == 'move':
+                Window.set_system_cursor('hand')
+            else:
+                Window.set_system_cursor('arrow')
+        else:
+            Window.set_system_cursor('arrow')
+
     def on_dismiss(self):
         # --- Cleanup ---
         # Unbind all global window events to prevent memory leaks
@@ -1043,9 +1045,8 @@ class PianoRollEditor(ModalView):
         self.edit_mode = mode
         self._update_button_states(self.mode_buttons, btn)
 
-        # Manually trigger the mouse pos check to update the cursor immediately
-        # in case the mouse is already over the grid when the mode is changed.
-        self._on_mouse_pos(Window, Window.mouse_pos)
+        # Trigger a cursor update in case the mouse is already over the grid
+        self._on_mouse_pos(None, Window.mouse_pos)
 
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':

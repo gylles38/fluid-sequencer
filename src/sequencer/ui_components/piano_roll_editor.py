@@ -263,9 +263,10 @@ class EditableMidiGrid(PianoRoll):
                         return True
 
             # If no note was clicked, it's a click on an empty space.
-            # This action should clear any existing selection.
+            # This action should clear any existing selection. To ensure the UI
+            # updates, we must re-assign the list, not clear it in-place.
             if self.editor.selected_notes:
-                self.editor.selected_notes.clear()
+                self.editor.selected_notes = []
 
             # After clearing selection (if any), prepare for a potential rubber-band selection.
             self._drag_mode = 'select'

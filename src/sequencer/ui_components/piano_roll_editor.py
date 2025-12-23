@@ -448,29 +448,27 @@ class EditablePianoRollViewer(ScrollView):
 
     def _on_mouse_pos(self, instance, pos):
         """
-        Checks if the mouse is over the visible, non-scrollbar area of the grid.
-        This prevents the hover effect from leaking out to other UI elements
-        (like the ruler) when the grid is scrolled, and also ensures the cursor
-        is normal when hovering over the scrollbar.
+        Checks if the mouse is truly over the grid content within the visible viewport.
+        This prevents the hover effect from leaking to other UI elements when the
+        grid is scrolled, and from activating in empty space within the viewport.
         """
         if not self.get_root_window():
             return
 
-        # Convert window coordinates to this widget's local coordinate space.
+        # Convert window coordinates to the ScrollView's local space.
         local_pos = self.to_widget(*pos)
 
-        # 1. Check if the mouse is within the main visible area of the ScrollView.
-        is_over_widget = self.collide_point(*local_pos)
+        # Condition 1: Is the mouse within the visible bounds of the ScrollView widget itself?
+        # This prevents the hover from leaking out to the ruler or toolbars.
+        is_over_viewport = self.collide_point(*local_pos)
 
-        # 2. Check if the mouse is within the vertical scrollbar area on the right.
-        is_over_scrollbar = False
-        if self.bar_width > 0 and self.do_scroll_y:
-            scrollbar_x = self.width - self.bar_width
-            if local_pos[0] > scrollbar_x:
-                is_over_scrollbar = True
+        # Condition 2: Is the mouse over the actual grid widget content?
+        # The grid's coordinates are relative to the ScrollView, so this check
+        # correctly accounts for the scroll position.
+        is_over_grid_content = self.grid.collide_point(*local_pos)
 
-        # The cursor should only change if it's over the widget but NOT the scrollbar.
-        is_truly_over = is_over_widget and not is_over_scrollbar
+        # Final determination: The hover is only active if BOTH conditions are true.
+        is_truly_over = is_over_viewport and is_over_grid_content
 
         if is_truly_over and not self._is_hovering:
             self._is_hovering = True

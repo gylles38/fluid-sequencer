@@ -409,7 +409,11 @@ class EditablePianoRollViewer(ScrollView):
     track = ObjectProperty(None, allownone=True)
     note_height = NumericProperty(dp(12))
     _is_hovering = False
-    _is_scrolling = False
+
+    def __init__(self, **kwargs):
+        super(EditablePianoRollViewer, self).__init__(**kwargs)
+        Window.bind(mouse_pos=self._on_mouse_pos)
+        self.scroll_type = ['bars'] # Disable content scrolling
 
     def on_enter(self):
         """Called when mouse enters the widget area."""
@@ -422,9 +426,9 @@ class EditablePianoRollViewer(ScrollView):
     def _update_cursor(self):
         """Sets the cursor based on the current edit mode, but only if hovering."""
         if not self._is_hovering:
+            Window.set_system_cursor('arrow')
             return
-        if not hasattr(self, 'editor') or not self.editor:
-            return
+
         mode = self.editor.edit_mode
         if mode == 'insert':
             Window.set_system_cursor('crosshair')
@@ -435,33 +439,21 @@ class EditablePianoRollViewer(ScrollView):
         else:
             Window.set_system_cursor('arrow')
 
-    def _on_scroll_start(self, *args):
-        self._is_scrolling = True
-
-    def _on_scroll_stop(self, *args):
-        self._is_scrolling = False
-        # Force a cursor update after scrolling stops
-        self._on_mouse_pos(Window, Window.mouse_pos)
-
     def _on_mouse_pos(self, instance, pos):
-        """Checks if the mouse is over this widget and calls on_enter/on_leave."""
-        if self._is_scrolling:
+        """Checks if the mouse is over the grid and calls on_enter/on_leave."""
+        if not self.get_root_window(): # Ensure the widget is on screen
             return
 
-        if self.get_root_window():
-            is_over = self.collide_point(*self.to_widget(*pos))
-            if is_over and not self._is_hovering:
-                self._is_hovering = True
-                self.on_enter()
-            elif not is_over and self._is_hovering:
-                self._is_hovering = False
-                self.on_leave()
+        # We check collision against the actual grid, not the scroll view wrapper
+        # The coordinates need to be in the scrollview's (the parent's) space
+        is_over = self.ids.grid.collide_point(*self.to_local(*pos))
 
-    def __init__(self, **kwargs):
-        super(EditablePianoRollViewer, self).__init__(**kwargs)
-        Window.bind(mouse_pos=self._on_mouse_pos)
-        self.bind(on_scroll_start=self._on_scroll_start, on_scroll_stop=self._on_scroll_stop)
-        self.scroll_type = ['bars', 'content']
+        if is_over and not self._is_hovering:
+            self._is_hovering = True
+            self.on_enter()
+        elif not is_over and self._is_hovering:
+            self._is_hovering = False
+            self.on_leave()
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True

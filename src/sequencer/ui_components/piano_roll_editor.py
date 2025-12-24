@@ -943,14 +943,16 @@ class PianoRollEditor(ModalView):
 
         # --- Update Note Highlight & Status Bar ---
         grid = grid_viewer.grid
+        timeline_scroll = self.ids.timeline_scroll
 
         # Calculate mouse position relative to the full grid content
         grid_bottom_left_in_window = grid.to_window(0, 0)
         rel_x = pos[0] - grid_bottom_left_in_window[0]
         rel_y = pos[1] - grid_bottom_left_in_window[1]
 
-        # Check for collision with the grid and if it's visible in the scrollview
-        if grid_viewer.collide_point(*grid_viewer.to_local(*pos)) and 0 <= rel_x < grid.width:
+        # Check for collision with the timeline_scroll (which includes the scrollbar)
+        # and if the horizontal position is within the visible grid content.
+        if timeline_scroll.collide_point(*timeline_scroll.to_local(*pos)) and 0 <= rel_x < grid.width:
             pitch = int(rel_y / self.note_height)
 
             if 0 <= pitch <= 127:

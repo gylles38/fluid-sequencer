@@ -629,6 +629,13 @@ Builder.load_string("""
             spacing: dp(8)
             md_bg_color: 0.2, 0.2, 0.2, 1
 
+            Label:
+                id: status_label
+                text: "Note: C4"
+                size_hint_x: None
+                width: self.texture_size[0]
+                color: 0.8, 0.8, 0.8, 1
+
             Widget:
                 size_hint_x: 1
             Button:
@@ -910,33 +917,75 @@ class PianoRollEditor(ModalView):
             self.selected_note = None
             self.selected_event = None
 
+    def _pitch_to_note_name(self, pitch):
+        """Converts a MIDI pitch number to its note name (e.g., 60 -> C4)."""
+        if not (0 <= pitch <= 127):
+            return ""
+        note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        note = note_names[pitch % 12]
+        octave = (pitch // 12) - 1
+        return f"{note}{octave}"
+
     def _on_mouse_pos(self, instance, pos):
         """
-        Checks if the mouse cursor is over the grid viewer and updates the
-        system cursor accordingly.
+        Handles mouse movement over the editor. Updates the status label, highlights
+        the piano key, and changes the system cursor based on the context.
         """
         grid_viewer = self.ids.get('grid_viewer')
-        if not grid_viewer:
+        piano_keyboard = self.ids.get('piano_keyboard')
+        status_label = self.ids.get('status_label')
+
+        if not all([grid_viewer, piano_keyboard, status_label]):
             return
 
-        # Convert window coordinates to the coordinate system of the grid_viewer's parent.
+        # Use the grid viewer's parent for coordinate conversion as it's the collision boundary
         if not grid_viewer.parent:
             return
         local_to_parent = grid_viewer.parent.to_widget(*pos)
 
-        # Now check for collision using the parent's coordinate system.
         if grid_viewer.collide_point(*local_to_parent):
+            # Convert the collision point into the grid's local coordinate space
+            local_to_grid = grid_viewer.to_local(*pos)
+
+            # --- Update Cursor ---
             mode = self.edit_mode
-            if mode == 'insert':
-                Window.set_system_cursor('crosshair')
-            elif mode == 'delete':
-                Window.set_system_cursor('no')
-            elif mode == 'move':
-                Window.set_system_cursor('hand')
+            if mode == 'insert': Window.set_system_cursor('crosshair')
+            elif mode == 'delete': Window.set_system_cursor('no')
+            elif mode == 'move': Window.set_system_cursor('hand')
+            else: Window.set_system_cursor('arrow')
+
+            # --- Update Highlight and Status Label ---
+            pitch = int(local_to_grid[1] / self.note_height)
+            if 0 <= pitch <= 127:
+                piano_keyboard.highlighted_note = pitch
+                note_name = self._pitch_to_note_name(pitch)
+
+                # Find if a note exists at this position
+                beat = local_to_grid[0] / self.pixels_per_beat
+                found_note = None
+                for event in self.track_copy.events:
+                    for note in event.notes:
+                        if note.pitch == pitch and event.start_time <= beat < event.start_time + note.duration:
+                            found_note = note
+                            break
+                    if found_note:
+                        break
+
+                if found_note:
+                    status_label.text = f"Note: {note_name}, Velocity: {found_note.velocity}"
+                else:
+                    status_label.text = f"Note: {note_name}"
+
             else:
-                Window.set_system_cursor('arrow')
+                # Mouse is in the grid area but outside valid pitches
+                piano_keyboard.highlighted_note = -1
+                status_label.text = ""
+
         else:
+            # Mouse is outside the grid area
             Window.set_system_cursor('arrow')
+            piano_keyboard.highlighted_note = -1
+            status_label.text = ""
 
     def on_dismiss(self):
         # --- Cleanup ---

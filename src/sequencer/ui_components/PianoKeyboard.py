@@ -10,6 +10,7 @@ class PianoKeyboard(FloatLayout):
     A widget that draws a vertical piano keyboard.
     """
     note_height = NumericProperty(dp(12))
+    highlighted_note = NumericProperty(-1)  # -1 means no note is highlighted
 
     def __init__(self, **kwargs):
         super(PianoKeyboard, self).__init__(**kwargs)
@@ -17,7 +18,8 @@ class PianoKeyboard(FloatLayout):
         self.height = 128 * self.note_height
         self.width = dp(40)
 
-        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule)
+        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule,
+                  highlighted_note=self._redraw_on_schedule)
         self._redraw_on_schedule()
 
     def _redraw_on_schedule(self, *args):
@@ -28,11 +30,16 @@ class PianoKeyboard(FloatLayout):
         self.canvas.before.clear()
         self.clear_widgets()
 
+        highlight_color = (0.3, 0.7, 1.0, 1) # A light blue color for highlighting
+
         with self.canvas.before:
             # Draw white keys
-            Color(0.95, 0.95, 0.95, 1)
             for i in range(128):
                 if (i % 12) not in [1, 3, 6, 8, 10]:
+                    if i == self.highlighted_note:
+                        Color(*highlight_color)
+                    else:
+                        Color(0.95, 0.95, 0.95, 1)
                     note_y = self.y + i * self.note_height
                     Rectangle(pos=(self.x, note_y), size=(self.width, self.note_height))
 
@@ -45,9 +52,12 @@ class PianoKeyboard(FloatLayout):
                     Line(points=[self.x, note_y, self.x + self.width, note_y], width=width)
 
             # Draw black keys
-            Color(0.1, 0.1, 0.1, 1)
             for i in range(128):
                  if (i % 12) in [1, 3, 6, 8, 10]:
+                    if i == self.highlighted_note:
+                        Color(*highlight_color)
+                    else:
+                        Color(0.1, 0.1, 0.1, 1)
                     note_y = self.y + i * self.note_height
                     Rectangle(pos=(self.x, note_y), size=(self.width * 0.65, self.note_height))
 

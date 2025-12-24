@@ -612,7 +612,6 @@ Builder.load_string("""
                 do_scroll_y: False
                 bar_width: dp(20)
                 scroll_type: ['bars']
-                padding: [0, 0, 0, dp(20)]
 
                 EditablePianoRollViewer:
                     id: grid_viewer
@@ -922,6 +921,12 @@ class PianoRollEditor(ModalView):
             self.selected_event = None
 
     def _on_mouse_pos(self, instance, pos):
+        """
+        Handles mouse movement over the editor. It is responsible for:
+        1. Updating the system cursor icon based on the current edit mode.
+        2. Highlighting the corresponding key on the virtual piano keyboard.
+        3. Displaying the note name and velocity under the cursor in the status bar.
+        """
         grid_viewer = self.ids.get('grid_viewer')
         if not grid_viewer:
             return

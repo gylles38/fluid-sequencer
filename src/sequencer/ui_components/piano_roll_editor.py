@@ -624,6 +624,17 @@ Builder.load_string("""
 
         MDBoxLayout:
             size_hint_y: None
+            height: dp(32)
+            padding: [dp(8), 0]
+            Label:
+                id: status_label
+                text: ""
+                size_hint_x: None
+                width: self.texture_size[0]
+                halign: 'left'
+
+        MDBoxLayout:
+            size_hint_y: None
             height: dp(48)
             padding: dp(8)
             spacing: dp(8)
@@ -911,32 +922,57 @@ class PianoRollEditor(ModalView):
             self.selected_event = None
 
     def _on_mouse_pos(self, instance, pos):
-        """
-        Checks if the mouse cursor is over the grid viewer and updates the
-        system cursor accordingly.
-        """
         grid_viewer = self.ids.get('grid_viewer')
         if not grid_viewer:
             return
 
-        # Convert window coordinates to the coordinate system of the grid_viewer's parent.
-        if not grid_viewer.parent:
-            return
-        local_to_parent = grid_viewer.parent.to_widget(*pos)
-
-        # Now check for collision using the parent's coordinate system.
-        if grid_viewer.collide_point(*local_to_parent):
+        # --- Update Cursor Icon ---
+        if grid_viewer.collide_point(*grid_viewer.to_widget(*pos, relative=True)):
             mode = self.edit_mode
-            if mode == 'insert':
-                Window.set_system_cursor('crosshair')
-            elif mode == 'delete':
-                Window.set_system_cursor('no')
-            elif mode == 'move':
-                Window.set_system_cursor('hand')
-            else:
-                Window.set_system_cursor('arrow')
+            if mode == 'insert': Window.set_system_cursor('crosshair')
+            elif mode == 'delete': Window.set_system_cursor('no')
+            elif mode == 'move': Window.set_system_cursor('hand')
+            else: Window.set_system_cursor('arrow')
         else:
             Window.set_system_cursor('arrow')
+
+        # --- Update Note Highlight & Status Bar ---
+        grid = grid_viewer.grid
+        # Use grid's coordinate system for calculations
+        local_to_grid = grid.to_local(*pos)
+
+        if grid.collide_point(*local_to_grid):
+            # Calculate pitch from y-coordinate
+            pitch = int(local_to_grid[1] / self.note_height)
+            if 0 <= pitch <= 127:
+                self.ids.piano_keyboard.highlighted_note = pitch
+
+                # Find note at current position to display info
+                beat_pos = local_to_grid[0] / self.pixels_per_beat
+                note_at_pos = None
+                for event in self.track_copy.events:
+                    if event.start_time <= beat_pos < event.start_time + max((n.duration for n in event.notes), default=0):
+                        for note in event.notes:
+                            if note.pitch == pitch:
+                                note_at_pos = note
+                                break
+                    if note_at_pos: break
+
+                # Update status label
+                note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+                octave = (pitch // 12) - 1
+                note_name = f"{note_names[pitch % 12]}{octave}"
+
+                velocity = note_at_pos.velocity if note_at_pos else 100
+                self.ids.status_label.text = f"Note: {note_name}  |  Velocity: {velocity}"
+            else:
+                # If pitch is out of bounds, clear highlight and status
+                self.ids.piano_keyboard.highlighted_note = -1
+                self.ids.status_label.text = ""
+        else:
+            # If not colliding with grid, clear highlight and status
+            self.ids.piano_keyboard.highlighted_note = -1
+            self.ids.status_label.text = ""
 
     def on_dismiss(self):
         # --- Cleanup ---

@@ -955,7 +955,11 @@ class PianoRollEditor(ModalView):
             else: Window.set_system_cursor('arrow')
 
             # --- Update Highlight and Status Label ---
-            pitch = int(local_to_grid[1] / self.note_height)
+            # Manually account for the vertical scroll position of the grid viewer
+            scroll_offset_y = grid_viewer.scroll_y * (grid_viewer.grid.height - grid_viewer.height)
+            true_y = local_to_grid[1] + scroll_offset_y
+            pitch = int(true_y / self.note_height)
+
             if 0 <= pitch <= 127:
                 piano_keyboard.highlighted_note = pitch
                 note_name = self._pitch_to_note_name(pitch)

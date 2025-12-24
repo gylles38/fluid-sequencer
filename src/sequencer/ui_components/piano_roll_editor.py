@@ -938,17 +938,20 @@ class PianoRollEditor(ModalView):
 
         # --- Update Note Highlight & Status Bar ---
         grid = grid_viewer.grid
-        # Use grid's coordinate system for calculations
-        local_to_grid = grid.to_local(*pos)
 
-        if grid.collide_point(*local_to_grid):
-            # Calculate pitch from y-coordinate
-            pitch = int(local_to_grid[1] / self.note_height)
+        # Calculate mouse position relative to the full grid content
+        grid_bottom_left_in_window = grid.to_window(0, 0)
+        rel_x = pos[0] - grid_bottom_left_in_window[0]
+        rel_y = pos[1] - grid_bottom_left_in_window[1]
+
+        # Check for collision with the grid and if it's visible in the scrollview
+        if grid_viewer.collide_point(*grid_viewer.to_local(*pos)) and 0 <= rel_x < grid.width:
+            pitch = int(rel_y / self.note_height)
+
             if 0 <= pitch <= 127:
                 self.ids.piano_keyboard.highlighted_note = pitch
 
-                # Find note at current position to display info
-                beat_pos = local_to_grid[0] / self.pixels_per_beat
+                beat_pos = rel_x / self.pixels_per_beat
                 note_at_pos = None
                 for event in self.track_copy.events:
                     if event.start_time <= beat_pos < event.start_time + max((n.duration for n in event.notes), default=0):
@@ -958,7 +961,6 @@ class PianoRollEditor(ModalView):
                                 break
                     if note_at_pos: break
 
-                # Update status label
                 note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
                 octave = (pitch // 12) - 1
                 note_name = f"{note_names[pitch % 12]}{octave}"
@@ -966,11 +968,9 @@ class PianoRollEditor(ModalView):
                 velocity = note_at_pos.velocity if note_at_pos else 100
                 self.ids.status_label.text = f"Note: {note_name}  |  Velocity: {velocity}"
             else:
-                # If pitch is out of bounds, clear highlight and status
                 self.ids.piano_keyboard.highlighted_note = -1
                 self.ids.status_label.text = ""
         else:
-            # If not colliding with grid, clear highlight and status
             self.ids.piano_keyboard.highlighted_note = -1
             self.ids.status_label.text = ""
 

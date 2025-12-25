@@ -629,6 +629,13 @@ Builder.load_string("""
             spacing: dp(8)
             md_bg_color: 0.2, 0.2, 0.2, 1
 
+            Label:
+                id: status_label
+                text: "Note: C4"
+                size_hint_x: None
+                width: self.texture_size[0]
+                color: 0.8, 0.8, 0.8, 1
+
             Widget:
                 size_hint_x: 1
             Button:
@@ -667,6 +674,7 @@ class PianoRollEditor(ModalView):
     selected_notes = ListProperty([])
     selected_event = ObjectProperty(None, allownone=True)
     history = ObjectProperty(None)
+    hovered_note = ObjectProperty(None, allownone=True)    
 
     def __init__(self, **kwargs):
         self.history = EditHistoryManager()
@@ -749,6 +757,31 @@ class PianoRollEditor(ModalView):
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         """Handle keyboard shortcuts for the editor."""
+        # --- Gestion de la Vélocité (+/-) ---
+        # 43 = + (numpad), 45 = - (clavier/numpad), 61 = + (clavier principal)
+        if text in ('+', '-') or keyboard in (43, 45, 61, 269, 270):
+            if self.hovered_note:
+                # Calcul du changement (pas de 5 ou 10 selon votre préférence)
+                delta = 5 if text == '+' or keyboard in (43, 61, 270) else -5
+                
+                # Application et bridage entre 0 et 127
+                new_vel = max(0, min(127, self.hovered_note.velocity + delta))
+                
+                if new_vel != self.hovered_note.velocity:
+                    self.hovered_note.velocity = new_vel
+                    self.is_dirty = True
+                    
+                    # Mise à jour immédiate de l'affichage
+                    note_name = self._pitch_to_note_name(self.hovered_note.pitch)
+                    self.ids.status_label.text = f"Note: {note_name}, Velocity: {self.hovered_note.velocity}"
+                    
+                    # Optionnel : redessiner la grille si la couleur dépend de la vélocité
+                    self.ids.grid_viewer.grid.draw()
+                    
+                    # Enregistrement pour le Undo/Redo
+                    self._record_state()
+                return True
+            
         # --- Modifier Shortcuts (Ctrl) ---
         if 'ctrl' in modifiers:
             if text == 'z':
@@ -910,33 +943,88 @@ class PianoRollEditor(ModalView):
             self.selected_note = None
             self.selected_event = None
 
+    def _pitch_to_note_name(self, pitch):
+        """Converts a MIDI pitch number to its note name (e.g., 60 -> C4)."""
+        if not (0 <= pitch <= 127):
+            return ""
+        note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        note = note_names[pitch % 12]
+        octave = (pitch // 12) - 1
+        return f"{note}{octave}"
+
     def _on_mouse_pos(self, instance, pos):
-        """
-        Checks if the mouse cursor is over the grid viewer and updates the
-        system cursor accordingly.
-        """
         grid_viewer = self.ids.get('grid_viewer')
-        if not grid_viewer:
+        piano_keyboard = self.ids.get('piano_keyboard')
+        status_label = self.ids.get('status_label')
+
+        if not all([grid_viewer, piano_keyboard, status_label]):
             return
 
-        # Convert window coordinates to the coordinate system of the grid_viewer's parent.
-        if not grid_viewer.parent:
-            return
-        local_to_parent = grid_viewer.parent.to_widget(*pos)
+        # 1. On récupère la position relative au contenu de la grille
+        # grid_viewer.grid est le PianoRoll qui contient les notes
+        grid_content = grid_viewer.grid
+        
+        # Transformation des coordonnées Fenêtre -> Widget interne
+        # to_widget(pos) sur le contenu du scrollview est la méthode la plus fiable
+        lx, ly = grid_content.to_widget(*pos)
 
-        # Now check for collision using the parent's coordinate system.
-        if grid_viewer.collide_point(*local_to_parent):
-            mode = self.edit_mode
-            if mode == 'insert':
-                Window.set_system_cursor('crosshair')
-            elif mode == 'delete':
-                Window.set_system_cursor('no')
-            elif mode == 'move':
-                Window.set_system_cursor('hand')
+        # 2. On vérifie si la souris est dans la zone visible du ScrollView
+        # On transforme les coordonnées fenêtre en coordonnées locales au parent du ScrollView
+        if grid_viewer.collide_point(*grid_viewer.parent.to_widget(*pos)):
+            
+            # CALCULS (Pitch et Temps)
+            # Note: on utilise int(ly / self.note_height)
+            pitch = int(ly / self.note_height)
+            current_beat = lx / self.pixels_per_beat
+            
+            if 0 <= pitch <= 127:
+                # Allume la touche sur le clavier à gauche
+                piano_keyboard.highlighted_note = pitch
+                
+                # Nom de la note (C4, D#2, etc.)
+                note_name = self._pitch_to_note_name(pitch)
+                
+                # --- RECHERCHE DE LA NOTE SOUS LE CURSEUR ---
+                found_note = None
+                for event in self.track_copy.events:
+                    # Optimisation : on ne scanne que si le beat est proche de l'événement
+                    if event.start_time <= current_beat <= (event.start_time + 20): 
+                        for note in event.notes:
+                            if note.pitch == pitch:
+                                # Vérification précise de la collision temporelle
+                                if event.start_time <= current_beat <= (event.start_time + note.duration):
+                                    found_note = note
+                                    break
+                    if found_note:
+                        break
+
+                # On mémorise l'objet note pour les raccourcis clavier (+/-)
+                self.hovered_note = found_note 
+                
+                # --- MISE À JOUR DU TEXTE ---
+                if found_note:
+                    status_label.text = f"Note: {note_name} | Velocity: {found_note.velocity}"
+                else:
+                    status_label.text = f"Note: {note_name}"
+                
+                # Curseur
+                self._set_editor_cursor()
             else:
-                Window.set_system_cursor('arrow')
+                piano_keyboard.highlighted_note = -1
+                status_label.text = ""
         else:
+            # Hors de la grille
             Window.set_system_cursor('arrow')
+            piano_keyboard.highlighted_note = -1
+            status_label.text = ""
+
+    def _set_editor_cursor(self):
+        """Gère l'apparence du curseur selon le mode d'édition"""
+        mode = getattr(self, 'edit_mode', 'select')
+        if mode == 'insert': Window.set_system_cursor('crosshair')
+        elif mode == 'delete': Window.set_system_cursor('no')
+        elif mode == 'move': Window.set_system_cursor('hand')
+        else: Window.set_system_cursor('arrow')
 
     def on_dismiss(self):
         # --- Cleanup ---
@@ -976,12 +1064,42 @@ class PianoRollEditor(ModalView):
             super(PianoRollEditor, self).dismiss()
 
     def _save_changes(self):
-        self.track.events = self.track_copy.events
-        self.is_dirty = False
-        for tw in self.sequencer_layout.track_widgets:
-            if tw.track == self.track and hasattr(tw, 'piano_roll_viewer'):
-                tw.piano_roll_viewer.grid.draw()
-                break
+            # 1. Appliquer les changements (On utilise deepcopy pour éviter les références partagées)
+            import copy
+            self.track.events = copy.deepcopy(self.track_copy.events)
+            
+            self.is_dirty = False
+            
+            # 2. Rafraîchissement VISUEL de la fenêtre principale
+            # On cherche le widget de la piste dans la liste des widgets du séquenceur
+            if self.sequencer_layout and hasattr(self.sequencer_layout, 'track_widgets'):
+                for tw in self.sequencer_layout.track_widgets:
+                    if tw.track == self.track:
+                        # On parcourt les enfants du TrackWidget pour trouver le PianoRoll
+                        # Dans votre structure, il est dans timeline_container
+                        for child in tw.walk():
+                            if child.__class__.__name__ == 'PianoRoll':
+                                # On appelle la méthode de dessin du PianoRoll de la fenêtre principale
+                                child.draw()
+                        break
+
+            # 3. Rafraîchissement de la LECTURE (Moteur MIDI)
+            # On force le séquenceur à recharger les événements de cette piste
+            if self.sequencer_layout.sequencer:
+                seq = self.sequencer_layout.sequencer
+                
+                # Si vous avez une méthode dédiée dans votre séquenceur :
+                if hasattr(seq, 'update_track_events'):
+                    seq.update_track_events(self.track_index)
+                else:
+                    # Sinon, on déclenche souvent une reconstruction de la timeline 
+                    # en réassignant ou en appelant la méthode qui prépare les messages
+                    # Exemple si vous utilisez un moteur basé sur des messages pré-calculés :
+                    if hasattr(seq, '_prepare_track_messages'):
+                        seq._prepare_track_messages(self.track_index)
+                
+                # Note: Si la lecture est en cours, certains moteurs demandent 
+                # un stop/start pour prendre en compte les gros changements.
 
     def update_playhead(self, dt):
         current_beat = self.sequencer_layout.sequencer.current_beat

@@ -9,7 +9,7 @@ class PianoKeyboard(FloatLayout):
     """
     A widget that draws a vertical piano keyboard.
     """
-    note_height = NumericProperty(dp(12))
+    note_height = NumericProperty(dp(14))
     highlighted_note = NumericProperty(-1)  # -1 means no note is highlighted
 
     def __init__(self, **kwargs):

@@ -1,6 +1,7 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
 from .midi_import_project import import_midi_to_project
+from .midi_export_project import export_midi_from_project
 from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
 from .config import MidiConfig
 from .terminal_input import cancellable_input, UserInputCancelled
@@ -2309,6 +2310,11 @@ class Sequencer(EventDispatcher):
         """Imports a MIDI file into the current project."""
         result = import_midi_to_project(self, filepath)
         return result.get("message", "Import process finished.")
+
+    def export_midi_tracks(self, track_indices: List[int], filepath: str) -> str:
+        """Exports selected MIDI tracks to a MIDI file."""
+        result = export_midi_from_project(self, track_indices, filepath)
+        return result.get("message", "Export process finished.")
 
     def save_song(self, filepath: str) -> str:
         try:

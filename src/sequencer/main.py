@@ -243,6 +243,11 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 return True, "Load cancelled."
         else:
             return True, "Usage: loadproject <basename>"
+    elif command == "importmidi":
+        if len(args) == 1:
+            return True, seq.import_midi_file(filepath=args[0])
+        else:
+            return True, "Usage: importmidi <filepath>"
     elif command == "newproject":
         if len(args) == 1:
             project_name = args[0]

@@ -90,6 +90,7 @@ class SequencerLayout(BoxLayout):
             {"leading_icon": "file-plus", "text": "New Project", "on_release": lambda: self.menu_action(self.new_project_popup)},
             {"leading_icon": "folder-open", "text": "Load Project", "on_release": lambda: self.menu_action(self.load_project_popup)},
             {"leading_icon": "content-save", "text": "Save Project", "on_release": lambda: self.menu_action(self.save_project)},
+            {"leading_icon": "file-import", "text": "Import MIDI file", "on_release": lambda: self.menu_action(self.import_midi_popup)},
             {"leading_icon": "content-save-edit", "text": "Save Project As...", "on_release": lambda: self.menu_action(self.save_project_as_popup)},
             {"leading_icon": "exit-to-app", "text": "Quit", "on_release": lambda: self.menu_action(lambda: self.process_command_ui('quit'))},
         ]
@@ -959,6 +960,19 @@ class SequencerLayout(BoxLayout):
         # Pour start_pos_input et end_pos_input
         # La gestion spécifique dépend de quel champ a changé
         pass
+
+    def import_midi_popup(self):
+        """Opens a file chooser to select a MIDI file to import."""
+        def file_chooser_callback(filepath):
+            if filepath:
+                self.process_command_ui(f'importmidi "{filepath}"')
+
+        popup = FileChooserPopup(
+            callback=file_chooser_callback,
+            title="Import MIDI File",
+            filters=['*.mid', '*.midi']
+        )
+        popup.open()
 
     def load_project_popup(self):
         def file_chooser_callback(filepath):

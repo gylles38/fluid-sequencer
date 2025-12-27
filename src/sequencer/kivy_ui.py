@@ -28,9 +28,11 @@ from kivy.properties import ObjectProperty
 from sequencer.ui_components.ConfirmationPopup import ConfirmationPopup
 from sequencer.ui_components.CustomTextInput import CustomTextInput
 from sequencer.ui_components.FileChooserPopup import FileChooserPopup
+from sequencer.ui_components.TrackSelectionPopup import TrackSelectionPopup
 from sequencer.ui_components.LoopPopup import LoopPopup
 from sequencer.ui_components.SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from sequencer.ui_components.SaveProjectAsPopup import SaveProjectAsPopup
+from sequencer.ui_components.SaveAsPopup import SaveAsPopup
 from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 from sequencer.ui_components.YesNoPopup import YesNoPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
@@ -90,6 +92,8 @@ class SequencerLayout(BoxLayout):
             {"leading_icon": "file-plus", "text": "New Project", "on_release": lambda: self.menu_action(self.new_project_popup)},
             {"leading_icon": "folder-open", "text": "Load Project", "on_release": lambda: self.menu_action(self.load_project_popup)},
             {"leading_icon": "content-save", "text": "Save Project", "on_release": lambda: self.menu_action(self.save_project)},
+            {"leading_icon": "file-import", "text": "Import MIDI file", "on_release": lambda: self.menu_action(self.import_midi_popup)},
+            {"leading_icon": "file-export", "text": "Export MIDI file...", "on_release": lambda: self.menu_action(self.export_midi_popup)},
             {"leading_icon": "content-save-edit", "text": "Save Project As...", "on_release": lambda: self.menu_action(self.save_project_as_popup)},
             {"leading_icon": "exit-to-app", "text": "Quit", "on_release": lambda: self.menu_action(lambda: self.process_command_ui('quit'))},
         ]
@@ -959,6 +963,48 @@ class SequencerLayout(BoxLayout):
         # Pour start_pos_input et end_pos_input
         # La gestion spécifique dépend de quel champ a changé
         pass
+
+    def import_midi_popup(self):
+        """Opens a file chooser to select a MIDI file to import."""
+        def file_chooser_callback(filepath):
+            if filepath:
+                self.process_command_ui(f'importmidi "{filepath}"')
+
+        popup = FileChooserPopup(
+            callback=file_chooser_callback,
+            title="Import MIDI File",
+            filters=['*.mid', '*.midi']
+        )
+        popup.open()
+
+    def export_midi_popup(self):
+        """Opens a popup to select tracks for MIDI export."""
+
+        def on_tracks_selected(selected_indices):
+            if not selected_indices:
+                self.show_info_popup("Info", "No tracks were selected for export.")
+                return
+
+            def on_save(filepath):
+                if filepath:
+                    # Convert list of indices to a space-separated string for the command
+                    indices_str = " ".join(map(str, selected_indices))
+                    self.process_command_ui(f'exportmidi "{filepath}" {indices_str}')
+
+            save_popup = SaveAsPopup(
+                callback=on_save,
+                title="Export MIDI As",
+                default_filename=f"{self.sequencer.song.name}.mid",
+                filters=['*.mid', '*.midi']
+            )
+            save_popup.open()
+
+        if not any(isinstance(t, MidiTrack) for t in self.sequencer.song.tracks):
+            self.show_info_popup("Info", "There are no MIDI tracks in the project to export.")
+            return
+
+        popup = TrackSelectionPopup(tracks=self.sequencer.song.tracks, callback=on_tracks_selected, sequencer_layout=self)
+        popup.open()
 
     def load_project_popup(self):
         def file_chooser_callback(filepath):

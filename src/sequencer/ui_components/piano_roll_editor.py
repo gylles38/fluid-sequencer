@@ -89,13 +89,47 @@ class EditableMidiGrid(PianoRoll):
             self.playback_rect.pos = self.playback_line.pos
             self.playback_rect.size = self.playback_line.size
 
-
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super(EditableMidiGrid, self).on_touch_move(touch)
 
         local_pos = self.to_local(*touch.pos)
+        
+        if self._drag_mode == 'move' and self._dragged_note:
+            # 1. Calcul de la position théorique de la note "maître"
+            new_x = local_pos[0] - self._drag_offset[0]
+            new_beat = new_x / self.pixels_per_beat
+            new_pitch = int(local_pos[1] / self.note_height)
 
+            # 2. Calcul du Delta (déplacement relatif par rapport au début du clic)
+            master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+            delta_beat = new_beat - master_data['original_start']
+            delta_pitch = new_pitch - master_data['original_pitch']
+
+            # --- SÉCURITÉ : Empêcher le temps négatif ---
+            # On trouve la note qui était la plus proche du début (temps 0) avant le début du drag
+            earliest_start = min(item['original_start'] for item in self._multi_drag_data)
+            
+            # Si le déplacement (delta_beat) pousse cette note avant 0, on limite le delta
+            if earliest_start + delta_beat < 0:
+                delta_beat = -earliest_start
+            # --------------------------------------------
+
+            # 3. Appliquer le delta (potentiellement bridé) à tout le groupe
+            for item in self._multi_drag_data:
+                target_note = item['note']
+                # target_new_beat ne sera plus jamais < 0 grâce au calcul ci-dessus
+                target_new_beat = item['original_start'] + delta_beat
+                
+                # On utilise max/min au lieu de clamp pour éviter le NameError
+                target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
+
+                self._move_note_logic(target_note, target_new_beat, target_new_pitch)
+
+            self.editor.is_dirty = True
+            self.draw()
+            return True
+        
         if self._drag_mode == 'select':
             if self._selection_rect:
                 self._selection_rect.size = (local_pos[0] - self._selection_start_pos[0], local_pos[1] - self._selection_start_pos[1])
@@ -177,6 +211,30 @@ class EditableMidiGrid(PianoRoll):
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
+    def _move_note_logic(self, note, new_beat, new_pitch):
+        track = self.editor.track_copy
+        
+        # 1. Trouver l'ancien événement et retirer la note
+        old_event = next((e for e in track.events if note in e.notes), None)
+        if old_event:
+            old_event.notes.remove(note)
+            if not old_event.notes:
+                track.events.remove(old_event)
+
+        # 2. Mettre à jour le pitch
+        note.pitch = int(new_pitch)
+
+        # 3. Trouver ou créer le nouvel événement au nouveau beat
+        # On arrondit légèrement pour éviter les problèmes de flottants
+        new_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
+        
+        if new_event:
+            new_event.notes.append(note)
+        else:
+            new_event = Event(start_time=new_beat, notes=[note])
+            track.events.append(new_event)
+            track.events.sort(key=lambda e: e.start_time)
+
     def _store_selection_states_if_needed(self, dragged_note):
         """If multiple notes are selected, store their initial states for group operations."""
         if len(self.editor.selected_notes) > 1 and dragged_note in self.editor.selected_notes:
@@ -252,6 +310,19 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = event
                         self._drag_mode = 'move'
                         self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+
+                        # --- AJOUT POUR LE MULTI-MOVE ---
+                        # On stocke la position de départ de TOUTES les notes sélectionnées
+                        self._multi_drag_data = []
+                        for ev in track.events:
+                            for n in ev.notes:
+                                if any(n is sn for sn in self.editor.selected_notes):
+                                    self._multi_drag_data.append({
+                                        'note': n,
+                                        'original_start': ev.start_time,
+                                        'original_pitch': n.pitch
+                                    })
+                        # -------------------------------
 
                         self._store_selection_states_if_needed(note)
                         
@@ -674,7 +745,7 @@ class PianoRollEditor(ModalView):
     selected_notes = ListProperty([])
     selected_event = ObjectProperty(None, allownone=True)
     history = ObjectProperty(None)
-    hovered_note = ObjectProperty(None, allownone=True)    
+    hovered_note = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kwargs):
         self.history = EditHistoryManager()
@@ -700,6 +771,7 @@ class PianoRollEditor(ModalView):
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)
         self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
+        self.clipboard_data = []        
 
     def _post_kv_init(self, dt):
         keyboard_sv = self.ids.keyboard_sv
@@ -799,6 +871,20 @@ class PianoRollEditor(ModalView):
             elif text == 'm':
                 self.set_edit_mode('move', self.mode_buttons['move'])
                 return True
+            
+            key_name = keycode[1] if isinstance(keycode, tuple) else text
+
+            if key_name == 'c':
+                self._copy_selection(is_cut=False)
+                return True
+            
+            elif key_name == 'x':
+                self._copy_selection(is_cut=True)
+                return True
+
+            elif key_name == 'v':
+                self._paste_selection()
+                return True            
 
         # --- Non-Modifier Shortcuts ---
         # Note: 'keyboard' argument is the integer keycode from Kivy
@@ -896,6 +982,93 @@ class PianoRollEditor(ModalView):
         self._update_undo_redo_buttons_state()
         self.is_dirty = True
 
+    def _copy_selection(self, is_cut=False):
+        """Copie les notes sélectionnées en calculant leur position relative."""
+        if not self.selected_notes:
+            return
+
+        self.clipboard_data = []
+        
+        # 1. On associe chaque note sélectionnée à son temps de départ
+        selected_with_times = []
+        for event in self.track_copy.events:
+            for note in event.notes:
+                # On utilise 'is' pour comparer l'instance exacte de la note
+                if any(note is sn for sn in self.selected_notes):
+                    selected_with_times.append((event.start_time, note))
+        
+        if not selected_with_times:
+            return
+
+        # 2. On trouve le temps de départ le plus tôt pour calculer les offsets
+        earliest_start = min(t for t, n in selected_with_times)
+
+        # 3. On remplit le presse-papier avec des données sérialisables
+        for start_time, note in selected_with_times:
+            self.clipboard_data.append({
+                'offset': start_time - earliest_start,
+                'pitch': note.pitch,
+                'velocity': note.velocity,
+                'duration': note.duration
+            })
+
+        if is_cut:
+            self._delete_selected_notes()
+            self._record_state()
+            self.ids.grid_viewer.grid.draw()
+
+    def _paste_selection(self):
+        """Colle les notes à la position de la tête de lecture."""
+        if not self.clipboard_data:
+            return
+
+        # Position cible : la tête de lecture (playhead)
+        target_beat = self.sequencer_layout.sequencer.current_beat
+        
+        new_selection = []
+        for item in self.clipboard_data:
+            paste_time = target_beat + item['offset']
+            new_note = Note(
+                pitch=item['pitch'], 
+                velocity=item['velocity'], 
+                duration=item['duration']
+            )
+            
+            # Trouver ou créer l'événement à ce temps
+            event = next((e for e in self.track_copy.events 
+                        if abs(e.start_time - paste_time) < 0.001), None)
+            
+            if event:
+                event.notes.append(new_note)
+            else:
+                new_event = Event(start_time=paste_time, notes=[new_note])
+                self.track_copy.events.append(new_event)
+            
+            new_selection.append(new_note)
+
+        # Optionnel : sélectionner les notes qui viennent d'être collées
+        self.selected_notes = new_selection
+        self.track_copy.events.sort(key=lambda e: e.start_time)
+        self.is_dirty = True
+        self._record_state()
+        self.ids.grid_viewer.grid.draw()
+
+    def _delete_selected_notes(self):
+        """Supprime proprement toutes les notes sélectionnées."""
+        if not self.selected_notes:
+            return
+            
+        for event in list(self.track_copy.events):
+            for note in list(event.notes):
+                if any(note is sn for sn in self.selected_notes):
+                    event.notes.remove(note)
+            
+            if not event.notes and not event.cc_messages:
+                self.track_copy.events.remove(event)
+        
+        self.selected_notes = []
+        self.is_dirty = True
+        
     def _update_undo_redo_buttons_state(self):
         """Enables/disables the undo/redo buttons based on history."""
         self.ids.undo_button.disabled = not self.history.can_undo()

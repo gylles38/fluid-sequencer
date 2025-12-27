@@ -243,6 +243,21 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 return True, "Load cancelled."
         else:
             return True, "Usage: loadproject <basename>"
+    elif command == "importmidi":
+        if len(args) == 1:
+            return True, seq.import_midi_file(filepath=args[0])
+        else:
+            return True, "Usage: importmidi <filepath>"
+    elif command == "exportmidi":
+        if len(args) >= 2:
+            filepath = args[0]
+            try:
+                track_indices = [int(i) for i in args[1:]]
+                return True, seq.export_midi_tracks(track_indices, filepath)
+            except ValueError:
+                return True, "Error: Track indices must be numbers."
+        else:
+            return True, "Usage: exportmidi <filepath> <track_index1> [track_index2] ..."
     elif command == "newproject":
         if len(args) == 1:
             project_name = args[0]

@@ -18,9 +18,8 @@ class VerifyZoomApp(MDApp):
         return self.layout
 
     def setup_and_run_test(self, dt):
-        """Directly load the project and trigger UI updates."""
+        """Directly load the project and then poll for UI updates."""
         print("Loading project programmatically...")
-        # 1. Load project directly into the sequencer object
         result = self.layout.sequencer.load_project("verification_project")
         print(f"Load result: {result}")
 
@@ -29,26 +28,32 @@ class VerifyZoomApp(MDApp):
             self.stop()
             return
 
-        # 2. Manually trigger the UI update that populates track_widgets
         print("Manually triggering UI update...")
         self.layout.update_status_display()
 
-        # 3. Schedule the check for the widget to allow the UI to draw
-        Clock.schedule_once(self.check_widget_and_open_editor, 0.5)
+        # Start polling to check when the track widget appears
+        self.start_time = time.time()
+        Clock.schedule_once(self.wait_for_track_widget, 0.2)
 
-    def check_widget_and_open_editor(self, dt):
-        """Check if widgets are populated, then open the editor."""
-        if not self.layout.track_widgets:
-            print("Error: Track widgets not found after manual UI update.")
+    def wait_for_track_widget(self, dt):
+        """Polls the UI to see if the track widgets have been created."""
+        if time.time() - self.start_time > 10.0: # 10 second timeout
+            print("Error: Timed out waiting for track widgets to appear.")
             self.stop()
             return
 
-        print("Track widget found. Opening editor.")
+        if self.layout.track_widgets:
+            print("Track widget found. Opening editor.")
+            self.open_editor()
+        else:
+            print("Waiting for track widget...")
+            Clock.schedule_once(self.wait_for_track_widget, 0.2)
+
+    def open_editor(self, *args):
         track = self.layout.sequencer.song.tracks[0]
         self.editor = PianoRollEditor(sequencer_layout=self.layout, track=track)
         self.editor.open()
         Clock.schedule_once(self.test_zoom, 1)
-
 
     def test_zoom(self, dt):
         print("Testing zoom...")
@@ -68,20 +73,17 @@ class VerifyZoomApp(MDApp):
         # Kivy often saves as screenshot0001.png, so we find and rename it
         found_file = None
         base_name, ext = os.path.splitext(screenshot_path)
-        for i in range(10): # Check for a few possible suffixes
+        for i in range(10):
             suffixed_name = f"{base_name}{i:04d}{ext}"
             if os.path.exists(suffixed_name):
                 os.rename(suffixed_name, screenshot_path)
                 found_file = screenshot_path
                 break
 
-        if found_file:
-             print(f"Screenshot saved to {screenshot_path}")
-        elif os.path.exists(screenshot_path):
+        if found_file or os.path.exists(screenshot_path):
              print(f"Screenshot saved to {screenshot_path}")
         else:
              print("Error: Screenshot not found.")
-
         self.stop()
 
 if __name__ == '__main__':

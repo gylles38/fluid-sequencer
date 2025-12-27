@@ -485,7 +485,7 @@ class EditablePianoRollViewer(ScrollView):
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
-        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
+        self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height, size_hint_x=None)
         self.grid.editor = self.editor # Pass the editor instance to the grid
         self.add_widget(self.grid)
 
@@ -496,12 +496,21 @@ class EditablePianoRollViewer(ScrollView):
             return True
         return super(EditablePianoRollViewer, self).on_touch_move(touch)
 
+    def _update_grid_width(self, *args):
+        new_width = self.total_beats * self.pixels_per_beat
+        self.width = new_width
+        if hasattr(self, 'grid'):
+            self.grid.width = new_width
+
     def on_editor(self, i, v): self.grid.editor = v
     def on_track(self, i, v): self.grid.track = v
-    def on_total_beats(self, i, v): self.grid.total_beats = v
+    def on_total_beats(self, i, v):
+        self.grid.total_beats = v
+        self._update_grid_width()
     def on_pixels_per_beat(self, instance, value):
         if hasattr(self, 'grid'):
             self.grid.pixels_per_beat = value
+        self._update_grid_width()
     def on_note_height(self, i, v): self.grid.note_height = v
 
 

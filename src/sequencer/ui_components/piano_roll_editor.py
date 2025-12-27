@@ -14,6 +14,7 @@ from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.core.window import Window
 import copy
+import math
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
@@ -899,7 +900,29 @@ class PianoRollEditor(ModalView):
 
             # --- Raccourci End (Aller à la fin) ---
             if keyboard == 279:
-                new_beat = self.total_beats  # Aller à la dernière mesure complète
+                beats_per_measure = self.sequencer_layout.sequencer.song.time_signature_numerator
+                if beats_per_measure == 0:
+                    new_beat = 0
+                else:
+                    # Find the actual last beat of a note in the track
+                    max_beat = 0.0
+                    for event in self.track_copy.events:
+                        if event.notes:
+                            event_end_beat = event.start_time + max(n.duration for n in event.notes)
+                            if event_end_beat > max_beat:
+                                max_beat = event_end_beat
+
+                    # If there are no notes, just go to the start of the last visible measure
+                    if max_beat == 0.0:
+                        new_beat = self.total_beats - beats_per_measure
+                    else:
+                        # Calculate the measure containing the last note
+                        # Subtract a tiny epsilon to handle notes ending exactly on a measure line
+                        last_measure_index = math.floor((max_beat - 0.0001) / beats_per_measure)
+                        new_beat = last_measure_index * beats_per_measure
+
+                if new_beat < 0:
+                    new_beat = 0
 
             # 1. Positionner la tête de lecture et mettre a jour la position du sequenceur
             self.sequencer_layout.sequencer.current_beat = new_beat

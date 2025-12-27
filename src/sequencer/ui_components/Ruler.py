@@ -129,6 +129,12 @@ class Ruler(BoxLayout):
         if hasattr(self, 'ruler_content'):
             self.ruler_content.sequencer_layout = value
 
+    def on_pixels_per_beat(self, *args):
+        self.redraw()
+
+    def on_total_beats(self, *args):
+        self.redraw()
+
     def redraw(self, *args):
         self.ruler_content.width = self.total_beats * self.pixels_per_beat
         self.ruler_content.redraw(*args)

@@ -488,7 +488,6 @@ class EditablePianoRollViewer(ScrollView):
         self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
         self.grid.editor = self.editor # Pass the editor instance to the grid
         self.add_widget(self.grid)
-        self.grid.bind(width=self.setter('width'))
 
     def on_touch_move(self, touch):
         # If the grid has grabbed the touch for a note drag/resize operation,
@@ -500,7 +499,9 @@ class EditablePianoRollViewer(ScrollView):
     def on_editor(self, i, v): self.grid.editor = v
     def on_track(self, i, v): self.grid.track = v
     def on_total_beats(self, i, v): self.grid.total_beats = v
-    def on_pixels_per_beat(self, i, v): self.grid.pixels_per_beat = v
+    def on_pixels_per_beat(self, instance, value):
+        if hasattr(self, 'grid'):
+            self.grid.pixels_per_beat = value
     def on_note_height(self, i, v): self.grid.note_height = v
 
 
@@ -615,6 +616,25 @@ Builder.load_string("""
                 tooltip_text: "Dotted Note (Toggle)"
                 theme_bg_color: "Custom"
                 on_press: root.toggle_dotted_mode()
+
+            MDDivider:
+                orientation: 'vertical'
+
+            TooltipMDIconButton:
+                id: zoom_in_button
+                icon: 'magnify-plus-outline'
+                tooltip_text: "Zoom In"
+                on_press: root.zoom_in()
+            TooltipMDIconButton:
+                id: zoom_out_button
+                icon: 'magnify-minus-outline'
+                tooltip_text: "Zoom Out"
+                on_press: root.zoom_out()
+            TooltipMDIconButton:
+                id: zoom_reset_button
+                icon: 'magnify-close'
+                tooltip_text: "Reset Zoom"
+                on_press: root.reset_zoom()
 
             Widget:
                 size_hint_x: 1
@@ -884,7 +904,15 @@ class PianoRollEditor(ModalView):
 
             elif key_name == 'v':
                 self._paste_selection()
-                return True            
+                return True
+
+            # Numpad Add/Subtract for Zoom
+            if keycode[1] == 'numpadadd' or text == '+':
+                self.zoom_in()
+                return True
+            if keycode[1] == 'numpadsubtract' or text == '-':
+                self.zoom_out()
+                return True
 
         # --- Non-Modifier Shortcuts ---
         # Note: 'keyboard' argument is the integer keycode from Kivy
@@ -1314,6 +1342,73 @@ class PianoRollEditor(ModalView):
     def stop_pressed(self, *args): self.sequencer_layout.sequencer.process_transport_command("stop")
     def record_pressed(self, *args): self.sequencer_layout.sequencer.process_transport_command("record")
     def rewind_pressed(self, *args): self.sequencer_layout.sequencer._resync_all_at_beat(0)
+
+    def zoom_in(self, *args):
+        self.zoom(1.2)
+
+    def zoom_out(self, *args):
+        self.zoom(0.8)
+
+    def reset_zoom(self, *args):
+        """Resets the zoom level to the default value."""
+        default_zoom = dp(100)
+        current_zoom = self.pixels_per_beat
+        if abs(current_zoom - default_zoom) < 0.1: # Floating point comparison
+            return
+
+        factor = default_zoom / current_zoom
+        self.zoom(factor)
+
+    def zoom(self, factor):
+        """Zooms the timeline view in or out, keeping the center of the view constant."""
+        # 1. Get references
+        scroll_view = self.ids.timeline_scroll
+        grid = self.ids.grid_viewer.grid
+        timeline_width = grid.width
+        viewport_width = scroll_view.width
+
+        if self.pixels_per_beat == 0: return
+
+        # If content is smaller than view, just change zoom and redraw
+        if timeline_width <= viewport_width:
+            self.pixels_per_beat = max(dp(10), self.pixels_per_beat * factor)
+            return
+
+        # 2. Calculate beat at the center of the view
+        current_scroll_pixels = scroll_view.scroll_x * (timeline_width - viewport_width)
+        center_pixel_pos = current_scroll_pixels + (viewport_width / 2)
+        center_beat = center_pixel_pos / self.pixels_per_beat
+
+        # 3. Apply the new zoom level
+        new_pixels_per_beat = max(dp(10), self.pixels_per_beat * factor)
+        self.pixels_per_beat = new_pixels_per_beat
+
+        # 4. Recenter the view
+        Clock.schedule_once(lambda dt: self._recenter_on_zoom(center_beat), 0)
+
+    def _recenter_on_zoom(self, center_beat):
+        """Callback to adjust scroll after zoom has been applied and widgets resized."""
+        scroll_view = self.ids.timeline_scroll
+        grid = self.ids.grid_viewer.grid
+        new_timeline_width = grid.width
+        viewport_width = scroll_view.width
+
+        if new_timeline_width <= viewport_width:
+            self.sync_horizontal_scroll(scroll_view, 0)
+            return
+
+        # Calculate the new pixel position of the center beat
+        new_center_pixel_pos = center_beat * self.pixels_per_beat
+        # Calculate the required scroll in pixels to place this at the center
+        new_scroll_pixels = new_center_pixel_pos - (viewport_width / 2)
+        # Clamp the value
+        max_scroll_pixels = new_timeline_width - viewport_width
+        new_scroll_pixels = max(0, min(new_scroll_pixels, max_scroll_pixels))
+
+        # Normalize and set the scroll_x
+        if max_scroll_pixels > 0:
+            final_scroll_x = new_scroll_pixels / max_scroll_pixels
+            self.sync_horizontal_scroll(scroll_view, final_scroll_x)
 
     def on_playback_state_change(self, instance, state):
         play_button, record_button = self.ids.play_button, self.ids.record_button

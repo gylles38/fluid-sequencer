@@ -1,3 +1,4 @@
+from turtle import position
 from kivy.uix.modalview import ModalView
 from kivy.lang import Builder
 from kivy.app import App
@@ -117,14 +118,17 @@ class EditableMidiGrid(PianoRoll):
 
             # 3. Appliquer le delta (potentiellement bridé) à tout le groupe
             for item in self._multi_drag_data:
-                target_note = item['note']
+                #target_note = item['note']
                 # target_new_beat ne sera plus jamais < 0 grâce au calcul ci-dessus
                 target_new_beat = item['original_start'] + delta_beat
-                
                 # On utilise max/min au lieu de clamp pour éviter le NameError
                 target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
 
-                self._move_note_logic(target_note, target_new_beat, target_new_pitch)
+                # On passe l'item['parent_event'] pour être sûr de supprimer la note du bon endroit
+                self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
+                # TRÈS IMPORTANT : Une fois la note déplacée, son parent_event a changé (il est devenu le nouvel Event)
+                # Si on ne met pas à jour parent_event, au prochain mouvement de souris, il cherchera dans l'ancien.
+                item['parent_event'] = next(e for e in self.editor.track_copy.events if item['note'] in e.notes)                
 
             self.editor.is_dirty = True
             self.draw()
@@ -211,25 +215,22 @@ class EditableMidiGrid(PianoRoll):
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
-    def _move_note_logic(self, note, new_beat, new_pitch):
+    def _move_note_logic(self, note, new_beat, new_pitch, source_event):
         track = self.editor.track_copy
         
-        # 1. Trouver l'ancien événement et retirer la note
-        old_event = next((e for e in track.events if note in e.notes), None)
-        if old_event:
-            old_event.notes.remove(note)
-            if not old_event.notes:
-                track.events.remove(old_event)
+        # 1. On ne cherche plus dans toute la track, on utilise la source directe
+        if source_event and note in source_event.notes:
+            source_event.notes.remove(note)
+            if not source_event.notes:
+                track.events.remove(source_event)
 
-        # 2. Mettre à jour le pitch
+        # 2. Mise à jour du pitch et placement dans le nouvel Event
         note.pitch = int(new_pitch)
-
-        # 3. Trouver ou créer le nouvel événement au nouveau beat
-        # On arrondit légèrement pour éviter les problèmes de flottants
         new_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
         
         if new_event:
-            new_event.notes.append(note)
+            if note not in new_event.notes:
+                new_event.notes.append(note)
         else:
             new_event = Event(start_time=new_beat, notes=[note])
             track.events.append(new_event)
@@ -319,10 +320,10 @@ class EditableMidiGrid(PianoRoll):
                                 if any(n is sn for sn in self.editor.selected_notes):
                                     self._multi_drag_data.append({
                                         'note': n,
+                                        'parent_event': ev,  # On mémorise l'événement actuel !
                                         'original_start': ev.start_time,
                                         'original_pitch': n.pitch
                                     })
-                        # -------------------------------
 
                         self._store_selection_states_if_needed(note)
                         
@@ -616,6 +617,44 @@ Builder.load_string("""
                 theme_bg_color: "Custom"
                 on_press: root.toggle_dotted_mode()
 
+            MDDivider:
+                orientation: "vertical"
+                adaptive_height: False
+                height: dp(30)
+                pos_hint: {"center_y": .5}
+                
+            # --- Boutons de Zoom (À insérer après duration_1_16) ---
+            MDBoxLayout:
+                adaptive_width: True
+                spacing: dp(4)
+                
+                TooltipMDIconButton:
+                    icon: "magnify-plus"
+                    tooltip_text: "Zoom In"
+                    on_release: root.zoom_in()
+                
+                TooltipMDIconButton:
+                    icon: "magnify-minus"
+                    tooltip_text: "Zoom Out"
+                    on_release: root.zoom_out()
+                
+                TooltipMDIconButton:
+                    icon: "magnify-remove-outline"
+                    tooltip_text: "Reset Zoom"
+                    on_release: root.zoom_reset()
+
+            MDDivider:
+                orientation: "vertical"
+                adaptive_height: False
+                height: dp(30)
+                pos_hint: {"center_y": .5}
+            
+            # --- Boutons de Transport (Existant) ---
+            MDIconButton:
+                id: play_pause_btn
+                # ... suite du code ...
+
+
             Widget:
                 size_hint_x: 1
 
@@ -853,7 +892,30 @@ class PianoRollEditor(ModalView):
                     # Enregistrement pour le Undo/Redo
                     self._record_state()
                 return True
+  
+        if keyboard in (278, 279):  # Home, End
+            # --- Raccourci Home (Retour au début) par défaut --- 
+            new_beat = 0
+
+            # --- Raccourci End (Aller à la fin) ---
+            if keyboard == 279:
+                new_beat = self.total_beats  # Aller à la dernière mesure complète
+
+            # 1. Positionner la tête de lecture et mettre a jour la position du sequenceur
+            self.sequencer_layout.sequencer.current_beat = new_beat
+            # 2. Forcer le scroll du ScrollView à 0 (gauche)
+            #self.ids.timeline_scroll.scroll_x = new_beat
+            # 3. Rafraîchir l'affichage
+            self.ids.grid_viewer.grid.draw()
+            self.sequencer_layout.sequencer.ui_start_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(new_beat)
+            self.sequencer_layout.sequencer._resync_all_at_beat(new_beat)
             
+            return True
+      
+        # --- Barre d'espace (Play/Pause) ---
+        if keyboard == 32:  # 32 est le code pour l'espace
+            return True
+                    
         # --- Modifier Shortcuts (Ctrl) ---
         if 'ctrl' in modifiers:
             if text == 'z':
@@ -886,6 +948,10 @@ class PianoRollEditor(ModalView):
                 self._paste_selection()
                 return True            
 
+            elif key_name == 'a':
+                self._select_all_notes()
+                return True 
+            
         # --- Non-Modifier Shortcuts ---
         # Note: 'keyboard' argument is the integer keycode from Kivy
 
@@ -941,6 +1007,18 @@ class PianoRollEditor(ModalView):
                     new_scroll_pixels = max(0, min(new_scroll_pixels, max_scroll_pixels))
                     grid_viewer.scroll_y = new_scroll_pixels / max_scroll_pixels
                 return True
+
+        # On vérifie aussi 'backspace' (8) qui est souvent utilisé pour supprimer
+        if keyboard in (127, 8):
+            if self.selected_notes:
+                self._delete_selected_notes()
+                # On enregistre l'état pour le Undo
+                self._record_state()
+                # On redessine la grille
+                #if hasattr(self.ids.ruler, 'redraw'):
+                #    self.ids.ruler.redraw()
+                self.ids.grid_viewer.grid.draw()                
+                return True # Indique que l'événement a été géré
 
         return False
 
@@ -1053,6 +1131,17 @@ class PianoRollEditor(ModalView):
         self._record_state()
         self.ids.grid_viewer.grid.draw()
 
+    def _select_all_notes(self):
+        """Sélectionne toutes les notes présentes dans la piste actuelle."""
+        all_notes = []
+        for event in self.track_copy.events:
+            for note in event.notes:
+                all_notes.append(note)
+        
+        if all_notes:
+            self.selected_notes = all_notes
+            self.ids.grid_viewer.grid.draw()
+     
     def _delete_selected_notes(self):
         """Supprime proprement toutes les notes sélectionnées."""
         if not self.selected_notes:
@@ -1407,3 +1496,57 @@ class PianoRollEditor(ModalView):
         max_scroll = (128 * self.note_height) - grid_viewer.height
         if max_scroll > 0:
             grid_viewer.scroll_y = max(0.0, min(1.0, ((60 * self.note_height) - (self.height / 2)) / max_scroll))
+
+    def zoom_in(self):
+        self._apply_zoom(self.pixels_per_beat * 1.25)
+
+    def zoom_out(self):
+        # On limite le dézoom pour ne pas avoir une grille minuscule
+        new_zoom = max(dp(20), self.pixels_per_beat / 1.25)
+        self._apply_zoom(new_zoom)
+
+    def zoom_reset(self):
+        self._apply_zoom(dp(100))
+
+    def _apply_zoom(self, new_pixels_per_beat):
+        """Applique le zoom en tentant de conserver le centre de la vue."""
+        scroll_view = self.ids.timeline_scroll
+        
+        # 1. Calculer le beat qui est actuellement au centre de l'écran
+        # Largeur totale actuelle
+        old_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+        
+        # Position du centre en pixels
+        center_pixel = (scroll_view.scroll_x * (old_total_width - viewport_width)) + (viewport_width / 2)
+        center_beat = center_pixel / self.pixels_per_beat
+
+        # 2. Appliquer le nouveau zoom
+        self.pixels_per_beat = new_pixels_per_beat
+        
+        # 3. Recalculer le scroll_x pour que le center_beat reste au centre
+        # On doit attendre que Kivy mette à jour le layout au prochain frame
+        Clock.schedule_once(lambda dt: self._update_scroll_after_zoom(center_beat), 0)
+
+    def _update_scroll_after_zoom(self, target_beat):
+        scroll_view = self.ids.timeline_scroll
+        new_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+        
+        if new_total_width <= viewport_width:
+            scroll_view.scroll_x = 0
+            return
+
+        # Nouvelle position du beat cible en pixels
+        new_center_pixel = target_beat * self.pixels_per_beat
+        new_scroll_pixels = new_center_pixel - (viewport_width / 2)
+        
+        # Normalisation du scroll_x (entre 0 et 1)
+        max_scroll = new_total_width - viewport_width
+        self.ids.timeline_scroll.scroll_x = max(0, min(1, new_scroll_pixels / max_scroll))
+        
+        # Forcer le redessin de la règle et de la grille
+        if hasattr(self.ids.ruler, 'redraw'):
+            self.ids.ruler.redraw()
+        
+        self.ids.grid_viewer.grid.draw()

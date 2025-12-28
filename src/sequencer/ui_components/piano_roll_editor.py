@@ -98,42 +98,30 @@ class EditableMidiGrid(PianoRoll):
         local_pos = self.to_local(*touch.pos)
         
         if self._drag_mode == 'move' and self._dragged_note:
-            # 1. Calcul de la position théorique de la note "maître"
             new_x = local_pos[0] - self._drag_offset[0]
             new_beat = new_x / self.pixels_per_beat
             new_pitch = int(local_pos[1] / self.note_height)
 
-            # 2. Calcul du Delta (déplacement relatif par rapport au début du clic)
             master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
             delta_beat = new_beat - master_data['original_start']
             delta_pitch = new_pitch - master_data['original_pitch']
 
-            # --- SÉCURITÉ : Empêcher le temps négatif ---
-            # On trouve la note qui était la plus proche du début (temps 0) avant le début du drag
             earliest_start = min(item['original_start'] for item in self._multi_drag_data)
-            
-            # Si le déplacement (delta_beat) pousse cette note avant 0, on limite le delta
             if earliest_start + delta_beat < 0:
                 delta_beat = -earliest_start
-            # --------------------------------------------
 
-            # 3. Appliquer le delta (potentiellement bridé) à tout le groupe
             for item in self._multi_drag_data:
-                #target_note = item['note']
-                # target_new_beat ne sera plus jamais < 0 grâce au calcul ci-dessus
                 target_new_beat = item['original_start'] + delta_beat
-                # On utilise max/min au lieu de clamp pour éviter le NameError
-                target_new_pitch: int = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
+                target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
 
-                # On passe l'item['parent_event'] pour être sûr de supprimer la note du bon endroit
-                self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
-                # TRÈS IMPORTANT : Une fois la note déplacée, son parent_event a changé (il est devenu le nouvel Event)
-                # Si on ne met pas à jour parent_event, au prochain mouvement de souris, il cherchera dans l'ancien.
-                item['parent_event'] = next(e for e in self.editor.track_copy.events if item['note'] in e.notes)                
+                # MODIFICATION ICI : On récupère le nouvel événement parent
+                # et on utilise l'identité 'is' pour être certain de ne pas se tromper de note
+                new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
+                item['parent_event'] = new_parent               
 
             self.editor.is_dirty = True
             self.draw()
-            return True
+            return True 
         
         if self._drag_mode == 'select':
             if self._selection_rect:
@@ -216,26 +204,32 @@ class EditableMidiGrid(PianoRoll):
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
-    def _move_note_logic(self, note, new_beat, new_pitch, source_event) -> None:
+    def _move_note_logic(self, note, new_beat, new_pitch, source_event):
         track = self.editor.track_copy
         
-        # 1. On ne cherche plus dans toute la track, on utilise la source directe
+        # 1. Retrait par identité stricte
         if source_event and note in source_event.notes:
-            source_event.notes.remove(note)
-            if not source_event.notes:
-                track.events.remove(source_event)
+            source_event.notes = [n for n in source_event.notes if n is not note]
+            if not source_event.notes and not source_event.cc_messages:
+                if source_event in track.events:
+                    track.events.remove(source_event)
 
-        # 2. Mise à jour du pitch et placement dans le nouvel Event
+        # 2. Mise à jour des propriétés
         note.pitch = int(new_pitch)
-        new_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
         
-        if new_event:
-            if note not in new_event.notes:
-                new_event.notes.append(note)
+        # 3. Placement et récupération du nouvel Event
+        target_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
+        
+        if target_event:
+            # On vérifie si CETTE instance n'y est pas déjà
+            if not any(n is note for n in target_event.notes):
+                target_event.notes.append(note)
+            return target_event
         else:
             new_event = Event(start_time=new_beat, notes=[note])
             track.events.append(new_event)
             track.events.sort(key=lambda e: e.start_time)
+            return new_event
 
     def _store_selection_states_if_needed(self, dragged_note) -> None:
         """If multiple notes are selected, store their initial states for group operations."""
@@ -477,24 +471,21 @@ class EditableMidiGrid(PianoRoll):
         self.editor.is_dirty = True
 
     def _move_note_to_new_time(self, note, original_event, new_start_time) -> None:
-        """Helper to move a note from its original event to an event at the new start time."""
-        # Retirer la note de l'événement d'origine
-        if note in original_event.notes:
-            original_event.notes.remove(note)
-            # Si l'événement d'origine est vide, le supprimer
+        # Retirer la note de l'événement d'origine par identité
+        if original_event and note in original_event.notes:
+            original_event.notes = [n for n in original_event.notes if n is not note]
             if not original_event.notes and not original_event.cc_messages:
                 if original_event in self.editor.track_copy.events:
                     self.editor.track_copy.events.remove(original_event)
 
-        # Trouver ou créer un événement à la nouvelle position
         target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_time) < 0.001), None)
         if target_event:
-            if note not in target_event.notes:
+            # CORRECTION : Empêcher l'ajout si l'instance est déjà là
+            if not any(n is note for n in target_event.notes):
                 target_event.notes.append(note)
         else:
             new_event = Event(start_time=new_start_time, notes=[note])
             self.editor.track_copy.add_event(new_event)
-
 
 class EditablePianoRollViewer(ScrollView):
     editor = ObjectProperty()
@@ -1182,7 +1173,7 @@ class PianoRollEditor(ModalView):
             self.ids.grid_viewer.grid.draw()
 
     def _paste_selection(self) -> None:
-        """Colle les notes à la position de la tête de lecture."""
+        """Colle les notes à la position de la tête de lecture sans doublons."""
         if not self.clipboard_data:
             return
 
@@ -1192,30 +1183,42 @@ class PianoRollEditor(ModalView):
         new_selection = []
         for item in self.clipboard_data:
             paste_time = target_beat + item['offset']
-            new_note = Note(
-                pitch=item['pitch'], 
-                velocity=item['velocity'], 
-                duration=item['duration']
-            )
+            new_pitch = item['pitch']
             
-            # Trouver ou créer l'événement à ce temps
+            # 1. Trouver ou créer l'événement à ce temps
             event = next((e for e in self.track_copy.events 
                         if abs(e.start_time - paste_time) < 0.001), None)
             
             if event:
+                # VERIFICATION : Si une note de même pitch existe déjà ici, 
+                # on ne la colle pas (ou on peut choisir de la remplacer)
+                if any(n.pitch == new_pitch for n in event.notes):
+                    continue  # Saute cette note pour éviter le doublon
+                
+                new_note = Note(
+                    pitch=new_pitch, 
+                    velocity=item['velocity'], 
+                    duration=item['duration']
+                )
                 event.notes.append(new_note)
             else:
+                new_note = Note(
+                    pitch=new_pitch, 
+                    velocity=item['velocity'], 
+                    duration=item['duration']
+                )
                 new_event = Event(start_time=paste_time, notes=[new_note])
                 self.track_copy.events.append(new_event)
             
             new_selection.append(new_note)
 
-        # Optionnel : sélectionner les notes qui viennent d'être collées
-        self.selected_notes = new_selection
-        self.track_copy.events.sort(key=lambda e: e.start_time)
-        self.is_dirty = True
-        self._record_state()
-        self.ids.grid_viewer.grid.draw()
+        # 2. Mettre à jour la sélection
+        if new_selection:
+            self.selected_notes = new_selection
+            self.track_copy.events.sort(key=lambda e: e.start_time)
+            self.is_dirty = True
+            self._record_state()
+            self.ids.grid_viewer.grid.draw()
 
     def _select_all_notes(self) -> None:
         """Sélectionne toutes les notes présentes dans la piste actuelle."""

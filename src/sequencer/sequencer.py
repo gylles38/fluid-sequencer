@@ -2358,6 +2358,11 @@ class Sequencer(EventDispatcher):
             self.is_dirty = False
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
+
+            # --- Restart Jack Manager to apply new project settings ---
+            self.jack_manager.stop()
+            self.jack_manager.start()
+
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:
             return f"Error: Project file not found at '{project_filepath}'"
@@ -2375,6 +2380,11 @@ class Sequencer(EventDispatcher):
         self.last_project_basename = None
         self.is_dirty = False
         self.invalidate_song_length_cache()
+
+        # --- Restart Jack Manager for the new empty project ---
+        self.jack_manager.stop()
+        self.jack_manager.start()
+
         print("New project created.")
 
     def list_tracks(self) -> str:

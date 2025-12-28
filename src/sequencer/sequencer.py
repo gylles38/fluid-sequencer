@@ -122,6 +122,17 @@ class JackManager:
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
 
+    def open_midi_port(self, name: str):
+        if name in self.open_ports:
+            return
+        vp = next((p for p in self.sequencer.virtual_ports if p.name == name), None)
+        if vp:
+            self.open_ports[name] = vp
+        else:
+            try:
+                self.open_ports[name] = mido.open_output(name)
+            except Exception as e:
+                print(f"Could not open MIDI port '{name}': {e}")
         # --- Dynamic Audio Correction ---
         self.CORRECTION_GAIN = 0.02
         self.CORRECTION_THRESHOLD = 0.03 # 30ms
@@ -292,14 +303,7 @@ class JackManager:
                     required_ports.add(self.sequencer.song.metronome_port_name)
 
                 for name in required_ports:
-                    vp = next((p for p in self.sequencer.virtual_ports if p.name == name), None)
-                    if vp:
-                        self.open_ports[name] = vp
-                    else:
-                        try:
-                            self.open_ports[name] = mido.open_output(name)
-                        except Exception as e:
-                            print(f"Could not open MIDI port '{name}': {e}")
+                    self.open_midi_port(name)
 
                 # --- Audio Track Setup ---
                 with self.process_lock:
@@ -1838,6 +1842,9 @@ class Sequencer(EventDispatcher):
             return "Error: Port assignment is currently only supported for MIDI tracks."
         track.output_port_name = port_name
         self.is_dirty = True
+        if self.jack_manager.is_running:
+            self.jack_manager.open_midi_port(port_name)
+
         return f"Assigned port '{port_name}' to track '{track.name}'."
 
     def unassign_port(self, track_index: int) -> str:

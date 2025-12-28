@@ -20,6 +20,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 from collections import deque
 import copy
+import mido
 
 
 class EditHistoryManager:
@@ -265,6 +266,28 @@ class EditableMidiGrid(PianoRoll):
 
         edit_mode = self.editor.edit_mode
         track = self.editor.track_copy
+
+        # --- Note Preview Logic ---
+        note_to_preview = None
+        if edit_mode in ('insert', 'move'):
+            # Find if there's a note at the clicked position
+            for event in reversed(track.events):
+                for note in reversed(event.notes):
+                    note_x = event.start_time * self.pixels_per_beat
+                    note_y = note.pitch * self.note_height
+                    note_width = note.duration * self.pixels_per_beat
+
+                    if note_x <= local_pos[0] <= note_x + note_width and \
+                       note_y <= local_pos[1] <= note_y + self.note_height:
+                        note_to_preview = note
+                        break
+                if note_to_preview:
+                    break
+
+            velocity = note_to_preview.velocity if note_to_preview else 100
+            duration_in_seconds = (60.0 / self.editor.sequencer_layout.sequencer.song.tempo) * self.editor.note_duration
+            self.editor._preview_note(clicked_pitch, velocity, duration_in_seconds)
+
 
         if edit_mode == 'move':
             for event in reversed(track.events):
@@ -810,7 +833,7 @@ class PianoRollEditor(ModalView):
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)
         self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
-        self.clipboard_data = []        
+        self.clipboard_data = []
 
     def _post_kv_init(self, dt) -> None:
         keyboard_sv = self.ids.keyboard_sv
@@ -1613,3 +1636,25 @@ class PianoRollEditor(ModalView):
             self.ids.ruler.redraw()
         
         self.ids.grid_viewer.grid.draw()
+
+    def _preview_note(self, pitch, velocity, duration) -> None:
+        """Plays a single note through the sequencer's MIDI output for preview."""
+        sequencer = self.sequencer_layout.sequencer
+        if not sequencer or not sequencer.jack_manager.is_running:
+            return
+
+        port_name = self.track_copy.output_port_name
+        if not port_name or port_name not in sequencer.jack_manager.open_ports:
+            return
+
+        port = sequencer.jack_manager.open_ports[port_name]
+        channel = self.track_copy.channel
+
+        try:
+            note_on_msg = mido.Message('note_on', channel=channel, note=pitch, velocity=velocity)
+            note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=velocity)
+
+            port.send(note_on_msg)
+            Clock.schedule_once(lambda dt: port.send(note_off_msg), duration)
+        except Exception as e:
+            print(f"Error sending preview note: {e}")

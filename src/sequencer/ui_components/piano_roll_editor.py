@@ -812,7 +812,6 @@ class PianoRollEditor(ModalView):
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
         super(PianoRollEditor, self).__init__(**kwargs)
-        self._preview_port = None
         self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
             name=self.track.name,
@@ -831,35 +830,6 @@ class PianoRollEditor(ModalView):
             is_metronome=self.track.is_metronome
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
-
-        # --- Preview Port Logic ---
-        sequencer = self.sequencer_layout.sequencer
-        if not sequencer.jack_manager.is_running:
-            port_opened = False
-            port_name = self.track_copy.output_port_name
-            if port_name:
-                try:
-                    # Check if the assigned port is a real, available output port
-                    if port_name in mido.get_output_names():
-                        self._preview_port = mido.open_output(port_name)
-                        print(f"Editor opened temporary preview port for '{port_name}'")
-                        port_opened = True
-                    else:
-                        # Port is assigned but not available (likely a virtual port), so fallback.
-                        print(f"Track port '{port_name}' not available. Will use fallback.")
-                except Exception:
-                    # This can happen if there's an issue even opening an existing port.
-                    pass
-
-            # If no port was assigned, or if the assigned port wasn't available, create a fallback.
-            if not port_opened:
-                try:
-                    fallback_port_name = 'EditorPreviewPort'
-                    self._preview_port = mido.open_output(name=fallback_port_name, virtual=True)
-                    print(f"Editor opened temporary virtual preview port: '{fallback_port_name}'. Connect your synth to this port to hear previews.")
-                except Exception as e:
-                    print(f"Editor could not create a virtual preview port: {e}")
-
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)
         self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
@@ -1410,14 +1380,6 @@ class PianoRollEditor(ModalView):
         Window.unbind(on_key_down=self._on_key_down)
         Window.unbind(mouse_pos=self._on_mouse_pos)
 
-        # --- Close dedicated preview port if it was opened ---
-        if self._preview_port:
-            try:
-                self._preview_port.close()
-                print(f"Editor closed temporary preview port.")
-            except Exception as e:
-                print(f"Error closing editor preview port: {e}")
-
         # Reset the cursor to default one last time to be safe
         Window.set_system_cursor('arrow')
 
@@ -1676,23 +1638,18 @@ class PianoRollEditor(ModalView):
         self.ids.grid_viewer.grid.draw()
 
     def _preview_note(self, pitch, velocity, duration) -> None:
-        """Plays a single note for preview, using a dedicated port or the main sequencer's."""
-        port = None
+        """Plays a single note through the sequencer's MIDI output for preview."""
         sequencer = self.sequencer_layout.sequencer
+        if not sequencer or not sequencer.jack_manager.is_running:
+            return
 
-        # Case 1: Editor has its own temporary port because the sequencer is stopped.
-        if self._preview_port:
-            port = self._preview_port
-        # Case 2: Sequencer is running, use its ports.
-        elif sequencer and sequencer.jack_manager.is_running:
-            port_name = self.track_copy.output_port_name
-            if port_name and port_name in sequencer.jack_manager.open_ports:
-                port = sequencer.jack_manager.open_ports[port_name]
+        port_name = self.track_copy.output_port_name
+        if not port_name or port_name not in sequencer.jack_manager.open_ports:
+            return
 
-        if not port:
-            return # No available port to send the preview note
-
+        port = sequencer.jack_manager.open_ports[port_name]
         channel = self.track_copy.channel
+
         try:
             note_on_msg = mido.Message('note_on', channel=channel, note=pitch, velocity=velocity)
             note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=velocity)

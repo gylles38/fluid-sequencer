@@ -1949,7 +1949,11 @@ class SequencerApp(MDApp):
     def build(self):
         self.theme_cls.theme_style = "Dark"
         self.theme_cls.primary_palette = "Blue"
-        return SequencerLayout()
+        layout = SequencerLayout()
+        # Start the Jack manager as soon as the app is built to ensure ports are available.
+        # We schedule it to avoid blocking the main UI thread during startup.
+        Clock.schedule_once(lambda dt: layout.sequencer.jack_manager.start(), 0.1)
+        return layout
 
     def on_stop(self):
         layout = self.root

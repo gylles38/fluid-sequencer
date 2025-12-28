@@ -835,13 +835,13 @@ class PianoRollEditor(ModalView):
         # --- Preview Port Logic ---
         sequencer = self.sequencer_layout.sequencer
         if not sequencer.jack_manager.is_running:
-            port_name = self.track_copy.output_port_name
-            if port_name:
-                try:
-                    self._preview_port = mido.open_output(port_name)
-                    print(f"Editor opened temporary preview port: {port_name}")
-                except Exception as e:
-                    print(f"Editor could not open preview port '{port_name}': {e}")
+            try:
+                # Create a temporary virtual port for previews when the main engine is off
+                port_name = 'EditorPreviewPort'
+                self._preview_port = mido.open_output(name=port_name, virtual=True)
+                print(f"Editor opened temporary virtual preview port: '{port_name}'. Connect your synth to this port to hear previews.")
+            except Exception as e:
+                print(f"Editor could not create a virtual preview port: {e}")
 
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)

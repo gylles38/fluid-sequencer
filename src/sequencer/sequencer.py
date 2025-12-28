@@ -122,17 +122,6 @@ class JackManager:
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
 
-    def open_midi_port(self, name: str):
-        if name in self.open_ports:
-            return
-        vp = next((p for p in self.sequencer.virtual_ports if p.name == name), None)
-        if vp:
-            self.open_ports[name] = vp
-        else:
-            try:
-                self.open_ports[name] = mido.open_output(name)
-            except Exception as e:
-                print(f"Could not open MIDI port '{name}': {e}")
         # --- Dynamic Audio Correction ---
         self.CORRECTION_GAIN = 0.02
         self.CORRECTION_THRESHOLD = 0.03 # 30ms
@@ -1833,6 +1822,18 @@ class Sequencer(EventDispatcher):
         if clamped_note_count > 0:
             message += f" {clamped_note_count} note(s) were clamped to the valid MIDI pitch range (0-127)."
         return {"status": "success", "message": message}
+
+    def open_midi_port(self, name: str):
+        if name in self.open_ports:
+            return
+        vp = next((p for p in self.sequencer.virtual_ports if p.name == name), None)
+        if vp:
+            self.open_ports[name] = vp
+        else:
+            try:
+                self.open_ports[name] = mido.open_output(name)
+            except Exception as e:
+                print(f"Could not open MIDI port '{name}': {e}")
 
     def assign_port(self, track_index: int, port_name: str) -> str:
         if not 0 <= track_index < len(self.song.tracks):

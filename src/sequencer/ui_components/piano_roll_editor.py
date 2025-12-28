@@ -812,6 +812,7 @@ class PianoRollEditor(ModalView):
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
         super(PianoRollEditor, self).__init__(**kwargs)
+        self._preview_port = None
         self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
             name=self.track.name,
@@ -830,10 +831,22 @@ class PianoRollEditor(ModalView):
             is_metronome=self.track.is_metronome
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
+
+        # --- Preview Port Logic ---
+        sequencer = self.sequencer_layout.sequencer
+        if not sequencer.jack_manager.is_running:
+            port_name = self.track_copy.output_port_name
+            if port_name:
+                try:
+                    self._preview_port = mido.open_output(port_name)
+                    print(f"Editor opened temporary preview port: {port_name}")
+                except Exception as e:
+                    print(f"Editor could not open preview port '{port_name}': {e}")
+
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
         Clock.schedule_once(self._post_kv_init)
         self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
-        self.clipboard_data = []        
+        self.clipboard_data = []
 
     def _post_kv_init(self, dt) -> None:
         keyboard_sv = self.ids.keyboard_sv
@@ -1380,6 +1393,14 @@ class PianoRollEditor(ModalView):
         Window.unbind(on_key_down=self._on_key_down)
         Window.unbind(mouse_pos=self._on_mouse_pos)
 
+        # --- Close dedicated preview port if it was opened ---
+        if self._preview_port:
+            try:
+                self._preview_port.close()
+                print(f"Editor closed temporary preview port.")
+            except Exception as e:
+                print(f"Error closing editor preview port: {e}")
+
         # Reset the cursor to default one last time to be safe
         Window.set_system_cursor('arrow')
 
@@ -1638,18 +1659,23 @@ class PianoRollEditor(ModalView):
         self.ids.grid_viewer.grid.draw()
 
     def _preview_note(self, pitch, velocity, duration) -> None:
-        """Plays a single note through the sequencer's MIDI output for preview."""
+        """Plays a single note for preview, using a dedicated port or the main sequencer's."""
+        port = None
         sequencer = self.sequencer_layout.sequencer
-        if not sequencer or not sequencer.jack_manager.is_running:
-            return
 
-        port_name = self.track_copy.output_port_name
-        if not port_name or port_name not in sequencer.jack_manager.open_ports:
-            return
+        # Case 1: Editor has its own temporary port because the sequencer is stopped.
+        if self._preview_port:
+            port = self._preview_port
+        # Case 2: Sequencer is running, use its ports.
+        elif sequencer and sequencer.jack_manager.is_running:
+            port_name = self.track_copy.output_port_name
+            if port_name and port_name in sequencer.jack_manager.open_ports:
+                port = sequencer.jack_manager.open_ports[port_name]
 
-        port = sequencer.jack_manager.open_ports[port_name]
+        if not port:
+            return # No available port to send the preview note
+
         channel = self.track_copy.channel
-
         try:
             note_on_msg = mido.Message('note_on', channel=channel, note=pitch, velocity=velocity)
             note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=velocity)

@@ -836,19 +836,22 @@ class PianoRollEditor(ModalView):
         sequencer = self.sequencer_layout.sequencer
         if not sequencer.jack_manager.is_running:
             port_opened = False
-            # First, try to open the track's assigned port if it exists
             port_name = self.track_copy.output_port_name
             if port_name:
                 try:
-                    self._preview_port = mido.open_output(port_name)
-                    print(f"Editor opened temporary preview port for '{port_name}'")
-                    port_opened = True
+                    # Check if the assigned port is a real, available output port
+                    if port_name in mido.get_output_names():
+                        self._preview_port = mido.open_output(port_name)
+                        print(f"Editor opened temporary preview port for '{port_name}'")
+                        port_opened = True
+                    else:
+                        # Port is assigned but not available (likely a virtual port), so fallback.
+                        print(f"Track port '{port_name}' not available. Will use fallback.")
                 except Exception:
-                    # This can happen if the port is virtual and not yet created by the main app.
-                    # Fallback to creating our own virtual port.
+                    # This can happen if there's an issue even opening an existing port.
                     pass
 
-            # If no port was assigned, or if opening it failed, create a fallback virtual port.
+            # If no port was assigned, or if the assigned port wasn't available, create a fallback.
             if not port_opened:
                 try:
                     fallback_port_name = 'EditorPreviewPort'

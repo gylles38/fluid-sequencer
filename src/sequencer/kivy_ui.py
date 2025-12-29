@@ -243,6 +243,7 @@ class SequencerLayout(BoxLayout):
             field_type='tempo',
             callback=self.handle_textinput_arrows
         )
+        self.tempo_input.bind(on_text_validate=self.on_tempo_validate)
         transport_card.add_widget(self.tempo_input)
                 
         self.timesig_label = Label(
@@ -1522,7 +1523,8 @@ class SequencerLayout(BoxLayout):
     def on_tempo_validate(self, instance=None):
         """Valide le tempo saisi"""
         try:
-            tempo = int(self.tempo_input.text)
+            # First, parse as a float to handle inputs like "120.0"
+            tempo = int(float(self.tempo_input.text))
             if 1 <= tempo <= 300:
                 self.process_command_ui(f'tempo {tempo}')
             else:

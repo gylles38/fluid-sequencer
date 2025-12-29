@@ -51,6 +51,22 @@ class ActiveAudioProcess:
 
 class CustomSongEncoder(json.JSONEncoder):
     def default(self, o):
+        if isinstance(o, Song):
+            return {
+                '__type__': 'Song',
+                'name': o.name,
+                'tempo': o.tempo,
+                'time_signature_numerator': o.time_signature_numerator,
+                'time_signature_denominator': o.time_signature_denominator,
+                'ticks_per_beat': o.ticks_per_beat,
+                'sync_offset_sec': o.sync_offset_sec,
+                'tracks': o.tracks,
+                'midi_mappings': o.midi_mappings,
+                'metronome_enabled': o.metronome_enabled,
+                'metronome_port_name': o.metronome_port_name,
+                'metronome_volume': o.metronome_volume,
+                'metronome_pan': o.metronome_pan,
+            }
         if isinstance(o, MidiTrack):
             return {
                 '__type__': 'MidiTrack',
@@ -92,7 +108,15 @@ class CustomSongEncoder(json.JSONEncoder):
 def song_decoder(d):
     if '__type__' in d:
         type_name = d.pop('__type__')
-        cls = getattr(sys.modules[__name__], type_name, None)
+        cls = None
+        # Check current module (sequencer.sequencer)
+        if __name__ in sys.modules:
+            cls = getattr(sys.modules[__name__], type_name, None)
+
+        # Fallback to models module if not found in current
+        if not cls and 'sequencer.models' in sys.modules:
+            cls = getattr(sys.modules['sequencer.models'], type_name, None)
+
         if cls:
             return cls(**d)
     return d

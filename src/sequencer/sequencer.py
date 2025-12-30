@@ -1052,7 +1052,7 @@ class Sequencer(EventDispatcher):
 
         # New properties to hold the start/end positions from the UI
         self.ui_start_pos_str = "1:1"
-        self.ui_end_pos_str = ""
+        self.ui_end_pos_str = StringProperty("")
 
         self.pause_beat = 0.0
         self.rewind_beat = 0.0

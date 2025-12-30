@@ -708,6 +708,7 @@ Builder.load_string("""
             pixels_per_beat: root.pixels_per_beat
             total_beats: root.total_beats
             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
+            end_pos_str: root.end_pos_str
             size_hint_y: None
             height: dp(30)
             keyboard_width: -dp(138)
@@ -794,6 +795,7 @@ class PianoRollEditor(ModalView):
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     _update_event = None
+    end_pos_str = StringProperty('')
     selected_note = ObjectProperty(None, allownone=True) # Will be deprecated in favor of selected_notes
     selected_notes = ListProperty([])
     selected_event = ObjectProperty(None, allownone=True)
@@ -822,6 +824,11 @@ class PianoRollEditor(ModalView):
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
+
+        # Bind the editor's end_pos_str to the main sequencer's property
+        self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self.setter('end_pos_str'))
+
         Clock.schedule_once(self._post_kv_init)
         self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
         self.clipboard_data = []

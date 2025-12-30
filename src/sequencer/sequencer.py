@@ -146,24 +146,6 @@ class JackManager:
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
 
-    def open_midi_port(self, port_name: str):
-        if port_name in self.open_ports:
-            return
-        try:
-            self.open_ports[port_name] = mido.open_output(port_name)
-            print(f"Successfully opened MIDI port '{port_name}' in JackManager.")
-        except Exception as e:
-            print(f"Could not open MIDI port '{port_name}' in JackManager: {e}")
-
-    def close_midi_port(self, port_name: str):
-        if port_name in self.open_ports:
-            try:
-                self.open_ports[port_name].close()
-                del self.open_ports[port_name]
-                print(f"Successfully closed MIDI port '{port_name}' in JackManager.")
-            except Exception as e:
-                print(f"Error closing MIDI port '{port_name}' in JackManager: {e}")
-
         # --- Dynamic Audio Correction ---
         self.CORRECTION_GAIN = 0.02
         self.CORRECTION_THRESHOLD = 0.03 # 30ms
@@ -171,6 +153,39 @@ class JackManager:
         self._correction_stop_event = threading.Event()
         self.last_applied_speeds = {}
 
+    def open_midi_port(self, port_name: str):
+        """Opens a MIDI port if it's not already open."""
+        if port_name in self.open_ports and not self.open_ports[port_name].closed:
+            return  # Port is already open
+
+        vp = next((p for p in self.sequencer.virtual_ports if p.name == port_name), None)
+        if vp:
+            self.open_ports[port_name] = vp
+        else:
+            try:
+                self.open_ports[port_name] = mido.open_output(port_name)
+                print(f"Successfully opened MIDI port '{port_name}'")
+            except Exception as e:
+                print(f"Could not open MIDI port '{port_name}': {e}")
+
+    def close_midi_port(self, port_name: str):
+        """Closes a MIDI port if it's open and not used by other tracks."""
+        # First, check if any other track is still using this port
+        for track in self.sequencer.song.tracks:
+            if isinstance(track, MidiTrack) and track.output_port_name == port_name:
+                return  # Port is still in use, do not close
+
+        if port_name in self.open_ports:
+            port = self.open_ports[port_name]
+            # Don't close virtual ports managed elsewhere
+            if not port.closed and port not in self.sequencer.virtual_ports:
+                try:
+                    port.close()
+                    print(f"Successfully closed MIDI port '{port_name}'")
+                except Exception as e:
+                    print(f"Error closing MIDI port '{port_name}': {e}")
+            # Remove from the dictionary regardless
+            del self.open_ports[port_name]
 
     def _audio_correction_loop(self):
         """

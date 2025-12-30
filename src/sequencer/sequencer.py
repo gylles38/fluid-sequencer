@@ -1032,6 +1032,7 @@ class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
     last_beat_update_time = NumericProperty(0)
     playback_state = StringProperty("stopped")
+    ui_end_pos_str = StringProperty("")
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
@@ -1052,7 +1053,7 @@ class Sequencer(EventDispatcher):
 
         # New properties to hold the start/end positions from the UI
         self.ui_start_pos_str = "1:1"
-        self.ui_end_pos_str = StringProperty("")
+        self.ui_end_pos_str = ""
 
         self.pause_beat = 0.0
         self.rewind_beat = 0.0

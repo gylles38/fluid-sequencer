@@ -1328,6 +1328,15 @@ class PianoRollEditor(ModalView):
         if not all([grid_viewer, piano_keyboard, status_label]):
             return
 
+        # --- Performance Optimization ---
+        # Disable heavy hover calculations during playback
+        if self.sequencer_layout.sequencer.playback_state in ('playing', 'recording'):
+            # Reset to a clean state and exit
+            Window.set_system_cursor('arrow')
+            piano_keyboard.highlighted_note = -1
+            status_label.text = ""
+            return
+
         # 1. On récupère la position relative au contenu de la grille
         # grid_viewer.grid est le PianoRoll qui contient les notes
         grid_content = grid_viewer.grid

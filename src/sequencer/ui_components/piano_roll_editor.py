@@ -102,7 +102,14 @@ class EditableMidiGrid(PianoRoll):
             new_beat = new_x / self.pixels_per_beat
             new_pitch = int(local_pos[1] / self.note_height)
 
-            master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+            try:
+                master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+            except (StopIteration, AttributeError):
+                print("Error: Drag data desynchronized. Cancelling drag.")
+                touch.ungrab(self)
+                self._dragged_note = None
+                self._drag_mode = None
+                return True
             delta_beat = new_beat - master_data['original_start']
             delta_pitch = new_pitch - master_data['original_pitch']
 
@@ -411,6 +418,9 @@ class EditableMidiGrid(PianoRoll):
             self.editor._record_state()
 
         if self._dragged_note:
+            if hasattr(self, '_multi_drag_data'):
+                self._multi_drag_data.clear()
+
             if self._selection_initial_states:
                 self._apply_multi_selection_changes()
                 self._selection_initial_states = None

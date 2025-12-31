@@ -1,4 +1,5 @@
 from . import *  # Importe tous les imports communs
+import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout

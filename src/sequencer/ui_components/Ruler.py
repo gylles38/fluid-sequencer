@@ -8,19 +8,23 @@ from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle, Line
 from sequencer.models import MidiTrack
 
+from kivy.properties import StringProperty
+
+
 class RulerContent(Widget):
     sequencer_layout = ObjectProperty(None)
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
     label_padding_x = NumericProperty(dp(4))
+    end_pos_str = StringProperty('')
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         with self.canvas.before:
             Color(0.18, 0.18, 0.18, 1)
             self.bg_rect = Rectangle(pos=self.pos, size=self.size)
-        self.bind(pos=self._update_bg, size=self._update_bg)
+        self.bind(pos=self._update_bg, size=self._update_bg, end_pos_str=self.redraw)
 
     def _update_bg(self, *args):
         self.bg_rect.pos = self.pos
@@ -37,11 +41,20 @@ class RulerContent(Widget):
         num_measures = math.ceil(self.total_beats / self.beats_per_measure)
 
         with self.canvas.after:
+            # --- Draw Measure Lines ---
             for i in range(1, num_measures + 2):
                 beat_pos = (i - 1) * self.beats_per_measure
                 x_pos = beat_pos * pixels_per_beat
                 Color(0.4, 0.4, 0.4, 1)
                 Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1)
+
+            # --- Draw End Position Marker ---
+            if self.sequencer_layout and self.end_pos_str:
+                end_beat = self.sequencer_layout.sequencer.parse_position_to_beats(self.end_pos_str)
+                if end_beat is not None:
+                    x_pos = end_beat * pixels_per_beat
+                    Color(0.2, 0.5, 0.8, 1)  # A distinct blue color
+                    Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=dp(1.5))
 
         for i in range(1, num_measures + 2):
             beat_pos = (i - 1) * self.beats_per_measure
@@ -68,14 +81,16 @@ class RulerContent(Widget):
             local_x, _ = self.to_local(*touch.pos)
             clicked_beat = local_x / self.pixels_per_beat
 
-            # Only seek if the sequencer is stopped
             if self.sequencer_layout.sequencer.playback_state == 'stopped':
-                self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
-
-                # --- NEW: Update the UI start position as well ---
-                new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
-                self.sequencer_layout.sequencer.ui_start_pos_str = new_pos_str
-                self.sequencer_layout.start_pos_input.text = new_pos_str
+                if touch.button == 'left':
+                    self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
+                    new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
+                    self.sequencer_layout.sequencer.ui_start_pos_str = new_pos_str
+                    self.sequencer_layout.start_pos_input.text = new_pos_str
+                elif touch.button == 'right':
+                    new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
+                    self.sequencer_layout.sequencer.ui_end_pos_str = new_pos_str
+                    self.sequencer_layout.end_pos_input.text = new_pos_str
 
             return True
         return super().on_touch_down(touch)
@@ -92,6 +107,7 @@ class Ruler(BoxLayout):
     spacing = NumericProperty(dp(12))
     padding = ListProperty([dp(12), dp(6), dp(12), dp(6)])
     label_padding_x = NumericProperty(dp(4))
+    end_pos_str = StringProperty('')
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -108,6 +124,7 @@ class Ruler(BoxLayout):
             pixels_per_beat=self.pixels_per_beat,
             total_beats=self.total_beats,
             beats_per_measure=self.beats_per_measure,
+            end_pos_str=self.end_pos_str,
             size_hint=(None, 1)
         )
         self.scroll_view.add_widget(self.ruler_content)
@@ -124,6 +141,7 @@ class Ruler(BoxLayout):
         self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))
         self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))
         self.bind(label_padding_x=lambda i,v: setattr(self.ruler_content, 'label_padding_x', v))
+        self.bind(end_pos_str=lambda i, v: setattr(self.ruler_content, 'end_pos_str', v))
 
     def on_sequencer_layout(self, instance, value):
         if hasattr(self, 'ruler_content'):

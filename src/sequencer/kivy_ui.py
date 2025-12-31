@@ -521,6 +521,7 @@ class SequencerLayout(BoxLayout):
             height=dp(30), # Increased height for better visibility
             pixels_per_beat=self.pixels_per_beat,
         )
+        self.sequencer.bind(ui_end_pos_str=lambda instance, value: setattr(self.ruler, 'end_pos_str', value))
         track_area_card.add_widget(self.ruler)
 
         # Conteneur pour la liste des pistes avec défilement

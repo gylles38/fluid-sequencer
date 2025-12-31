@@ -102,7 +102,14 @@ class EditableMidiGrid(PianoRoll):
             new_beat = new_x / self.pixels_per_beat
             new_pitch = int(local_pos[1] / self.note_height)
 
-            master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+            try:
+                master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+            except (StopIteration, AttributeError):
+                print("Error: Drag data desynchronized. Cancelling drag.")
+                touch.ungrab(self)
+                self._dragged_note = None
+                self._drag_mode = None
+                return True
             delta_beat = new_beat - master_data['original_start']
             delta_pitch = new_pitch - master_data['original_pitch']
 
@@ -411,6 +418,9 @@ class EditableMidiGrid(PianoRoll):
             self.editor._record_state()
 
         if self._dragged_note:
+            if hasattr(self, '_multi_drag_data'):
+                self._multi_drag_data.clear()
+
             if self._selection_initial_states:
                 self._apply_multi_selection_changes()
                 self._selection_initial_states = None
@@ -708,6 +718,7 @@ Builder.load_string("""
             pixels_per_beat: root.pixels_per_beat
             total_beats: root.total_beats
             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
+            end_pos_str: root.end_pos_str
             size_hint_y: None
             height: dp(30)
             keyboard_width: -dp(138)
@@ -794,6 +805,7 @@ class PianoRollEditor(ModalView):
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     _update_event = None
+    end_pos_str = StringProperty('')
     selected_note = ObjectProperty(None, allownone=True) # Will be deprecated in favor of selected_notes
     selected_notes = ListProperty([])
     selected_event = ObjectProperty(None, allownone=True)
@@ -822,6 +834,11 @@ class PianoRollEditor(ModalView):
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
+
+        # Bind the editor's end_pos_str to the main sequencer's property
+        self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self.setter('end_pos_str'))
+
         Clock.schedule_once(self._post_kv_init)
         self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
         self.clipboard_data = []
@@ -1309,6 +1326,15 @@ class PianoRollEditor(ModalView):
         status_label = self.ids.get('status_label')
 
         if not all([grid_viewer, piano_keyboard, status_label]):
+            return
+
+        # --- Performance Optimization ---
+        # Disable heavy hover calculations during playback
+        if self.sequencer_layout.sequencer.playback_state in ('playing', 'recording'):
+            # Reset to a clean state and exit
+            Window.set_system_cursor('arrow')
+            piano_keyboard.highlighted_note = -1
+            status_label.text = ""
             return
 
         # 1. On récupère la position relative au contenu de la grille

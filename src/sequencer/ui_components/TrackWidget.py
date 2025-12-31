@@ -113,22 +113,33 @@ class TrackWidget(BoxLayout):
         )
 
         if isinstance(track, MidiTrack):
-            channel_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            # Channel and Program Spinners on top
+            top_controls = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
             channel_label = Label(text='Ch:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
-            channel_container.add_widget(channel_label)
+            top_controls.add_widget(channel_label)
             channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change)
-            channel_container.add_widget(channel_spinner)
+            top_controls.add_widget(channel_spinner)
 
-            program_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
             program_label = Label(text='Prg:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
-            program_container.add_widget(program_label)
+            top_controls.add_widget(program_label)
             program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change)
-            program_container.add_widget(program_spinner)
+            top_controls.add_widget(program_spinner)
 
-            midi_controls_layout.add_widget(Widget()) # Top spacer
-            midi_controls_layout.add_widget(channel_container)
-            midi_controls_layout.add_widget(program_container)
-            midi_controls_layout.add_widget(Widget()) # Bottom spacer
+            # Port Selector Button below
+            port_name = track.output_port_name if track.output_port_name else "None"
+            self.port_button_text = MDButtonText(text=f"Port: {port_name}")
+            self.port_selector_button = MDButton(
+                self.port_button_text,
+                on_press=self.select_midi_port_popup,
+                style="outlined",
+                size_hint_y=None,
+                height=dp(32)
+            )
+
+            midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Top spacer
+            midi_controls_layout.add_widget(top_controls)
+            midi_controls_layout.add_widget(self.port_selector_button)
+            midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
         else:
             midi_controls_layout.add_widget(Widget())
             
@@ -517,3 +528,34 @@ class TrackWidget(BoxLayout):
 
             editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
             editor.open()
+
+    def select_midi_port_popup(self, instance):
+        """Opens a popup to select a MIDI output port for the track."""
+        available_ports = mido.get_output_names()
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        scroll_view = ScrollView()
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
+        grid.bind(minimum_height=grid.setter('height'))
+
+        popup = Popup(
+            title="Select MIDI Output Port",
+            content=content,
+            size_hint=(0.5, 0.7)
+        )
+
+        def select_port(port_name):
+            command = f'assign {self.track_index} "{port_name}"'
+            self.sequencer_layout.process_command_ui(command)
+            self.port_button_text.text = f"Port: {port_name}"
+            popup.dismiss()
+
+        for port in available_ports:
+            btn = MDButton(MDButtonText(text=port), size_hint_y=None, height=dp(40))
+            btn.bind(on_release=lambda x, p=port: select_port(p))
+            grid.add_widget(btn)
+
+        scroll_view.add_widget(grid)
+        content.add_widget(scroll_view)
+
+        popup.open()

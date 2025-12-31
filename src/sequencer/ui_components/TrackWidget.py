@@ -127,9 +127,8 @@ class TrackWidget(BoxLayout):
 
             # Port Selector Button below
             port_name = track.output_port_name if track.output_port_name else "None"
-            self.port_button_text = MDButtonText(text=f"Port: {port_name}")
-            self.port_selector_button = MDButton(
-                self.port_button_text,
+            self.port_selector_button = MDTextButton(
+                text=f"Port: {port_name}",
                 on_press=self.select_midi_port_popup,
                 style="outlined",
                 size_hint_y=None,
@@ -547,11 +546,11 @@ class TrackWidget(BoxLayout):
         def select_port(port_name):
             command = f'assign {self.track_index} "{port_name}"'
             self.sequencer_layout.process_command_ui(command)
-            self.port_button_text.text = f"Port: {port_name}"
+            self.port_selector_button.text = f"Port: {port_name}"
             popup.dismiss()
 
         for port in available_ports:
-            btn = MDButton(MDButtonText(text=port), size_hint_y=None, height=dp(40))
+            btn = MDTextButton(text=port, size_hint_y=None, height=dp(40))
             btn.bind(on_release=lambda x, p=port: select_port(p))
             grid.add_widget(btn)
 

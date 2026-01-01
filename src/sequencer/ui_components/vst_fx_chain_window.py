@@ -28,7 +28,8 @@ Builder.load_string("""
         MDLabel:
             id: track_label
             halign: 'center'
-            font_style: 'H6'
+            bold: True
+            font_size: '20sp'
             size_hint_y: None
             height: self.texture_size[1]
 

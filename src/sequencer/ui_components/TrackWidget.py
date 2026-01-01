@@ -143,6 +143,18 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(top_controls)
             midi_controls_layout.add_widget(self.port_selector_button)
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
+        elif isinstance(track, AudioTrack):
+            # --- FX Button for Audio Tracks ---
+            self.fx_button = TooltipMDIconButton(
+                icon='grain', # An icon that represents effects/processing
+                tooltip_text='Manage VST Effects',
+                on_press=self.open_fx_popup,
+                pos_hint={'center_y': 0.5},
+                theme_icon_color="Custom",
+                icon_color=[0.4, 0.8, 1, 1],
+                md_bg_color=[0.1, 0.1, 0.1, 0.8]
+            )
+            midi_controls_layout.add_widget(self.fx_button)
         else:
             midi_controls_layout.add_widget(Widget())
             
@@ -564,3 +576,14 @@ class TrackWidget(BoxLayout):
         content.add_widget(scroll_view)
 
         popup.open()
+
+    def open_fx_popup(self, instance):
+        """Opens the VST effects management window for the current audio track."""
+        if isinstance(self.track, AudioTrack):
+            sequencer = self.sequencer_layout.sequencer
+            editor = VstFxChainWindow(
+                track=self.track,
+                sequencer=sequencer,
+                track_index=self.track_index
+            )
+            editor.open()

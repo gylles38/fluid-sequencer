@@ -2,8 +2,9 @@ from .midi_export import export_to_midi
 from .midi_import import import_song
 from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
-from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
+from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping, VSTPlugin
 from .config import MidiConfig
+from .vst_audio_processor import VSTAudioProcessor
 from .terminal_input import cancellable_input, UserInputCancelled
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
@@ -98,6 +99,7 @@ class CustomSongEncoder(json.JSONEncoder):
                 'channels': o.channels,
                 'native_tempo': o.native_tempo,
                 'duration_beats': o.duration_beats,
+                'plugins': o.plugins,
             }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
@@ -118,6 +120,8 @@ def song_decoder(d):
             cls = getattr(sys.modules['sequencer.models'], type_name, None)
 
         if cls:
+            if type_name == 'VSTPlugin':
+                return VSTPlugin(**d)
             return cls(**d)
     return d
 
@@ -649,12 +653,14 @@ class JackManager:
         if sys.platform != "win32" and os.path.exists(socket_path):
             os.unlink(socket_path)
 
+        filepath_to_play = self.sequencer.vst_audio_processor.process_track(track_index)
+
         command = shlex.split(self.sequencer.audio_player_command)
         command.extend([
             f"--input-ipc-server={socket_path}",
             "--pause",
-        "--loop-file=inf", # Loop the file to prevent mpv from exiting
-            track.filepath
+            "--loop-file=inf", # Loop the file to prevent mpv from exiting
+            filepath_to_play
         ])
 
         kwargs = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL}
@@ -691,6 +697,7 @@ class JackManager:
                 except Exception as e:
                     print(f"Error removing socket file {ap.socket_path}: {e}", file=sys.stderr)
             self.active_audio_processes.clear()
+        self.sequencer.vst_audio_processor.clear_cache()
 
     def _seek_audio_process_synchronously(self, ap: ActiveAudioProcess, target_time_sec: float, timeout=2.0):
         """Envoie une commande de recherche (seek) à un processus mpv et attend sa finalisation de manière robuste."""
@@ -1040,6 +1047,7 @@ class Sequencer(EventDispatcher):
         self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
         self.midi_config = MidiConfig("config/midi_mappings.json")
+        self.vst_audio_processor = VSTAudioProcessor(self)
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()

@@ -93,6 +93,13 @@ class MidiTrack(BaseTrack, EventDispatcher):
 # Note: This class inherits from EventDispatcher to support Kivy's property-binding
 # system. This allows the UI to automatically react to changes in track properties like 'volume'.
 # The @dataclass decorator was removed as it is not compatible with this pattern.
+@dataclass
+class VSTPlugin:
+    """Represents a VST plugin instance with its parameters."""
+    path: str
+    parameters: dict = field(default_factory=dict)
+
+
 class AudioTrack(BaseTrack, EventDispatcher):
     """Represents an audio track, which is a single audio file."""
     volume = NumericProperty(0.5)
@@ -101,7 +108,7 @@ class AudioTrack(BaseTrack, EventDispatcher):
     def __init__(self, name: str, filepath: str, is_muted: bool = False, is_solo: bool = False,
                  start_time: float = 0.0, volume: float = 0.5, pan: float = 0.0,
                  channels: int = 0, native_tempo: Optional[float] = None,
-                 duration_beats: Optional[float] = None, **kwargs):
+                 duration_beats: Optional[float] = None, plugins: List[VSTPlugin] = None, **kwargs):
         BaseTrack.__init__(self, name=name)
         EventDispatcher.__init__(self, **kwargs)
         self.filepath = filepath
@@ -113,10 +120,11 @@ class AudioTrack(BaseTrack, EventDispatcher):
         self.channels = channels
         self.native_tempo = native_tempo
         self.duration_beats = duration_beats
+        self.plugins = plugins if plugins is not None else []
 
     def __repr__(self):
         return (f"AudioTrack(name='{self.name}', filepath='{self.filepath}', "
-                f"volume={self.volume}, pan={self.pan})")
+                f"volume={self.volume}, pan={self.pan}, plugins={len(self.plugins)})")
 
 @dataclass
 class AutomationPoint:

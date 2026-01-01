@@ -71,3 +71,20 @@ class VSTAudioProcessor:
                 except OSError:
                     pass
         self.processed_audio_cache.clear()
+
+    def get_plugin_parameters(self, plugin_path: str) -> dict:
+        """
+        Loads a VST3 plugin and returns a dictionary of its parameters and their default values.
+        """
+        try:
+            vst = VST3Plugin(plugin_path)
+            params = {name: getattr(vst, name) for name in dir(vst) if not name.startswith('_')}
+            # Filter out non-parameter attributes
+            valid_params = {}
+            for name, value in params.items():
+                if isinstance(value, (int, float)):
+                    valid_params[name] = value
+            return valid_params
+        except Exception as e:
+            print(f"Error reading parameters for plugin {plugin_path}: {e}")
+            return {}

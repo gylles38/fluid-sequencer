@@ -8,6 +8,7 @@ from kivy.properties import ObjectProperty, StringProperty
 from kivy.lang import Builder
 from kivymd.uix.button import MDButton
 from kivymd.uix.label import MDLabel
+from kivymd.uix.slider import MDSlider
 from kivymd.uix.card import MDCard
 from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText, MDListItemTrailingIcon
 from kivy.uix.filechooser import FileChooserListView
@@ -16,7 +17,6 @@ import os
 
 Builder.load_string("""
 <VstFxChainWindow>:
-    title: f"FX Chain - {root.track.name}"
     size_hint: 0.6, 0.8
     auto_dismiss: False
 
@@ -26,32 +26,51 @@ Builder.load_string("""
         spacing: dp(10)
 
         MDLabel:
-            text: f"Track: {root.track.name}"
+            id: track_label
             halign: 'center'
             font_style: 'H6'
             size_hint_y: None
             height: self.texture_size[1]
 
-        ScrollView:
-            id: scroll_view
-            size_hint_y: 1
-            MDGridLayout:
-                id: plugin_list
-                cols: 1
-                size_hint_y: None
-                adaptive_height: True
-                spacing: dp(5)
-
         BoxLayout:
-            size_hint_y: None
-            height: dp(48)
+            orientation: 'horizontal'
             spacing: dp(10)
-            MDButton:
-                text: "Add Plugin"
-                on_press: root.open_file_chooser()
-            MDButton:
-                text: "Close"
-                on_press: root.dismiss()
+
+            # Left Panel: Plugin List
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: 0.4
+                spacing: dp(5)
+                ScrollView:
+                    id: scroll_view
+                    size_hint_y: 1
+                    MDGridLayout:
+                        id: plugin_list
+                        cols: 1
+                        size_hint_y: None
+                        adaptive_height: True
+                        spacing: dp(5)
+                MDButton:
+                    text: "Add Plugin"
+                    on_press: root.open_file_chooser()
+                    size_hint_y: None
+                    height: dp(36)
+
+            # Right Panel: Parameter Editor
+            ScrollView:
+                size_hint_x: 0.6
+                MDGridLayout:
+                    id: parameter_list
+                    cols: 1
+                    size_hint_y: None
+                    adaptive_height: True
+                    spacing: dp(10)
+
+        MDButton:
+            text: "Close"
+            on_press: root.dismiss()
+            size_hint_y: None
+            height: dp(36)
 
 <PluginListItem>:
     size_hint_y: None
@@ -80,9 +99,13 @@ class PluginListItem(MDListItem):
         self.fx_window = fx_window
         self.headline_text = os.path.basename(plugin.path)
         self.supporting_text = plugin.path
+        self.bind(on_press=self.select_plugin)
 
     def remove_plugin(self):
         self.fx_window.remove_plugin(self.plugin)
+
+    def select_plugin(self, instance):
+        self.fx_window.select_plugin(self.plugin)
 
 
 class VstFxChainWindow(Popup):
@@ -95,6 +118,9 @@ class VstFxChainWindow(Popup):
         self.track = track
         self.sequencer = sequencer
         self.track_index = track_index
+        self.title = f"FX Chain - {self.track.name}"
+        self.ids.track_label.text = f"Track: {self.track.name}"
+        self.selected_plugin = None
         self.refresh_plugin_list()
 
     def refresh_plugin_list(self):
@@ -104,12 +130,51 @@ class VstFxChainWindow(Popup):
             item = PluginListItem(plugin=plugin, fx_window=self)
             plugin_list.add_widget(item)
 
+    def select_plugin(self, plugin):
+        self.selected_plugin = plugin
+        param_list = self.ids.parameter_list
+        param_list.clear_widgets()
+
+        for name, value in plugin.parameters.items():
+            # Container for each parameter
+            param_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(60))
+
+            # Label for the parameter name
+            label = MDLabel(text=f"{name}: {value:.2f}", size_hint_y=None, height=dp(24))
+
+            # Slider for the parameter value
+            slider = MDSlider(min=0.0, max=1.0, value=value)
+            slider.bind(value=lambda instance, v, p_name=name, lbl=label: self.on_parameter_change(p_name, v, lbl))
+
+            param_layout.add_widget(label)
+            param_layout.add_widget(slider)
+            param_list.add_widget(param_layout)
+
+    def on_parameter_change(self, param_name, value, label):
+        if self.selected_plugin:
+            # Update the data model
+            self.selected_plugin.parameters[param_name] = value
+            self.sequencer.is_dirty = True
+
+            # Update the UI label
+            label.text = f"{param_name}: {value:.2f}"
+
+            # Trigger audio re-processing
+            self.sequencer.vst_audio_processor.process_track(self.track_index)
+
+
     def add_plugin(self, path):
         if path and path.endswith('.vst3'):
-            plugin = VSTPlugin(path=path)
+            # Get the default parameters for the new plugin
+            default_params = self.sequencer.vst_audio_processor.get_plugin_parameters(path)
+            plugin = VSTPlugin(path=path, parameters=default_params)
+
             self.track.plugins.append(plugin)
             self.sequencer.is_dirty = True
+
+            # Re-process the audio with the new plugin
             self.sequencer.vst_audio_processor.process_track(self.track_index)
+
             self.refresh_plugin_list()
         else:
             print(f"Invalid file selected: {path}. Please select a .vst3 file.")

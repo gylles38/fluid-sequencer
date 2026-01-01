@@ -534,7 +534,9 @@ class TrackWidget(BoxLayout):
 
     def select_midi_port_popup(self, instance):
         """Opens a popup to select a MIDI output port for the track."""
-        available_ports = mido.get_output_names()
+        standard_ports = mido.get_output_names()
+        virtual_port_names = [p.name for p in self.sequencer_layout.sequencer.virtual_ports]
+        available_ports = sorted(list(set(standard_ports + virtual_port_names)))
 
         content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         scroll_view = ScrollView()

@@ -24,10 +24,21 @@ def get_plugin_parameters(plugin_path):
 
         plugin = VST3Plugin(plugin_path)
 
-        parameters = {
-            name: (p.value if hasattr(p, 'value') else 0.5)
-            for name, p in plugin.parameters.items()
-        }
+        parameters = {}
+        for name, p in plugin.parameters.items():
+            min_val = getattr(p, 'min_value', 0.0)
+            max_val = getattr(p, 'max_value', 1.0)
+
+            # Fallback for invalid ranges
+            if min_val is None or max_val is None or max_val <= min_val:
+                min_val, max_val = 0.0, 1.0
+
+            parameters[name] = {
+                "value": getattr(p, 'value', 0.5),
+                "default_value": getattr(p, 'default_value', 0.5),
+                "min_value": min_val,
+                "max_value": max_val,
+            }
         return parameters
     except Exception as e:
         # If any error occurs during loading, print it to stderr

@@ -2,7 +2,10 @@ from .midi_export import export_to_midi
 from .midi_import import import_song
 from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
-from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping, VSTPlugin
+from .models import (
+    AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event,
+    MidiTrack, Note, Song, MidiMapping, VSTPlugin, VSTParameter
+)
 from .config import MidiConfig
 from .vst_audio_processor import VSTAudioProcessor
 from .terminal_input import cancellable_input, UserInputCancelled
@@ -120,7 +123,15 @@ def song_decoder(d):
             cls = getattr(sys.modules['sequencer.models'], type_name, None)
 
         if cls:
+            # Handle nested VSTParameter objects within a VSTPlugin
             if type_name == 'VSTPlugin':
+                # Manually deserialize the parameters dictionary
+                param_dict = d.get('parameters', {})
+                deserialized_params = {}
+                for name, param_data in param_dict.items():
+                    # Assuming param_data is a dict that can initialize VSTParameter
+                    deserialized_params[name] = VSTParameter(**param_data)
+                d['parameters'] = deserialized_params
                 return VSTPlugin(**d)
             return cls(**d)
     return d

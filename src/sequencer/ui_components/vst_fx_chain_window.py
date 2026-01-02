@@ -1,5 +1,5 @@
 from . import *
-from sequencer.models import AudioTrack, VSTPlugin
+from sequencer.models import AudioTrack, VSTPlugin, VSTParameter
 from kivy.uix.popup import Popup
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -141,15 +141,16 @@ class VstFxChainWindow(Popup):
         param_list = self.ids.parameter_list
         param_list.clear_widgets()
 
-        for name, value in plugin.parameters.items():
-            # Container for each parameter
+        for name, param_data in plugin.parameters.items():
             param_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(60))
 
-            # Label for the parameter name
-            label = MDLabel(text=f"{name}: {value:.2f}", size_hint_y=None, height=dp(24))
+            label = MDLabel(text=f"{name}: {param_data.value:.2f}", size_hint_y=None, height=dp(24))
 
-            # Slider for the parameter value
-            slider = MDSlider(min=0.0, max=1.0, value=value)
+            slider = MDSlider(
+                min=param_data.min_value,
+                max=param_data.max_value,
+                value=param_data.value
+            )
             slider.bind(value=lambda instance, v, p_name=name, lbl=label: self.on_parameter_change(p_name, v, lbl))
 
             param_layout.add_widget(label)
@@ -158,11 +159,10 @@ class VstFxChainWindow(Popup):
 
     def on_parameter_change(self, param_name, value, label):
         if self.selected_plugin:
-            # Update the data model
-            self.selected_plugin.parameters[param_name] = value
+            # Update the value within the VSTParameter object
+            self.selected_plugin.parameters[param_name].value = value
             self.sequencer.is_dirty = True
 
-            # Update the UI label
             label.text = f"{param_name}: {value:.2f}"
 
             # Trigger audio re-processing
@@ -197,7 +197,18 @@ class VstFxChainWindow(Popup):
             )
             return
 
-        plugin = VSTPlugin(path=plugin_path, parameters=default_params)
+        # Create VSTParameter objects for each parameter, using the default value
+        plugin_parameters = {
+            name: VSTParameter(
+                value=param_data["default_value"],
+                default_value=param_data["default_value"],
+                min_value=param_data["min_value"],
+                max_value=param_data["max_value"]
+            )
+            for name, param_data in default_params.items()
+        }
+
+        plugin = VSTPlugin(path=plugin_path, parameters=plugin_parameters)
 
         self.track.plugins.append(plugin)
         self.sequencer.is_dirty = True

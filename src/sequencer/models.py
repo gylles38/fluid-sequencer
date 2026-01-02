@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 from kivy.properties import BooleanProperty
 from kivy.event import EventDispatcher
 
@@ -94,10 +94,18 @@ class MidiTrack(BaseTrack, EventDispatcher):
 # system. This allows the UI to automatically react to changes in track properties like 'volume'.
 # The @dataclass decorator was removed as it is not compatible with this pattern.
 @dataclass
+class VSTParameter:
+    """Represents a single parameter of a VST plugin."""
+    value: float
+    default_value: float
+    min_value: float
+    max_value: float
+
+@dataclass
 class VSTPlugin:
     """Represents a VST plugin instance with its parameters."""
     path: str
-    parameters: dict = field(default_factory=dict)
+    parameters: Dict[str, VSTParameter] = field(default_factory=dict)
 
 
 class AudioTrack(BaseTrack, EventDispatcher):

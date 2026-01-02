@@ -181,11 +181,22 @@ class VstFxChainWindow(Popup):
             plugin_path = os.path.dirname(plugin_path)
 
         if not is_bundle:
-             print(f"Invalid file selected: {path}. Not part of a .vst3 bundle.")
+             # Using the main app's error popup for consistency
+             MDApp.get_running_app().root.show_error_popup("Invalid File", f"Selected file is not part of a valid .vst3 bundle:\n{path}")
              return
 
-        # Get the default parameters for the new plugin
+        # Get the default parameters for the new plugin using the safe, out-of-process method
         default_params = self.sequencer.vst_audio_processor.get_plugin_parameters(plugin_path)
+
+        # Handle the case where the plugin fails to load
+        if default_params is None:
+            MDApp.get_running_app().root.show_error_popup(
+                "Plugin Load Failed",
+                f"Could not load VST3 plugin:\n{os.path.basename(plugin_path)}\n\n"
+                "This may be because it is an instrument (VSTi), unstable, or otherwise incompatible."
+            )
+            return
+
         plugin = VSTPlugin(path=plugin_path, parameters=default_params)
 
         self.track.plugins.append(plugin)

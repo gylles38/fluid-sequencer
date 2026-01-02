@@ -74,17 +74,45 @@ class VSTAudioProcessor:
 
     def get_plugin_parameters(self, plugin_path: str) -> dict:
         """
-        Loads a VST3 plugin and returns a dictionary of its parameters and their default values.
+        Safely loads a VST3 plugin in a separate process to get its parameters.
+        Returns a dictionary of parameters or None if the plugin is unstable.
         """
+        import subprocess
+        import json
+        import sys
+
+        # Construct the path to the inspector script
+        # This assumes the script is in the same directory as this file
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        inspector_script = os.path.join(base_dir, "vst_inspector.py")
+
+        command = [sys.executable, inspector_script, plugin_path]
+
         try:
-            vst = VST3Plugin(plugin_path)
-            params = {name: getattr(vst, name) for name in dir(vst) if not name.startswith('_')}
-            # Filter out non-parameter attributes
-            valid_params = {}
-            for name, value in params.items():
-                if isinstance(value, (int, float)):
-                    valid_params[name] = value
-            return valid_params
+            # We use a timeout to catch plugins that hang on load
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True,  # This will raise CalledProcessError on non-zero exit codes
+                timeout=10 # 10-second timeout
+            )
+
+            # If the script succeeded, stdout will contain the JSON data
+            return json.loads(result.stdout)
+
+        except subprocess.CalledProcessError as e:
+            # This catches crashes/errors within the script (non-zero exit code)
+            print(f"VST Inspector Error for '{plugin_path}': The plugin might be unstable or incompatible (e.g., a VSTi).")
+            print(f"  Stderr: {e.stderr.strip()}")
+            return None
+        except subprocess.TimeoutExpired:
+            print(f"VST Inspector Error for '{plugin_path}': The plugin timed out during loading.")
+            return None
+        except json.JSONDecodeError:
+            print(f"VST Inspector Error for '{plugin_path}': Could not parse parameter JSON from the plugin.")
+            return None
         except Exception as e:
-            print(f"Error reading parameters for plugin {plugin_path}: {e}")
-            return {}
+            # Catch any other unexpected errors during the subprocess call
+            print(f"An unexpected error occurred while inspecting VST plugin '{plugin_path}': {e}")
+            return None

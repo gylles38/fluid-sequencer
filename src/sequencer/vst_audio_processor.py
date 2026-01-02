@@ -33,8 +33,8 @@ class VSTAudioProcessor:
             board = pb.Pedalboard()
             for plugin_model in track.plugins:
                 vst = VST3Plugin(plugin_model.path)
-                for param, value in plugin_model.parameters.items():
-                    setattr(vst, param, value)
+                for param_name, param_data in plugin_model.parameters.items():
+                    setattr(vst, param_name, param_data.value)
                 board.append(vst)
 
             effected = board(audio, samplerate)

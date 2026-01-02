@@ -29,9 +29,21 @@ def get_plugin_parameters(plugin_path):
             min_val = getattr(p, 'min_value', 0.0)
             max_val = getattr(p, 'max_value', 1.0)
 
-            # Fallback for invalid ranges
-            if min_val is None or max_val is None or max_val <= min_val:
+            # More robust fallback for invalid ranges, including non-numeric types
+            is_min_valid = isinstance(min_val, (int, float))
+            is_max_valid = isinstance(max_val, (int, float))
+
+            if not is_min_valid or not is_max_valid or max_val <= min_val:
                 min_val, max_val = 0.0, 1.0
+
+            # Ensure value and default_value are also valid numbers
+            value = getattr(p, 'value', 0.5)
+            if not isinstance(value, (int, float)):
+                value = 0.5
+
+            default_value = getattr(p, 'default_value', 0.5)
+            if not isinstance(default_value, (int, float)):
+                default_value = 0.5
 
             parameters[name] = {
                 "value": getattr(p, 'value', 0.5),

@@ -17,7 +17,7 @@ class MainScreen(Screen):
 class TestApp(MDApp):
     def build(self):
         self.theme_cls.theme_style = "Dark"
-        self.theme_cls.primary_palette = "BlueGray"
+        self.theme_cls.primary_palette = "Blue"
         # Create a sequencer instance with a dummy song for the layout to use
         sequencer = Sequencer()
         sequencer.add_track("Test MIDI Track", "midi")

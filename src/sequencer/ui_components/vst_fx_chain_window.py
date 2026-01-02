@@ -12,7 +12,7 @@ from kivymd.uix.slider import MDSlider
 from kivymd.uix.card import MDCard
 from kivymd.uix.selectioncontrol import MDCheckbox
 from kivy.uix.label import Label
-from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText, MDListItemTrailing
+from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText
 from kivy.uix.filechooser import FileChooserListView
 from kivy.metrics import dp
 import os
@@ -87,10 +87,10 @@ Builder.load_string("""
     MDListItemSupportingText:
         text: root.supporting_text
 
-    MDListItemTrailing:
-        MDIconButton:
-            icon: 'close'
-            on_press: root.remove_plugin()
+    MDIconButton:
+        icon: 'close'
+        pos_hint: {"center_y": 0.5, "right": 0.98}
+        on_press: root.remove_plugin()
 """)
 
 class PluginListItem(MDListItem):

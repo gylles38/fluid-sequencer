@@ -169,20 +169,31 @@ class VstFxChainWindow(Popup):
 
 
     def add_plugin(self, path):
-        if path and path.endswith('.vst3'):
-            # Get the default parameters for the new plugin
-            default_params = self.sequencer.vst_audio_processor.get_plugin_parameters(path)
-            plugin = VSTPlugin(path=path, parameters=default_params)
+        # The user selects the .so file, but pedalboard needs the .vst3 bundle path.
+        # We traverse up the path to find the parent directory that ends in .vst3
+        plugin_path = path
+        is_bundle = False
+        while plugin_path != os.path.dirname(plugin_path): # Stop at the root
+            if plugin_path.endswith('.vst3'):
+                is_bundle = True
+                break
+            plugin_path = os.path.dirname(plugin_path)
 
-            self.track.plugins.append(plugin)
-            self.sequencer.is_dirty = True
+        if not is_bundle:
+             print(f"Invalid file selected: {path}. Not part of a .vst3 bundle.")
+             return
 
-            # Re-process the audio with the new plugin
-            self.sequencer.vst_audio_processor.process_track(self.track_index)
+        # Get the default parameters for the new plugin
+        default_params = self.sequencer.vst_audio_processor.get_plugin_parameters(plugin_path)
+        plugin = VSTPlugin(path=plugin_path, parameters=default_params)
 
-            self.refresh_plugin_list()
-        else:
-            print(f"Invalid file selected: {path}. Please select a .vst3 file.")
+        self.track.plugins.append(plugin)
+        self.sequencer.is_dirty = True
+
+        # Re-process the audio with the new plugin
+        self.sequencer.vst_audio_processor.process_track(self.track_index)
+
+        self.refresh_plugin_list()
 
     def remove_plugin(self, plugin):
         self.track.plugins.remove(plugin)
@@ -210,7 +221,7 @@ class VstFxChainWindow(Popup):
                 start_path = path
                 break
 
-        file_chooser = FileChooserListView(path=start_path, filters=['*.vst3'], show_hidden=False)
+        file_chooser = FileChooserListView(path=start_path, filters=['*.so'], show_hidden=False)
 
         # Checkbox for showing hidden files
         hidden_files_layout = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(10))

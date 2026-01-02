@@ -146,7 +146,7 @@ class TrackWidget(BoxLayout):
         elif isinstance(track, AudioTrack):
             # --- FX Button for Audio Tracks ---
             self.fx_button = TooltipMDIconButton(
-                icon='grain', # An icon that represents effects/processing
+                icon='cog', # An icon that represents effects/processing
                 tooltip_text='Manage VST Effects',
                 on_press=self.open_fx_popup,
                 pos_hint={'center_y': 0.5},

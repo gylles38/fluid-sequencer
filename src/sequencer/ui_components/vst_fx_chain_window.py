@@ -6,10 +6,11 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.gridlayout import GridLayout
 from kivy.properties import ObjectProperty, StringProperty
 from kivy.lang import Builder
-from kivymd.uix.button import MDButton
+from kivymd.uix.button import MDButton, MDButtonText
 from kivymd.uix.label import MDLabel
 from kivymd.uix.slider import MDSlider
 from kivymd.uix.card import MDCard
+from kivymd.uix.selectioncontrol import MDCheckbox
 from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText, MDListItemTrailingIcon
 from kivy.uix.filechooser import FileChooserListView
 from kivy.metrics import dp
@@ -52,10 +53,11 @@ Builder.load_string("""
                         adaptive_height: True
                         spacing: dp(5)
                 MDButton:
-                    text: "Add Plugin"
                     on_press: root.open_file_chooser()
                     size_hint_y: None
                     height: dp(36)
+                    MDButtonText:
+                        text: "Add Plugin"
 
             # Right Panel: Parameter Editor
             ScrollView:
@@ -68,10 +70,11 @@ Builder.load_string("""
                     spacing: dp(10)
 
         MDButton:
-            text: "Close"
             on_press: root.dismiss()
             size_hint_y: None
             height: dp(36)
+            MDButtonText:
+                text: "Close"
 
 <PluginListItem>:
     size_hint_y: None
@@ -191,7 +194,15 @@ class VstFxChainWindow(Popup):
         # For now, let's assume VSTs are in a known location or user can navigate
         # Starting in the home directory is a safe bet.
         home_dir = os.path.expanduser('~')
-        file_chooser = FileChooserListView(path=home_dir, filters=['*.vst3'])
+        file_chooser = FileChooserListView(path=home_dir, filters=['*.vst3'], show_hidden=False)
+
+        # Checkbox for showing hidden files
+        hidden_files_layout = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(10))
+        checkbox = MDCheckbox(size_hint_x=None, width=dp(32))
+        checkbox.bind(active=lambda instance, value: setattr(file_chooser, 'show_hidden', value))
+        label = MDLabel(text="Show Hidden Files")
+        hidden_files_layout.add_widget(checkbox)
+        hidden_files_layout.add_widget(label)
 
         button_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
 
@@ -202,15 +213,16 @@ class VstFxChainWindow(Popup):
                 self.add_plugin(file_chooser.selection[0])
             popup.dismiss()
 
-        select_button = MDButton(text="Select")
+        select_button = MDButton(MDButtonText(text="Select"))
         select_button.bind(on_press=select_file)
 
-        cancel_button = MDButton(text="Cancel")
+        cancel_button = MDButton(MDButtonText(text="Cancel"))
         cancel_button.bind(on_press=popup.dismiss)
 
         button_layout.add_widget(select_button)
         button_layout.add_widget(cancel_button)
 
+        content.add_widget(hidden_files_layout)
         content.add_widget(file_chooser)
         content.add_widget(button_layout)
 

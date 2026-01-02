@@ -58,8 +58,9 @@ class VSTAudioProcessor:
         parts = [track.filepath]
         for plugin in track.plugins:
             parts.append(plugin.path)
-            for param, value in sorted(plugin.parameters.items()):
-                parts.append(f"{param}:{value}")
+            # Correctly access the .value of the VSTParameter object
+            for param_name, param_data in sorted(plugin.parameters.items()):
+                parts.append(f"{param_name}:{param_data.value}")
         return "|".join(parts)
 
     def clear_cache(self):

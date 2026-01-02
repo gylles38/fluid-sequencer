@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Union, Dict, Any
 from kivy.properties import BooleanProperty
 from kivy.event import EventDispatcher
 
@@ -95,11 +95,13 @@ class MidiTrack(BaseTrack, EventDispatcher):
 # The @dataclass decorator was removed as it is not compatible with this pattern.
 @dataclass
 class VSTParameter:
-    """Represents a single parameter of a VST plugin."""
-    value: float
-    default_value: float
-    min_value: float
-    max_value: float
+    """Represents a single, typed parameter of a VST plugin."""
+    type: str  # 'float', 'boolean', or 'choice'
+    value: Any
+    default_value: Any
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    choices: Optional[List[str]] = None
 
 @dataclass
 class VSTPlugin:

@@ -9,6 +9,7 @@ from kivy.lang import Builder
 from kivymd.uix.button import MDButton, MDButtonText, MDIconButton
 from kivymd.uix.label import MDLabel
 from kivymd.uix.slider import MDSlider
+from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.card import MDCard
 from kivymd.uix.selectioncontrol import MDCheckbox
 from kivy.uix.label import Label
@@ -142,30 +143,69 @@ class VstFxChainWindow(Popup):
         param_list.clear_widgets()
 
         for name, param_data in plugin.parameters.items():
-            param_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(60))
+            if param_data.type == "float":
+                # Layout for a float parameter (slider)
+                param_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(60))
+                label = MDLabel(text=f"{name}: {param_data.value:.2f}", size_hint_y=None, height=dp(24))
+                slider = MDSlider(min=param_data.min_value, max=param_data.max_value, value=param_data.value)
+                slider.bind(value=lambda instance, v, p_name=name, lbl=label: self.on_slider_change(p_name, v, lbl))
+                param_layout.add_widget(label)
+                param_layout.add_widget(slider)
+                param_list.add_widget(param_layout)
 
-            label = MDLabel(text=f"{name}: {param_data.value:.2f}", size_hint_y=None, height=dp(24))
+            elif param_data.type == "boolean":
+                # Layout for a boolean parameter (checkbox)
+                param_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(48))
+                label = MDLabel(text=name, halign="left")
+                checkbox = MDCheckbox(active=param_data.value, size_hint_x=None, width=dp(48))
+                checkbox.bind(active=lambda instance, v, p_name=name: self.on_checkbox_change(p_name, v))
+                param_layout.add_widget(label)
+                param_layout.add_widget(checkbox)
+                param_list.add_widget(param_layout)
 
-            slider = MDSlider(
-                min=param_data.min_value,
-                max=param_data.max_value,
-                value=param_data.value
-            )
-            slider.bind(value=lambda instance, v, p_name=name, lbl=label: self.on_parameter_change(p_name, v, lbl))
+            elif param_data.type == "choice":
+                # Layout for a choice parameter (dropdown button)
+                param_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(48))
+                label = MDLabel(text=name, halign="left")
 
-            param_layout.add_widget(label)
-            param_layout.add_widget(slider)
-            param_list.add_widget(param_layout)
+                # Button that shows the current choice
+                choice_button = MDButton(
+                    MDButtonText(text=str(param_data.value)),
+                    style="outlined",
+                    size_hint_x=0.6,
+                )
 
-    def on_parameter_change(self, param_name, value, label):
+                # Create the dropdown menu items
+                menu_items = [
+                    {"text": choice, "on_release": lambda c=choice, btn=choice_button, p_name=name: self.on_choice_change(p_name, c, btn)}
+                    for choice in param_data.choices
+                ]
+
+                dropdown = MDDropdownMenu(caller=choice_button, items=menu_items)
+                choice_button.bind(on_release=lambda x: dropdown.open())
+
+                param_layout.add_widget(label)
+                param_layout.add_widget(choice_button)
+                param_list.add_widget(param_layout)
+
+    def on_slider_change(self, param_name, value, label):
         if self.selected_plugin:
-            # Update the value within the VSTParameter object
             self.selected_plugin.parameters[param_name].value = value
             self.sequencer.is_dirty = True
-
             label.text = f"{param_name}: {value:.2f}"
+            self.sequencer.vst_audio_processor.process_track(self.track_index)
 
-            # Trigger audio re-processing
+    def on_checkbox_change(self, param_name, value):
+        if self.selected_plugin:
+            self.selected_plugin.parameters[param_name].value = value
+            self.sequencer.is_dirty = True
+            self.sequencer.vst_audio_processor.process_track(self.track_index)
+
+    def on_choice_change(self, param_name, value, button):
+        if self.selected_plugin:
+            self.selected_plugin.parameters[param_name].value = value
+            button.text = str(value)
+            self.sequencer.is_dirty = True
             self.sequencer.vst_audio_processor.process_track(self.track_index)
 
 
@@ -198,15 +238,16 @@ class VstFxChainWindow(Popup):
             return
 
         # Create VSTParameter objects for each parameter, using the default value
-        plugin_parameters = {
-            name: VSTParameter(
+        plugin_parameters = {}
+        for name, param_data in default_params.items():
+            plugin_parameters[name] = VSTParameter(
+                type=param_data["type"],
                 value=param_data["default_value"],
                 default_value=param_data["default_value"],
-                min_value=param_data["min_value"],
-                max_value=param_data["max_value"]
+                min_value=param_data.get("min_value"),
+                max_value=param_data.get("max_value"),
+                choices=param_data.get("choices")
             )
-            for name, param_data in default_params.items()
-        }
 
         plugin = VSTPlugin(path=plugin_path, parameters=plugin_parameters)
 

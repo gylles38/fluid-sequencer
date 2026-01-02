@@ -6,13 +6,13 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.gridlayout import GridLayout
 from kivy.properties import ObjectProperty, StringProperty
 from kivy.lang import Builder
-from kivymd.uix.button import MDButton, MDButtonText
+from kivymd.uix.button import MDButton, MDButtonText, MDIconButton
 from kivymd.uix.label import MDLabel
 from kivymd.uix.slider import MDSlider
 from kivymd.uix.card import MDCard
 from kivymd.uix.selectioncontrol import MDCheckbox
 from kivy.uix.label import Label
-from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText, MDListItemTrailingIcon
+from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText, MDListItemTrailing
 from kivy.uix.filechooser import FileChooserListView
 from kivy.metrics import dp
 import os
@@ -87,9 +87,10 @@ Builder.load_string("""
     MDListItemSupportingText:
         text: root.supporting_text
 
-    MDListItemTrailingIcon:
-        icon: 'close'
-        on_press: root.remove_plugin()
+    MDListItemTrailing:
+        MDIconButton:
+            icon: 'close'
+            on_press: root.remove_plugin()
 """)
 
 class PluginListItem(MDListItem):

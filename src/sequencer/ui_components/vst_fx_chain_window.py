@@ -11,6 +11,7 @@ from kivymd.uix.label import MDLabel
 from kivymd.uix.slider import MDSlider
 from kivymd.uix.card import MDCard
 from kivymd.uix.selectioncontrol import MDCheckbox
+from kivy.uix.label import Label
 from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText, MDListItemTrailingIcon
 from kivy.uix.filechooser import FileChooserListView
 from kivy.metrics import dp
@@ -191,16 +192,31 @@ class VstFxChainWindow(Popup):
 
     def open_file_chooser(self):
         content = BoxLayout(orientation='vertical', spacing=dp(10))
-        # For now, let's assume VSTs are in a known location or user can navigate
-        # Starting in the home directory is a safe bet.
+
+        # --- VST3 Path Detection ---
         home_dir = os.path.expanduser('~')
-        file_chooser = FileChooserListView(path=home_dir, filters=['*.vst3'], show_hidden=False)
+        vst3_paths = [
+            os.path.join(home_dir, '.vst3'),
+            '/usr/lib/vst3',
+            '/usr/local/lib/vst3',
+        ]
+        vst3_path_env = os.environ.get('VST3_PATH')
+        if vst3_path_env:
+            vst3_paths.extend(vst3_path_env.split(':'))
+
+        start_path = home_dir  # Default fallback
+        for path in vst3_paths:
+            if os.path.isdir(path):
+                start_path = path
+                break
+
+        file_chooser = FileChooserListView(path=start_path, filters=['*.vst3'], show_hidden=False)
 
         # Checkbox for showing hidden files
         hidden_files_layout = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(10))
         checkbox = MDCheckbox(size_hint_x=None, width=dp(32))
         checkbox.bind(active=lambda instance, value: setattr(file_chooser, 'show_hidden', value))
-        label = MDLabel(text="Show Hidden Files")
+        label = Label(text="Show Hidden Files")
         hidden_files_layout.add_widget(checkbox)
         hidden_files_layout.add_widget(label)
 
@@ -213,10 +229,10 @@ class VstFxChainWindow(Popup):
                 self.add_plugin(file_chooser.selection[0])
             popup.dismiss()
 
-        select_button = MDButton(MDButtonText(text="Select"))
+        select_button = MDButton(MDButtonText(text="Select"), style="outlined")
         select_button.bind(on_press=select_file)
 
-        cancel_button = MDButton(MDButtonText(text="Cancel"))
+        cancel_button = MDButton(MDButtonText(text="Cancel"), style="outlined")
         cancel_button.bind(on_press=popup.dismiss)
 
         button_layout.add_widget(select_button)

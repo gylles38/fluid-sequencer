@@ -2,12 +2,8 @@ from .midi_export import export_to_midi
 from .midi_import import import_song
 from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
-from .models import (
-    AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event,
-    MidiTrack, Note, Song, MidiMapping, VSTPlugin, VSTParameter
-)
+from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
 from .config import MidiConfig
-from .vst_audio_processor import VSTAudioProcessor
 from .terminal_input import cancellable_input, UserInputCancelled
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
@@ -102,7 +98,6 @@ class CustomSongEncoder(json.JSONEncoder):
                 'channels': o.channels,
                 'native_tempo': o.native_tempo,
                 'duration_beats': o.duration_beats,
-                'plugins': o.plugins,
             }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
@@ -123,16 +118,6 @@ def song_decoder(d):
             cls = getattr(sys.modules['sequencer.models'], type_name, None)
 
         if cls:
-            # Handle nested VSTParameter objects within a VSTPlugin
-            if type_name == 'VSTPlugin':
-                # Manually deserialize the parameters dictionary
-                param_dict = d.get('parameters', {})
-                deserialized_params = {}
-                for name, param_data in param_dict.items():
-                    # Assuming param_data is a dict that can initialize VSTParameter
-                    deserialized_params[name] = VSTParameter(**param_data)
-                d['parameters'] = deserialized_params
-                return VSTPlugin(**d)
             return cls(**d)
     return d
 
@@ -664,14 +649,12 @@ class JackManager:
         if sys.platform != "win32" and os.path.exists(socket_path):
             os.unlink(socket_path)
 
-        filepath_to_play = self.sequencer.vst_audio_processor.process_track(track_index)
-
         command = shlex.split(self.sequencer.audio_player_command)
         command.extend([
             f"--input-ipc-server={socket_path}",
             "--pause",
-            "--loop-file=inf", # Loop the file to prevent mpv from exiting
-            filepath_to_play
+        "--loop-file=inf", # Loop the file to prevent mpv from exiting
+            track.filepath
         ])
 
         kwargs = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL}
@@ -708,7 +691,6 @@ class JackManager:
                 except Exception as e:
                     print(f"Error removing socket file {ap.socket_path}: {e}", file=sys.stderr)
             self.active_audio_processes.clear()
-        self.sequencer.vst_audio_processor.clear_cache()
 
     def _seek_audio_process_synchronously(self, ap: ActiveAudioProcess, target_time_sec: float, timeout=2.0):
         """Envoie une commande de recherche (seek) à un processus mpv et attend sa finalisation de manière robuste."""
@@ -1058,7 +1040,6 @@ class Sequencer(EventDispatcher):
         self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
         self.midi_config = MidiConfig("config/midi_mappings.json")
-        self.vst_audio_processor = VSTAudioProcessor(self)
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
@@ -1913,19 +1894,11 @@ class Sequencer(EventDispatcher):
         track = self.song.tracks[track_index]
         if not isinstance(track, MidiTrack):
             return "Error: Port assignment is currently only supported for MIDI tracks."
-
-        # Strip quotes if port_name is a quoted string from the command line
-        if port_name.startswith('"') and port_name.endswith('"'):
-            port_name = port_name[1:-1]
-
-        old_port_name = track.output_port_name
         track.output_port_name = port_name
         self.is_dirty = True
 
         if self.jack_manager.is_running:
             self.jack_manager.open_midi_port(port_name)
-            if old_port_name and old_port_name != port_name:
-                self.jack_manager.close_midi_port(old_port_name)
 
         return f"Assigned port '{port_name}' to track '{track.name}'."
 
@@ -2389,6 +2362,25 @@ class Sequencer(EventDispatcher):
         new_point = AutomationPoint(start_time=current_beat, parameter=mapping.action, value=point_value, curve='linear')
         auto_track.add_point(new_point)
         self.is_dirty = True
+
+    def get_midi_output_ports(self) -> List[str]:
+        """Returns a list of all available MIDI output port names, including virtual ports."""
+        try:
+            output_ports = get_output_names()
+            virtual_port_names = [vp.name for vp in self.virtual_ports]
+            # Combine and remove duplicates, maintaining order
+            all_outputs = list(dict.fromkeys(output_ports + virtual_port_names))
+            return all_outputs
+        except Exception as e:
+            print(f"Error getting MIDI output ports: {e}")
+            return []
+
+    def assign_midi_port_to_track(self, track_index: int, port_name: Optional[str]):
+        """Assigns a specific MIDI output port to a track, updating the JackManager if running."""
+        if port_name is None:
+            self.unassign_port(track_index)
+        else:
+            self.assign_port(track_index, port_name)
 
     def load_song(self, filepath: str) -> str:
         try:

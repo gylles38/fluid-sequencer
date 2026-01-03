@@ -1,10 +1,7 @@
 from . import *  # Importe tous les imports communs
-import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.gridlayout import GridLayout
-from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty
 from kivy.uix.label import Label 
@@ -16,6 +13,7 @@ from kivy.effects.scroll import ScrollEffect
 from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
+from kivymd.uix.menu import MDDropdownMenu
 
 
 class TrackWidget(BoxLayout):
@@ -116,49 +114,55 @@ class TrackWidget(BoxLayout):
         )
 
         if isinstance(track, MidiTrack):
-            # Channel and Program Spinners on top
-            top_controls = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            channel_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
             channel_label = Label(text='Ch:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
-            top_controls.add_widget(channel_label)
+            channel_container.add_widget(channel_label)
             channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change)
-            top_controls.add_widget(channel_spinner)
+            channel_container.add_widget(channel_spinner)
 
+            program_container = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
             program_label = Label(text='Prg:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
-            top_controls.add_widget(program_label)
+            program_container.add_widget(program_label)
             program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change)
-            top_controls.add_widget(program_spinner)
+            program_container.add_widget(program_spinner)
 
-            # Port Selector Button below
-            port_name = track.output_port_name if track.output_port_name else "None"
-            self.port_button_text = MDButtonText(text=f"Port: {port_name}")
-            self.port_selector_button = MDButton(
-                self.port_button_text,
-                on_press=self.select_midi_port_popup,
-                style="outlined",
-                size_hint_y=None,
-                height=dp(32)
-            )
-
-            midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Top spacer
-            midi_controls_layout.add_widget(top_controls)
-            midi_controls_layout.add_widget(self.port_selector_button)
-            midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
-        elif isinstance(track, AudioTrack):
-            # --- FX Button for Audio Tracks ---
-            self.fx_button = TooltipMDIconButton(
-                icon='cog', # An icon that represents effects/processing
-                tooltip_text='Manage VST Effects',
-                on_press=self.open_fx_popup,
-                pos_hint={'center_y': 0.5},
-                theme_icon_color="Custom",
-                icon_color=[0.4, 0.8, 1, 1],
-                md_bg_color=[0.1, 0.1, 0.1, 0.8]
-            )
-            midi_controls_layout.add_widget(self.fx_button)
+            midi_controls_layout.add_widget(Widget()) # Top spacer
+            midi_controls_layout.add_widget(channel_container)
+            midi_controls_layout.add_widget(program_container)
+            midi_controls_layout.add_widget(Widget()) # Bottom spacer
         else:
             midi_controls_layout.add_widget(Widget())
             
         self.controls_section.add_widget(midi_controls_layout)
+
+        if isinstance(track, MidiTrack):
+            self.output_port_button = MDFlatButton(
+                text=self.track.output_port_name or "Default",
+                on_release=self.open_port_menu,
+                size_hint_x=None,
+                width=dp(100)
+            )
+            self.controls_section.add_widget(self.output_port_button)
+
+            menu_items = [
+                {
+                    "text": "Default",
+                    "viewclass": "OneLineListItem",
+                    "on_release": lambda x="Default": self.set_output_port(None),
+                }
+            ]
+            menu_items.extend([
+                {
+                    "text": port,
+                    "viewclass": "OneLineListItem",
+                    "on_release": lambda x=port: self.set_output_port(x),
+                } for port in self.sequencer_layout.sequencer.get_midi_output_ports()
+            ])
+            self.port_menu = MDDropdownMenu(
+                caller=self.output_port_button,
+                items=menu_items,
+                width_mult=4,
+            )
         
         # --- Volume Controls ---
         volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
@@ -544,46 +548,11 @@ class TrackWidget(BoxLayout):
             editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
             editor.open()
 
-    def select_midi_port_popup(self, instance):
-        """Opens a popup to select a MIDI output port for the track."""
-        standard_ports = mido.get_output_names()
-        virtual_port_names = [p.name for p in self.sequencer_layout.sequencer.virtual_ports]
-        available_ports = sorted(list(set(standard_ports + virtual_port_names)))
+    def open_port_menu(self, button):
+        self.port_menu.open()
 
-        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
-        scroll_view = ScrollView()
-        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
-        grid.bind(minimum_height=grid.setter('height'))
-
-        popup = Popup(
-            title="Select MIDI Output Port",
-            content=content,
-            size_hint=(0.5, 0.7)
-        )
-
-        def select_port(port_name):
-            command = f'assign {self.track_index} "{port_name}"'
-            self.sequencer_layout.process_command_ui(command)
-            self.port_button_text.text = f"Port: {port_name}"
-            popup.dismiss()
-
-        for port in available_ports:
-            btn = MDButton(MDButtonText(text=port), size_hint_y=None, height=dp(40))
-            btn.bind(on_release=lambda x, p=port: select_port(p))
-            grid.add_widget(btn)
-
-        scroll_view.add_widget(grid)
-        content.add_widget(scroll_view)
-
-        popup.open()
-
-    def open_fx_popup(self, instance):
-        """Opens the VST effects management window for the current audio track."""
-        if isinstance(self.track, AudioTrack):
-            sequencer = self.sequencer_layout.sequencer
-            editor = VstFxChainWindow(
-                track=self.track,
-                sequencer=sequencer,
-                track_index=self.track_index
-            )
-            editor.open()
+    def set_output_port(self, port_name):
+        self.port_menu.dismiss()
+        self.output_port_button.text = port_name or "Default"
+        self.track.output_port_name = port_name
+        self.sequencer_layout.sequencer.assign_midi_port_to_track(self.track_index, port_name)

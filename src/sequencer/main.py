@@ -321,18 +321,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
     elif command == "ports":
         return True, seq.list_ports()
     elif command == "assign":
-        if len(args) == 2:
-            try:
-                track_index = int(args[0])
-                port_name = args[1]
-                result = seq.assign_port(track_index, port_name)
-                if api_mode:
-                    return True, json.dumps({"status": "success", "message": result})
-                else:
-                    return True, result
-            except (ValueError, IndexError):
-                return True, "Error: Invalid arguments for assign."
-        elif len(args) == 1:
+        if len(args) == 1:
             try:
                 track_index = int(args[0])
                 if not 0 <= track_index < len(seq.song.tracks):

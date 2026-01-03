@@ -13,7 +13,7 @@ from kivy.graphics import Color, Rectangle, Line
 from kivy.clock import Clock
 
 # KivyMD imports
-from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
+from kivymd.uix.button import MDIconButton
 from kivymd.uix.slider import MDSlider
 from kivymd.uix.label import MDLabel
 
@@ -28,4 +28,3 @@ from .PianoRoll import PianoRoll, PianoRollViewer
 from .PianoKeyboard import PianoKeyboard
 from .bounded_scroll_view import BoundedScrollView
 from .piano_roll_editor import PianoRollEditor
-from .vst_fx_chain_window import VstFxChainWindow

@@ -2363,6 +2363,25 @@ class Sequencer(EventDispatcher):
         auto_track.add_point(new_point)
         self.is_dirty = True
 
+    def get_midi_output_ports(self) -> List[str]:
+        """Returns a list of all available MIDI output port names, including virtual ports."""
+        try:
+            output_ports = get_output_names()
+            virtual_port_names = [vp.name for vp in self.virtual_ports]
+            # Combine and remove duplicates, maintaining order
+            all_outputs = list(dict.fromkeys(output_ports + virtual_port_names))
+            return all_outputs
+        except Exception as e:
+            print(f"Error getting MIDI output ports: {e}")
+            return []
+
+    def assign_midi_port_to_track(self, track_index: int, port_name: Optional[str]):
+        """Assigns a specific MIDI output port to a track, updating the JackManager if running."""
+        if port_name is None:
+            self.unassign_port(track_index)
+        else:
+            self.assign_port(track_index, port_name)
+
     def load_song(self, filepath: str) -> str:
         try:
             self.song = import_song(filepath)

@@ -13,6 +13,8 @@ from kivy.effects.scroll import ScrollEffect
 from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
+from kivymd.uix.menu import MDDropdownMenu
+from kivymd.uix.button import MDButton, MDButtonText
 
 
 class TrackWidget(BoxLayout):
@@ -133,6 +135,38 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(Widget())
             
         self.controls_section.add_widget(midi_controls_layout)
+
+        if isinstance(track, MidiTrack):
+            self.output_port_button = MDButton(
+                on_release=self.open_port_menu,
+                size_hint_x=None,
+                width=dp(100)
+            )
+            self.output_port_button_text = MDButtonText(
+                text=self.track.output_port_name or "Default",
+            )
+            self.output_port_button.add_widget(self.output_port_button_text)
+            self.controls_section.add_widget(self.output_port_button)
+
+            menu_items = [
+                {
+                    "text": "Default",
+                    "viewclass": "OneLineListItem",
+                    "on_release": lambda x="Default": self.set_output_port(None),
+                }
+            ]
+            menu_items.extend([
+                {
+                    "text": port,
+                    "viewclass": "OneLineListItem",
+                    "on_release": lambda x=port: self.set_output_port(x),
+                } for port in self.sequencer_layout.sequencer.get_midi_output_ports()
+            ])
+            self.port_menu = MDDropdownMenu(
+                caller=self.output_port_button,
+                items=menu_items,
+                width_mult=4,
+            )
         
         # --- Volume Controls ---
         volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
@@ -517,3 +551,12 @@ class TrackWidget(BoxLayout):
 
             editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
             editor.open()
+
+    def open_port_menu(self, button):
+        self.port_menu.open()
+
+    def set_output_port(self, port_name):
+        self.port_menu.dismiss()
+        self.output_port_button_text.text = port_name or "Default"
+        self.track.output_port_name = port_name
+        self.sequencer_layout.sequencer.assign_midi_port_to_track(self.track_index, port_name)

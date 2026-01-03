@@ -14,7 +14,7 @@ from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 from kivymd.uix.menu import MDDropdownMenu
-from kivymd.uix.button import MDTextButton
+from kivymd.uix.button import MDRectangleFlatButton
 
 
 class TrackWidget(BoxLayout):
@@ -137,7 +137,7 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
 
         if isinstance(track, MidiTrack):
-            self.output_port_button = MDTextButton(
+            self.output_port_button = MDRectangleFlatButton(
                 text=self.track.output_port_name or "Default",
                 on_release=self.open_port_menu,
                 size_hint_x=None,

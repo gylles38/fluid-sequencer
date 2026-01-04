@@ -28,7 +28,7 @@ class TrackWidget(BoxLayout):
     pixels_per_beat = NumericProperty(dp(100))
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
-    controls_width = NumericProperty(dp(350))
+    controls_width = NumericProperty(dp(450))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs):
         super(TrackWidget, self).__init__(**kwargs)

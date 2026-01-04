@@ -111,21 +111,34 @@ class TrackWidget(BoxLayout):
         midi_controls_layout = BoxLayout(
             orientation='vertical',
             size_hint_x=None,
-            width=dp(130),
+            width=dp(170),  # Increased width
             spacing=dp(4)
         )
 
         if isinstance(track, MidiTrack):
             # Channel and Program Spinners on top
-            top_controls = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            top_controls = BoxLayout(
+                orientation='horizontal',
+                spacing=dp(4),
+                size_hint_y=None,
+                height=dp(32),
+                pos_hint={'center_x': 0.5} # Center the horizontal layout
+            )
             channel_label = Label(text='Ch:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             top_controls.add_widget(channel_label)
+
+            # Use fixed width for spinners
             channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change)
+            channel_spinner.size_hint_x = None
+            channel_spinner.width = dp(50)
             top_controls.add_widget(channel_spinner)
 
             program_label = Label(text='Prg:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             top_controls.add_widget(program_label)
+
             program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change)
+            program_spinner.size_hint_x = None
+            program_spinner.width = dp(50)
             top_controls.add_widget(program_spinner)
 
             # Port Selector Button below
@@ -135,8 +148,10 @@ class TrackWidget(BoxLayout):
                 self.port_button_text,
                 on_press=self.select_midi_port_popup,
                 style="outlined",
-                size_hint_y=None,
-                height=dp(32)
+                size_hint=(None, None), # Disable size hint for centering
+                width=dp(150),
+                height=dp(32),
+                pos_hint={'center_x': 0.5} # Center the button
             )
 
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Top spacer

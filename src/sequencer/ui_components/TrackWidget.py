@@ -28,7 +28,7 @@ class TrackWidget(BoxLayout):
     pixels_per_beat = NumericProperty(dp(100))
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
-    controls_width = NumericProperty(dp(350))
+    controls_width = NumericProperty(dp(400))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs):
         super(TrackWidget, self).__init__(**kwargs)
@@ -111,21 +111,34 @@ class TrackWidget(BoxLayout):
         midi_controls_layout = BoxLayout(
             orientation='vertical',
             size_hint_x=None,
-            width=dp(130),
+            width=dp(170),  # Increased width
             spacing=dp(4)
         )
 
         if isinstance(track, MidiTrack):
             # Channel and Program Spinners on top
-            top_controls = BoxLayout(orientation='horizontal', spacing=dp(4), size_hint_y=None, height=dp(32))
+            top_controls = BoxLayout(
+                orientation='horizontal',
+                spacing=dp(4),
+                size_hint_y=None,
+                height=dp(32),
+                pos_hint={'center_x': 0.5} # Center the horizontal layout
+            )
             channel_label = Label(text='Ch:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             top_controls.add_widget(channel_label)
+
+            # Use fixed width for spinners
             channel_spinner = ValueSpinner(min_val=1, max_val=16, initial_value=track.channel + 1, callback=self.on_channel_change)
+            channel_spinner.size_hint_x = None
+            channel_spinner.width = dp(50)
             top_controls.add_widget(channel_spinner)
 
             program_label = Label(text='Prg:', size_hint_x=None, width=dp(28), halign='right', valign='middle', color=[0.9, 0.9, 0.9, 1], font_size=dp(13))
             top_controls.add_widget(program_label)
+
             program_spinner = ValueSpinner(min_val=1, max_val=128, initial_value=track.instrument + 1, callback=self.on_program_change)
+            program_spinner.size_hint_x = None
+            program_spinner.width = dp(50)
             top_controls.add_widget(program_spinner)
 
             # Port Selector Button below
@@ -135,8 +148,10 @@ class TrackWidget(BoxLayout):
                 self.port_button_text,
                 on_press=self.select_midi_port_popup,
                 style="outlined",
-                size_hint_y=None,
-                height=dp(32)
+                size_hint=(None, None), # Disable size hint for centering
+                width=dp(150),
+                height=dp(32),
+                pos_hint={'center_x': 0.5} # Center the button
             )
 
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Top spacer
@@ -160,7 +175,7 @@ class TrackWidget(BoxLayout):
         )
         mute_button_container.add_widget(self.mute_button)
 
-        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(8), track_inactive_width=dp(8))
+        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
         self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
         volume_layout.add_widget(mute_button_container)
@@ -177,7 +192,7 @@ class TrackWidget(BoxLayout):
         pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
         pan_icon_container.add_widget(pan_icon)
 
-        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(8), track_inactive_width=dp(8))
+        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
         self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
         pan_layout.add_widget(pan_icon_container)

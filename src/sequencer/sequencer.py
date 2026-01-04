@@ -930,7 +930,7 @@ class JackManager:
                     self.jack_client.transport_reposition_struct(pos)
 
         song_length_beats = self.sequencer.get_song_length_in_beats()
-        if not self.sequencer.loop_enabled and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
+        if not self.sequencer.loop_enabled and not self.sequencer.is_recording and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
                 self.jack_client.transport_stop()
                 self.sequencer.playback_state = "stopped"
@@ -2697,6 +2697,7 @@ class Sequencer(EventDispatcher):
                                         
                                         target_track.add_event(event)
                                         self.is_dirty = True
+                                        self.invalidate_song_length_cache()
                                         
                                         print(f"Note OFF: {msg.note}, durée: {duration:.2f} beats")
                         

@@ -28,7 +28,7 @@ class TrackWidget(BoxLayout):
     pixels_per_beat = NumericProperty(dp(100))
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
-    controls_width = NumericProperty(dp(450))
+    controls_width = NumericProperty(dp(400))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs):
         super(TrackWidget, self).__init__(**kwargs)
@@ -164,7 +164,7 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(100), spacing=0)
+        volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
         mute_button_container = BoxLayout(size_hint_y=None, height=dp(30), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
@@ -175,7 +175,7 @@ class TrackWidget(BoxLayout):
         )
         mute_button_container.add_widget(self.mute_button)
 
-        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(8), track_inactive_width=dp(8))
+        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
         self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
         volume_layout.add_widget(mute_button_container)
@@ -186,13 +186,13 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(volume_layout)
 
         # --- Pan Controls ---
-        pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(100), spacing=0)
+        pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
         pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
         pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
         pan_icon_container.add_widget(pan_icon)
 
-        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(8), track_inactive_width=dp(8))
+        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
         self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
         pan_layout.add_widget(pan_icon_container)

@@ -13,7 +13,7 @@ from kivy.graphics import Color, Rectangle, Line
 from kivy.clock import Clock
 
 # KivyMD imports
-from kivymd.uix.button import MDIconButton
+from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.slider import MDSlider
 from kivymd.uix.label import MDLabel
 

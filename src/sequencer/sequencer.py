@@ -1894,11 +1894,19 @@ class Sequencer(EventDispatcher):
         track = self.song.tracks[track_index]
         if not isinstance(track, MidiTrack):
             return "Error: Port assignment is currently only supported for MIDI tracks."
+
+        # Strip quotes if port_name is a quoted string from the command line
+        if port_name.startswith('"') and port_name.endswith('"'):
+            port_name = port_name[1:-1]
+
+        old_port_name = track.output_port_name
         track.output_port_name = port_name
         self.is_dirty = True
 
         if self.jack_manager.is_running:
             self.jack_manager.open_midi_port(port_name)
+            if old_port_name and old_port_name != port_name:
+                self.jack_manager.close_midi_port(old_port_name)
 
         return f"Assigned port '{port_name}' to track '{track.name}'."
 

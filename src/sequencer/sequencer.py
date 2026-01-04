@@ -1329,9 +1329,10 @@ class Sequencer(EventDispatcher):
             elif isinstance(track, MidiTrack):
                 if hasattr(track, 'events') and track.events:
                     for event in track.events:
-                        end_beat = event.start_time + getattr(event, 'duration', 0.0) 
-                        if end_beat > max_beat:
-                            max_beat = end_beat
+                        for note in event.notes:
+                            end_beat = event.start_time + note.duration
+                            if end_beat > max_beat:
+                                max_beat = end_beat
             
             elif isinstance(track, AutomationTrack):
                 if hasattr(track, 'points') and track.points:

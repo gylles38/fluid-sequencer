@@ -35,6 +35,7 @@ from sequencer.ui_components.SaveProjectAsPopup import SaveProjectAsPopup
 from sequencer.ui_components.SaveAsPopup import SaveAsPopup
 from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 from sequencer.ui_components.YesNoPopup import YesNoPopup
+from sequencer.ui_components.VportsPopup import VportsPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.ui_components.Ruler import Ruler
 # ============================================
@@ -130,6 +131,27 @@ class SequencerLayout(BoxLayout):
         )
         edit_button.bind(on_release=lambda x: self.edit_menu.open())
         menu_bar.add_widget(edit_button)
+
+        # Bouton Song
+        song_button = MDButton(
+            MDButtonText(text="Song"),
+            style="text",
+            pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
+        )
+        with song_button.canvas.before:
+            Color(0.5, 0.5, 0.5, 1)
+            self.song_line = Line(points=[0, -1, song_button.width, -1], width=1)
+
+        song_items = [
+            {"leading_icon": "virtual-reality", "text": "Vports...", "on_release": lambda: self.menu_action(self.show_vports_popup)},
+        ]
+        self.song_menu = MDDropdownMenu(
+            caller=song_button,
+            items=song_items,
+        )
+        song_button.bind(on_release=lambda x: self.song_menu.open())
+        menu_bar.add_widget(song_button)
 
         settings_button = MDButton(
             MDButtonText(text="Settings"),
@@ -650,11 +672,18 @@ class SequencerLayout(BoxLayout):
             self.file_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'edit_line'):
             self.edit_line.points = [0, -1, instance.width, -1]
+        if hasattr(self, 'song_line'):
+            self.song_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'settings_line'):
             self.settings_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'help_line'):
             self.help_line.points = [0, -1, instance.width, -1]
 
+
+    def show_vports_popup(self):
+        """Affiche le popup de gestion des Vports."""
+        popup = VportsPopup(sequencer=self.sequencer)
+        popup.open()
 
     def show_audio_settings(self):
         """Affiche les paramètres audio"""
@@ -941,7 +970,7 @@ class SequencerLayout(BoxLayout):
 
     def close_all_menus(self):
         """Ferme tous les menus ouverts"""
-        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu', 'help_menu']
+        menus_to_close = ['file_menu', 'edit_menu', 'song_menu', 'settings_menu', 'help_menu']
         for menu_name in menus_to_close:
             if hasattr(self, menu_name) and getattr(self, menu_name):
                 try:

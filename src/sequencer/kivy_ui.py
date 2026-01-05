@@ -1480,7 +1480,8 @@ class SequencerLayout(BoxLayout):
         # 5. Check if song length has changed and update widgets if needed
         new_total_beats = self.sequencer.get_song_length_in_beats()
         if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
-             for track_widget in self.track_widgets:
+            self.ruler.total_beats = new_total_beats
+            for track_widget in self.track_widgets:
                 if track_widget.total_beats != new_total_beats:
                     track_widget.total_beats = new_total_beats
 

@@ -1034,6 +1034,7 @@ class Sequencer(EventDispatcher):
     playback_state = StringProperty("stopped")
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
+    song_structure_changed = NumericProperty(0)
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
@@ -2824,6 +2825,7 @@ class Sequencer(EventDispatcher):
                 # Nettoyage final : on enlève les événements devenus complètement vides.
                 target_track.events = [e for e in final_events if e.notes or e.cc_messages]
                 self.invalidate_song_length_cache()
+                self.song_structure_changed += 1
 
                 start_pos_msg = self._format_beats_to_position(start_beat)
                 if end_beat_for_deletion == float('inf'):

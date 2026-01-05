@@ -55,6 +55,7 @@ class SequencerLayout(BoxLayout):
             self.sequencer = Sequencer(gui_mode=True)
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self.sequencer.bind(is_recording=self.update_record_button_state)
+        self.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
         self._transport_update_event = None # Pour stocker l'événement Clock
         self.current_command = ""
         self.end_pos_manual_override = False
@@ -586,6 +587,14 @@ class SequencerLayout(BoxLayout):
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
 
         Window.bind(on_key_down=self._on_keyboard_down)
+
+    def on_song_structure_changed(self, *args):
+        """
+        Callback for when the song's structure (e.g., notes in a track) changes
+        in a way that requires a full UI redraw.
+        """
+        Logger.info("UI: Song structure changed, forcing full UI refresh.")
+        self.update_status_display()
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""

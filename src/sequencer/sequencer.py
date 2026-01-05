@@ -122,7 +122,7 @@ def song_decoder(d):
     return d
 
 
-from kivy.properties import NumericProperty, StringProperty
+from kivy.properties import NumericProperty, StringProperty, BooleanProperty
 from kivy.event import EventDispatcher
 from kivy.clock import Clock
 
@@ -1032,6 +1032,7 @@ class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
     last_beat_update_time = NumericProperty(0)
     playback_state = StringProperty("stopped")
+    is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
@@ -1058,7 +1059,6 @@ class Sequencer(EventDispatcher):
         self.pause_beat = 0.0
         self.rewind_beat = 0.0
         self.recording_thread = None
-        self.is_recording = False
         self._stop_event = threading.Event()
 
         self.loop_enabled = False
@@ -1096,6 +1096,16 @@ class Sequencer(EventDispatcher):
         from both the UI and MIDI controllers to ensure consistent behavior.
         """
         if command == "play_pause":
+            # If armed for recording, pressing play should start the recording.
+            if self.is_recording and self.playback_state == 'stopped':
+                # The recording thread is already waiting for the transport to start.
+                # We find the start_beat from the last recording settings.
+                start_beat = 0.0
+                if self.last_record_settings and 'start_beat' in self.last_record_settings:
+                    start_beat = self.last_record_settings['start_beat']
+                self.play(start_beat=start_beat)
+                return
+
             # If already playing, do nothing. If paused, resume.
             if self.playback_state == "playing":
                 self.pause()
@@ -1135,7 +1145,12 @@ class Sequencer(EventDispatcher):
                 self.play(start_beat=start_beat)
 
         elif command == "stop":
-            self.stop()
+            # If armed for recording but not yet playing, "stop" should just cancel the armed state.
+            if self.is_recording and self.playback_state == 'stopped':
+                self.is_recording = False
+                print("Recording armed state cancelled.")
+            else:
+                self.stop()
 
         elif command == "record":
             if self.is_recording:
@@ -2641,21 +2656,39 @@ class Sequencer(EventDispatcher):
                     wait_start_time = time.time()
                     pending_first_note = None
                     while not self._stop_event.is_set() and not first_note_detected:
-                        if time.time() - wait_start_time > 30:
-                            print("Timeout: Aucune note reçue après 30 secondes")
-                            return
+                        # Case 1: Recording is cancelled (e.g., by pressing stop or record again)
+                        if not self.is_recording:
+                             print("Recording armed state cancelled.")
+                             return
+
+                        # Case 2: User presses the main Play button
+                        if self.playback_state == 'playing':
+                            print("Transport started. Beginning recording.")
+                            first_note_detected = True
+                            recording_start_beat = self._get_current_beat()
+                            print(f"Enregistrement démarré à la position: {self._format_beats_to_position(recording_start_beat)}")
+                            break # Exit the wait loop
+
+                        # Case 3: User plays a note on the MIDI keyboard
                         msg = inport.poll()
                         if msg and msg.type == 'note_on' and msg.velocity > 0:
                             print(f"Première note détectée: {msg.note} (vélocité: {msg.velocity})")
                             first_note_detected = True
                             pending_first_note = msg
+                            # This call starts the transport, which will be detected on the next loop,
+                            # or the recording will just proceed. Let's start it directly.
                             self.play(start_beat=start_beat)
-                            time.sleep(0.05)
+                            time.sleep(0.05) # Give transport a moment to start
                             recording_start_beat = self._get_current_beat()
                             print(f"Enregistrement démarré à la position: {self._format_beats_to_position(recording_start_beat)}")
-                        time.sleep(0.001)
+                            break # Exit the wait loop
+
+                        time.sleep(0.01)
 
                     if not first_note_detected:
+                        # This can happen if stop is pressed while waiting
+                        print("Recording start cancelled.")
+                        self.is_recording = False
                         return
 
                     print("Début de l'enregistrement en temps réel...")

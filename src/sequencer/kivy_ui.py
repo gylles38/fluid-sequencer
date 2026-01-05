@@ -54,12 +54,13 @@ class SequencerLayout(BoxLayout):
         if not self.sequencer:
             self.sequencer = Sequencer(gui_mode=True)
         self.sequencer.bind(playback_state=self.on_playback_state_change)
+        self.sequencer.bind(is_recording=self.update_record_button_state)
         self._transport_update_event = None # Pour stocker l'événement Clock
         self.current_command = ""
         self.end_pos_manual_override = False
         self.is_looping = False
         self._is_scrolling = False # For scroll synchronization
-        self.blink_animation = None  # Référence à l'animation de clignotement
+        self.record_blink_event = None
         self._current_measure = None # Initialisation pour la détection du beat 1
         self._is_seeking_on_scroll = False
         self.pixels_per_beat = dp(100)
@@ -653,12 +654,9 @@ class SequencerLayout(BoxLayout):
             self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
 
         # --- Update Record Button ---
-        if is_recording:
-            self.record_button.icon = 'record-circle-outline'
-            self.record_button.md_bg_color = [0.8, 0, 0, 1]
-        else:
-            self.record_button.icon = 'record'
-            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+        # This is now handled by the binding to `is_recording` and the `update_record_button_state` method.
+        # We just need to call it here to ensure it's up-to-date with the playback state change.
+        self.update_record_button_state()
 
         # --- Final UI sync on stop ---
         if state == "stopped":
@@ -1211,6 +1209,42 @@ class SequencerLayout(BoxLayout):
             callback=on_confirm
         )
         popup.open()
+
+    def toggle_record_button_color(self, dt):
+        """Alternates the record button color for blinking effect."""
+        default_color = (0.1, 0.1, 0.1, 1)
+        blink_color = (0.8, 0.0, 0.0, 1)
+        # Round the components for robust comparison
+        current_color_tuple = tuple(round(c, 1) for c in self.record_button.md_bg_color)
+
+        if current_color_tuple == default_color:
+            self.record_button.md_bg_color = blink_color
+        else:
+            self.record_button.md_bg_color = default_color
+
+    def update_record_button_state(self, *args):
+        """Centralized method to update the record button's visual state."""
+        # Stop any previous blinking timer
+        if self.record_blink_event:
+            self.record_blink_event.cancel()
+            self.record_blink_event = None
+
+        # Determine the sequencer's current recording-related state
+        is_armed = self.sequencer.is_recording and self.sequencer.playback_state == 'stopped'
+        is_actively_recording = self.sequencer.is_recording and self.sequencer.playback_state != 'stopped'
+
+        if is_armed:
+            # Start the blinking animation for the "armed" state
+            self.record_blink_event = Clock.schedule_interval(self.toggle_record_button_color, 0.5)
+            self.record_button.icon = 'record'
+        elif is_actively_recording:
+            # Set a solid red background for active recording
+            self.record_button.md_bg_color = [0.8, 0, 0, 1]
+            self.record_button.icon = 'record-circle-outline'
+        else:
+            # Revert to the default appearance
+            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+            self.record_button.icon = 'record'
 
     def start_play_blink(self):
         """Démarre l'animation de clignotement du bouton play"""

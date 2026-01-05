@@ -1322,26 +1322,23 @@ class Sequencer(EventDispatcher):
             return 0.0
 
     def get_song_length_in_beats(self) -> float:
-        """Calcule la longueur totale du morceau en beats en fonction de l'événement le plus long, arrondie à la mesure supérieure."""
-        
-        # 1. Vérification du cache (MAINTENUE)
-        if self._cached_song_length_beats is not None:
+        """
+        Calculates the total length of the song in beats.
+        If recording, the length is dynamic and extends to the current playhead position.
+        Otherwise, it's based on the last event and cached for performance.
+        """
+        # If not recording, try to use the cache first.
+        if not self.is_recording and self._cached_song_length_beats is not None:
             return self._cached_song_length_beats
 
         max_beat = 0.0
-        beats_per_measure = self.song.time_signature_numerator
-        
-        # 2. Trouver le point final maximum
+        # Always calculate the "natural" end of the song based on existing events
         for track in self.song.tracks:
-            
             if isinstance(track, AudioTrack):
-                # Utilisation de la méthode mise en cache
                 duration_beats = self._get_audio_duration_in_beats(track)
                 end_beat = track.start_time + duration_beats
                 if end_beat > max_beat:
                     max_beat = end_beat
-                    
-            # ... (Logique pour MidiTrack et AutomationTrack reste inchangée)
             elif isinstance(track, MidiTrack):
                 if hasattr(track, 'events') and track.events:
                     for event in track.events:
@@ -1349,30 +1346,32 @@ class Sequencer(EventDispatcher):
                             end_beat = event.start_time + note.duration
                             if end_beat > max_beat:
                                 max_beat = end_beat
-            
             elif isinstance(track, AutomationTrack):
                 if hasattr(track, 'points') and track.points:
-                    last_point_beat = track.points[-1].start_time
+                    last_point_beat = max(p.start_time for p in track.points)
                     if last_point_beat > max_beat:
                         max_beat = last_point_beat
-                        
-        # 3. Arrondi et cache
-        min_length = beats_per_measure * 4 
+
+        # If recording, the dynamic length is the greater of the natural end or the current playhead
+        if self.is_recording:
+            current_beat = self.jack_manager.get_current_beat()
+            max_beat = max(max_beat, current_beat)
+
+        # Round up to the next measure
+        beats_per_measure = self.song.time_signature_numerator
+        min_length = beats_per_measure * 4
 
         if max_beat > 0.0:
             rounded_length = math.ceil((max_beat + 0.0001) / beats_per_measure) * beats_per_measure
         else:
             rounded_length = min_length
-                
-        rounded_length = max(rounded_length, min_length)
-        
-        # 🕵️ DIAGNOSTIC CRITIQUE
-        print(f"DEBUG LONGUEUR: Max Beat trouvé: {max_beat}")
-        print(f"DEBUG LONGUEUR: Longueur finale arrondie: {rounded_length} beats")
 
-        # 💾 Enregistrement du résultat dans le cache
-        self._cached_song_length_beats = rounded_length 
-        
+        rounded_length = max(rounded_length, min_length)
+
+        # Only cache the result if we are NOT recording
+        if not self.is_recording:
+            self._cached_song_length_beats = rounded_length
+
         return rounded_length
 
     def _all_notes_off(self):

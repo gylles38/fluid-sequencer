@@ -60,6 +60,7 @@ class SequencerLayout(BoxLayout):
         self.end_pos_manual_override = False
         self.is_looping = False
         self._is_scrolling = False # For scroll synchronization
+        self.blink_animation = None
         self.record_blink_event = None
         self._current_measure = None # Initialisation pour la détection du beat 1
         self._is_seeking_on_scroll = False

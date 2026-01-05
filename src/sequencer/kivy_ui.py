@@ -1481,6 +1481,7 @@ class SequencerLayout(BoxLayout):
         new_total_beats = self.sequencer.get_song_length_in_beats()
         if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
             self.ruler.total_beats = new_total_beats
+            self.ruler.redraw()
             for track_widget in self.track_widgets:
                 if track_widget.total_beats != new_total_beats:
                     track_widget.total_beats = new_total_beats

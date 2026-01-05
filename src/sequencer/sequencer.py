@@ -2823,6 +2823,7 @@ class Sequencer(EventDispatcher):
 
                 # Nettoyage final : on enlève les événements devenus complètement vides.
                 target_track.events = [e for e in final_events if e.notes or e.cc_messages]
+                self.invalidate_song_length_cache()
 
                 start_pos_msg = self._format_beats_to_position(start_beat)
                 if end_beat_for_deletion == float('inf'):
@@ -2890,7 +2891,6 @@ class Sequencer(EventDispatcher):
             if self.playback_state != "stopped":
                 return "Error: Please stop playback before starting a new recording."
 
-            self.playback_state = "recording"
             
             # This is a new recording session initiated from the UI or command line
             if track_idx is not None:

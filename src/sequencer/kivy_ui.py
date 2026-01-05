@@ -35,6 +35,7 @@ from sequencer.ui_components.SaveProjectAsPopup import SaveProjectAsPopup
 from sequencer.ui_components.SaveAsPopup import SaveAsPopup
 from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 from sequencer.ui_components.YesNoPopup import YesNoPopup
+from sequencer.ui_components.VportsPopup import VportsPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.ui_components.Ruler import Ruler
 # ============================================
@@ -53,12 +54,15 @@ class SequencerLayout(BoxLayout):
         if not self.sequencer:
             self.sequencer = Sequencer(gui_mode=True)
         self.sequencer.bind(playback_state=self.on_playback_state_change)
+        self.sequencer.bind(is_recording=self.update_record_button_state)
+        self.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
         self._transport_update_event = None # Pour stocker l'événement Clock
         self.current_command = ""
         self.end_pos_manual_override = False
         self.is_looping = False
         self._is_scrolling = False # For scroll synchronization
-        self.blink_animation = None  # Référence à l'animation de clignotement
+        self.blink_animation = None
+        self.record_blink_event = None
         self._current_measure = None # Initialisation pour la détection du beat 1
         self._is_seeking_on_scroll = False
         self.pixels_per_beat = dp(100)
@@ -130,6 +134,27 @@ class SequencerLayout(BoxLayout):
         )
         edit_button.bind(on_release=lambda x: self.edit_menu.open())
         menu_bar.add_widget(edit_button)
+
+        # Bouton Song
+        song_button = MDButton(
+            MDButtonText(text="Song"),
+            style="text",
+            pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
+        )
+        with song_button.canvas.before:
+            Color(0.5, 0.5, 0.5, 1)
+            self.song_line = Line(points=[0, -1, song_button.width, -1], width=1)
+
+        song_items = [
+            {"leading_icon": "virtual-reality", "text": "Vports...", "on_release": lambda: self.menu_action(self.show_vports_popup)},
+        ]
+        self.song_menu = MDDropdownMenu(
+            caller=song_button,
+            items=song_items,
+        )
+        song_button.bind(on_release=lambda x: self.song_menu.open())
+        menu_bar.add_widget(song_button)
 
         settings_button = MDButton(
             MDButtonText(text="Settings"),
@@ -563,6 +588,14 @@ class SequencerLayout(BoxLayout):
 
         Window.bind(on_key_down=self._on_keyboard_down)
 
+    def on_song_structure_changed(self, *args):
+        """
+        Callback for when the song's structure (e.g., notes in a track) changes
+        in a way that requires a full UI redraw.
+        """
+        Logger.info("UI: Song structure changed, forcing full UI refresh.")
+        self.update_status_display()
+
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
         # The 'keyboard' argument is the integer keycode
@@ -631,12 +664,9 @@ class SequencerLayout(BoxLayout):
             self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
 
         # --- Update Record Button ---
-        if is_recording:
-            self.record_button.icon = 'record-circle-outline'
-            self.record_button.md_bg_color = [0.8, 0, 0, 1]
-        else:
-            self.record_button.icon = 'record'
-            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+        # This is now handled by the binding to `is_recording` and the `update_record_button_state` method.
+        # We just need to call it here to ensure it's up-to-date with the playback state change.
+        self.update_record_button_state()
 
         # --- Final UI sync on stop ---
         if state == "stopped":
@@ -650,11 +680,18 @@ class SequencerLayout(BoxLayout):
             self.file_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'edit_line'):
             self.edit_line.points = [0, -1, instance.width, -1]
+        if hasattr(self, 'song_line'):
+            self.song_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'settings_line'):
             self.settings_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'help_line'):
             self.help_line.points = [0, -1, instance.width, -1]
 
+
+    def show_vports_popup(self):
+        """Affiche le popup de gestion des Vports."""
+        popup = VportsPopup(sequencer=self.sequencer)
+        popup.open()
 
     def show_audio_settings(self):
         """Affiche les paramètres audio"""
@@ -941,7 +978,7 @@ class SequencerLayout(BoxLayout):
 
     def close_all_menus(self):
         """Ferme tous les menus ouverts"""
-        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu', 'help_menu']
+        menus_to_close = ['file_menu', 'edit_menu', 'song_menu', 'settings_menu', 'help_menu']
         for menu_name in menus_to_close:
             if hasattr(self, menu_name) and getattr(self, menu_name):
                 try:
@@ -1183,6 +1220,42 @@ class SequencerLayout(BoxLayout):
         )
         popup.open()
 
+    def toggle_record_button_color(self, dt):
+        """Alternates the record button color for blinking effect."""
+        default_color = (0.1, 0.1, 0.1, 1)
+        blink_color = (0.8, 0.0, 0.0, 1)
+        # Round the components for robust comparison
+        current_color_tuple = tuple(round(c, 1) for c in self.record_button.md_bg_color)
+
+        if current_color_tuple == default_color:
+            self.record_button.md_bg_color = blink_color
+        else:
+            self.record_button.md_bg_color = default_color
+
+    def update_record_button_state(self, *args):
+        """Centralized method to update the record button's visual state."""
+        # Stop any previous blinking timer
+        if self.record_blink_event:
+            self.record_blink_event.cancel()
+            self.record_blink_event = None
+
+        # Determine the sequencer's current recording-related state
+        is_armed = self.sequencer.is_recording and self.sequencer.playback_state == 'stopped'
+        is_actively_recording = self.sequencer.is_recording and self.sequencer.playback_state != 'stopped'
+
+        if is_armed:
+            # Start the blinking animation for the "armed" state
+            self.record_blink_event = Clock.schedule_interval(self.toggle_record_button_color, 0.5)
+            self.record_button.icon = 'record'
+        elif is_actively_recording:
+            # Set a solid red background for active recording
+            self.record_button.md_bg_color = [0.8, 0, 0, 1]
+            self.record_button.icon = 'record-circle-outline'
+        else:
+            # Revert to the default appearance
+            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+            self.record_button.icon = 'record'
+
     def start_play_blink(self):
         """Démarre l'animation de clignotement du bouton play"""
         if self.blink_animation:
@@ -1416,7 +1489,9 @@ class SequencerLayout(BoxLayout):
         # 5. Check if song length has changed and update widgets if needed
         new_total_beats = self.sequencer.get_song_length_in_beats()
         if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
-             for track_widget in self.track_widgets:
+            self.ruler.total_beats = new_total_beats
+            self.ruler.redraw()
+            for track_widget in self.track_widgets:
                 if track_widget.total_beats != new_total_beats:
                     track_widget.total_beats = new_total_beats
 

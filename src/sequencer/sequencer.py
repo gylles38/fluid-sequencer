@@ -3308,6 +3308,12 @@ class Sequencer(EventDispatcher):
             # Wait for the recording thread to finish its cleanup
             self.recording_thread.join(timeout=1.0)
             self.is_recording = False
+
+            # After recording, invalidate the cache so the new length is calculated
+            self.invalidate_song_length_cache()
+            # Trigger a UI refresh to redraw all tracks to the new length
+            self.song_structure_changed += 1
+
             # After the recording thread has stopped itself, we might not need to stop playback again
             # as it might have already done so. However, calling it ensures a consistent state.
             if self.playback_state != "stopped":

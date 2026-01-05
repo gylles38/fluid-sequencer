@@ -507,11 +507,12 @@ class TrackWidget(BoxLayout):
         self.mute_button.icon_color = [0.8, 0.3, 0, 1] if is_muted else [1, 0.6, 0, 1]
         self.mute_button.md_bg_color = [0.4, 0.2, 0.1, 0.8] if is_muted else [0.3, 0.2, 0.1, 0.8]
 
-        is_solo = self.track.is_solo
-        self.solo_button.icon = 'alpha-s-box' if is_solo else 'alpha-s-box-outline'
-        self.solo_button.tooltip_text = 'Unsolo' if is_solo else 'Solo'
-        self.solo_button.icon_color = [1, 1, 0, 1] if is_solo else [0.6, 0.6, 0.6, 1]
-        self.solo_button.md_bg_color = [0.3, 0.3, 0.1, 0.8] if is_solo else [0.1, 0.1, 0.1, 0.8]
+        if hasattr(self, 'solo_button'):
+            is_solo = self.track.is_solo
+            self.solo_button.icon = 'alpha-s-box' if is_solo else 'alpha-s-box-outline'
+            self.solo_button.tooltip_text = 'Unsolo' if is_solo else 'Solo'
+            self.solo_button.icon_color = [1, 1, 0, 1] if is_solo else [0.6, 0.6, 0.6, 1]
+            self.solo_button.md_bg_color = [0.3, 0.3, 0.1, 0.8] if is_solo else [0.1, 0.1, 0.1, 0.8]
 
     def get_record_mode_tooltip(self, mode):
         """Returns the appropriate tooltip text for the given record mode."""

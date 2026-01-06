@@ -860,43 +860,68 @@ class JackManager:
                 else:
                     self.next_event_indices[i] += 1
 
+    def _prime_automation_at_beat(self, beat: float):
+        """
+        Calculates and applies the correct automation values for a specific beat,
+        typically the start of playback.
+        """
+        # Dictionary to hold the last known value for each parameter on each track
+        # Key: (track_index, parameter_name), Value: event
+        initial_values = {}
+
+        # Find the last event at or before the given beat for each parameter
+        for event in self.automation_events:
+            if event['time'] <= beat:
+                key = (event['target_track_index'], event['parameter'])
+                initial_values[key] = event
+            else:
+                # Since the events are sorted by time, we can stop early
+                break
+        # Apply the found initial values
+        for (track_idx, param), event in initial_values.items():
+            self._apply_automation_event(event)
+
+    def _apply_automation_event(self, event: dict):
+        """Applies a single automation event."""
+        target_track_index = event['target_track_index']
+        if not 0 <= target_track_index < len(self.sequencer.song.tracks):
+            return
+
+        target_track = self.sequencer.song.tracks[target_track_index]
+        param_config = event['param_config']
+        value = event['value']
+        param_name = event['parameter'].lower()
+
+        if param_config['type'] == 'midi_cc':
+            if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
+                port = self.open_ports[target_track.output_port_name]
+                midi_value = 0
+                if param_name == 'vol':
+                    midi_value = int(value * 127)
+                elif param_name == 'pan':
+                    midi_value = int((value + 1.0) / 2.0 * 127)
+                else:
+                    midi_value = int(value)
+                midi_value = max(0, min(127, midi_value))
+                msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
+                port.send(msg)
+        elif param_config['type'] == 'program_change':
+            if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
+                port = self.open_ports[target_track.output_port_name]
+                program_value = max(0, min(127, int(value)))
+                msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
+                port.send(msg)
+        elif param_config['type'] == 'velocity_multiplier':
+            if isinstance(target_track, MidiTrack):
+                target_track.velocity = value
+
     def _process_automation_events(self, start_beat_of_block, end_beat_of_block):
         while self.next_automation_event_index < len(self.automation_events):
             event = self.automation_events[self.next_automation_event_index]
-            event_time = event['time']
-            if start_beat_of_block <= event_time < end_beat_of_block:
-                target_track_index = event['target_track_index']
-                if not 0 <= target_track_index < len(self.sequencer.song.tracks):
-                    self.next_automation_event_index += 1
-                    continue
-                target_track = self.sequencer.song.tracks[target_track_index]
-                param_config = event['param_config']
-                value = event['value']
-                param_name = event['parameter'].lower()
-                if param_config['type'] == 'midi_cc':
-                    if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
-                        port = self.open_ports[target_track.output_port_name]
-                        midi_value = 0
-                        if param_name == 'vol':
-                            midi_value = int(value * 127)
-                        elif param_name == 'pan':
-                            midi_value = int((value + 1.0) / 2.0 * 127)
-                        else:
-                            midi_value = int(value)
-                        midi_value = max(0, min(127, midi_value))
-                        msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
-                        port.send(msg)
-                elif param_config['type'] == 'program_change':
-                    if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
-                        port = self.open_ports[target_track.output_port_name]
-                        program_value = max(0, min(127, int(value)))
-                        msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
-                        port.send(msg)
-                elif param_config['type'] == 'velocity_multiplier':
-                    if isinstance(target_track, MidiTrack):
-                        target_track.velocity = value
+            if start_beat_of_block <= event['time'] < end_beat_of_block:
+                self._apply_automation_event(event)
                 self.next_automation_event_index += 1
-            elif event_time >= end_beat_of_block:
+            elif event['time'] >= end_beat_of_block:
                 break
             else:
                 self.next_automation_event_index += 1
@@ -3261,6 +3286,9 @@ class Sequencer(EventDispatcher):
 
         # Always prime tracks before starting
         self.prime_all_tracks()
+
+        # Prime automation to the start beat
+        self.jack_manager._prime_automation_at_beat(effective_start_beat)
 
         # Simply tell JACK to start rolling
         if self.jack_manager.jack_client.transport_state != jack.ROLLING:

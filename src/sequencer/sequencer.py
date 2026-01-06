@@ -3091,48 +3091,65 @@ class Sequencer(EventDispatcher):
         points = sorted(auto_track.points, key=lambda p: p.start_time)
         if not points:
             return []
+
         target_track_index = auto_track.target_track_index
         if not 0 <= target_track_index < len(self.song.tracks):
             return []
         target_track = self.song.tracks[target_track_index]
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
-        for i, start_point in enumerate(points):
-            param_config = param_map.get(start_point.parameter.lower())
+
+        points_by_parameter: Dict[str, List[AutomationPoint]] = {}
+        for p in points:
+            points_by_parameter.setdefault(p.parameter, []).append(p)
+
+        for parameter, param_points in points_by_parameter.items():
+            param_config = param_map.get(parameter.lower())
             if not param_config:
                 continue
-            generated_events.append({"time": start_point.start_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": start_point.value})
-            if i + 1 >= len(points) or start_point.curve == "none":
-                continue
-            end_point = points[i+1]
-            if start_point.parameter != end_point.parameter:
-                continue
-            start_time = start_point.start_time
-            end_time = end_point.start_time
-            start_val = start_point.value
-            end_val = end_point.value
-            time_diff = end_time - start_time
-            if time_diff <= 0:
-                continue
-            granularity = 1.0 / 16.0
-            num_steps = int(time_diff / granularity)
-            if num_steps <= 1:
-                continue
-            t = np.linspace(0, 1, num_steps, endpoint=False)[1:]
-            time_steps = start_time + t * time_diff
-            value_range = end_val - start_val
-            value_steps = None
-            if start_point.curve == "linear":
+
+            for i, start_point in enumerate(param_points):
+                generated_events.append({"time": start_point.start_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": start_point.value})
+
+                if i + 1 >= len(param_points):
+                    continue
+
+                end_point = param_points[i+1]
+
+                if end_point.curve == "none":
+                    continue
+                start_time = start_point.start_time
+                end_time = end_point.start_time
+                start_val = start_point.value
+                end_val = end_point.value
+                time_diff = end_time - start_time
+                if time_diff <= 0:
+                    continue
+
+                granularity = 1.0 / 16.0
+                num_steps = int(time_diff / granularity)
+                if num_steps <= 1:
+                    continue
+
+                t = np.linspace(0, 1, num_steps, endpoint=False)[1:]
+                time_steps = start_time + t * time_diff
+                value_range = end_val - start_val
+                value_steps = None
+
+            if end_point.curve == "linear":
                 value_steps = start_val + t * value_range
-            elif start_point.curve == "ease-in":
+            elif end_point.curve == "ease-in":
                 value_steps = start_val + (t**2) * value_range
-            elif start_point.curve == "ease-out":
+            elif end_point.curve == "ease-out":
                 value_steps = start_val + (1 - (1 - t)**2) * value_range
-            elif start_point.curve in ["ease-in-out", "sine"]:
+            elif end_point.curve in ["ease-in-out", "sine"]:
                 value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
             else:
                 continue
+
             for step_time, step_value in zip(time_steps, value_steps):
                 generated_events.append({"time": step_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": step_value})
+
+        generated_events.sort(key=lambda e: e['time'])
         return generated_events
 
     def _resync_all_at_beat(self, beat: float, force_play: bool = False):

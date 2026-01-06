@@ -2352,10 +2352,10 @@ class Sequencer(EventDispatcher):
                     if should_be_audible:
                         try:
                             output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
-                            # Bank and Program changes are always sent, as they aren't continuous controllers.
-                            if track.bank_msb is not None:
+                            # Bank and Program changes are always sent, unless automation for them exists at the start.
+                            if track.bank_msb is not None and (i, 'cc0') not in primed_by_automation:
                                 port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                            if track.bank_lsb is not None:
+                            if track.bank_lsb is not None and (i, 'cc32') not in primed_by_automation:
                                 port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
                             if (i, 'prog') not in primed_by_automation:
                                 port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))

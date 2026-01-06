@@ -162,6 +162,17 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(top_controls)
             midi_controls_layout.add_widget(self.port_selector_button)
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
+        elif isinstance(track, AutomationTrack):
+            # This is where the automation controls will be added for automation tracks
+            target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
+            automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
+
+            automation_controls = AutomationControls(track_type=automation_type)
+            automation_controls.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
+
+            # Adjust the layout's width to fit the controls
+            midi_controls_layout.width = automation_controls.width
+            midi_controls_layout.add_widget(automation_controls)
         else:
             midi_controls_layout.add_widget(Widget())
             

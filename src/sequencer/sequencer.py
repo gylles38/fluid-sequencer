@@ -3135,13 +3135,10 @@ class Sequencer(EventDispatcher):
             for i, start_point in enumerate(param_points):
                 generated_events.append({"time": start_point.start_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": start_point.value})
 
-                if i + 1 >= len(param_points):
+                if i + 1 >= len(param_points) or start_point.curve == "none":
                     continue
 
                 end_point = param_points[i+1]
-
-                if end_point.curve == "none":
-                    continue
                 start_time = start_point.start_time
                 end_time = end_point.start_time
                 start_val = start_point.value
@@ -3160,13 +3157,13 @@ class Sequencer(EventDispatcher):
                 value_range = end_val - start_val
                 value_steps = None
 
-            if end_point.curve == "linear":
+            if start_point.curve == "linear":
                 value_steps = start_val + t * value_range
-            elif end_point.curve == "ease-in":
+            elif start_point.curve == "ease-in":
                 value_steps = start_val + (t**2) * value_range
-            elif end_point.curve == "ease-out":
+            elif start_point.curve == "ease-out":
                 value_steps = start_val + (1 - (1 - t)**2) * value_range
-            elif end_point.curve in ["ease-in-out", "sine"]:
+            elif start_point.curve in ["ease-in-out", "sine"]:
                 value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
             else:
                 continue

@@ -1034,6 +1034,9 @@ class JackManager:
 
         if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:
             if start_beat_of_block < self.sequencer.loop_end_beat:
+                # When looping, re-prime automation to the loop start point
+                self._prime_automation_at_beat(self.sequencer.loop_start_beat)
+
                 beats_per_second = self.sequencer.song.tempo / 60.0
                 samplerate = self.jack_client.samplerate
                 if beats_per_second > 0 and samplerate > 0:

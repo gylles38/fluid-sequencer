@@ -3132,46 +3132,65 @@ class Sequencer(EventDispatcher):
             if not param_config:
                 continue
 
-            for i, start_point in enumerate(param_points):
-                generated_events.append({"time": start_point.start_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": start_point.value})
+            # First, add all the raw points to the event list. This ensures they are always present.
+            for p in param_points:
+                generated_events.append({
+                    "time": p.start_time,
+                    "target_track_index": target_track_index,
+                    "parameter": p.parameter,
+                    "param_config": param_config,
+                    "value": p.value
+                })
 
-                if i + 1 >= len(param_points):
-                    continue
+            # Now, iterate through the segments between points to generate the curves.
+            for i in range(len(param_points) - 1):
+                start_point = param_points[i]
+                end_point = param_points[i+1]
+
                 if start_point.curve == "none":
                     continue
 
-                end_point = param_points[i+1]
                 start_time = start_point.start_time
                 end_time = end_point.start_time
                 start_val = start_point.value
                 end_val = end_point.value
                 time_diff = end_time - start_time
+
                 if time_diff <= 0:
                     continue
 
-                granularity = 1.0 / 16.0
+                granularity = 1.0 / 16.0  # Generate events for every 16th note
                 num_steps = int(time_diff / granularity)
                 if num_steps <= 1:
                     continue
 
-                t = np.linspace(0, 1, num_steps, endpoint=False)[1:]
+                # Generate time steps and value steps based on the curve type
+                t = np.linspace(0, 1, num_steps, endpoint=False)[1:]  # Exclude t=0
                 time_steps = start_time + t * time_diff
                 value_range = end_val - start_val
                 value_steps = None
 
-            if start_point.curve == "linear":
-                value_steps = start_val + t * value_range
-            elif start_point.curve == "ease-in":
-                value_steps = start_val + (t**2) * value_range
-            elif start_point.curve == "ease-out":
-                value_steps = start_val + (1 - (1 - t)**2) * value_range
-            elif start_point.curve in ["ease-in-out", "sine"]:
-                value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
-            else:
-                continue
+                if start_point.curve == "linear":
+                    value_steps = start_val + t * value_range
+                elif start_point.curve == "ease-in":
+                    value_steps = start_val + (t**2) * value_range
+                elif start_point.curve == "ease-out":
+                    value_steps = start_val + (1 - (1 - t)**2) * value_range
+                elif start_point.curve in ["ease-in-out", "sine"]:
+                    value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
+                else:
+                    continue  # Unsupported curve type
 
-            for step_time, step_value in zip(time_steps, value_steps):
-                generated_events.append({"time": step_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": step_value})
+                # Add the generated intermediate events
+                if value_steps is not None:
+                    for step_time, step_value in zip(time_steps, value_steps):
+                        generated_events.append({
+                            "time": step_time,
+                            "target_track_index": target_track_index,
+                            "parameter": start_point.parameter,
+                            "param_config": param_config,
+                            "value": step_value
+                        })
 
         generated_events.sort(key=lambda e: e['time'])
         return generated_events

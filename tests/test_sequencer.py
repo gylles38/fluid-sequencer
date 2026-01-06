@@ -349,6 +349,46 @@ class TestSequencer(unittest.TestCase):
         sequencer.stop.assert_called_once()
         self.assertFalse(sequencer.play_range_enabled)
 
+    def test_automation_ease_in_to_none_curve(self):
+        """
+        Tests the specific bug case where an ease-in curve followed by a 'none'
+        curve was failing to generate the intermediate steps for the ease-in segment.
+        """
+        # 1. Setup the tracks
+        self.sequencer.add_track(name="Target Track", track_type='midi')
+        self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
+        auto_track = self.sequencer.song.tracks[1]
+        self.assertIsInstance(auto_track, AutomationTrack)
+
+        # 2. Add the specific points that caused the bug
+        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="vol", value=0.0, curve="ease-in"))
+        auto_track.add_point(AutomationPoint(start_time=16.0, parameter="vol", value=1.0, curve="none"))
+
+        # 3. Call the event generation function
+        generated_events = self.sequencer._generate_automation_events(auto_track)
+
+        # 4. Assertions
+        # There should be many generated events, not just the two endpoints.
+        # 16 beats at 1/16 granularity = 16*16 = 256 steps. Plus the 2 endpoints.
+        self.assertGreater(len(generated_events), 250)
+
+        # Find the event closest to the midpoint in time (8.0 beats)
+        midpoint_event = min(generated_events, key=lambda e: abs(e['time'] - 8.0))
+
+        # For an "ease-in" (t^2) curve, the value at the temporal midpoint (t=0.5)
+        # should be 0.25, which is significantly less than the linear midpoint of 0.5.
+        # This confirms the curve is being correctly applied.
+        self.assertLess(midpoint_event['value'], 0.3)
+        self.assertGreater(midpoint_event['value'], 0.2)
+
+        # Check that the start and end points are correct
+        start_event = min(generated_events, key=lambda e: e['time'])
+        end_event = max(generated_events, key=lambda e: e['time'])
+        self.assertAlmostEqual(start_event['time'], 0.0)
+        self.assertAlmostEqual(start_event['value'], 0.0)
+        self.assertAlmostEqual(end_event['time'], 16.0)
+        self.assertAlmostEqual(end_event['value'], 1.0)
+
 
 if __name__ == '__main__':
     unittest.main()

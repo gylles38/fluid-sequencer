@@ -95,17 +95,21 @@ class TrackWidget(BoxLayout):
             # Add a spacer to maintain alignment with MIDI tracks that have a record button
             self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
 
-        # --- Solo Button ---
-        self.solo_button = TooltipMDIconButton(
-            icon='alpha-s-box' if track.is_solo else 'alpha-s-box-outline',
-            tooltip_text='Solo' if not track.is_solo else 'Unsolo',
-            on_press=self.on_solo_toggle,
-            pos_hint={'center_y': 0.5},
-            theme_icon_color="Custom",
-            icon_color=[1, 1, 0, 1] if track.is_solo else [0.6, 0.6, 0.6, 1],
-            md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8]
-        )
-        self.controls_section.add_widget(self.solo_button)
+        # --- Solo Button (not for Automation tracks) ---
+        if not isinstance(track, AutomationTrack):
+            self.solo_button = TooltipMDIconButton(
+                icon='alpha-s-box' if track.is_solo else 'alpha-s-box-outline',
+                tooltip_text='Solo' if not track.is_solo else 'Unsolo',
+                on_press=self.on_solo_toggle,
+                pos_hint={'center_y': 0.5},
+                theme_icon_color="Custom",
+                icon_color=[1, 1, 0, 1] if track.is_solo else [0.6, 0.6, 0.6, 1],
+                md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8]
+            )
+            self.controls_section.add_widget(self.solo_button)
+        else:
+            # Add a spacer to maintain alignment
+            self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
 
         # --- MIDI Specific Controls (Channel, Program) ---
         midi_controls_layout = BoxLayout(
@@ -174,32 +178,40 @@ class TrackWidget(BoxLayout):
             pos_hint={'center_x': 0.5, 'center_y': 0.5}
         )
         mute_button_container.add_widget(self.mute_button)
-
-        self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
-        self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
-
         volume_layout.add_widget(mute_button_container)
-        volume_layout.add_widget(self.volume_slider)
-        volume_layout.add_widget(self.volume_label)
-        self.volume_slider.bind(value=self.on_volume_change)
-        self.track.bind(volume=self.on_track_volume_changed)
+
+        if not isinstance(track, AutomationTrack):
+            self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
+            volume_layout.add_widget(self.volume_slider)
+            volume_layout.add_widget(self.volume_label)
+            self.volume_slider.bind(value=self.on_volume_change)
+            self.track.bind(volume=self.on_track_volume_changed)
+        else:
+            # For automation tracks, add a spacer to fill the vertical space
+            volume_layout.add_widget(Widget())
+
         self.controls_section.add_widget(volume_layout)
 
         # --- Pan Controls ---
-        pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
+        if not isinstance(track, AutomationTrack):
+            pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
-        pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
-        pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
-        pan_icon_container.add_widget(pan_icon)
+            pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
+            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
+            pan_icon_container.add_widget(pan_icon)
 
-        self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
-        self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
+            self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
-        pan_layout.add_widget(pan_icon_container)
-        pan_layout.add_widget(self.pan_slider)
-        pan_layout.add_widget(self.pan_label)
-        self.pan_slider.bind(value=self.on_pan_change)
-        self.controls_section.add_widget(pan_layout)
+            pan_layout.add_widget(pan_icon_container)
+            pan_layout.add_widget(self.pan_slider)
+            pan_layout.add_widget(self.pan_label)
+            self.pan_slider.bind(value=self.on_pan_change)
+            self.controls_section.add_widget(pan_layout)
+        else:
+            # Add a spacer to maintain alignment
+            self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(50)))
 
         # --- Left Panel Container ---
         left_panel = BoxLayout(
@@ -495,11 +507,12 @@ class TrackWidget(BoxLayout):
         self.mute_button.icon_color = [0.8, 0.3, 0, 1] if is_muted else [1, 0.6, 0, 1]
         self.mute_button.md_bg_color = [0.4, 0.2, 0.1, 0.8] if is_muted else [0.3, 0.2, 0.1, 0.8]
 
-        is_solo = self.track.is_solo
-        self.solo_button.icon = 'alpha-s-box' if is_solo else 'alpha-s-box-outline'
-        self.solo_button.tooltip_text = 'Unsolo' if is_solo else 'Solo'
-        self.solo_button.icon_color = [1, 1, 0, 1] if is_solo else [0.6, 0.6, 0.6, 1]
-        self.solo_button.md_bg_color = [0.3, 0.3, 0.1, 0.8] if is_solo else [0.1, 0.1, 0.1, 0.8]
+        if hasattr(self, 'solo_button'):
+            is_solo = self.track.is_solo
+            self.solo_button.icon = 'alpha-s-box' if is_solo else 'alpha-s-box-outline'
+            self.solo_button.tooltip_text = 'Unsolo' if is_solo else 'Solo'
+            self.solo_button.icon_color = [1, 1, 0, 1] if is_solo else [0.6, 0.6, 0.6, 1]
+            self.solo_button.md_bg_color = [0.3, 0.3, 0.1, 0.8] if is_solo else [0.1, 0.1, 0.1, 0.8]
 
     def get_record_mode_tooltip(self, mode):
         """Returns the appropriate tooltip text for the given record mode."""

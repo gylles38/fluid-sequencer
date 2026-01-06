@@ -150,18 +150,28 @@ class AutomationPoint:
              raise ValueError(f"Invalid parameter name: {self.parameter}")
         self.parameter = param_lower
 
-@dataclass
-class AutomationTrack(BaseTrack):
+class AutomationTrack(BaseTrack, EventDispatcher):
     """A track that contains automation data for another track."""
-    target_track_index: int
-    is_muted: bool = False
-    is_solo: bool = False
-    points: List[AutomationPoint] = field(default_factory=list)
+    is_muted = BooleanProperty(False)
+    is_solo = BooleanProperty(False)
+
+    def __init__(self, name: str, target_track_index: int, is_muted: bool = False,
+                 is_solo: bool = False, points: List[AutomationPoint] = None, **kwargs):
+        BaseTrack.__init__(self, name=name)
+        EventDispatcher.__init__(self, **kwargs)
+        self.target_track_index = target_track_index
+        self.is_muted = is_muted
+        self.is_solo = is_solo
+        self.points = points if points is not None else []
 
     def add_point(self, point: AutomationPoint):
         """Adds an automation point and keeps the list sorted."""
         self.points.append(point)
         self.points.sort(key=lambda p: p.start_time)
+
+    def __repr__(self):
+        return (f"AutomationTrack(name='{self.name}', target_track_index={self.target_track_index}, "
+                f"points=[...{len(self.points)} items...])")
 
 
 # Using Union to allow the list to contain both MidiTrack and AudioTrack objects

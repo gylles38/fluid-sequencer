@@ -99,6 +99,15 @@ class CustomSongEncoder(json.JSONEncoder):
                 'native_tempo': o.native_tempo,
                 'duration_beats': o.duration_beats,
             }
+        if isinstance(o, AutomationTrack):
+            return {
+                '__type__': 'AutomationTrack',
+                'name': o.name,
+                'target_track_index': o.target_track_index,
+                'is_muted': o.is_muted,
+                'is_solo': o.is_solo,
+                'points': o.points,
+            }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__
@@ -851,43 +860,88 @@ class JackManager:
                 else:
                     self.next_event_indices[i] += 1
 
+    def _prime_automation_at_beat(self, beat: float):
+        """
+        Calculates and applies the correct automation values for a specific beat,
+        typically the start of playback.
+        """
+        # Dictionary to hold the last known value for each parameter on each track
+        # Key: (track_index, parameter_name), Value: event
+        initial_values = {}
+
+        # Find the last event at or before the given beat for each parameter
+        for event in self.automation_events:
+            if event['time'] <= beat:
+                key = (event['target_track_index'], event['parameter'])
+                initial_values[key] = event
+            else:
+                # Since the events are sorted by time, we can stop early
+                break
+        # Apply the found initial values
+        for (track_idx, param), event in initial_values.items():
+            self._apply_automation_event(event)
+
+    def _apply_automation_event(self, event: dict):
+        """Applies a single automation event."""
+        target_track_index = event['target_track_index']
+        if not 0 <= target_track_index < len(self.sequencer.song.tracks):
+            return
+
+        target_track = self.sequencer.song.tracks[target_track_index]
+        param_config = event['param_config']
+        value = event['value']
+        param_name = event['parameter'].lower()
+
+        # Branch by Track Type first for clarity and correctness
+        if isinstance(target_track, MidiTrack):
+            if param_config.get('type') == 'midi_cc':
+                if target_track.output_port_name in self.open_ports:
+                    port = self.open_ports[target_track.output_port_name]
+                    midi_value = 0
+                    if param_name == 'vol':
+                        midi_value = int(value * 127)
+                    elif param_name == 'pan':
+                        # CORRECT: Convert pan from -1.0..1.0 to 0..127 for MIDI
+                        midi_value = int((value + 1.0) / 2.0 * 127)
+                    else:
+                        midi_value = int(value)
+                    midi_value = max(0, min(127, midi_value))
+                    msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
+                    port.send(msg)
+            elif param_config.get('type') == 'program_change':
+                if target_track.output_port_name in self.open_ports:
+                    port = self.open_ports[target_track.output_port_name]
+                    program_value = max(0, min(127, int(value)))
+                    msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
+                    port.send(msg)
+            elif param_config.get('type') == 'velocity_multiplier':
+                target_track.velocity = value
+
+        elif isinstance(target_track, AudioTrack):
+            ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)
+            if not ap:
+                return
+
+            if param_name == 'vol':
+                # mpv expects volume from 0 to 100
+                mpv_volume = value * 100
+                command = {"command": ["set_property", "volume", mpv_volume]}
+                self._send_ipc_command(ap.socket_path, command)
+            elif param_name == 'pan':
+                # CORRECT: Use the lavfi filter for audio track panning, not 'balance'
+                gain_l = min(1.0, 1.0 - value)
+                gain_r = min(1.0, 1.0 + value)
+                pan_filter = f"lavfi=[pan=stereo|c0={gain_l:.2f}*c0|c1={gain_r:.2f}*c1]"
+                command = {"command": ["set_property", "af", pan_filter]}
+                self._send_ipc_command(ap.socket_path, command)
+
     def _process_automation_events(self, start_beat_of_block, end_beat_of_block):
         while self.next_automation_event_index < len(self.automation_events):
             event = self.automation_events[self.next_automation_event_index]
-            event_time = event['time']
-            if start_beat_of_block <= event_time < end_beat_of_block:
-                target_track_index = event['target_track_index']
-                if not 0 <= target_track_index < len(self.sequencer.song.tracks):
-                    self.next_automation_event_index += 1
-                    continue
-                target_track = self.sequencer.song.tracks[target_track_index]
-                param_config = event['param_config']
-                value = event['value']
-                param_name = event['parameter'].lower()
-                if param_config['type'] == 'midi_cc':
-                    if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
-                        port = self.open_ports[target_track.output_port_name]
-                        midi_value = 0
-                        if param_name == 'vol':
-                            midi_value = int(value * 127)
-                        elif param_name == 'pan':
-                            midi_value = int((value + 1.0) / 2.0 * 127)
-                        else:
-                            midi_value = int(value)
-                        midi_value = max(0, min(127, midi_value))
-                        msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
-                        port.send(msg)
-                elif param_config['type'] == 'program_change':
-                    if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
-                        port = self.open_ports[target_track.output_port_name]
-                        program_value = max(0, min(127, int(value)))
-                        msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
-                        port.send(msg)
-                elif param_config['type'] == 'velocity_multiplier':
-                    if isinstance(target_track, MidiTrack):
-                        target_track.velocity = value
+            if start_beat_of_block <= event['time'] < end_beat_of_block:
+                self._apply_automation_event(event)
                 self.next_automation_event_index += 1
-            elif event_time >= end_beat_of_block:
+            elif event['time'] >= end_beat_of_block:
                 break
             else:
                 self.next_automation_event_index += 1
@@ -1322,26 +1376,23 @@ class Sequencer(EventDispatcher):
             return 0.0
 
     def get_song_length_in_beats(self) -> float:
-        """Calcule la longueur totale du morceau en beats en fonction de l'événement le plus long, arrondie à la mesure supérieure."""
-        
-        # 1. Vérification du cache (MAINTENUE)
-        if self._cached_song_length_beats is not None:
+        """
+        Calculates the total length of the song in beats.
+        If recording, the length is dynamic and extends to the current playhead position.
+        Otherwise, it's based on the last event and cached for performance.
+        """
+        # If not recording, try to use the cache first.
+        if not self.is_recording and self._cached_song_length_beats is not None:
             return self._cached_song_length_beats
 
         max_beat = 0.0
-        beats_per_measure = self.song.time_signature_numerator
-        
-        # 2. Trouver le point final maximum
+        # Always calculate the "natural" end of the song based on existing events
         for track in self.song.tracks:
-            
             if isinstance(track, AudioTrack):
-                # Utilisation de la méthode mise en cache
                 duration_beats = self._get_audio_duration_in_beats(track)
                 end_beat = track.start_time + duration_beats
                 if end_beat > max_beat:
                     max_beat = end_beat
-                    
-            # ... (Logique pour MidiTrack et AutomationTrack reste inchangée)
             elif isinstance(track, MidiTrack):
                 if hasattr(track, 'events') and track.events:
                     for event in track.events:
@@ -1349,30 +1400,32 @@ class Sequencer(EventDispatcher):
                             end_beat = event.start_time + note.duration
                             if end_beat > max_beat:
                                 max_beat = end_beat
-            
             elif isinstance(track, AutomationTrack):
                 if hasattr(track, 'points') and track.points:
-                    last_point_beat = track.points[-1].start_time
+                    last_point_beat = max(p.start_time for p in track.points)
                     if last_point_beat > max_beat:
                         max_beat = last_point_beat
-                        
-        # 3. Arrondi et cache
-        min_length = beats_per_measure * 4 
+
+        # If recording, the dynamic length is the greater of the natural end or the current playhead
+        if self.is_recording:
+            current_beat = self.jack_manager.get_current_beat()
+            max_beat = max(max_beat, current_beat)
+
+        # Round up to the next measure
+        beats_per_measure = self.song.time_signature_numerator
+        min_length = beats_per_measure * 4
 
         if max_beat > 0.0:
             rounded_length = math.ceil((max_beat + 0.0001) / beats_per_measure) * beats_per_measure
         else:
             rounded_length = min_length
-                
-        rounded_length = max(rounded_length, min_length)
-        
-        # 🕵️ DIAGNOSTIC CRITIQUE
-        print(f"DEBUG LONGUEUR: Max Beat trouvé: {max_beat}")
-        print(f"DEBUG LONGUEUR: Longueur finale arrondie: {rounded_length} beats")
 
-        # 💾 Enregistrement du résultat dans le cache
-        self._cached_song_length_beats = rounded_length 
-        
+        rounded_length = max(rounded_length, min_length)
+
+        # Only cache the result if we are NOT recording
+        if not self.is_recording:
+            self._cached_song_length_beats = rounded_length
+
         return rounded_length
 
     def _all_notes_off(self):
@@ -3083,48 +3136,83 @@ class Sequencer(EventDispatcher):
         points = sorted(auto_track.points, key=lambda p: p.start_time)
         if not points:
             return []
+
         target_track_index = auto_track.target_track_index
         if not 0 <= target_track_index < len(self.song.tracks):
             return []
         target_track = self.song.tracks[target_track_index]
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
-        for i, start_point in enumerate(points):
-            param_config = param_map.get(start_point.parameter.lower())
+
+        points_by_parameter: Dict[str, List[AutomationPoint]] = {}
+        for p in points:
+            points_by_parameter.setdefault(p.parameter, []).append(p)
+
+        for parameter, param_points in points_by_parameter.items():
+            param_config = param_map.get(parameter.lower())
             if not param_config:
                 continue
-            generated_events.append({"time": start_point.start_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": start_point.value})
-            if i + 1 >= len(points) or start_point.curve == "none":
-                continue
-            end_point = points[i+1]
-            if start_point.parameter != end_point.parameter:
-                continue
-            start_time = start_point.start_time
-            end_time = end_point.start_time
-            start_val = start_point.value
-            end_val = end_point.value
-            time_diff = end_time - start_time
-            if time_diff <= 0:
-                continue
-            granularity = 1.0 / 16.0
-            num_steps = int(time_diff / granularity)
-            if num_steps <= 1:
-                continue
-            t = np.linspace(0, 1, num_steps, endpoint=False)[1:]
-            time_steps = start_time + t * time_diff
-            value_range = end_val - start_val
-            value_steps = None
-            if start_point.curve == "linear":
-                value_steps = start_val + t * value_range
-            elif start_point.curve == "ease-in":
-                value_steps = start_val + (t**2) * value_range
-            elif start_point.curve == "ease-out":
-                value_steps = start_val + (1 - (1 - t)**2) * value_range
-            elif start_point.curve in ["ease-in-out", "sine"]:
-                value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
-            else:
-                continue
-            for step_time, step_value in zip(time_steps, value_steps):
-                generated_events.append({"time": step_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": step_value})
+
+            # First, add all the raw points to the event list. This ensures they are always present.
+            for p in param_points:
+                generated_events.append({
+                    "time": p.start_time,
+                    "target_track_index": target_track_index,
+                    "parameter": p.parameter,
+                    "param_config": param_config,
+                    "value": p.value
+                })
+
+            # Now, iterate through the segments between points to generate the curves.
+            for i in range(len(param_points) - 1):
+                start_point = param_points[i]
+                end_point = param_points[i+1]
+
+                if start_point.curve == "none":
+                    continue
+
+                start_time = start_point.start_time
+                end_time = end_point.start_time
+                start_val = start_point.value
+                end_val = end_point.value
+                time_diff = end_time - start_time
+
+                if time_diff <= 0:
+                    continue
+
+                granularity = 1.0 / 16.0  # Generate events for every 16th note
+                num_steps = int(time_diff / granularity)
+                if num_steps <= 1:
+                    continue
+
+                # Generate time steps and value steps based on the curve type
+                t = np.linspace(0, 1, num_steps, endpoint=False)[1:]  # Exclude t=0
+                time_steps = start_time + t * time_diff
+                value_range = end_val - start_val
+                value_steps = None
+
+                if start_point.curve == "linear":
+                    value_steps = start_val + t * value_range
+                elif start_point.curve == "ease-in":
+                    value_steps = start_val + (t**2) * value_range
+                elif start_point.curve == "ease-out":
+                    value_steps = start_val + (1 - (1 - t)**2) * value_range
+                elif start_point.curve in ["ease-in-out", "sine"]:
+                    value_steps = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
+                else:
+                    continue  # Unsupported curve type
+
+                # Add the generated intermediate events
+                if value_steps is not None:
+                    for step_time, step_value in zip(time_steps, value_steps):
+                        generated_events.append({
+                            "time": step_time,
+                            "target_track_index": target_track_index,
+                            "parameter": start_point.parameter,
+                            "param_config": param_config,
+                            "value": step_value
+                        })
+
+        generated_events.sort(key=lambda e: e['time'])
         return generated_events
 
     def _resync_all_at_beat(self, beat: float, force_play: bool = False):
@@ -3237,6 +3325,9 @@ class Sequencer(EventDispatcher):
         # Always prime tracks before starting
         self.prime_all_tracks()
 
+        # Prime automation to the start beat
+        self.jack_manager._prime_automation_at_beat(effective_start_beat)
+
         # Simply tell JACK to start rolling
         if self.jack_manager.jack_client.transport_state != jack.ROLLING:
             self.jack_manager.jack_client.transport_start()
@@ -3309,6 +3400,12 @@ class Sequencer(EventDispatcher):
             # Wait for the recording thread to finish its cleanup
             self.recording_thread.join(timeout=1.0)
             self.is_recording = False
+
+            # After recording, invalidate the cache so the new length is calculated
+            self.invalidate_song_length_cache()
+            # Trigger a UI refresh to redraw all tracks to the new length
+            self.song_structure_changed += 1
+
             # After the recording thread has stopped itself, we might not need to stop playback again
             # as it might have already done so. However, calling it ensures a consistent state.
             if self.playback_state != "stopped":

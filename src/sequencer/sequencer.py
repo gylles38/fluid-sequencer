@@ -99,6 +99,15 @@ class CustomSongEncoder(json.JSONEncoder):
                 'native_tempo': o.native_tempo,
                 'duration_beats': o.duration_beats,
             }
+        if isinstance(o, AutomationTrack):
+            return {
+                '__type__': 'AutomationTrack',
+                'name': o.name,
+                'target_track_index': o.target_track_index,
+                'is_muted': o.is_muted,
+                'is_solo': o.is_solo,
+                'points': o.points,
+            }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}
             d['__type__'] = o.__class__.__name__

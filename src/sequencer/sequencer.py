@@ -3135,7 +3135,9 @@ class Sequencer(EventDispatcher):
             for i, start_point in enumerate(param_points):
                 generated_events.append({"time": start_point.start_time, "target_track_index": target_track_index, "parameter": start_point.parameter, "param_config": param_config, "value": start_point.value})
 
-                if i + 1 >= len(param_points) or start_point.curve == "none":
+                if i + 1 >= len(param_points):
+                    continue
+                if start_point.curve == "none":
                     continue
 
                 end_point = param_points[i+1]

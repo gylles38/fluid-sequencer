@@ -901,6 +901,7 @@ class JackManager:
                     if param_name == 'vol':
                         midi_value = int(value * 127)
                     elif param_name == 'pan':
+                        # CORRECT: Convert pan from -1.0..1.0 to 0..127 for MIDI
                         midi_value = int((value + 1.0) / 2.0 * 127)
                     else:
                         midi_value = int(value)
@@ -926,9 +927,8 @@ class JackManager:
                 mpv_volume = value * 100
                 command = {"command": ["set_property", "volume", mpv_volume]}
                 self._send_ipc_command(ap.socket_path, command)
-
             elif param_name == 'pan':
-                # mpv pan value is -1.0 (L) to 1.0 (R)
+                # CORRECT: Use the lavfi filter for audio track panning, not 'balance'
                 gain_l = min(1.0, 1.0 - value)
                 gain_r = min(1.0, 1.0 + value)
                 pan_filter = f"lavfi=[pan=stereo|c0={gain_l:.2f}*c0|c1={gain_r:.2f}*c1]"

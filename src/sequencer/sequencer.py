@@ -860,26 +860,85 @@ class JackManager:
                 else:
                     self.next_event_indices[i] += 1
 
-    def _prime_automation_at_beat(self, beat: float):
+    def _prime_automation_at_beat(self, beat: float) -> set:
         """
-        Calculates and applies the correct automation values for a specific beat,
-        typically the start of playback.
+        Calculates and applies the correct automation values for a specific beat by
+        interpolating the automation curves. This ensures the correct state is set
+        when starting playback mid-song.
+        Returns a set of (track_index, parameter_name) tuples that were primed.
         """
-        # Dictionary to hold the last known value for each parameter on each track
-        # Key: (track_index, parameter_name), Value: event
-        initial_values = {}
+        primed_params = set()
+        param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
-        # Find the last event at or before the given beat for each parameter
-        for event in self.automation_events:
-            if event['time'] <= beat:
-                key = (event['target_track_index'], event['parameter'])
-                initial_values[key] = event
-            else:
-                # Since the events are sorted by time, we can stop early
-                break
-        # Apply the found initial values
-        for (track_idx, param), event in initial_values.items():
-            self._apply_automation_event(event)
+        for track in self.sequencer.song.tracks:
+            if not isinstance(track, AutomationTrack):
+                continue
+
+            # This logic only works if the target track is valid
+            if not 0 <= track.target_track_index < len(self.sequencer.song.tracks):
+                continue
+
+            points_by_parameter: Dict[str, List[AutomationPoint]] = {}
+            for p in track.points:
+                points_by_parameter.setdefault(p.parameter, []).append(p)
+
+            for parameter, points in points_by_parameter.items():
+                if not points:
+                    continue
+
+                start_point = None
+                end_point = None
+
+                # Find the last point at or before the beat
+                for p in reversed(points):
+                    if p.start_time <= beat:
+                        start_point = p
+                        break
+
+                if not start_point:
+                    continue
+
+                # Find the first point after the beat
+                for p in points:
+                    if p.start_time > beat:
+                        end_point = p
+                        break
+
+                value_to_apply = start_point.value
+
+                if end_point and start_point.curve != 'none':
+                    start_time = start_point.start_time
+                    end_time = end_point.start_time
+                    time_diff = end_time - start_time
+
+                    if time_diff > 0:
+                        start_val = start_point.value
+                        end_val = end_point.value
+                        value_range = end_val - start_val
+                        curve = start_point.curve
+                        t = (beat - start_time) / time_diff
+
+                        if curve == "linear":
+                            value_to_apply = start_val + t * value_range
+                        elif curve == "ease-in":
+                            value_to_apply = start_val + (t**2) * value_range
+                        elif curve == "ease-out":
+                            value_to_apply = start_val + (1 - (1 - t)**2) * value_range
+                        elif curve in ["ease-in-out", "sine"]:
+                            value_to_apply = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
+
+                param_config = param_map.get(parameter.lower())
+                if param_config:
+                    event_dict = {
+                        "target_track_index": track.target_track_index,
+                        "parameter": parameter,
+                        "param_config": param_config,
+                        "value": value_to_apply
+                    }
+                    self._apply_automation_event(event_dict)
+                    primed_params.add((track.target_track_index, parameter))
+
+        return primed_params
 
     def _apply_automation_event(self, event: dict):
         """Applies a single automation event."""
@@ -975,6 +1034,9 @@ class JackManager:
 
         if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:
             if start_beat_of_block < self.sequencer.loop_end_beat:
+                # When looping, re-prime automation to the loop start point
+                self._prime_automation_at_beat(self.sequencer.loop_start_beat)
+
                 beats_per_second = self.sequencer.song.tempo / 60.0
                 samplerate = self.jack_client.samplerate
                 if beats_per_second > 0 and samplerate > 0:
@@ -2324,10 +2386,16 @@ class Sequencer(EventDispatcher):
         output += f"Track '{target_track.name}' is now {status}."
         return {"status": "success", "message": output}
 
-    def prime_all_tracks(self) -> str:
-        """Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks."""
+    def prime_all_tracks(self, primed_by_automation: set = None) -> str:
+        """
+        Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks.
+        Skips parameters that have already been set by an automation event.
+        """
         if not self.jack_manager.is_running:
             return "Warning: prime_all_tracks called but JACK manager is not running. State will not be sent."
+
+        if primed_by_automation is None:
+            primed_by_automation = set()
 
         output = "Priming all MIDI tracks with initial state...\n"
         tracks = self.song.tracks
@@ -2345,15 +2413,24 @@ class Sequencer(EventDispatcher):
                     if should_be_audible:
                         try:
                             output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
-                            if track.bank_msb is not None:
+                            # Bank and Program changes are always sent, unless automation for them exists at the start.
+                            if track.bank_msb is not None and (i, 'cc0') not in primed_by_automation:
                                 port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                            if track.bank_lsb is not None:
+                            if track.bank_lsb is not None and (i, 'cc32') not in primed_by_automation:
                                 port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                            port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-                            midi_volume = int(track.volume * 127)
-                            port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-                            midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                            port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                            if (i, 'prog') not in primed_by_automation:
+                                port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+
+                            # Only send volume if not already handled by automation.
+                            if (i, 'vol') not in primed_by_automation:
+                                midi_volume = int(track.volume * 127)
+                                port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+
+                            # Only send pan if not already handled by automation.
+                            if (i, 'pan') not in primed_by_automation:
+                                midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                                port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+
                         except Exception as e:
                             output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
                     else:
@@ -3274,7 +3351,8 @@ class Sequencer(EventDispatcher):
             self.jack_manager._prepare_automation_events()
 
             # 6. Envoyer l'état actuel (volume, pan, etc.) à toutes les pistes audibles
-            self.prime_all_tracks()
+            primed_by_automation = self.jack_manager._prime_automation_at_beat(beat)
+            self.prime_all_tracks(primed_by_automation=primed_by_automation)
 
             # 7. CORRECTION : Mettre à jour l'état mute/solo des pistes audio
             is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
@@ -3322,11 +3400,11 @@ class Sequencer(EventDispatcher):
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
 
-        # Always prime tracks before starting
-        self.prime_all_tracks()
+        # Prime automation first and get the set of parameters it handled.
+        primed_by_automation = self.jack_manager._prime_automation_at_beat(effective_start_beat)
 
-        # Prime automation to the start beat
-        self.jack_manager._prime_automation_at_beat(effective_start_beat)
+        # Then, prime the tracks, passing in the set so it can skip what's already done.
+        self.prime_all_tracks(primed_by_automation=primed_by_automation)
 
         # Simply tell JACK to start rolling
         if self.jack_manager.jack_client.transport_state != jack.ROLLING:

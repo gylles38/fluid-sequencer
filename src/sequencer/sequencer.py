@@ -860,26 +860,27 @@ class JackManager:
                 else:
                     self.next_event_indices[i] += 1
 
-    def _prime_automation_at_beat(self, beat: float):
+    def _prime_automation_at_beat(self, beat: float) -> set:
         """
         Calculates and applies the correct automation values for a specific beat,
         typically the start of playback.
+        Returns a set of (track_index, parameter_name) tuples that were primed.
         """
-        # Dictionary to hold the last known value for each parameter on each track
-        # Key: (track_index, parameter_name), Value: event
+        primed_params = set()
         initial_values = {}
 
-        # Find the last event at or before the given beat for each parameter
         for event in self.automation_events:
             if event['time'] <= beat:
                 key = (event['target_track_index'], event['parameter'])
                 initial_values[key] = event
             else:
-                # Since the events are sorted by time, we can stop early
                 break
-        # Apply the found initial values
+
         for (track_idx, param), event in initial_values.items():
             self._apply_automation_event(event)
+            primed_params.add((track_idx, param))
+
+        return primed_params
 
     def _apply_automation_event(self, event: dict):
         """Applies a single automation event."""
@@ -2324,10 +2325,16 @@ class Sequencer(EventDispatcher):
         output += f"Track '{target_track.name}' is now {status}."
         return {"status": "success", "message": output}
 
-    def prime_all_tracks(self) -> str:
-        """Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks."""
+    def prime_all_tracks(self, primed_by_automation: set = None) -> str:
+        """
+        Sends the current state (program, volume, pan, etc.) for all assigned MIDI tracks.
+        Skips parameters that have already been set by an automation event.
+        """
         if not self.jack_manager.is_running:
             return "Warning: prime_all_tracks called but JACK manager is not running. State will not be sent."
+
+        if primed_by_automation is None:
+            primed_by_automation = set()
 
         output = "Priming all MIDI tracks with initial state...\n"
         tracks = self.song.tracks
@@ -2345,15 +2352,24 @@ class Sequencer(EventDispatcher):
                     if should_be_audible:
                         try:
                             output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
+                            # Bank and Program changes are always sent, as they aren't continuous controllers.
                             if track.bank_msb is not None:
                                 port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
                             if track.bank_lsb is not None:
                                 port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                            port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-                            midi_volume = int(track.volume * 127)
-                            port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
-                            midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                            port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                            if (i, 'prog') not in primed_by_automation:
+                                port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+
+                            # Only send volume if not already handled by automation.
+                            if (i, 'vol') not in primed_by_automation:
+                                midi_volume = int(track.volume * 127)
+                                port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+
+                            # Only send pan if not already handled by automation.
+                            if (i, 'pan') not in primed_by_automation:
+                                midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                                port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+
                         except Exception as e:
                             output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
                     else:
@@ -3274,7 +3290,8 @@ class Sequencer(EventDispatcher):
             self.jack_manager._prepare_automation_events()
 
             # 6. Envoyer l'état actuel (volume, pan, etc.) à toutes les pistes audibles
-            self.prime_all_tracks()
+            primed_by_automation = self.jack_manager._prime_automation_at_beat(beat)
+            self.prime_all_tracks(primed_by_automation=primed_by_automation)
 
             # 7. CORRECTION : Mettre à jour l'état mute/solo des pistes audio
             is_any_track_soloed = any(t.is_solo for t in self.song.tracks if hasattr(t, 'is_solo'))
@@ -3322,11 +3339,11 @@ class Sequencer(EventDispatcher):
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
 
-        # Always prime tracks before starting
-        self.prime_all_tracks()
+        # Prime automation first and get the set of parameters it handled.
+        primed_by_automation = self.jack_manager._prime_automation_at_beat(effective_start_beat)
 
-        # Prime automation to the start beat
-        self.jack_manager._prime_automation_at_beat(effective_start_beat)
+        # Then, prime the tracks, passing in the set so it can skip what's already done.
+        self.prime_all_tracks(primed_by_automation=primed_by_automation)
 
         # Simply tell JACK to start rolling
         if self.jack_manager.jack_client.transport_state != jack.ROLLING:

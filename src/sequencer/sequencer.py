@@ -862,23 +862,81 @@ class JackManager:
 
     def _prime_automation_at_beat(self, beat: float) -> set:
         """
-        Calculates and applies the correct automation values for a specific beat,
-        typically the start of playback.
+        Calculates and applies the correct automation values for a specific beat by
+        interpolating the automation curves. This ensures the correct state is set
+        when starting playback mid-song.
         Returns a set of (track_index, parameter_name) tuples that were primed.
         """
         primed_params = set()
-        initial_values = {}
+        param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
-        for event in self.automation_events:
-            if event['time'] <= beat:
-                key = (event['target_track_index'], event['parameter'])
-                initial_values[key] = event
-            else:
-                break
+        for track in self.sequencer.song.tracks:
+            if not isinstance(track, AutomationTrack):
+                continue
 
-        for (track_idx, param), event in initial_values.items():
-            self._apply_automation_event(event)
-            primed_params.add((track_idx, param))
+            # This logic only works if the target track is valid
+            if not 0 <= track.target_track_index < len(self.sequencer.song.tracks):
+                continue
+
+            points_by_parameter: Dict[str, List[AutomationPoint]] = {}
+            for p in track.points:
+                points_by_parameter.setdefault(p.parameter, []).append(p)
+
+            for parameter, points in points_by_parameter.items():
+                if not points:
+                    continue
+
+                start_point = None
+                end_point = None
+
+                # Find the last point at or before the beat
+                for p in reversed(points):
+                    if p.start_time <= beat:
+                        start_point = p
+                        break
+
+                if not start_point:
+                    continue
+
+                # Find the first point after the beat
+                for p in points:
+                    if p.start_time > beat:
+                        end_point = p
+                        break
+
+                value_to_apply = start_point.value
+
+                if end_point and start_point.curve != 'none':
+                    start_time = start_point.start_time
+                    end_time = end_point.start_time
+                    time_diff = end_time - start_time
+
+                    if time_diff > 0:
+                        start_val = start_point.value
+                        end_val = end_point.value
+                        value_range = end_val - start_val
+                        curve = start_point.curve
+                        t = (beat - start_time) / time_diff
+
+                        if curve == "linear":
+                            value_to_apply = start_val + t * value_range
+                        elif curve == "ease-in":
+                            value_to_apply = start_val + (t**2) * value_range
+                        elif curve == "ease-out":
+                            value_to_apply = start_val + (1 - (1 - t)**2) * value_range
+                        elif curve in ["ease-in-out", "sine"]:
+                            value_to_apply = start_val + (0.5 * (1 - np.cos(np.pi * t))) * value_range
+
+                param_config = param_map.get(parameter.lower())
+                if param_config:
+                    event_dict = {
+                        "target_track_index": track.target_track_index,
+                        "parameter": parameter,
+                        "param_config": param_config,
+                        "value": value_to_apply
+                    }
+                    self._apply_automation_event(event_dict)
+                    primed_params.add((track.target_track_index, parameter))
 
         return primed_params
 

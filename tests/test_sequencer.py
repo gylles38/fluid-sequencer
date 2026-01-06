@@ -389,6 +389,50 @@ class TestSequencer(unittest.TestCase):
         self.assertAlmostEqual(end_event['time'], 16.0)
         self.assertAlmostEqual(end_event['value'], 1.0)
 
+    @patch('pydub.AudioSegment.from_file')
+    @patch('sequencer.sequencer.JackManager._send_ipc_command')
+    def test_audio_track_automation_sends_ipc_commands(self, mock_send_ipc, mock_from_file):
+        """
+        Verify that automation events for audio tracks are correctly translated
+        into IPC commands for mpv.
+        """
+        # 1. Setup
+        mock_from_file.return_value = MagicMock()
+        self.sequencer.add_track(name="Audio", track_type='audio', filepath="test.wav")
+
+        # Mock an active audio process for this track
+        self.sequencer.jack_manager.active_audio_processes = [
+            MagicMock(track_index=0, socket_path="/tmp/mpv-socket")
+        ]
+
+        # 2. Test Volume Automation
+        vol_event = {
+            "target_track_index": 0,
+            "parameter": "vol",
+            "param_config": {}, # Not used for audio track logic
+            "value": 0.75
+        }
+        self.sequencer.jack_manager._apply_automation_event(vol_event)
+
+        # Assert that the correct volume command was sent (0.75 -> 75.0)
+        expected_vol_command = {"command": ["set_property", "volume", 75.0]}
+        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_vol_command)
+
+        # 3. Test Pan Automation
+        pan_event = {
+            "target_track_index": 0,
+            "parameter": "pan",
+            "param_config": {},
+            "value": -0.5 # Pan to the left
+        }
+        self.sequencer.jack_manager._apply_automation_event(pan_event)
+
+        # Assert that the correct pan command was sent
+        expected_pan_filter = "lavfi=[pan=stereo|c0=1.00*c0|c1=0.50*c1]"
+        expected_pan_command = {"command": ["set_property", "af", expected_pan_filter]}
+        # The mock was already called for volume, so we check the last call
+        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_pan_command)
+
 
 if __name__ == '__main__':
     unittest.main()

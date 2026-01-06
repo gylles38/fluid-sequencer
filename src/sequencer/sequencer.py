@@ -892,28 +892,48 @@ class JackManager:
         value = event['value']
         param_name = event['parameter'].lower()
 
-        if param_config['type'] == 'midi_cc':
-            if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
-                port = self.open_ports[target_track.output_port_name]
-                midi_value = 0
-                if param_name == 'vol':
-                    midi_value = int(value * 127)
-                elif param_name == 'pan':
-                    midi_value = int((value + 1.0) / 2.0 * 127)
-                else:
-                    midi_value = int(value)
-                midi_value = max(0, min(127, midi_value))
-                msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
-                port.send(msg)
-        elif param_config['type'] == 'program_change':
-            if isinstance(target_track, MidiTrack) and target_track.output_port_name in self.open_ports:
-                port = self.open_ports[target_track.output_port_name]
-                program_value = max(0, min(127, int(value)))
-                msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
-                port.send(msg)
-        elif param_config['type'] == 'velocity_multiplier':
-            if isinstance(target_track, MidiTrack):
+        # Branch by Track Type first for clarity and correctness
+        if isinstance(target_track, MidiTrack):
+            if param_config.get('type') == 'midi_cc':
+                if target_track.output_port_name in self.open_ports:
+                    port = self.open_ports[target_track.output_port_name]
+                    midi_value = 0
+                    if param_name == 'vol':
+                        midi_value = int(value * 127)
+                    elif param_name == 'pan':
+                        midi_value = int((value + 1.0) / 2.0 * 127)
+                    else:
+                        midi_value = int(value)
+                    midi_value = max(0, min(127, midi_value))
+                    msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
+                    port.send(msg)
+            elif param_config.get('type') == 'program_change':
+                if target_track.output_port_name in self.open_ports:
+                    port = self.open_ports[target_track.output_port_name]
+                    program_value = max(0, min(127, int(value)))
+                    msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
+                    port.send(msg)
+            elif param_config.get('type') == 'velocity_multiplier':
                 target_track.velocity = value
+
+        elif isinstance(target_track, AudioTrack):
+            ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)
+            if not ap:
+                return
+
+            if param_name == 'vol':
+                # mpv expects volume from 0 to 100
+                mpv_volume = value * 100
+                command = {"command": ["set_property", "volume", mpv_volume]}
+                self._send_ipc_command(ap.socket_path, command)
+
+            elif param_name == 'pan':
+                # mpv pan value is -1.0 (L) to 1.0 (R)
+                gain_l = min(1.0, 1.0 - value)
+                gain_r = min(1.0, 1.0 + value)
+                pan_filter = f"lavfi=[pan=stereo|c0={gain_l:.2f}*c0|c1={gain_r:.2f}*c1]"
+                command = {"command": ["set_property", "af", pan_filter]}
+                self._send_ipc_command(ap.socket_path, command)
 
     def _process_automation_events(self, start_beat_of_block, end_beat_of_block):
         while self.next_automation_event_index < len(self.automation_events):

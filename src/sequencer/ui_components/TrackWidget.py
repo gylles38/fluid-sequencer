@@ -195,7 +195,6 @@ class TrackWidget(BoxLayout):
         )
         mute_button_container.add_widget(self.mute_button)
 
-
         if not isinstance(track, AutomationTrack):
             volume_layout.add_widget(mute_button_container)
             self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
@@ -205,8 +204,6 @@ class TrackWidget(BoxLayout):
             self.volume_slider.bind(value=self.on_volume_change)
             self.track.bind(volume=self.on_track_volume_changed)
         else:
-            volume_layout.spacing = dp(4)
-            mute_button_container.height = dp(36)
             # For automation tracks, add spacers to center the button
             volume_layout.add_widget(Widget())
             volume_layout.add_widget(mute_button_container)

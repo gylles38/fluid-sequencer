@@ -186,7 +186,7 @@ class TrackWidget(BoxLayout):
         # --- Volume Controls ---
         volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
-        mute_button_container = BoxLayout(size_hint_y=None, height=dp(36), pos_hint={'center_x': 0.5})
+        mute_button_container = BoxLayout(size_hint_y=None, height=dp(30), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
@@ -194,6 +194,7 @@ class TrackWidget(BoxLayout):
             pos_hint={'center_x': 0.5, 'center_y': 0.5}
         )
         mute_button_container.add_widget(self.mute_button)
+
 
         if not isinstance(track, AutomationTrack):
             volume_layout.add_widget(mute_button_container)
@@ -204,10 +205,12 @@ class TrackWidget(BoxLayout):
             self.volume_slider.bind(value=self.on_volume_change)
             self.track.bind(volume=self.on_track_volume_changed)
         else:
+            volume_layout.spacing = dp(4)
+            mute_button_container.height = dp(36)
             # For automation tracks, add spacers to center the button
-            volume_layout.add_widget(Widget())  # Top spacer
+            volume_layout.add_widget(Widget())
             volume_layout.add_widget(mute_button_container)
-            volume_layout.add_widget(Widget())  # Bottom spacer
+            volume_layout.add_widget(Widget())
 
         self.controls_section.add_widget(volume_layout)
 
@@ -334,15 +337,12 @@ class TrackWidget(BoxLayout):
                 icon=track_type_icon,
                 theme_text_color="Custom",
                 text_color=track_type_color,
-                halign='center'
+                halign='center',
+                valign='center'
             )
 
-            # Use a container with a fixed height for precise vertical alignment
-            icon_container = BoxLayout(size_hint_y=None, height=dp(36))
-            icon_container.add_widget(icon)
-
             icon_layout.add_widget(Widget()) # Top spacer
-            icon_layout.add_widget(icon_container)
+            icon_layout.add_widget(icon)
             icon_layout.add_widget(Widget()) # Bottom spacer
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)

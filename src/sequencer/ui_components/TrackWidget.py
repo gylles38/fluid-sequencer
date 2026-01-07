@@ -315,8 +315,7 @@ class TrackWidget(BoxLayout):
             icon_layout = BoxLayout(
                 size_hint_x=None,
                 width=dp(40),
-                orientation='vertical',
-                pos_hint={'center_y': 0.5}
+                orientation='vertical'
             )
 
             track_type_icon = "help-circle"
@@ -336,7 +335,10 @@ class TrackWidget(BoxLayout):
                 halign='center',
                 valign='center'
             )
+
+            icon_layout.add_widget(Widget()) # Top spacer
             icon_layout.add_widget(icon)
+            icon_layout.add_widget(Widget()) # Bottom spacer
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce

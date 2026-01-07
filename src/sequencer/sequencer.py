@@ -163,6 +163,103 @@ class JackManager:
         self._correction_stop_event = threading.Event()
         self.last_applied_speeds = {}
 
+    def find_port_by_name(self, pattern):
+        """
+        Cherche un port JACK complet qui contient le 'pattern' donné.
+        Retourne le nom complet du premier port trouvé, ou None.
+        """
+        try:
+            # On demande à JACK/PipeWire la liste de tous les ports
+            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
+            all_ports = result.stdout.splitlines()
+
+            for port in all_ports:
+                # On cherche une correspondance partielle (ex: "RtMidiOut" dans le nom complet)
+                if pattern in port:
+                    return port.strip() # On nettoie les espaces/sauts de ligne
+
+            return None
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
+            return None
+
+    def auto_connect_dynamic(self, src_keyword, dest_keyword):
+        """
+        Connecte deux ports en utilisant des mots-clés partiels.
+        """
+        print(f"--- Attempting auto-connect: '{src_keyword}' -> '{dest_keyword}' ---")
+
+        # 1. Recherche des noms complets
+        full_source = self.find_port_by_name(src_keyword)
+        full_dest = self.find_port_by_name(dest_keyword)
+
+        if not full_source:
+            print(f"Info: Source port not found with keyword: '{src_keyword}'")
+            return
+        if not full_dest:
+            print(f"Info: Destination port not found with keyword: '{dest_keyword}'")
+            return
+
+        print(f"Ports identified:\n   Source: {full_source}\n   Dest  : {full_dest}")
+
+        # 2. Tentative de connexion via jack_connect
+        try:
+            res = subprocess.run(
+                ["jack_connect", full_source, full_dest],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+
+            if res.returncode == 0:
+                print("Connection successful!")
+            else:
+                # If error (often because already connected), we display the message
+                # PipeWire often returns an error if it's already connected, it's not serious.
+                if "exists" in res.stderr:
+                     print("Already connected.")
+                else:
+                     print(f"Connection warning: {res.stderr.strip()}")
+
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_connect' introuvable.", file=sys.stderr)
+
+    def disconnect_dynamic(self, src_keyword, dest_keyword):
+        """
+        Disconnects two ports using partial keywords.
+        """
+        if not src_keyword or not dest_keyword:
+            return
+
+        full_source = self.find_port_by_name(src_keyword)
+        full_dest = self.find_port_by_name(dest_keyword)
+
+        if not full_source or not full_dest:
+            return
+
+        try:
+            subprocess.run(
+                ["jack_disconnect", full_source, full_dest],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_disconnect' introuvable.", file=sys.stderr)
+
+    def get_midi_input_ports(self):
+        """
+        Retourne une liste de tous les ports d'entrée MIDI JACK disponibles (se terminant par :events-in).
+        """
+        try:
+            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
+            all_ports = result.stdout.splitlines()
+            midi_input_ports = [port.strip() for port in all_ports if port.strip().endswith(':events-in')]
+            return midi_input_ports
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
+            return []
+
     def open_midi_port(self, port_name: str):
         """Opens a MIDI port if it's not already open."""
         if port_name in self.open_ports and not self.open_ports[port_name].closed:
@@ -2585,6 +2682,12 @@ class Sequencer(EventDispatcher):
             # --- Restart Jack Manager to apply new project settings ---
             self.jack_manager.stop()
             self.jack_manager.start()
+
+            # --- Auto-connect MIDI tracks based on project data ---
+            time.sleep(0.5) # Give Jack time to register ports
+            for track in self.song.tracks:
+                if isinstance(track, MidiTrack) and track.output_port_name and track.input_port_name:
+                    self.jack_manager.auto_connect_dynamic(track.output_port_name, track.input_port_name)
 
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:

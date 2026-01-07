@@ -1,0 +1,29 @@
+{
+    "__class__": "Song",
+    "version": "1.0",
+    "name": "Test Project",
+    "tempo": 120,
+    "time_signature": [4, 4],
+    "tracks": [
+        {
+            "__class__": "MidiTrack",
+            "name": "midi",
+            "channel": 0,
+            "instrument": 0,
+            "is_muted": false,
+            "is_solo": false,
+            "volume": 1.0,
+            "pan": 0.0,
+            "events": []
+        },
+        {
+            "__class__": "AutomationTrack",
+            "name": "auto",
+            "target_track_index": 0,
+            "target_param": "volume",
+            "is_muted": false,
+            "is_solo": false,
+            "points": []
+        }
+    ]
+}

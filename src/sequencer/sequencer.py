@@ -83,6 +83,7 @@ class CustomSongEncoder(json.JSONEncoder):
                 'bank_msb': o.bank_msb,
                 'bank_lsb': o.bank_lsb,
                 'output_port_name': o.output_port_name,
+                'input_port_name': o.input_port_name,
                 'record_mode': o.record_mode,
             }
         if isinstance(o, AudioTrack):

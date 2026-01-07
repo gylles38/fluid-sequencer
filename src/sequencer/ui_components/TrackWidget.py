@@ -158,9 +158,23 @@ class TrackWidget(BoxLayout):
                 pos_hint={'center_x': 0.5} # Center the button
             )
 
+            # Plugin Selector Button below
+            plugin_name = track.input_port_name if track.input_port_name else "None"
+            self.input_button_text_button_text = MDButtonText(text=f"Plugin: {plugin_name}")
+            self.input_selector_button = MDButton(
+                self.input_button_text_button_text,
+                on_press=self.select_midi_port_popup,
+                style="outlined",
+                size_hint=(None, None), # Disable size hint for centering
+                width=dp(150),
+                height=dp(32),
+                pos_hint={'center_x': 0.5} # Center the button
+            )
+
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Top spacer
             midi_controls_layout.add_widget(top_controls)
             midi_controls_layout.add_widget(self.port_selector_button)
+            midi_controls_layout.add_widget(self.input_selector_button)
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
         elif isinstance(track, AutomationTrack):
             # This is where the automation controls will be added for automation tracks

@@ -147,7 +147,7 @@ class TrackWidget(BoxLayout):
 
             # Port Selector Button below
             port_name = track.output_port_name if track.output_port_name else "None"
-            self.port_button_text = MDButtonText(text=f"Port: {port_name}")
+            self.port_button_text = MDButtonText(text=f"In: {port_name}")
             self.port_selector_button = MDButton(
                 self.port_button_text,
                 on_press=self.select_midi_port_popup,
@@ -160,10 +160,10 @@ class TrackWidget(BoxLayout):
 
             # Plugin Selector Button below
             plugin_name = track.input_port_name if track.input_port_name else "None"
-            self.input_button_text_button_text = MDButtonText(text=f"Plugin: {plugin_name}")
+            self.input_button_text_button_text = MDButtonText(text=f"Out: {plugin_name}")
             self.input_selector_button = MDButton(
                 self.input_button_text_button_text,
-                on_press=self.select_midi_port_popup,
+                on_press=self.select_midi_input_popup,
                 style="outlined",
                 size_hint=(None, None), # Disable size hint for centering
                 width=dp(150),
@@ -626,3 +626,35 @@ class TrackWidget(BoxLayout):
         content.add_widget(scroll_view)
 
         popup.open()
+
+    def select_midi_input_popup(self, instance):
+        """Opens a popup to select a MIDI input port for the track."""
+        available_inputs = []
+        
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        scroll_view = ScrollView()
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
+        grid.bind(minimum_height=grid.setter('height'))
+
+        popup = Popup(
+            title="Select Plugin Input Port",
+            content=content,
+            size_hint=(0.5, 0.7)
+        )
+
+        def select_input(input_name):
+            command = f'assign {self.track_index} "{input_name}"'
+            self.sequencer_layout.process_command_ui(command)
+            self.input_button_text_button_text.text = f"Input: {input_name}"
+            popup.dismiss()
+
+        for input in available_inputs:
+            btn = MDButton(MDButtonText(text=input), size_hint_y=None, height=dp(40))
+            btn.bind(on_release=lambda x, p=input: select_input(p))
+            grid.add_widget(btn)
+
+        scroll_view.add_widget(grid)
+        content.add_widget(scroll_view)
+
+        popup.open()
+        

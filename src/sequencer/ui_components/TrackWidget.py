@@ -186,7 +186,7 @@ class TrackWidget(BoxLayout):
         # --- Volume Controls ---
         volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
-        mute_button_container = BoxLayout(size_hint_y=None, height=dp(30), pos_hint={'center_x': 0.5})
+        mute_button_container = BoxLayout(size_hint_y=None, height=dp(36), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
@@ -334,12 +334,15 @@ class TrackWidget(BoxLayout):
                 icon=track_type_icon,
                 theme_text_color="Custom",
                 text_color=track_type_color,
-                halign='center',
-                valign='center'
+                halign='center'
             )
 
+            # Use a container with a fixed height for precise vertical alignment
+            icon_container = BoxLayout(size_hint_y=None, height=dp(36))
+            icon_container.add_widget(icon)
+
             icon_layout.add_widget(Widget()) # Top spacer
-            icon_layout.add_widget(icon)
+            icon_layout.add_widget(icon_container)
             icon_layout.add_widget(Widget()) # Bottom spacer
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)

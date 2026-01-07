@@ -168,11 +168,14 @@ class TrackWidget(BoxLayout):
             automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
 
             automation_controls = AutomationControls(track_type=automation_type)
-            automation_controls.pos_hint = {'center_x': 0.5, 'center_y': 0.5}
+            automation_controls.pos_hint = {'center_x': 0.5} # Keep horizontal centering
 
             # Adjust the layout's width to fit the controls
             midi_controls_layout.width = automation_controls.width
+
+            # Add controls and a spacer to push them to the top
             midi_controls_layout.add_widget(automation_controls)
+            midi_controls_layout.add_widget(Widget()) # This will act as a spacer
         else:
             midi_controls_layout.add_widget(Widget())
             

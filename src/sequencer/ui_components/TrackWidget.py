@@ -116,7 +116,7 @@ class TrackWidget(BoxLayout):
             orientation='vertical',
             size_hint_x=None,
             width=dp(170),  # Increased width
-            spacing=dp(4)
+            spacing=0
         )
 
         if isinstance(track, MidiTrack):

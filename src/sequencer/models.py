@@ -202,6 +202,8 @@ class Song:
     metronome_port_name: Optional[str] = None
     metronome_volume: float = 1.0
     metronome_pan: float = 0.0
+    carla_project_path: Optional[str] = None
+    aj_snapshot_path: Optional[str] = None
 
     def add_track(self, track: AnyTrack):
         """Adds a track to the song, assigning a default channel if it's a MIDI track."""

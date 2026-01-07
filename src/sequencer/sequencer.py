@@ -66,6 +66,8 @@ class CustomSongEncoder(json.JSONEncoder):
                 'metronome_port_name': o.metronome_port_name,
                 'metronome_volume': o.metronome_volume,
                 'metronome_pan': o.metronome_pan,
+                'carla_project_path': o.carla_project_path,
+                'aj_snapshot_path': o.aj_snapshot_path,
             }
         if isinstance(o, MidiTrack):
             return {
@@ -1266,6 +1268,7 @@ class Sequencer(EventDispatcher):
         self.virtual_ports = []
         self.temporary_ports = []
         self.audio_player_command: str = self.DEFAULT_AUDIO_PLAYER_COMMAND
+        self.carla_process: Optional[subprocess.Popen] = None
 
         # New properties to hold the start/end positions from the UI
         self.ui_start_pos_str = "1:1"
@@ -1304,6 +1307,40 @@ class Sequencer(EventDispatcher):
 
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
+
+    def _start_carla_process(self, carla_project_path: str):
+        """Starts the Carla process with a given project file."""
+        self._stop_carla_process()  # Ensure any existing process is stopped first
+        if not carla_project_path or not os.path.exists(carla_project_path):
+            return
+
+        try:
+            print(f"Starting Carla with project: {carla_project_path}")
+            # Using Popen to run Carla as a non-blocking background process
+            self.carla_process = subprocess.Popen(
+                ["carla", carla_project_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except FileNotFoundError:
+            print("Error: 'carla' command not found. Please ensure Carla is installed and in your system's PATH.", file=sys.stderr)
+            self.carla_process = None
+        except Exception as e:
+            print(f"An error occurred while starting Carla: {e}", file=sys.stderr)
+            self.carla_process = None
+
+    def _stop_carla_process(self):
+        """Stops the managed Carla process if it is running."""
+        if self.carla_process and self.carla_process.poll() is None:
+            print("Stopping Carla process...")
+            self.carla_process.terminate()
+            try:
+                self.carla_process.wait(timeout=5.0)
+                print("Carla process stopped.")
+            except subprocess.TimeoutExpired:
+                print("Carla did not terminate gracefully. Forcing shutdown.", file=sys.stderr)
+                self.carla_process.kill()
+            self.carla_process = None
 
     def process_transport_command(self, command: str):
         """
@@ -2679,15 +2716,34 @@ class Sequencer(EventDispatcher):
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
 
+            # --- Stop existing Carla instance ---
+            self._stop_carla_process()
+
+            # --- Start new Carla instance if specified ---
+            if self.song.carla_project_path:
+                self._start_carla_process(self.song.carla_project_path)
+                print("Waiting for Carla to initialize...")
+                time.sleep(3)  # Wait for Carla and its plugins to be ready
+
             # --- Restart Jack Manager to apply new project settings ---
             self.jack_manager.stop()
             self.jack_manager.start()
-
-            # --- Auto-connect MIDI tracks based on project data ---
             time.sleep(0.5) # Give Jack time to register ports
-            for track in self.song.tracks:
-                if isinstance(track, MidiTrack) and track.output_port_name and track.input_port_name:
-                    self.jack_manager.auto_connect_dynamic(track.output_port_name, track.input_port_name)
+
+            # --- Restore JACK connections with aj-snapshot if specified ---
+            if self.song.aj_snapshot_path and os.path.exists(self.song.aj_snapshot_path):
+                try:
+                    print(f"Restoring JACK connections from {self.song.aj_snapshot_path}...")
+                    subprocess.run(["aj-snapshot", "-r", self.song.aj_snapshot_path], check=True)
+                except FileNotFoundError:
+                    print("Error: 'aj-snapshot' command not found. Please ensure it is installed.", file=sys.stderr)
+                except subprocess.CalledProcessError as e:
+                    print(f"Error restoring aj-snapshot: {e}", file=sys.stderr)
+            else:
+                # --- Auto-connect MIDI tracks based on project data (fallback) ---
+                for track in self.song.tracks:
+                    if isinstance(track, MidiTrack) and track.output_port_name and track.input_port_name:
+                        self.jack_manager.auto_connect_dynamic(track.output_port_name, track.input_port_name)
 
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:
@@ -2798,6 +2854,7 @@ class Sequencer(EventDispatcher):
             if not port.closed:
                 port.close()
         print("Virtual ports closed.")
+        self._stop_carla_process()
         """Assure la fermeture propre des processus audio mpv à la sortie du séquenceur."""
         try:
             self.jack_manager._shutdown_audio_processes()

@@ -148,6 +148,9 @@ class SequencerLayout(BoxLayout):
 
         song_items = [
             {"leading_icon": "virtual-reality", "text": "Vports...", "on_release": lambda: self.menu_action(self.show_vports_popup)},
+            {"leading_icon": "folder-music", "text": "Set Carla Project", "on_release": lambda: self.menu_action(self.set_carla_project_popup)},
+            {"leading_icon": "lan-connect", "text": "Set Connections Snapshot", "on_release": lambda: self.menu_action(self.set_aj_snapshot_popup)},
+            {"leading_icon": "content-save-cog", "text": "Save JACK Connections", "on_release": lambda: self.menu_action(self.save_aj_snapshot_popup)},
         ]
         self.song_menu = MDDropdownMenu(
             caller=song_button,
@@ -990,6 +993,67 @@ class SequencerLayout(BoxLayout):
         """Exécute une action de menu et ferme le menu"""
         self.close_all_menus()
         action_callback()
+
+    def set_carla_project_popup(self):
+        """Opens a file chooser to set the Carla project path."""
+        def callback(filepath):
+            if filepath:
+                self.sequencer.song.carla_project_path = filepath
+                self.sequencer.is_dirty = True
+                self.show_info_popup("Success", f"Carla project path set to:\n{filepath}")
+
+        popup = FileChooserPopup(
+            callback=callback,
+            title="Select Carla Project File",
+            filters=['*.carxp']
+        )
+        popup.open()
+
+    def set_aj_snapshot_popup(self):
+        """Opens a file chooser to set the aj-snapshot file path."""
+        def callback(filepath):
+            if filepath:
+                self.sequencer.song.aj_snapshot_path = filepath
+                self.sequencer.is_dirty = True
+                self.show_info_popup("Success", f"aj-snapshot path set to:\n{filepath}")
+
+        popup = FileChooserPopup(
+            callback=callback,
+            title="Select aj-snapshot File",
+            filters=['*.ajs']
+        )
+        popup.open()
+
+    def save_aj_snapshot_popup(self):
+        """Opens a save file dialog to save the current JACK connections."""
+        def callback(filepath):
+            if filepath:
+                try:
+                    # Ensure the filename ends with .ajs
+                    if not filepath.endswith('.ajs'):
+                        filepath += '.ajs'
+
+                    print(f"Saving JACK connections to {filepath}...")
+                    result = subprocess.run(["aj-snapshot", "-d", filepath], check=True, capture_output=True, text=True)
+
+                    self.sequencer.song.aj_snapshot_path = filepath
+                    self.sequencer.is_dirty = True
+                    self.show_info_popup("Success", f"JACK connections saved to:\n{filepath}")
+
+                except FileNotFoundError:
+                    self.show_error_popup("Error", "'aj-snapshot' command not found.\nPlease ensure it is installed.")
+                except subprocess.CalledProcessError as e:
+                    self.show_error_popup("aj-snapshot Error", f"Failed to save snapshot:\n{e.stderr}")
+                except Exception as e:
+                    self.show_error_popup("Error", f"An unexpected error occurred:\n{str(e)}")
+
+        popup = SaveAsPopup(
+            callback=callback,
+            title="Save JACK Connections As",
+            default_filename=f"{self.sequencer.song.name}.ajs",
+            filters=['*.ajs']
+        )
+        popup.open()
         
     def on_end_pos_manual_set(self, instance):
         if instance.text:

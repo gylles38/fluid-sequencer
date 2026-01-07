@@ -1,4 +1,5 @@
 from . import *
+from kivy.app import App
 
 class AutomationControls(BoxLayout):
     def __init__(self, track_type='midi', **kwargs):

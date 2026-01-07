@@ -64,7 +64,7 @@ class MidiTrack(BaseTrack, EventDispatcher):
                  channel: int = 0, volume: float = 0.8, pan: float = 0.0, velocity: float = 1.0,
                  events: List[Event] = None, instrument: int = 0, bank_msb: Optional[int] = None,
                  bank_lsb: Optional[int] = None, output_port_name: Optional[str] = None,
-                 record_mode: str = 'OFF', **kwargs):
+                 input_port_name: Optional[str] = None, record_mode: str = 'OFF', **kwargs):
         BaseTrack.__init__(self, name=name)
         EventDispatcher.__init__(self, **kwargs)
         self.is_muted = is_muted
@@ -79,6 +79,7 @@ class MidiTrack(BaseTrack, EventDispatcher):
         self.bank_msb = bank_msb
         self.bank_lsb = bank_lsb
         self.output_port_name = output_port_name
+        self.input_port_name = input_port_name
         self.record_mode = record_mode
     
     def add_event(self, event: Event):

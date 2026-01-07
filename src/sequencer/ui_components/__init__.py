@@ -28,4 +28,5 @@ from .PianoRoll import PianoRoll, PianoRollViewer
 from .PianoKeyboard import PianoKeyboard
 from .bounded_scroll_view import BoundedScrollView
 from .piano_roll_editor import PianoRollEditor
+from .AutomationControls import AutomationControls
 from .VportsPopup import VportsPopup

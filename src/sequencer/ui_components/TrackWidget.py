@@ -162,6 +162,22 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(top_controls)
             midi_controls_layout.add_widget(self.port_selector_button)
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
+        elif isinstance(track, AutomationTrack):
+            # This is where the automation controls will be added for automation tracks
+            target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
+            automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
+
+            automation_controls = AutomationControls(track_type=automation_type)
+            automation_controls.size_hint_y = None
+            automation_controls.height = dp(36)
+
+            # Adjust the layout's width to fit the controls
+            midi_controls_layout.width = automation_controls.width
+
+            # Add spacers before and after to center vertically
+            midi_controls_layout.add_widget(Widget()) # Top spacer
+            midi_controls_layout.add_widget(automation_controls)
+            midi_controls_layout.add_widget(Widget()) # Bottom spacer
         else:
             midi_controls_layout.add_widget(Widget())
             
@@ -299,8 +315,7 @@ class TrackWidget(BoxLayout):
             icon_layout = BoxLayout(
                 size_hint_x=None,
                 width=dp(40),
-                orientation='vertical',
-                pos_hint={'center_y': 0.5}
+                orientation='vertical'
             )
 
             track_type_icon = "help-circle"
@@ -320,7 +335,10 @@ class TrackWidget(BoxLayout):
                 halign='center',
                 valign='center'
             )
+
+            icon_layout.add_widget(Widget()) # Top spacer
             icon_layout.add_widget(icon)
+            icon_layout.add_widget(Widget()) # Bottom spacer
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce

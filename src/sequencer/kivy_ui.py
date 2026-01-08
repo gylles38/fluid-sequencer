@@ -43,7 +43,7 @@ from sequencer.ui_components.Ruler import Ruler
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from typing import Optional
-import sys, os, time
+import sys, os, time, subprocess
 
 class SequencerLayout(BoxLayout):
     sequencer = ObjectProperty(None)

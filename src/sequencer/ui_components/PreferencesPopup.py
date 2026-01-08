@@ -30,8 +30,8 @@ class PreferencesPopup(Popup):
         settings = {
             'default_projects_dir': 'Default Projects Directory',
             'default_audio_files_dir': 'Default Audio Files Directory',
-            'default_carla_project_file': 'Default Carla Project File',
-            'default_aj_snapshot_file': 'Default JACK Snapshot File'
+            'default_carla_projects_dir': 'Default Carla Projects Directory',
+            'default_aj_snapshots_dir': 'Default JACK Snapshots Directory'
         }
 
         # --- Create a row for each setting ---
@@ -52,7 +52,7 @@ class PreferencesPopup(Popup):
                 MDButtonText(text="Browse"),
                 size_hint_x=0.1
             )
-            browse_button.bind(on_release=lambda x, k=key, i=path_input: self.open_path_chooser(k, i))
+            browse_button.bind(on_release=lambda x, k=key, i=path_input: self.open_dir_chooser(k, i))
             settings_grid.add_widget(browse_button)
 
         content.add_widget(settings_grid)
@@ -70,34 +70,17 @@ class PreferencesPopup(Popup):
 
         self.content = content
 
-    def open_path_chooser(self, config_key, text_input):
-        """Opens a directory or file chooser based on the config key."""
-
-        is_dir_chooser = config_key.endswith('_dir')
-        filters = []
-        if config_key == 'default_carla_project_file':
-            filters = ['*.carxp']
-        elif config_key == 'default_aj_snapshot_file':
-            filters = ['*.ajs']
-
+    def open_dir_chooser(self, config_key, text_input):
+        """Opens a directory chooser."""
         def callback(path):
-            if path: # For both files and directories, path will be a string
+            if path and os.path.isdir(path):
                 text_input.text = path
-
-        # Use the directory of the current file path as the starting path for the chooser
-        start_path = text_input.text
-        if not is_dir_chooser and start_path and os.path.exists(start_path):
-            start_path = os.path.dirname(start_path)
-        if not os.path.isdir(start_path):
-             start_path = self.config_manager.get_setting('default_projects_dir')
-
 
         popup = FileChooserPopup(
             callback=callback,
-            title=f"Select {'Directory' if is_dir_chooser else 'File'} for {config_key}",
-            path=start_path,
-            dirselect=is_dir_chooser,
-            filters=filters
+            title=f"Select Directory for {config_key}",
+            path=text_input.text,
+            dirselect=True
         )
         popup.open()
 

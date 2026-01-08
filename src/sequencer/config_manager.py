@@ -26,8 +26,8 @@ class ConfigManager:
         return {
             'default_projects_dir': home_dir,
             'default_audio_files_dir': home_dir,
-            'default_carla_project_file': '',
-            'default_aj_snapshot_file': '',
+            'default_carla_projects_dir': home_dir,
+            'default_aj_snapshots_dir': home_dir,
         }
 
     def load_settings(self):

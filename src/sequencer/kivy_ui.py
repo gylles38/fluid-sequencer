@@ -488,7 +488,7 @@ class SequencerLayout(BoxLayout):
 
         # Bouton pour ajouter une piste MIDI
         add_midi_track_button = TooltipMDIconButton(
-            icon="midi-port",
+            icon="midi",
             tooltip_text="Ajouter une piste MIDI",
             on_release=lambda x: self.add_midi_track_popup()
         )

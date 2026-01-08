@@ -25,6 +25,7 @@ class TooltipMDIconButton(MDIconButton):
 
     def on_enter(self, *args):
         """Appelé lorsque la souris entre dans la zone du widget."""
+        Window.set_system_cursor('hand')
         # Si une autre info-bulle est active, on la cache
         if TooltipMDIconButton._active_tooltip_instance and TooltipMDIconButton._active_tooltip_instance != self:
             TooltipMDIconButton._active_tooltip_instance._hide_tooltip()
@@ -35,6 +36,7 @@ class TooltipMDIconButton(MDIconButton):
 
     def on_leave(self, *args):
         """Appelé lorsque la souris quitte la zone du widget."""
+        Window.set_system_cursor('arrow')
         self._hide_tooltip()
         if TooltipMDIconButton._active_tooltip_instance == self:
             TooltipMDIconButton._active_tooltip_instance = None

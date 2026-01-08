@@ -115,7 +115,7 @@ class TrackWidget(BoxLayout):
                 on_press=self.open_piano_roll_editor,
                 pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
-                icon_color=[0.7, 0.7, 0.9, 1],
+                icon_color=[0.8, 0.8, 0.8, 1],
                 size_hint_x=None,
                 width=dp(36)
             )
@@ -257,7 +257,9 @@ class TrackWidget(BoxLayout):
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
             on_press=self.on_mute_toggle,
-            pos_hint={'center_x': 0.5, 'center_y': 0.5}
+            pos_hint={'center_x': 0.5, 'center_y': 0.5},
+            theme_icon_color="Custom",
+            icon_color=[0.8, 0.8, 0.8, 1]
         )
         mute_button_container.add_widget(self.mute_button)
 
@@ -282,7 +284,7 @@ class TrackWidget(BoxLayout):
             pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
             pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
-            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
+            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.8, 0.8, 0.8, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
             pan_icon_container.add_widget(pan_icon)
 
             self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))

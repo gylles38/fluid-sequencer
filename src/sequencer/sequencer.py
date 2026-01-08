@@ -2725,14 +2725,12 @@ class Sequencer(EventDispatcher):
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
 
-            # --- Stop existing Carla instance ---
-            self._stop_carla_process()
-
-            # --- Start new Carla instance if specified ---
-            if self.song.carla_project_path:
-                self._start_carla_process(self.song.carla_project_path)
-                print("Waiting for Carla to initialize...")
-                time.sleep(3)  # Wait for Carla and its plugins to be ready
+            # --- Stop existing Carla instance and start a new one ---
+            # This will load the project's carla file if it exists,
+            # or an empty instance if it does not.
+            self._start_carla_process(self.song.carla_project_path)
+            print("Waiting for Carla to initialize...")
+            time.sleep(3)  # Wait for Carla and its plugins to be ready
 
             # --- Restart Jack Manager to apply new project settings ---
             self.jack_manager.stop()

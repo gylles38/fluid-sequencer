@@ -301,51 +301,25 @@ class TestSequencer(unittest.TestCase):
         # Assert that set_control_port was called with the correct name
         mock_set_control_port.assert_called_with("MyTestControlPort")
 
-    @patch('pydub.AudioSegment.from_file')
-    @patch('sequencer.sequencer.jack')
-    @patch('sequencer.sequencer.Clock.schedule_once')
-    def test_play_range_stops_audio(self, mock_schedule_once, mock_jack, mock_from_file):
+    @patch('kivy.clock.Clock.schedule_once')
+    def test_play_range_stops_audio(self, mock_schedule):
         """Test that reaching the end of a play range schedules a stop command."""
-        # Make the mock immediately execute the callback passed to it
-        mock_schedule_once.side_effect = lambda func, *args, **kwargs: func(0)
-
         # Setup
-        mock_from_file.return_value = MagicMock()
         sequencer = self.sequencer
-        jm = sequencer.jack_manager
-
-        # Mock the JACK client and its state
-        jm.jack_client = MagicMock()
-        jm.jack_client.transport_state = mock_jack.ROLLING
-
-        # Mock the transport query to return a valid state
-        mock_pos = MagicMock()
-        jm.jack_client.transport_query_struct.return_value = (mock_jack.ROLLING, mock_pos)
-
-        # Patch the sequencer's stop method to check if it's called
+        sequencer.play_range_enabled = True
+        sequencer.play_range_end_beat = 4.0
         sequencer.stop = MagicMock()
 
-        # Set a play range
-        sequencer.play_range_enabled = True
-        sequencer.play_range_end_beat = 4.0 # Stop at the end of the first measure
+        # Simulate the callback hitting the end of the range.
+        # This logic is now in JackManager, so we call it on the real instance.
+        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1)
 
-        # Simulate the process callback just before the end of the play range
-        jm.last_beat = 3.9
-        sequencer.song.tempo = 120.0
-        samplerate = jm.jack_client.samplerate = 48000
+        # The method should schedule sequencer.stop() to be called.
+        mock_schedule.assert_called_once()
+        # Simulate the clock tick to execute the scheduled function.
+        scheduled_function = mock_schedule.call_args[0][0]
+        scheduled_function(0) # The argument is dt (delta-time), 0 is fine.
 
-        # Calculate frames needed to cross the play_range_end_beat boundary
-        frames = 4800
-        beats_per_second = sequencer.song.tempo / 60.0
-        # This frame position ensures authoritative_beat_now is also 3.9
-        current_frame = 3.9 * (samplerate / beats_per_second)
-        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': current_frame}
-
-
-        # Call the method under test
-        jm._process_callback(frames)
-
-        # Assertions
         sequencer.stop.assert_called_once()
         self.assertFalse(sequencer.play_range_enabled)
 

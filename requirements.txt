@@ -5,3 +5,4 @@ JACK-Client>=0.5.1
 cffi>=1.15.0
 kivy
 https://github.com/kivymd/KivyMD/archive/master.zip
+PyQt5

@@ -4,6 +4,7 @@ from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
 from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
 from .config import MidiConfig
+from .config_manager import ConfigManager
 from .terminal_input import cancellable_input, UserInputCancelled
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
@@ -66,6 +67,8 @@ class CustomSongEncoder(json.JSONEncoder):
                 'metronome_port_name': o.metronome_port_name,
                 'metronome_volume': o.metronome_volume,
                 'metronome_pan': o.metronome_pan,
+                'carla_project_path': o.carla_project_path,
+                'aj_snapshot_path': o.aj_snapshot_path,
             }
         if isinstance(o, MidiTrack):
             return {
@@ -162,6 +165,103 @@ class JackManager:
         self._correction_thread = None
         self._correction_stop_event = threading.Event()
         self.last_applied_speeds = {}
+
+    def find_port_by_name(self, pattern):
+        """
+        Cherche un port JACK complet qui contient le 'pattern' donné.
+        Retourne le nom complet du premier port trouvé, ou None.
+        """
+        try:
+            # On demande à JACK/PipeWire la liste de tous les ports
+            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
+            all_ports = result.stdout.splitlines()
+
+            for port in all_ports:
+                # On cherche une correspondance partielle (ex: "RtMidiOut" dans le nom complet)
+                if pattern in port:
+                    return port.strip() # On nettoie les espaces/sauts de ligne
+
+            return None
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
+            return None
+
+    def auto_connect_dynamic(self, src_keyword, dest_keyword):
+        """
+        Connecte deux ports en utilisant des mots-clés partiels.
+        """
+        print(f"--- Attempting auto-connect: '{src_keyword}' -> '{dest_keyword}' ---")
+
+        # 1. Recherche des noms complets
+        full_source = self.find_port_by_name(src_keyword)
+        full_dest = self.find_port_by_name(dest_keyword)
+
+        if not full_source:
+            print(f"Info: Source port not found with keyword: '{src_keyword}'")
+            return
+        if not full_dest:
+            print(f"Info: Destination port not found with keyword: '{dest_keyword}'")
+            return
+
+        print(f"Ports identified:\n   Source: {full_source}\n   Dest  : {full_dest}")
+
+        # 2. Tentative de connexion via jack_connect
+        try:
+            res = subprocess.run(
+                ["jack_connect", full_source, full_dest],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+
+            if res.returncode == 0:
+                print("Connection successful!")
+            else:
+                # If error (often because already connected), we display the message
+                # PipeWire often returns an error if it's already connected, it's not serious.
+                if "exists" in res.stderr:
+                     print("Already connected.")
+                else:
+                     print(f"Connection warning: {res.stderr.strip()}")
+
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_connect' introuvable.", file=sys.stderr)
+
+    def disconnect_dynamic(self, src_keyword, dest_keyword):
+        """
+        Disconnects two ports using partial keywords.
+        """
+        if not src_keyword or not dest_keyword:
+            return
+
+        full_source = self.find_port_by_name(src_keyword)
+        full_dest = self.find_port_by_name(dest_keyword)
+
+        if not full_source or not full_dest:
+            return
+
+        try:
+            subprocess.run(
+                ["jack_disconnect", full_source, full_dest],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_disconnect' introuvable.", file=sys.stderr)
+
+    def get_midi_input_ports(self):
+        """
+        Retourne une liste de tous les ports d'entrée MIDI JACK disponibles (se terminant par :events-in).
+        """
+        try:
+            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
+            all_ports = result.stdout.splitlines()
+            midi_input_ports = [port.strip() for port in all_ports if port.strip().endswith(':events-in')]
+            return midi_input_ports
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
+            return []
 
     def open_midi_port(self, port_name: str):
         """Opens a MIDI port if it's not already open."""
@@ -1158,6 +1258,7 @@ class Sequencer(EventDispatcher):
         super().__init__()
         self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
+        self.config_manager = ConfigManager()
         self.midi_config = MidiConfig("config/midi_mappings.json")
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None
@@ -1169,6 +1270,7 @@ class Sequencer(EventDispatcher):
         self.virtual_ports = []
         self.temporary_ports = []
         self.audio_player_command: str = self.DEFAULT_AUDIO_PLAYER_COMMAND
+        self.carla_process: Optional[subprocess.Popen] = None
 
         # New properties to hold the start/end positions from the UI
         self.ui_start_pos_str = "1:1"
@@ -1207,6 +1309,47 @@ class Sequencer(EventDispatcher):
 
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
+
+    def _start_carla_process(self, carla_project_path: Optional[str] = None):
+        """
+        Starts the Carla process. If a valid project path is provided, it opens
+        that project. Otherwise, it starts an empty Carla instance.
+        It always stops a previous instance before starting a new one.
+        """
+        self._stop_carla_process()
+
+        command = ["carla"]
+        if carla_project_path and os.path.exists(carla_project_path):
+            print(f"Starting Carla with project: {carla_project_path}")
+            command.append(carla_project_path)
+        else:
+            print("Starting a new empty Carla instance.")
+
+        try:
+            self.carla_process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except FileNotFoundError:
+            print("Error: 'carla' command not found. Please ensure Carla is installed and in your system's PATH.", file=sys.stderr)
+            self.carla_process = None
+        except Exception as e:
+            print(f"An error occurred while starting Carla: {e}", file=sys.stderr)
+            self.carla_process = None
+
+    def _stop_carla_process(self):
+        """Stops the managed Carla process if it is running."""
+        if self.carla_process and self.carla_process.poll() is None:
+            print("Stopping Carla process...")
+            self.carla_process.terminate()
+            try:
+                self.carla_process.wait(timeout=5.0)
+                print("Carla process stopped.")
+            except subprocess.TimeoutExpired:
+                print("Carla did not terminate gracefully. Forcing shutdown.", file=sys.stderr)
+                self.carla_process.kill()
+            self.carla_process = None
 
     def process_transport_command(self, command: str):
         """
@@ -2582,15 +2725,81 @@ class Sequencer(EventDispatcher):
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
 
+            # --- Stop existing Carla instance and start a new one ---
+            # This will load the project's carla file if it exists,
+            # or an empty instance if it does not.
+            self._start_carla_process(self.song.carla_project_path)
+            print("Waiting for Carla to initialize...")
+            time.sleep(3)  # Wait for Carla and its plugins to be ready
+
             # --- Restart Jack Manager to apply new project settings ---
             self.jack_manager.stop()
             self.jack_manager.start()
+            time.sleep(0.5) # Give Jack time to register ports
+
+            # --- Restore JACK connections with aj-snapshot if specified ---
+            if self.song.aj_snapshot_path and os.path.exists(self.song.aj_snapshot_path):
+                try:
+                    print(f"Restoring JACK connections from {self.song.aj_snapshot_path}...")
+                    subprocess.run(["aj-snapshot", "-r", self.song.aj_snapshot_path], check=True)
+                except FileNotFoundError:
+                    print("Error: 'aj-snapshot' command not found. Please ensure it is installed.", file=sys.stderr)
+                except subprocess.CalledProcessError as e:
+                    print(f"Error restoring aj-snapshot: {e}", file=sys.stderr)
+            else:
+                # --- Auto-connect MIDI tracks based on project data (fallback) ---
+                for track in self.song.tracks:
+                    if isinstance(track, MidiTrack) and track.output_port_name and track.input_port_name:
+                        self.jack_manager.auto_connect_dynamic(track.output_port_name, track.input_port_name)
 
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:
             return f"Error: Project file not found at '{project_filepath}'"
         except Exception as e:
             return f"Error loading project file: {e}"
+
+    def save_jack_connections(self, filepath: str) -> dict:
+        """Saves the current JACK connections using aj-snapshot."""
+        if not filepath:
+            return {"status": "error", "message": "Filepath cannot be empty."}
+
+        command = ["aj-snapshot", "-d", filepath]
+        try:
+            print(f"Executing: {' '.join(command)}")
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False
+            )
+
+            if result.returncode == 0:
+                output = result.stdout.strip() or result.stderr.strip()
+                print(f"aj-snapshot output: {output}")
+                return {
+                    "status": "success",
+                    "message": f"JACK connections saved to {os.path.basename(filepath)}."
+                }
+            else:
+                error_message = result.stderr.strip()
+                print(f"aj-snapshot command failed with exit code {result.returncode}: {error_message}", file=sys.stderr)
+                return {
+                    "status": "error",
+                    "message": f"aj-snapshot failed: {error_message}"
+                }
+
+        except FileNotFoundError:
+            print("Error: 'aj-snapshot' command not found.", file=sys.stderr)
+            return {
+                "status": "error",
+                "message": "Error: 'aj-snapshot' command not found. Please ensure it is installed and in your system's PATH."
+            }
+        except Exception as e:
+            print(f"An unexpected error occurred while running aj-snapshot: {e}", file=sys.stderr)
+            return {
+                "status": "error",
+                "message": f"An unexpected error occurred: {e}"
+            }
 
     def new_project(self):
         """Resets the sequencer to a new, empty project."""
@@ -2604,9 +2813,10 @@ class Sequencer(EventDispatcher):
         self.is_dirty = False
         self.invalidate_song_length_cache()
 
-        # --- Restart Jack Manager for the new empty project ---
+        # --- Restart Jack Manager and Carla for the new empty project ---
         self.jack_manager.stop()
         self.jack_manager.start()
+        self._start_carla_process() # Start an empty instance
 
         print("New project created.")
 
@@ -2695,6 +2905,7 @@ class Sequencer(EventDispatcher):
             if not port.closed:
                 port.close()
         print("Virtual ports closed.")
+        self._stop_carla_process()
         """Assure la fermeture propre des processus audio mpv à la sortie du séquenceur."""
         try:
             self.jack_manager._shutdown_audio_processes()

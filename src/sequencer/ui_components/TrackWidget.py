@@ -18,6 +18,58 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 
 
+class MidiInputSelectorPopup(Popup):
+    def __init__(self, track_widget, **kwargs):
+        super().__init__(**kwargs)
+        self.track_widget = track_widget
+        self.sequencer = track_widget.sequencer_layout.sequencer
+        self.title = "Select MIDI Input Port"
+        self.size_hint = (0.6, 0.8)
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        scroll_view = ScrollView()
+        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
+        grid.bind(minimum_height=grid.setter('height'))
+
+        # Fetch available ports using the new method
+        available_ports = self.sequencer.jack_manager.get_midi_input_ports()
+
+        # Add a disconnect button
+        disconnect_btn = MDButton(MDButtonText(text="-- Disconnect --"), size_hint_y=None, height=dp(40))
+        disconnect_btn.bind(on_release=lambda x: self.select_port(None))
+        grid.add_widget(disconnect_btn)
+
+        # Add a button for each available port
+        for port in available_ports:
+            btn = MDButton(MDButtonText(text=port), size_hint_y=None, height=dp(40))
+            btn.bind(on_release=lambda x, p=port: self.select_port(p))
+            grid.add_widget(btn)
+
+        scroll_view.add_widget(grid)
+        content.add_widget(scroll_view)
+        self.content = content
+
+    def select_port(self, port_name):
+        track = self.track_widget.track
+
+        # Disconnect existing connection if a new port is chosen or disconnect is clicked
+        if track.input_port_name and track.output_port_name:
+            self.sequencer.jack_manager.disconnect_dynamic(track.output_port_name, track.input_port_name)
+
+        track.input_port_name = port_name
+
+        if port_name:
+            # Connect to the new port
+            self.sequencer.jack_manager.auto_connect_dynamic(track.output_port_name, port_name)
+            self.track_widget.input_button_text_button_text.text = f"Dest: {port_name.split(':')[0]}"
+        else:
+            # No new port, just disconnected
+            self.track_widget.input_button_text_button_text.text = "Dest: None"
+
+        self.sequencer.is_dirty = True
+        self.dismiss()
+
+
 class TrackWidget(BoxLayout):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
@@ -159,8 +211,8 @@ class TrackWidget(BoxLayout):
             )
 
             # Plugin Selector Button below
-            plugin_name = track.input_port_name if track.input_port_name else "None"
-            self.input_button_text_button_text = MDButtonText(text=f"Out: {plugin_name}")
+            plugin_name = track.input_port_name.split(':')[0] if track.input_port_name else "None"
+            self.input_button_text_button_text = MDButtonText(text=f"Dest: {plugin_name}")
             self.input_selector_button = MDButton(
                 self.input_button_text_button_text,
                 on_press=self.select_midi_input_popup,
@@ -629,32 +681,6 @@ class TrackWidget(BoxLayout):
 
     def select_midi_input_popup(self, instance):
         """Opens a popup to select a MIDI input port for the track."""
-        available_inputs = []
-        
-        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
-        scroll_view = ScrollView()
-        grid = GridLayout(cols=1, size_hint_y=None, spacing=dp(5))
-        grid.bind(minimum_height=grid.setter('height'))
-
-        popup = Popup(
-            title="Select Plugin Input Port",
-            content=content,
-            size_hint=(0.5, 0.7)
-        )
-
-        def select_input(input_name):
-            command = f'assign {self.track_index} "{input_name}"'
-            self.sequencer_layout.process_command_ui(command)
-            self.input_button_text_button_text.text = f"Input: {input_name}"
-            popup.dismiss()
-
-        for input in available_inputs:
-            btn = MDButton(MDButtonText(text=input), size_hint_y=None, height=dp(40))
-            btn.bind(on_release=lambda x, p=input: select_input(p))
-            grid.add_widget(btn)
-
-        scroll_view.add_widget(grid)
-        content.add_widget(scroll_view)
-
+        popup = MidiInputSelectorPopup(track_widget=self)
         popup.open()
         

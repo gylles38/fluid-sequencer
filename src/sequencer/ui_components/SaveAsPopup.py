@@ -8,7 +8,7 @@ from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 import os
 
 class SaveAsPopup(Popup):
-    def __init__(self, callback, title="Save As", default_filename="", filters=None, **kwargs):
+    def __init__(self, callback, title="Save As", default_filename="", filters=None, path='.', **kwargs):
         super(SaveAsPopup, self).__init__(**kwargs)
         self.title = title
         self.size_hint = (0.8, 0.8)
@@ -18,7 +18,7 @@ class SaveAsPopup(Popup):
 
         # File chooser for directory selection
         self.filechooser = FileChooserListView(
-            path='.',
+            path=path,
             dirselect=True,  # Allow directory selection
             filters=filters if filters else []
         )

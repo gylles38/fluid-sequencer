@@ -5,15 +5,18 @@ from kivy.metrics import dp
 from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 
 class FileChooserPopup(Popup):
-    def __init__(self, callback, title="Select File", filters=None, **kwargs):
+    def __init__(self, callback, title="Select File", filters=None, path='.', dirselect=False, **kwargs):
         super(FileChooserPopup, self).__init__(**kwargs)
         self.title = title
         self.size_hint = (0.9, 0.9)
         self.callback = callback
+        self.dirselect = dirselect
 
         layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
         self.filechooser = FileChooserListView(
-            path='.', filters=filters if filters is not None else ['*.proj.json', '*.mid']
+            path=path,
+            filters=filters if filters is not None else [],
+            dirselect=self.dirselect
         )
         layout.add_widget(self.filechooser)
 
@@ -28,6 +31,11 @@ class FileChooserPopup(Popup):
         self.content = layout
 
     def on_select(self, instance):
-        if self.filechooser.selection:
+        if self.dirselect:
+            # For directory selection, return the selected dir or the current path
+            selected_path = self.filechooser.selection[0] if self.filechooser.selection else self.filechooser.path
+            self.callback(selected_path)
+            self.dismiss()
+        elif self.filechooser.selection:
             self.callback(self.filechooser.selection[0])
             self.dismiss()

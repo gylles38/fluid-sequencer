@@ -4,6 +4,7 @@ from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
 from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
 from .config import MidiConfig
+from .config_manager import ConfigManager
 from .terminal_input import cancellable_input, UserInputCancelled
 from copy import deepcopy
 from dataclasses import dataclass, asdict, is_dataclass, fields
@@ -1257,6 +1258,7 @@ class Sequencer(EventDispatcher):
         super().__init__()
         self.gui_mode = gui_mode
         self.song = Song(name="New Song", tempo=tempo)
+        self.config_manager = ConfigManager()
         self.midi_config = MidiConfig("config/midi_mappings.json")
         self.jack_manager = JackManager(self)
         self.midi_listener_thread = None

@@ -1318,9 +1318,7 @@ class Sequencer(EventDispatcher):
             print(f"Starting Carla with project: {carla_project_path}")
             # Using Popen to run Carla as a non-blocking background process
             self.carla_process = subprocess.Popen(
-                ["carla", carla_project_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                ["carla", carla_project_path]
             )
         except FileNotFoundError:
             print("Error: 'carla' command not found. Please ensure Carla is installed and in your system's PATH.", file=sys.stderr)

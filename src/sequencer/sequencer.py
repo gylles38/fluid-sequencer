@@ -1310,17 +1310,24 @@ class Sequencer(EventDispatcher):
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
 
-    def _start_carla_process(self, carla_project_path: str):
-        """Starts the Carla process with a given project file."""
-        self._stop_carla_process()  # Ensure any existing process is stopped first
-        if not carla_project_path or not os.path.exists(carla_project_path):
-            return
+    def _start_carla_process(self, carla_project_path: Optional[str] = None):
+        """
+        Starts the Carla process. If a valid project path is provided, it opens
+        that project. Otherwise, it starts an empty Carla instance.
+        It always stops a previous instance before starting a new one.
+        """
+        self._stop_carla_process()
+
+        command = ["carla"]
+        if carla_project_path and os.path.exists(carla_project_path):
+            print(f"Starting Carla with project: {carla_project_path}")
+            command.append(carla_project_path)
+        else:
+            print("Starting a new empty Carla instance.")
 
         try:
-            print(f"Starting Carla with project: {carla_project_path}")
-            # Using Popen to run Carla as a non-blocking background process
             self.carla_process = subprocess.Popen(
-                ["carla", carla_project_path],
+                command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
@@ -2808,9 +2815,10 @@ class Sequencer(EventDispatcher):
         self.is_dirty = False
         self.invalidate_song_length_cache()
 
-        # --- Restart Jack Manager for the new empty project ---
+        # --- Restart Jack Manager and Carla for the new empty project ---
         self.jack_manager.stop()
         self.jack_manager.start()
+        self._start_carla_process() # Start an empty instance
 
         print("New project created.")
 

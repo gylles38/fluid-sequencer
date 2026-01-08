@@ -123,6 +123,7 @@ class AudioTrack(BaseTrack, EventDispatcher):
 @dataclass
 class AutomationPoint:
     """Represents a single point in an automation curve."""
+    VALID_CURVES = ["none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"]
     start_time: float  # Start time in beats
     parameter: str  # e.g., "volume", "pan", "cc_10"
     value: float  # The value of the parameter at this point
@@ -132,9 +133,8 @@ class AutomationPoint:
         if self.start_time < 0:
             raise ValueError("Start time cannot be negative.")
 
-        valid_curves = ["none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"]
-        if self.curve not in valid_curves:
-            raise ValueError(f"Curve type must be one of {valid_curves}.")
+        if self.curve not in self.VALID_CURVES:
+            raise ValueError(f"Curve type must be one of {self.VALID_CURVES}.")
 
         # Validate parameter format
         param_lower = self.parameter.lower()

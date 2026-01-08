@@ -1007,7 +1007,9 @@ class SequencerLayout(BoxLayout):
             if filepath:
                 self.sequencer.song.carla_project_path = filepath
                 self.sequencer.is_dirty = True
-                self.show_info_popup("Success", f"Carla project path set to:\n{filepath}")
+                # Relaunch Carla with the new project file
+                self.sequencer._start_carla_process(filepath)
+                self.show_info_popup("Success", f"Carla project loaded:\n{os.path.basename(filepath)}")
 
         popup = FileChooserPopup(
             callback=callback,

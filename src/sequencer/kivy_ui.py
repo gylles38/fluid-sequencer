@@ -43,7 +43,7 @@ from sequencer.ui_components.Ruler import Ruler
 from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from typing import Optional
-import sys, os, time, subprocess
+import sys, os, time
 
 class SequencerLayout(BoxLayout):
     sequencer = ObjectProperty(None)
@@ -1027,25 +1027,24 @@ class SequencerLayout(BoxLayout):
     def save_aj_snapshot_popup(self):
         """Opens a save file dialog to save the current JACK connections."""
         def callback(filepath):
-            if filepath:
-                try:
-                    # Ensure the filename ends with .ajs
-                    if not filepath.endswith('.ajs'):
-                        filepath += '.ajs'
+            if not filepath:
+                return
 
-                    print(f"Saving JACK connections to {filepath}...")
-                    result = subprocess.run(["aj-snapshot", "-d", filepath], check=True, capture_output=True, text=True)
+            # Ensure the filename ends with .ajs
+            if not filepath.endswith('.ajs'):
+                filepath += '.ajs'
 
-                    self.sequencer.song.aj_snapshot_path = filepath
-                    self.sequencer.is_dirty = True
-                    self.show_info_popup("Success", f"JACK connections saved to:\n{filepath}")
+            # Call the backend method
+            result = self.sequencer.save_jack_connections(filepath)
 
-                except FileNotFoundError:
-                    self.show_error_popup("Error", "'aj-snapshot' command not found.\nPlease ensure it is installed.")
-                except subprocess.CalledProcessError as e:
-                    self.show_error_popup("aj-snapshot Error", f"Failed to save snapshot:\n{e.stderr}")
-                except Exception as e:
-                    self.show_error_popup("Error", f"An unexpected error occurred:\n{str(e)}")
+            if result["status"] == "success":
+                # If successful, also update the project's snapshot path
+                self.sequencer.song.aj_snapshot_path = filepath
+                self.sequencer.is_dirty = True
+                self.show_info_popup("Success", result["message"])
+            else:
+                # Show an error popup with the message from the backend
+                self.show_error_popup("Save Connections Error", result["message"])
 
         popup = SaveAsPopup(
             callback=callback,

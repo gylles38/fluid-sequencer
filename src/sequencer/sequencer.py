@@ -2751,6 +2751,49 @@ class Sequencer(EventDispatcher):
         except Exception as e:
             return f"Error loading project file: {e}"
 
+    def save_jack_connections(self, filepath: str) -> dict:
+        """Saves the current JACK connections using aj-snapshot."""
+        if not filepath:
+            return {"status": "error", "message": "Filepath cannot be empty."}
+
+        command = ["aj-snapshot", "-d", filepath]
+        try:
+            print(f"Executing: {' '.join(command)}")
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False
+            )
+
+            if result.returncode == 0:
+                output = result.stdout.strip() or result.stderr.strip()
+                print(f"aj-snapshot output: {output}")
+                return {
+                    "status": "success",
+                    "message": f"JACK connections saved to {os.path.basename(filepath)}."
+                }
+            else:
+                error_message = result.stderr.strip()
+                print(f"aj-snapshot command failed with exit code {result.returncode}: {error_message}", file=sys.stderr)
+                return {
+                    "status": "error",
+                    "message": f"aj-snapshot failed: {error_message}"
+                }
+
+        except FileNotFoundError:
+            print("Error: 'aj-snapshot' command not found.", file=sys.stderr)
+            return {
+                "status": "error",
+                "message": "Error: 'aj-snapshot' command not found. Please ensure it is installed and in your system's PATH."
+            }
+        except Exception as e:
+            print(f"An unexpected error occurred while running aj-snapshot: {e}", file=sys.stderr)
+            return {
+                "status": "error",
+                "message": f"An unexpected error occurred: {e}"
+            }
+
     def new_project(self):
         """Resets the sequencer to a new, empty project."""
         if self.playback_state != "stopped":

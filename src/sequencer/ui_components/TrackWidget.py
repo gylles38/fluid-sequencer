@@ -2,7 +2,7 @@ from . import *  # Importe tous les imports communs
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
-from sequencer.kivy_ui import Hoverable, HoverableScrollView
+from sequencer.kivy_ui import Hoverable, HoverableScrollView, HoverableMDButton
 from kivymd.uix.slider import MDSlider
 
 class HoverableSlider(Hoverable, MDSlider):

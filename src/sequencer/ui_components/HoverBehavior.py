@@ -1,5 +1,4 @@
 from kivy.core.window import Window
-from kivy.properties import BooleanProperty
 from kivymd.uix.button import MDButton
 from kivy.uix.button import Button
 
@@ -10,6 +9,8 @@ class HoverBehavior:
     when it leaves.
     """
     def __init__(self, *args, **kwargs):
+        self.register_event_type('on_enter')
+        self.register_event_type('on_leave')
         super().__init__(*args, **kwargs)
 
     def on_enter(self, *args):

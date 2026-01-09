@@ -1,6 +1,7 @@
 from . import *  # Importe tous les imports communs
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
+from kivy.core.window import Window
 from .HoverBehavior import HoverBehavior, HoverableMDButton
 from kivymd.uix.slider import MDSlider
 

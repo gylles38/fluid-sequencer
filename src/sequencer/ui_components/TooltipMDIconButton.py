@@ -5,9 +5,9 @@ from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
 from kivy.properties import StringProperty
-from sequencer.kivy_ui import Hoverable
+from .HoverBehavior import HoverBehavior
 
-class TooltipMDIconButton(Hoverable, MDIconButton):
+class TooltipMDIconButton(MDIconButton, HoverBehavior):
     tooltip_text = StringProperty()
 
     # --- Optimisation XRun ---
@@ -24,6 +24,7 @@ class TooltipMDIconButton(Hoverable, MDIconButton):
 
     def on_enter(self, *args):
         """Appelé lorsque la souris entre dans la zone du widget."""
+        super().on_enter(*args)
         # Si une autre info-bulle est active, on la cache
         if TooltipMDIconButton._active_tooltip_instance and TooltipMDIconButton._active_tooltip_instance != self:
             TooltipMDIconButton._active_tooltip_instance._hide_tooltip()
@@ -34,6 +35,7 @@ class TooltipMDIconButton(Hoverable, MDIconButton):
 
     def on_leave(self, *args):
         """Appelé lorsque la souris quitte la zone du widget."""
+        super().on_leave(*args)
         self._hide_tooltip()
         if TooltipMDIconButton._active_tooltip_instance == self:
             TooltipMDIconButton._active_tooltip_instance = None

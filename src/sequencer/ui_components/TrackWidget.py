@@ -1,13 +1,10 @@
 from . import *  # Importe tous les imports communs
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
-from kivy.core.window import Window
-from sequencer.kivy_ui import Hoverable, HoverableScrollView, HoverableMDButton
-from kivymd.uix.slider import MDSlider
-
-class HoverableSlider(Hoverable, MDSlider):
-    pass
 from kivy.uix.boxlayout import BoxLayout
+from kivy.core.window import Window
+from .HoverBehavior import HoverBehavior
+from kivymd.uix.slider import MDSlider
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.popup import Popup
@@ -23,6 +20,9 @@ from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 
+
+class HoverableSlider(MDSlider, HoverBehavior):
+    pass
 
 class MidiInputSelectorPopup(Popup):
     def __init__(self, track_widget, **kwargs):
@@ -121,7 +121,7 @@ class TrackWidget(BoxLayout):
                 on_press=self.open_piano_roll_editor,
                 pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
-                icon_color=[0.8, 0.8, 0.8, 1],
+                icon_color=[0.7, 0.7, 0.9, 1],
                 size_hint_x=None,
                 width=dp(36)
             )
@@ -206,7 +206,7 @@ class TrackWidget(BoxLayout):
             # Port Selector Button below
             port_name = track.output_port_name if track.output_port_name else "None"
             self.port_button_text = MDButtonText(text=f"In: {port_name}")
-            self.port_selector_button = HoverableMDButton(
+            self.port_selector_button = MDButton(
                 self.port_button_text,
                 on_press=self.select_midi_port_popup,
                 style="outlined",
@@ -219,7 +219,7 @@ class TrackWidget(BoxLayout):
             # Plugin Selector Button below
             plugin_name = track.input_port_name.split(':')[0] if track.input_port_name else "None"
             self.input_button_text_button_text = MDButtonText(text=f"Dest: {plugin_name}")
-            self.input_selector_button = HoverableMDButton(
+            self.input_selector_button = MDButton(
                 self.input_button_text_button_text,
                 on_press=self.select_midi_input_popup,
                 style="outlined",
@@ -263,9 +263,7 @@ class TrackWidget(BoxLayout):
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
             on_press=self.on_mute_toggle,
-            pos_hint={'center_x': 0.5, 'center_y': 0.5},
-            theme_icon_color="Custom",
-            icon_color=[0.8, 0.8, 0.8, 1]
+            pos_hint={'center_x': 0.5, 'center_y': 0.5}
         )
         mute_button_container.add_widget(self.mute_button)
 
@@ -290,7 +288,7 @@ class TrackWidget(BoxLayout):
             pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
             pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
-            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.8, 0.8, 0.8, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
+            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.6, 0.6, 1, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
             pan_icon_container.add_widget(pan_icon)
 
             self.pan_slider = HoverableSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
@@ -321,13 +319,13 @@ class TrackWidget(BoxLayout):
             note_height = dp(12)
 
             # 1. Keyboard (fixed width)
-            self.keyboard_sv = HoverableScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
-            self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
+            keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
+            keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
-            self.keyboard_sv.add_widget(self.piano_keyboard)
+            keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
-            self.timeline_scroll = HoverableScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
+            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
             self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
 
@@ -364,8 +362,8 @@ class TrackWidget(BoxLayout):
             self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
 
             # Link vertical scrolling between keyboard and timeline
-            self.keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
-            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(self.keyboard_sv, 'scroll_y', v))
+            keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
+            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
 
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
@@ -379,11 +377,11 @@ class TrackWidget(BoxLayout):
                     scroll_y = 1 - (desired_top_y / max_top_y)
                 else:
                     scroll_y = 0
-                self.keyboard_sv.scroll_y = scroll_y
+                keyboard_sv.scroll_y = scroll_y
             Clock.schedule_once(set_default_scroll)
 
             # Add to main layout
-            self.add_widget(self.keyboard_sv)
+            self.add_widget(keyboard_sv)
             self.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
@@ -418,6 +416,7 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
+            self.timeline_scroll.bind(on_touch_down=self._on_timeline_touch_down, on_touch_up=self._on_timeline_touch_up)
 
             # A ScrollView must have a single child.
             self.timeline_container = Widget(size_hint=(None, 1))
@@ -448,7 +447,13 @@ class TrackWidget(BoxLayout):
         self.update_timeline_size()
 
         self.track.bind(is_solo=self.on_solo_changed)
-        
+
+    def _on_timeline_touch_down(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            Window.set_system_cursor('hand')
+
+    def _on_timeline_touch_up(self, instance, touch):
+        Window.set_system_cursor('arrow')
 
     def update_timeline_size(self, *args):
         if hasattr(self, 'content'):

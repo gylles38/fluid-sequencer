@@ -4,53 +4,8 @@ kivy.require('2.3.1')
 
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.core.window import Window
-from kivy.properties import ObjectProperty
-
-class CursorManager:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(CursorManager, cls).__new__(cls)
-            cls._instance.hovered_widgets = []
-            Window.bind(mouse_pos=cls._instance.on_mouse_pos)
-        return cls._instance
-
-    def add_widget(self, widget):
-        if widget not in self.hovered_widgets:
-            self.hovered_widgets.append(widget)
-
-    def remove_widget(self, widget):
-        if widget in self.hovered_widgets:
-            self.hovered_widgets.remove(widget)
-
-    def on_mouse_pos(self, window, pos):
-        is_over_widget = False
-        for widget in self.hovered_widgets:
-            if not getattr(widget, 'disabled', False) and widget.collide_point(*widget.to_widget(*pos, relative=True)):
-                is_over_widget = True
-                break
-
-        if is_over_widget:
-            Window.set_system_cursor('hand')
-        else:
-            Window.set_system_cursor('arrow')
-
-cursor_manager = CursorManager()
-
-class Hoverable:
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.bind(parent=self._update_hover_registration)
-
-    def _update_hover_registration(self, instance, parent):
-        if parent:
-            cursor_manager.add_widget(self)
-        else:
-            cursor_manager.remove_widget(self)
-
 from kivy.uix.gridlayout import GridLayout
+from .ui_components.HoverBehavior import HoverBehavior
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
@@ -61,20 +16,10 @@ from kivy.uix.scrollview import ScrollView
 from kivymd.uix.label import MDLabel
 from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
-from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
+from kivymd.uix.button import MDTextButton
+from kivy.uix.button import Button
 from kivymd.uix.menu import MDDropdownMenu
 from kivy.metrics import dp
-from kivy.uix.button import Button
-
-class HoverableMDButton(Hoverable, MDButton):
-    pass
-
-class HoverableButton(Hoverable, Button):
-    pass
-
-class HoverableScrollView(Hoverable, ScrollView):
-    pass
-
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.logger import Logger
@@ -102,6 +47,13 @@ from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from typing import Optional
 import sys, os, time
+
+# Custom Hoverable Buttons
+class HoverableMDTextButton(MDTextButton, HoverBehavior):
+    pass
+
+class HoverableButton(Button, HoverBehavior):
+    pass
 
 class SequencerLayout(BoxLayout):
     sequencer = ObjectProperty(None)
@@ -133,11 +85,9 @@ class SequencerLayout(BoxLayout):
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
         # Bouton File avec ligne en dessous
-        file_button = HoverableMDButton(
-            MDButtonText(text="File"),
-            style="text",
+        file_button = HoverableMDTextButton(
+            text="File",
             pos_hint={'center_y': 0.5},
-            md_bg_color=[0, 0, 0, 0],  # Fond transparent
         )
 
         with file_button.canvas.before:
@@ -168,11 +118,9 @@ class SequencerLayout(BoxLayout):
         menu_bar.add_widget(file_button)
 
         # Bouton Edit avec ligne en dessous
-        edit_button = HoverableMDButton(
-            MDButtonText(text="Edit"),
-            style="text",
+        edit_button = HoverableMDTextButton(
+            text="Edit",
             pos_hint={'center_y': 0.5},
-            md_bg_color=[0, 0, 0, 0],  # Fond transparent
         )
 
         with edit_button.canvas.before:
@@ -194,11 +142,9 @@ class SequencerLayout(BoxLayout):
         menu_bar.add_widget(edit_button)
 
         # Bouton Song
-        song_button = HoverableMDButton(
-            MDButtonText(text="Song"),
-            style="text",
+        song_button = HoverableMDTextButton(
+            text="Song",
             pos_hint={'center_y': 0.5},
-            md_bg_color=[0, 0, 0, 0],
         )
         with song_button.canvas.before:
             Color(0.5, 0.5, 0.5, 1)
@@ -217,11 +163,9 @@ class SequencerLayout(BoxLayout):
         song_button.bind(on_release=lambda x: self.song_menu.open())
         menu_bar.add_widget(song_button)
 
-        settings_button = HoverableMDButton(
-            MDButtonText(text="Settings"),
-            style="text", 
+        settings_button = HoverableMDTextButton(
+            text="Settings",
             pos_hint={'center_y': 0.5},
-            md_bg_color=[0, 0, 0, 0],
         )
 
         with settings_button.canvas.before:
@@ -241,11 +185,9 @@ class SequencerLayout(BoxLayout):
         settings_button.bind(on_release=lambda x: self.settings_menu.open())
         menu_bar.add_widget(settings_button)
 
-        help_button = HoverableMDButton(
-            MDButtonText(text="Help"),
-            style="text",
+        help_button = HoverableMDTextButton(
+            text="Help",
             pos_hint={'center_y': 0.5},
-            md_bg_color=[0, 0, 0, 0],
         )
 
         with help_button.canvas.before:
@@ -545,7 +487,7 @@ class SequencerLayout(BoxLayout):
 
         # Bouton pour ajouter une piste MIDI
         add_midi_track_button = TooltipMDIconButton(
-            icon="midi",
+            icon="midi-port",
             tooltip_text="Ajouter une piste MIDI",
             on_release=lambda x: self.add_midi_track_popup()
         )
@@ -583,7 +525,7 @@ class SequencerLayout(BoxLayout):
         toolbar_card.add_widget(zoom_out_button)
 
         reset_zoom_button = TooltipMDIconButton(
-            icon="magnify-close",
+            icon="magnify-scan",
             tooltip_text="Reset Zoom",
             on_release=lambda x: self.reset_zoom()
         )
@@ -708,7 +650,7 @@ class SequencerLayout(BoxLayout):
         is_paused = (state == "paused")
         is_recording = (state == "recording")
 
-        # --- Update Play/Blink Button ---
+        # --- Update Play/Blink HoverableButton ---
         if is_playing or is_recording:
             if not self.blink_animation:
                 self.start_play_blink()
@@ -717,7 +659,7 @@ class SequencerLayout(BoxLayout):
             self.stop_play_blink()
             self.play_button.icon = 'play'
 
-        # --- Update Pause Button ---
+        # --- Update Pause HoverableButton ---
         if is_paused:
             self.pause_button.icon = 'pause-circle-outline'
             self.pause_button.md_bg_color = [0.9, 0.7, 0, 1]
@@ -725,7 +667,7 @@ class SequencerLayout(BoxLayout):
             self.pause_button.icon = 'pause'
             self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
 
-        # --- Update Record Button ---
+        # --- Update Record HoverableButton ---
         # This is now handled by the binding to `is_recording` and the `update_record_button_state` method.
         # We just need to call it here to ensure it's up-to-date with the playback state change.
         self.update_record_button_state()
@@ -905,6 +847,7 @@ class SequencerLayout(BoxLayout):
         content.add_widget(Label(text=message))
         
         ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
+        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50))
         buttons_layout.add_widget(ok_button)
         content.add_widget(buttons_layout)
@@ -922,7 +865,7 @@ class SequencerLayout(BoxLayout):
         content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         content.add_widget(Label(text=message))
         
-        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
+        ok_button = TooltipMDIconHoverableButton(icon='check', tooltip_text='OK')
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50))
         buttons_layout.add_widget(ok_button)
         content.add_widget(buttons_layout)
@@ -957,8 +900,8 @@ class SequencerLayout(BoxLayout):
         )
 
         # Bouton OK
-        ok_button = MDButton(
-            MDButtonText(text="OK"),
+        ok_button = HoverableMDTextButton(
+            text="OK",
             pos_hint={'center_x': 0.5}
         )
 
@@ -1024,8 +967,8 @@ class SequencerLayout(BoxLayout):
         scroll_view.add_widget(scroll_content)
 
         # Bouton OK
-        ok_button = MDButton(
-            MDButtonText(text="OK"),
+        ok_button = HoverableMDTextButton(
+            text="OK",
             size_hint=(1, None),
             height=dp(40)
         )
@@ -1245,8 +1188,8 @@ class SequencerLayout(BoxLayout):
 
         # Boutons
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        ok_button = HoverableMDButton(MDButtonText(text="OK"))
-        cancel_button = HoverableMDButton(MDButtonText(text="Annuler"))
+        ok_button = HoverableMDTextButton(text="OK")
+        cancel_button = HoverableMDTextButton(text="Annuler")
         buttons_layout.add_widget(ok_button)
         buttons_layout.add_widget(cancel_button)
         content.add_widget(buttons_layout)
@@ -1326,8 +1269,8 @@ class SequencerLayout(BoxLayout):
         grid.bind(minimum_height=grid.setter('height'))
 
         for i, track in enumerate(tracks):
-            btn = HoverableMDButton(
-                MDButtonText(text=f"{i}: {track.name}"),
+            btn = HoverableMDTextButton(
+                text=f"{i}: {track.name}",
                 size_hint_y=None,
                 height=dp(40)
             )

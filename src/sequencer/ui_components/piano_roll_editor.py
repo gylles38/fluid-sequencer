@@ -554,19 +554,19 @@ Builder.load_string("""
 
             TooltipMDIconButton:
                 id: insert_button
-                icon: 'pencil'
+                icon: 'plus-box'
                 tooltip_text: "Insert Mode"
                 theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('insert', self)
             TooltipMDIconButton:
                 id: move_button
-                icon: 'cursor-move'
+                icon: 'drag-variant'
                 tooltip_text: "Move Mode"
                 theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('move', self)
             TooltipMDIconButton:
                 id: delete_button
-                icon: 'eraser'
+                icon: 'minus-box'
                 tooltip_text: "Delete Mode"
                 theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
@@ -654,17 +654,17 @@ Builder.load_string("""
                 spacing: dp(4)
                 
                 TooltipMDIconButton:
-                    icon: "magnify-plus-outline"
+                    icon: "magnify-plus"
                     tooltip_text: "Zoom In"
                     on_release: root.zoom_in()
                 
                 TooltipMDIconButton:
-                    icon: "magnify-minus-outline"
+                    icon: "magnify-minus"
                     tooltip_text: "Zoom Out"
                     on_release: root.zoom_out()
                 
                 TooltipMDIconButton:
-                    icon: "magnify-close"
+                    icon: "magnify-remove-outline"
                     tooltip_text: "Reset Zoom"
                     on_release: root.zoom_reset()
 
@@ -685,7 +685,7 @@ Builder.load_string("""
 
             TooltipMDIconButton:
                 id: rewind_button
-                icon: 'skip-backward'
+                icon: 'rewind'
                 tooltip_text: "Rewind to Start"
                 on_press: root.rewind_pressed()
             TooltipMDIconButton:
@@ -700,7 +700,7 @@ Builder.load_string("""
                 on_press: root.stop_pressed()
             TooltipMDIconButton:
                 id: record_button
-                icon: 'record-circle-outline'
+                icon: 'record'
                 tooltip_text: "Record"
                 on_press: root.record_pressed()
 

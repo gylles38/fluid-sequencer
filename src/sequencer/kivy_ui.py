@@ -5,7 +5,7 @@ kivy.require('2.3.1')
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
-from .ui_components.HoverBehavior import HoverBehavior
+from .ui_components.HoverBehavior import HoverBehavior, HoverableMDTextButton, HoverableButton
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
@@ -47,13 +47,6 @@ from sequencer.sequencer import Sequencer
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from typing import Optional
 import sys, os, time
-
-# Custom Hoverable Buttons
-class HoverableMDTextButton(MDTextButton, HoverBehavior):
-    pass
-
-class HoverableButton(Button, HoverBehavior):
-    pass
 
 class SequencerLayout(BoxLayout):
     sequencer = ObjectProperty(None)
@@ -847,7 +840,6 @@ class SequencerLayout(BoxLayout):
         content.add_widget(Label(text=message))
         
         ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
-        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50))
         buttons_layout.add_widget(ok_button)
         content.add_widget(buttons_layout)
@@ -865,7 +857,7 @@ class SequencerLayout(BoxLayout):
         content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         content.add_widget(Label(text=message))
         
-        ok_button = TooltipMDIconHoverableButton(icon='check', tooltip_text='OK')
+        ok_button = TooltipMDIconButton(icon='check', tooltip_text='OK')
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50))
         buttons_layout.add_widget(ok_button)
         content.add_widget(buttons_layout)

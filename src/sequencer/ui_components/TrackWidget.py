@@ -3,7 +3,7 @@ import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.uix.boxlayout import BoxLayout
 from kivy.core.window import Window
-from .HoverBehavior import HoverBehavior
+from .HoverBehavior import HoverBehavior, HoverableSlider
 from kivymd.uix.slider import MDSlider
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
@@ -20,9 +20,6 @@ from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 
-
-class HoverableSlider(MDSlider, HoverBehavior):
-    pass
 
 class MidiInputSelectorPopup(Popup):
     def __init__(self, track_widget, **kwargs):

@@ -512,6 +512,14 @@ class SequencerLayout(BoxLayout):
         )
         toolbar_card.add_widget(add_audio_track_button)
 
+        # Bouton pour ajouter une piste d'automation
+        add_automation_track_button = TooltipMDIconButton(
+            icon="chart-bell-curve",
+            tooltip_text="Ajouter une piste d'automation",
+            on_release=lambda x: self.add_automation_track_popup()
+        )
+        toolbar_card.add_widget(add_automation_track_button)
+
         # Bouton pour supprimer une piste
         delete_track_button = TooltipMDIconButton(
             icon="playlist-minus",
@@ -1265,6 +1273,100 @@ class SequencerLayout(BoxLayout):
             callback=on_name_confirm
         )
         name_popup.open()
+
+    def add_automation_track_popup(self):
+        """Affiche un popup pour ajouter une nouvelle piste d'automation."""
+
+        # Filtrer les pistes qui peuvent avoir une piste d'automation
+        eligible_tracks = []
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if isinstance(track, (MidiTrack, AudioTrack)):
+                # Vérifier si une piste d'automation cible déjà cette piste
+                is_targeted = any(
+                    isinstance(t, AutomationTrack) and t.target_track_index == i
+                    for t in self.sequencer.song.tracks
+                )
+                if not is_targeted:
+                    eligible_tracks.append((i, track.name))
+
+        if not eligible_tracks:
+            self.show_info_popup("Info", "Toutes les pistes ont déjà une piste d'automation ou il n'y a aucune piste éligible.")
+            return
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+
+        # Champ pour le nom de la piste d'automation
+        track_name_input = TextInput(
+            hint_text="Nom de la piste d'automation",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        content.add_widget(track_name_input)
+
+        # Bouton pour le menu déroulant
+        dropdown_button = MDButton(
+            MDButtonText(text="Sélectionner une piste cible"),
+            size_hint_y=None,
+            height=dp(40),
+        )
+        content.add_widget(dropdown_button)
+
+        menu_items = [
+            {
+                "text": f"Track {i}: {name}",
+                "viewclass": "OneLineListItem",
+                "on_release": lambda x=i, y=name: set_item(x, y),
+            } for i, name in eligible_tracks
+        ]
+
+        self.track_menu = MDDropdownMenu(
+            caller=dropdown_button,
+            items=menu_items,
+            width_mult=4,
+        )
+        dropdown_button.bind(on_release=lambda x: self.track_menu.open())
+
+        selected_track_index = [-1] # Using a list to be mutable inside the lambda
+
+        def set_item(index, name):
+            dropdown_button.text = f"Track {index}: {name}"
+            selected_track_index[0] = index
+            self.track_menu.dismiss()
+
+        # Boutons OK/Annuler
+        buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        ok_button = HoverableMDButton(MDButtonText(text="OK"))
+        cancel_button = HoverableMDButton(MDButtonText(text="Annuler"))
+        buttons_layout.add_widget(ok_button)
+        buttons_layout.add_widget(cancel_button)
+        content.add_widget(buttons_layout)
+
+        popup = Popup(
+            title="Ajouter une piste d'automation",
+            content=content,
+            size_hint=(0.6, None),
+            height=dp(250),
+            auto_dismiss=False
+        )
+
+        def on_ok(instance):
+            track_name = track_name_input.text.strip()
+            if not track_name:
+                self.show_error_popup("Erreur", "Le nom de la piste ne peut pas être vide.")
+                return
+
+            if selected_track_index[0] == -1:
+                self.show_error_popup("Erreur", "Veuillez sélectionner une piste cible.")
+                return
+
+            command = f'addautotrack "{track_name}" {selected_track_index[0]}'
+            self.process_command_ui(command)
+            popup.dismiss()
+
+        ok_button.bind(on_press=on_ok)
+        cancel_button.bind(on_press=popup.dismiss)
+
+        popup.open()
 
     def delete_track_popup(self):
         """Affiche une liste de pistes à supprimer."""

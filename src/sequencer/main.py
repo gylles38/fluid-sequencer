@@ -168,7 +168,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
                 return True, result['message']
         else:
             return True, "Usage: addaudio <name> <filepath>"
-    elif command == "addauto":
+    elif command == "addautotrack":
         if len(args) == 2:
             try:
                 name = args[0]
@@ -181,7 +181,7 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             except ValueError:
                 return True, "Error: Invalid target track index."
         else:
-            return True, "Usage: addauto <name> <target_track_index>"
+            return True, "Usage: addautotrack <name> <target_track_index>"
     elif command == "addap":
         if len(args) >= 4:
             try:

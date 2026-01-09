@@ -1320,8 +1320,6 @@ class SequencerLayout(BoxLayout):
                 "children": [
                     MDListItemSupportingText(
                         text=f"Track {i}: {name}",
-                        theme_text_color="Custom",
-                        text_color=MDApp.get_running_app().theme_cls.onSurfaceColor,
                     )
                 ]
             }
@@ -1331,6 +1329,7 @@ class SequencerLayout(BoxLayout):
             caller=dropdown_button,
             items=menu_items,
             width_mult=4,
+            background_color=MDApp.get_running_app().theme_cls.backgroundColor,
         )
         dropdown_button.bind(on_release=lambda x: self.track_menu.open())
 

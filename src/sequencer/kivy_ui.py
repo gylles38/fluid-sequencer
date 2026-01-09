@@ -17,6 +17,7 @@ from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.menu import MDDropdownMenu
+from sequencer.ui_components.HoverBehavior import HoverableMDButton, HoverableButton
 from kivy.metrics import dp
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -76,7 +77,7 @@ class SequencerLayout(BoxLayout):
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
         # Bouton File avec ligne en dessous
-        file_button = MDButton(
+        file_button = HoverableMDButton(
             MDButtonText(text="File"),
             style="text",
             pos_hint={'center_y': 0.5},
@@ -111,7 +112,7 @@ class SequencerLayout(BoxLayout):
         menu_bar.add_widget(file_button)
 
         # Bouton Edit avec ligne en dessous
-        edit_button = MDButton(
+        edit_button = HoverableMDButton(
             MDButtonText(text="Edit"),
             style="text",
             pos_hint={'center_y': 0.5},
@@ -137,7 +138,7 @@ class SequencerLayout(BoxLayout):
         menu_bar.add_widget(edit_button)
 
         # Bouton Song
-        song_button = MDButton(
+        song_button = HoverableMDButton(
             MDButtonText(text="Song"),
             style="text",
             pos_hint={'center_y': 0.5},
@@ -160,7 +161,7 @@ class SequencerLayout(BoxLayout):
         song_button.bind(on_release=lambda x: self.song_menu.open())
         menu_bar.add_widget(song_button)
 
-        settings_button = MDButton(
+        settings_button = HoverableMDButton(
             MDButtonText(text="Settings"),
             style="text", 
             pos_hint={'center_y': 0.5},
@@ -184,7 +185,7 @@ class SequencerLayout(BoxLayout):
         settings_button.bind(on_release=lambda x: self.settings_menu.open())
         menu_bar.add_widget(settings_button)
 
-        help_button = MDButton(
+        help_button = HoverableMDButton(
             MDButtonText(text="Help"),
             style="text",
             pos_hint={'center_y': 0.5},
@@ -526,7 +527,7 @@ class SequencerLayout(BoxLayout):
         toolbar_card.add_widget(zoom_out_button)
 
         reset_zoom_button = TooltipMDIconButton(
-            icon="magnify-scan",
+            icon="magnify-close",
             tooltip_text="Reset Zoom",
             on_release=lambda x: self.reset_zoom()
         )
@@ -763,7 +764,6 @@ class SequencerLayout(BoxLayout):
         # Container scrollable pour les ports
         from kivy.uix.scrollview import ScrollView
         from kivy.uix.gridlayout import GridLayout
-        from kivy.uix.button import Button
         
         scroll_view = ScrollView(size_hint=(1, 1))
         grid_layout = GridLayout(
@@ -787,7 +787,7 @@ class SequencerLayout(BoxLayout):
         
         # Créer un bouton pour chaque port
         for port in ports:
-            btn = Button(
+            btn = HoverableButton(
                 text=port,
                 size_hint_y=None,
                 height=dp(40),
@@ -1189,8 +1189,8 @@ class SequencerLayout(BoxLayout):
 
         # Boutons
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        ok_button = MDButton(MDButtonText(text="OK"))
-        cancel_button = MDButton(MDButtonText(text="Annuler"))
+        ok_button = HoverableMDButton(MDButtonText(text="OK"))
+        cancel_button = HoverableMDButton(MDButtonText(text="Annuler"))
         buttons_layout.add_widget(ok_button)
         buttons_layout.add_widget(cancel_button)
         content.add_widget(buttons_layout)
@@ -1270,7 +1270,7 @@ class SequencerLayout(BoxLayout):
         grid.bind(minimum_height=grid.setter('height'))
 
         for i, track in enumerate(tracks):
-            btn = MDButton(
+            btn = HoverableMDButton(
                 MDButtonText(text=f"{i}: {track.name}"),
                 size_hint_y=None,
                 height=dp(40)

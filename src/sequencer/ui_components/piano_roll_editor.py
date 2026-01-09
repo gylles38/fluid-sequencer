@@ -21,6 +21,7 @@ from kivy.graphics import Color, Rectangle
 from collections import deque
 import copy
 import mido
+from sequencer.ui_components.HoverBehavior import HoverableButton
 
 
 class EditHistoryManager:
@@ -663,7 +664,7 @@ Builder.load_string("""
                     on_release: root.zoom_out()
                 
                 TooltipMDIconButton:
-                    icon: "magnify-scan"
+                    icon: "magnify-close"
                     tooltip_text: "Reset Zoom"
                     on_release: root.zoom_reset()
 
@@ -773,17 +774,17 @@ Builder.load_string("""
 
             Widget:
                 size_hint_x: 1
-            Button:
+            HoverableButton:
                 text: 'Save & Close'
                 size_hint_x: None
                 width: dp(120)
                 on_press: root.dismiss('save_and_close')
-            Button:
+            HoverableButton:
                 text: 'Discard & Close'
                 size_hint_x: None
                 width: dp(140)
                 on_press: root.dismiss('discard_and_close')
-            Button:
+            HoverableButton:
                 text: 'Cancel'
                 size_hint_x: None
                 width: dp(100)

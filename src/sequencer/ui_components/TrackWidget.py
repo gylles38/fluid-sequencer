@@ -1,6 +1,11 @@
 from . import *  # Importe tous les imports communs
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
+from .HoverBehavior import HoverBehavior, HoverableMDButton
+from kivymd.uix.slider import MDSlider
+
+class HoverableSlider(HoverBehavior, MDSlider):
+    pass
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
@@ -200,7 +205,7 @@ class TrackWidget(BoxLayout):
             # Port Selector Button below
             port_name = track.output_port_name if track.output_port_name else "None"
             self.port_button_text = MDButtonText(text=f"In: {port_name}")
-            self.port_selector_button = MDButton(
+            self.port_selector_button = HoverableMDButton(
                 self.port_button_text,
                 on_press=self.select_midi_port_popup,
                 style="outlined",
@@ -213,7 +218,7 @@ class TrackWidget(BoxLayout):
             # Plugin Selector Button below
             plugin_name = track.input_port_name.split(':')[0] if track.input_port_name else "None"
             self.input_button_text_button_text = MDButtonText(text=f"Dest: {plugin_name}")
-            self.input_selector_button = MDButton(
+            self.input_selector_button = HoverableMDButton(
                 self.input_button_text_button_text,
                 on_press=self.select_midi_input_popup,
                 style="outlined",
@@ -265,7 +270,7 @@ class TrackWidget(BoxLayout):
 
         if not isinstance(track, AutomationTrack):
             volume_layout.add_widget(mute_button_container)
-            self.volume_slider = MDSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.volume_slider = HoverableSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
             self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
             volume_layout.add_widget(self.volume_slider)
             volume_layout.add_widget(self.volume_label)
@@ -287,7 +292,7 @@ class TrackWidget(BoxLayout):
             pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.8, 0.8, 0.8, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
             pan_icon_container.add_widget(pan_icon)
 
-            self.pan_slider = MDSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.pan_slider = HoverableSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
             self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
             pan_layout.add_widget(pan_icon_container)
@@ -412,6 +417,7 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
+            self.timeline_scroll.bind(on_touch_down=self._on_timeline_touch_down, on_touch_up=self._on_timeline_touch_up)
 
             # A ScrollView must have a single child.
             self.timeline_container = Widget(size_hint=(None, 1))
@@ -443,6 +449,13 @@ class TrackWidget(BoxLayout):
 
         self.track.bind(is_solo=self.on_solo_changed)
         
+    def _on_timeline_touch_down(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            Window.set_system_cursor('hand')
+
+    def _on_timeline_touch_up(self, instance, touch):
+        Window.set_system_cursor('arrow')
+
     def update_timeline_size(self, *args):
         if hasattr(self, 'content'):
             # For MIDI tracks

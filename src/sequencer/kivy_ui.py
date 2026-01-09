@@ -1318,7 +1318,11 @@ class SequencerLayout(BoxLayout):
                 "viewclass": "MDListItem",
                 "on_release": lambda x=i, y=name: set_item(x, y),
                 "children": [
-                    MDListItemSupportingText(text=f"Track {i}: {name}")
+                    MDListItemSupportingText(
+                        text=f"Track {i}: {name}",
+                        theme_text_color="Custom",
+                        text_color=MDApp.get_running_app().theme_cls.onSurfaceColor,
+                    )
                 ]
             }
             menu_items.append(item)

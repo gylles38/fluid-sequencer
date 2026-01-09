@@ -114,19 +114,6 @@ class TrackWidget(BoxLayout):
         # --- Left Section: Track Info ---
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[dp(4), 0, 0, 0])
 
-        if isinstance(track, MidiTrack):
-            self.piano_roll_button = TooltipMDIconButton(
-                icon='piano',
-                tooltip_text='Open Piano Roll Editor',
-                on_press=self.open_piano_roll_editor,
-                pos_hint={'center_y': 0.5},
-                theme_icon_color="Custom",
-                icon_color=[0.8, 0.8, 0.8, 1],
-                size_hint_x=None,
-                width=dp(36)
-            )
-            self.info_section.add_widget(self.piano_roll_button)
-
         self.name_label = Label(
             text=f"[{track_index}] {track.name}",
             halign='left', 
@@ -134,24 +121,14 @@ class TrackWidget(BoxLayout):
             color=[0.9, 0.9, 0.9, 1],
             font_size=dp(14),
             bold=True,
-            text_size=(self.info_width - dp(50), None) # Allow text to wrap if needed
+            size_hint_x=None,        # On désactive l'extension automatique
+            width=self.info_width - dp(45), # On fixe la largeur (en laissant de la place pour le bouton piano)
+            text_size=(self.info_width - dp(45), None) # On force la zone de texte à cette largeur
         )
         self.info_section.add_widget(self.name_label)
 
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
-
-        if isinstance(track, MidiTrack):
-            self.record_mode_button = ThreeStateRecordButton(
-                track=track,
-                track_index=track_index,
-                sequencer_layout=sequencer_layout,
-                callback=self.on_record_mode_change
-            )
-            self.controls_section.add_widget(self.record_mode_button)
-        else:
-            # Add a spacer to maintain alignment with MIDI tracks that have a record button
-            self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
 
         # --- Solo Button (not for Automation tracks) ---
         if not isinstance(track, AutomationTrack):
@@ -165,8 +142,45 @@ class TrackWidget(BoxLayout):
                 md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8]
             )
             self.controls_section.add_widget(self.solo_button)
+        elif isinstance(track, AutomationTrack):
+            # On récupère le type (midi/audio) de la piste cible
+            target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
+            automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
+
+            # On crée les contrôles d'automation à la place du bouton Record
+            self.automation_controls = AutomationControls(track_type=automation_type)
+            self.automation_controls.size_hint_y = None
+            self.automation_controls.height = dp(36)
+            self.automation_controls.pos_hint = {'center_y': 0.5}
+            
+            # On l'ajoute directement dans la colonne de gauche
+            self.controls_section.add_widget(self.automation_controls)
         else:
             # Add a spacer to maintain alignment
+            self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
+
+        if isinstance(track, MidiTrack):
+            self.piano_roll_button = TooltipMDIconButton(
+                icon='piano',
+                tooltip_text='Open Piano Roll Editor',
+                on_press=self.open_piano_roll_editor,
+                pos_hint={'center_y': 0.5},
+                theme_icon_color="Custom",
+                icon_color=[0.8, 0.8, 0.8, 1],
+                size_hint_x=None,
+                width=dp(36)
+            )
+            self.controls_section.add_widget(self.piano_roll_button)
+
+            self.record_mode_button = ThreeStateRecordButton(
+                track=track,
+                track_index=track_index,
+                sequencer_layout=sequencer_layout,
+                callback=self.on_record_mode_change
+            )
+            self.controls_section.add_widget(self.record_mode_button)
+        else:
+            # Pour les pistes Audio standards, on garde l'espaceur de 44dp
             self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(44)))
 
         # --- MIDI Specific Controls (Channel, Program) ---
@@ -234,22 +248,6 @@ class TrackWidget(BoxLayout):
             midi_controls_layout.add_widget(self.port_selector_button)
             midi_controls_layout.add_widget(self.input_selector_button)
             midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
-        elif isinstance(track, AutomationTrack):
-            # This is where the automation controls will be added for automation tracks
-            target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
-            automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
-
-            automation_controls = AutomationControls(track_type=automation_type)
-            automation_controls.size_hint_y = None
-            automation_controls.height = dp(36)
-
-            # Adjust the layout's width to fit the controls
-            midi_controls_layout.width = automation_controls.width
-
-            # Add spacers before and after to center vertically
-            midi_controls_layout.add_widget(Widget()) # Top spacer
-            midi_controls_layout.add_widget(automation_controls)
-            midi_controls_layout.add_widget(Widget()) # Bottom spacer
         else:
             midi_controls_layout.add_widget(Widget())
             
@@ -265,7 +263,9 @@ class TrackWidget(BoxLayout):
             on_press=self.on_mute_toggle,
             pos_hint={'center_x': 0.5, 'center_y': 0.5},
             theme_icon_color="Custom",
-            icon_color=[0.8, 0.8, 0.8, 1]
+            #icon_color=[0.3, 0.2, 0.1, 0.8]
+            icon_color = [0.8, 0.3, 0, 1] if track.is_muted else [1, 0.6, 0, 1],
+            md_bg_color = [0.4, 0.2, 0.1, 0.8] if track.is_muted else [0.3, 0.2, 0.1, 0.8]            
         )
         mute_button_container.add_widget(self.mute_button)
 
@@ -277,11 +277,11 @@ class TrackWidget(BoxLayout):
             volume_layout.add_widget(self.volume_label)
             self.volume_slider.bind(value=self.on_volume_change)
             self.track.bind(volume=self.on_track_volume_changed)
-        else:
+        #else:
             # For automation tracks, add spacers to center the button
-            volume_layout.add_widget(Widget())
-            volume_layout.add_widget(mute_button_container)
-            volume_layout.add_widget(Widget())
+        #    volume_layout.add_widget(Widget())
+        #    volume_layout.add_widget(mute_button_container)
+        #    volume_layout.add_widget(Widget())
 
         self.controls_section.add_widget(volume_layout)
 

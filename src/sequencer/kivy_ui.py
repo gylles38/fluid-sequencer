@@ -246,6 +246,7 @@ class SequencerLayout(BoxLayout):
             width=150,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(150, None)
@@ -258,6 +259,7 @@ class SequencerLayout(BoxLayout):
             width=20,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(80, None)
@@ -271,6 +273,7 @@ class SequencerLayout(BoxLayout):
             width=40,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             field_type='tempo',
             callback=self.handle_textinput_arrows
         )
@@ -283,6 +286,7 @@ class SequencerLayout(BoxLayout):
             width=60,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(60, None)
@@ -319,6 +323,7 @@ class SequencerLayout(BoxLayout):
             width=80, 
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(80, None)
@@ -332,6 +337,7 @@ class SequencerLayout(BoxLayout):
             width=40,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             halign='right', 
             valign='middle',
             text_size=(40, None)
@@ -345,6 +351,7 @@ class SequencerLayout(BoxLayout):
             width=55,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             field_type='position',
             callback=self.handle_textinput_arrows
         )
@@ -356,6 +363,7 @@ class SequencerLayout(BoxLayout):
             width=35,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             halign='right', 
             valign='middle',
             text_size=(35, None)
@@ -369,6 +377,7 @@ class SequencerLayout(BoxLayout):
             width=55,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             field_type='position', 
             callback=self.handle_textinput_arrows
         )

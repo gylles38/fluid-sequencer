@@ -54,5 +54,5 @@ class AutomationControls(BoxLayout):
 
         # Select the new button
         instance.md_bg_color = App.get_running_app().theme_cls.primaryColor
-        instance.icon_color = [1, 1, 1, 1]
+        instance.icon_color = [1, 0.6, 0, 1]
         self.selected_button = instance

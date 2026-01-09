@@ -7,7 +7,7 @@ from kivy.clock import Clock
 from kivy.properties import StringProperty
 from .HoverBehavior import HoverBehavior
 
-class TooltipMDIconButton(HoverBehavior, MDIconButton):
+class TooltipMDIconButton(MDIconButton, HoverBehavior):
     tooltip_text = StringProperty()
 
     # --- Optimisation XRun ---

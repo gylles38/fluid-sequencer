@@ -4,7 +4,7 @@ from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from .HoverBehavior import HoverBehavior, HoverableMDButton
 from kivymd.uix.slider import MDSlider
 
-class HoverableSlider(HoverBehavior, MDSlider):
+class HoverableSlider(MDSlider, HoverBehavior):
     pass
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout

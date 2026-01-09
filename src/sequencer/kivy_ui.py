@@ -4,6 +4,52 @@ kivy.require('2.3.1')
 
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.core.window import Window
+from kivy.properties import ObjectProperty
+
+class CursorManager:
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(CursorManager, cls).__new__(cls)
+            cls._instance.hovered_widgets = []
+            Window.bind(mouse_pos=cls._instance.on_mouse_pos)
+        return cls._instance
+
+    def add_widget(self, widget):
+        if widget not in self.hovered_widgets:
+            self.hovered_widgets.append(widget)
+
+    def remove_widget(self, widget):
+        if widget in self.hovered_widgets:
+            self.hovered_widgets.remove(widget)
+
+    def on_mouse_pos(self, window, pos):
+        is_over_widget = False
+        for widget in self.hovered_widgets:
+            if not getattr(widget, 'disabled', False) and widget.collide_point(*widget.to_widget(*pos, relative=True)):
+                is_over_widget = True
+                break
+
+        if is_over_widget:
+            Window.set_system_cursor('hand')
+        else:
+            Window.set_system_cursor('arrow')
+
+cursor_manager = CursorManager()
+
+class Hoverable:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bind(parent=self._update_hover_registration)
+
+    def _update_hover_registration(self, instance, parent):
+        if parent:
+            cursor_manager.add_widget(self)
+        else:
+            cursor_manager.remove_widget(self)
+
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
@@ -17,8 +63,18 @@ from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.menu import MDDropdownMenu
-from sequencer.ui_components.HoverBehavior import HoverableMDButton, HoverableButton
 from kivy.metrics import dp
+from kivy.uix.button import Button
+
+class HoverableMDButton(Hoverable, MDButton):
+    pass
+
+class HoverableButton(Hoverable, Button):
+    pass
+
+class HoverableScrollView(Hoverable, ScrollView):
+    pass
+
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.logger import Logger

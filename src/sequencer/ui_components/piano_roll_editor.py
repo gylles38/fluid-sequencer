@@ -21,7 +21,7 @@ from kivy.graphics import Color, Rectangle
 from collections import deque
 import copy
 import mido
-from sequencer.ui_components.HoverBehavior import HoverableButton
+from sequencer.kivy_ui import HoverableButton
 
 
 class EditHistoryManager:

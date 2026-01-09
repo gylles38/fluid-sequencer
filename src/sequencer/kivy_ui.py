@@ -16,6 +16,7 @@ from kivymd.uix.label import MDLabel
 from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
+from kivymd.uix.list import MDListItem, MDListItemSupportingText
 from kivymd.uix.menu import MDDropdownMenu
 from sequencer.ui_components.HoverBehavior import HoverableMDButton, HoverableButton
 from kivy.metrics import dp
@@ -1311,13 +1312,16 @@ class SequencerLayout(BoxLayout):
         )
         content.add_widget(dropdown_button)
 
-        menu_items = [
-            {
-                "text": f"Track {i}: {name}",
-                "viewclass": "OneLineListItem",
+        menu_items = []
+        for i, name in eligible_tracks:
+            item = {
+                "viewclass": "MDListItem",
                 "on_release": lambda x=i, y=name: set_item(x, y),
-            } for i, name in eligible_tracks
-        ]
+                "children": [
+                    MDListItemSupportingText(text=f"Track {i}: {name}")
+                ]
+            }
+            menu_items.append(item)
 
         self.track_menu = MDDropdownMenu(
             caller=dropdown_button,

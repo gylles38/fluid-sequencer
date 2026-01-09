@@ -1,0 +1,8 @@
+{
+    "default_projects_dir": "/home/gilles/fluid-sequencer",
+    "default_audio_files_dir": "/home/gilles/fluid-sequencer",
+    "default_carla_projects_dir": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects",
+    "default_aj_snapshots_dir": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects",
+    "default_carla_project_file": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes-sheep.carxp",
+    "default_aj_snapshot_file": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes-sheep.ajs"
+}

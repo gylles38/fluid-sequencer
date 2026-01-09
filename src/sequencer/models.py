@@ -58,12 +58,13 @@ class MidiTrack(BaseTrack, EventDispatcher):
     """Represents a MIDI track, which is a sequence of musical events."""
     volume = NumericProperty(0.8)
     is_solo = BooleanProperty(False)
+    velocity = NumericProperty(1.0)
 
     def __init__(self, name: str, is_muted: bool = False, is_solo: bool = False, is_metronome: bool = False,
                  channel: int = 0, volume: float = 0.8, pan: float = 0.0, velocity: float = 1.0,
                  events: List[Event] = None, instrument: int = 0, bank_msb: Optional[int] = None,
                  bank_lsb: Optional[int] = None, output_port_name: Optional[str] = None,
-                 record_mode: str = 'OFF', **kwargs):
+                 input_port_name: Optional[str] = None, record_mode: str = 'OFF', **kwargs):
         BaseTrack.__init__(self, name=name)
         EventDispatcher.__init__(self, **kwargs)
         self.is_muted = is_muted
@@ -78,6 +79,7 @@ class MidiTrack(BaseTrack, EventDispatcher):
         self.bank_msb = bank_msb
         self.bank_lsb = bank_lsb
         self.output_port_name = output_port_name
+        self.input_port_name = input_port_name
         self.record_mode = record_mode
     
     def add_event(self, event: Event):
@@ -121,6 +123,7 @@ class AudioTrack(BaseTrack, EventDispatcher):
 @dataclass
 class AutomationPoint:
     """Represents a single point in an automation curve."""
+    VALID_CURVES = ["none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"]
     start_time: float  # Start time in beats
     parameter: str  # e.g., "volume", "pan", "cc_10"
     value: float  # The value of the parameter at this point
@@ -130,9 +133,8 @@ class AutomationPoint:
         if self.start_time < 0:
             raise ValueError("Start time cannot be negative.")
 
-        valid_curves = ["none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"]
-        if self.curve not in valid_curves:
-            raise ValueError(f"Curve type must be one of {valid_curves}.")
+        if self.curve not in self.VALID_CURVES:
+            raise ValueError(f"Curve type must be one of {self.VALID_CURVES}.")
 
         # Validate parameter format
         param_lower = self.parameter.lower()
@@ -150,18 +152,28 @@ class AutomationPoint:
              raise ValueError(f"Invalid parameter name: {self.parameter}")
         self.parameter = param_lower
 
-@dataclass
-class AutomationTrack(BaseTrack):
+class AutomationTrack(BaseTrack, EventDispatcher):
     """A track that contains automation data for another track."""
-    target_track_index: int
-    is_muted: bool = False
-    is_solo: bool = False
-    points: List[AutomationPoint] = field(default_factory=list)
+    is_muted = BooleanProperty(False)
+    is_solo = BooleanProperty(False)
+
+    def __init__(self, name: str, target_track_index: int, is_muted: bool = False,
+                 is_solo: bool = False, points: List[AutomationPoint] = None, **kwargs):
+        BaseTrack.__init__(self, name=name)
+        EventDispatcher.__init__(self, **kwargs)
+        self.target_track_index = target_track_index
+        self.is_muted = is_muted
+        self.is_solo = is_solo
+        self.points = points if points is not None else []
 
     def add_point(self, point: AutomationPoint):
         """Adds an automation point and keeps the list sorted."""
         self.points.append(point)
         self.points.sort(key=lambda p: p.start_time)
+
+    def __repr__(self):
+        return (f"AutomationTrack(name='{self.name}', target_track_index={self.target_track_index}, "
+                f"points=[...{len(self.points)} items...])")
 
 
 # Using Union to allow the list to contain both MidiTrack and AudioTrack objects
@@ -190,6 +202,8 @@ class Song:
     metronome_port_name: Optional[str] = None
     metronome_volume: float = 1.0
     metronome_pan: float = 0.0
+    carla_project_path: Optional[str] = None
+    aj_snapshot_path: Optional[str] = None
 
     def add_track(self, track: AnyTrack):
         """Adds a track to the song, assigning a default channel if it's a MIDI track."""

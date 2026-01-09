@@ -13,7 +13,7 @@ from kivy.graphics import Color, Rectangle, Line
 from kivy.clock import Clock
 
 # KivyMD imports
-from kivymd.uix.button import MDIconButton
+from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.slider import MDSlider
 from kivymd.uix.label import MDLabel
 
@@ -24,3 +24,9 @@ from sequencer.ui_components.ValueSpinner import ValueSpinner
 
 from kivy.uix.widget import Widget
 from kivymd.uix.label import MDIcon
+from .PianoRoll import PianoRoll, PianoRollViewer
+from .PianoKeyboard import PianoKeyboard
+from .bounded_scroll_view import BoundedScrollView
+from .piano_roll_editor import PianoRollEditor
+from .AutomationControls import AutomationControls
+from .VportsPopup import VportsPopup

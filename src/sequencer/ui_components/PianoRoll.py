@@ -1,0 +1,154 @@
+from kivy.uix.widget import Widget
+from kivy.uix.scrollview import ScrollView
+from kivy.properties import NumericProperty, ObjectProperty, ListProperty
+from kivy.metrics import dp
+from kivy.graphics import Color, Rectangle, Line
+from sequencer.models import MidiTrack
+
+class PianoRoll(Widget):
+    """
+    Represents the drawing area of the piano roll's grid and notes.
+    This widget is intended to be placed inside a ScrollView.
+    """
+    total_beats = NumericProperty(128.0)
+    pixels_per_beat = NumericProperty(dp(100))
+    track = ObjectProperty(None, allownone=True)
+    beat_per_measure = NumericProperty(4)
+    note_height = NumericProperty(dp(12))
+    editor = ObjectProperty(None, allownone=True)
+    selected_notes = ListProperty([])
+
+    def __init__(self, **kwargs):
+        super(PianoRoll, self).__init__(**kwargs)
+        self.size_hint = (None, None)
+        self.height = 128 * self.note_height
+
+        self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width,
+                  track=self.draw, pos=self.draw, size=self.draw)
+        self._update_width()
+
+    def _update_width(self, *args):
+        self.width = self.total_beats * self.pixels_per_beat
+        self.draw()
+
+    def _velocity_to_color(self, velocity):
+        """Converts MIDI velocity (0-127) to a color for visualization."""
+        normalized_velocity = velocity / 127.0
+        red = normalized_velocity
+        blue = 1.0 - normalized_velocity
+        green = 0.3
+        return (red, green, blue, 0.9)
+
+    def draw(self, *args):
+        self.canvas.before.clear()
+        self.canvas.clear()
+
+        with self.canvas.before:
+            Color(0.1, 0.1, 0.12, 1)
+            Rectangle(pos=self.pos, size=self.size)
+
+            # --- Grid ---
+            for i in range(128):
+                # Y-coordinate is now proportional to pitch (bottom-up)
+                note_y = self.y + i * self.note_height
+                if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1) # Black keys
+                else: Color(0.2, 0.2, 0.22, 1) # White keys
+
+                # Draw horizontal lines for note separation
+                Line(points=[self.x, note_y, self.x + self.width, note_y], width=0.6)
+
+                # Draw thicker lines to mark octaves (after B notes)
+                if (i % 12) == 11:
+                    Color(0.8, 0.8, 0.8, 0.6)
+                    # Draw octave line at the TOP of the B key row, to separate from C
+                    octave_line_y = note_y + self.note_height
+                    Line(points=[self.x, octave_line_y, self.x + self.width, octave_line_y], width=1.2)
+
+            current_beat = 0
+            while current_beat < self.total_beats:
+                x_pos = current_beat * self.pixels_per_beat
+                if current_beat % self.beat_per_measure == 0:
+                    Color(0.8, 0.8, 0.8, 0.8)
+                    Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1.5)
+                else:
+                    Color(0.5, 0.5, 0.5, 0.4)
+                    Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=0.5)
+                current_beat += 1
+
+        # --- Notes ---
+        if isinstance(self.track, MidiTrack):
+            with self.canvas:
+                for event in self.track.events:
+                    for note in event.notes:
+                        note_x = event.start_time * self.pixels_per_beat
+                        note_y = self.y + note.pitch * self.note_height
+                        note_width = note.duration * self.pixels_per_beat
+                        note_color = self._velocity_to_color(note.velocity)
+
+                        # Draw the main note body
+                        Color(*note_color)
+                        Rectangle(pos=(note_x, note_y), size=(note_width, self.note_height))
+
+                        # Draw resize handles if the note is wide enough
+                        if note_width > dp(16):
+                            handle_width = min(dp(8), note_width / 4)
+                            handle_color = (min(1.0, note_color[0] * 1.2), min(1.0, note_color[1] * 1.2), min(1.0, note_color[2] * 1.2), 1.0)
+                            Color(*handle_color)
+                            # Left handle
+                            Rectangle(pos=(note_x, note_y), size=(handle_width, self.note_height))
+                            # Right handle
+                            Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
+
+                        # Draw outline for selected note.
+                        # Both the legacy `selected_note` and the new `selected_notes` list must be
+                        # checked using identity (`is`) to handle identical-looking but distinct note objects.
+                        is_in_multi_select = any(note is sel_note for sel_note in self.selected_notes)
+                        is_the_single_select = self.editor and self.editor.selected_note is note
+
+                        if is_in_multi_select or is_the_single_select:
+                            Color(1, 1, 1, 1)  # White outline
+                            Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
+
+
+class PianoRollViewer(ScrollView):
+    """
+    A scrollable container for the PianoRoll grid widget.
+    It handles vertical scrolling for the grid part of the piano roll.
+    """
+    total_beats = NumericProperty(128.0)
+    pixels_per_beat = NumericProperty(dp(100))
+    track = ObjectProperty(None, allownone=True)
+    note_height = NumericProperty(dp(12))
+
+    def __init__(self, **kwargs):
+        super(PianoRollViewer, self).__init__(**kwargs)
+        self.size_hint_x = None
+        self.do_scroll_x = False
+        self.do_scroll_y = True
+
+        self.grid = PianoRoll(
+            track=self.track,
+            total_beats=self.total_beats,
+            pixels_per_beat=self.pixels_per_beat,
+            note_height=self.note_height
+        )
+        self.add_widget(self.grid)
+
+        # Bind this viewer's width to the grid's width ("content-out" sizing)
+        self.grid.bind(width=self.setter('width'))
+
+    def on_track(self, instance, value):
+        if hasattr(self, 'grid'):
+            self.grid.track = value
+
+    def on_total_beats(self, instance, value):
+        if hasattr(self, 'grid'):
+            self.grid.total_beats = value
+
+    def on_pixels_per_beat(self, instance, value):
+        if hasattr(self, 'grid'):
+            self.grid.pixels_per_beat = value
+
+    def on_note_height(self, instance, value):
+        if hasattr(self, 'grid'):
+            self.grid.note_height = value

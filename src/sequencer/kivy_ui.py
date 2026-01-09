@@ -17,21 +17,27 @@ from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.menu import MDDropdownMenu
+from sequencer.ui_components.HoverBehavior import HoverableMDButton, HoverableButton
 from kivy.metrics import dp
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.logger import Logger
 from kivy.graphics import Color, Rectangle, Line
+from kivy.properties import ObjectProperty
 
 # === External UI Components (modularized) ===
 from sequencer.ui_components.ConfirmationPopup import ConfirmationPopup
 from sequencer.ui_components.CustomTextInput import CustomTextInput
 from sequencer.ui_components.FileChooserPopup import FileChooserPopup
+from sequencer.ui_components.TrackSelectionPopup import TrackSelectionPopup
 from sequencer.ui_components.LoopPopup import LoopPopup
 from sequencer.ui_components.SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from sequencer.ui_components.SaveProjectAsPopup import SaveProjectAsPopup
+from sequencer.ui_components.SaveAsPopup import SaveAsPopup
 from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
 from sequencer.ui_components.YesNoPopup import YesNoPopup
+from sequencer.ui_components.VportsPopup import VportsPopup
+from sequencer.ui_components.PreferencesPopup import PreferencesPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.ui_components.Ruler import Ruler
 # ============================================
@@ -42,18 +48,23 @@ from typing import Optional
 import sys, os, time
 
 class SequencerLayout(BoxLayout):
-    
+    sequencer = ObjectProperty(None)
+
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
         self.orientation = 'vertical'
-        self.sequencer = Sequencer(gui_mode=True)
+        if not self.sequencer:
+            self.sequencer = Sequencer(gui_mode=True)
         self.sequencer.bind(playback_state=self.on_playback_state_change)
-        self._transport_update_event = None # Pour stocker l'événement Clock        
+        self.sequencer.bind(is_recording=self.update_record_button_state)
+        self.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
+        self._transport_update_event = None # Pour stocker l'événement Clock
         self.current_command = ""
         self.end_pos_manual_override = False
         self.is_looping = False
         self._is_scrolling = False # For scroll synchronization
-        self.blink_animation = None  # Référence à l'animation de clignotement
+        self.blink_animation = None
+        self.record_blink_event = None
         self._current_measure = None # Initialisation pour la détection du beat 1
         self._is_seeking_on_scroll = False
         self.pixels_per_beat = dp(100)
@@ -66,7 +77,7 @@ class SequencerLayout(BoxLayout):
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
         # Bouton File avec ligne en dessous
-        file_button = MDButton(
+        file_button = HoverableMDButton(
             MDButtonText(text="File"),
             style="text",
             pos_hint={'center_y': 0.5},
@@ -87,6 +98,8 @@ class SequencerLayout(BoxLayout):
             {"leading_icon": "file-plus", "text": "New Project", "on_release": lambda: self.menu_action(self.new_project_popup)},
             {"leading_icon": "folder-open", "text": "Load Project", "on_release": lambda: self.menu_action(self.load_project_popup)},
             {"leading_icon": "content-save", "text": "Save Project", "on_release": lambda: self.menu_action(self.save_project)},
+            {"leading_icon": "file-import", "text": "Import MIDI file", "on_release": lambda: self.menu_action(self.import_midi_popup)},
+            {"leading_icon": "file-export", "text": "Export MIDI file...", "on_release": lambda: self.menu_action(self.export_midi_popup)},
             {"leading_icon": "content-save-edit", "text": "Save Project As...", "on_release": lambda: self.menu_action(self.save_project_as_popup)},
             {"leading_icon": "exit-to-app", "text": "Quit", "on_release": lambda: self.menu_action(lambda: self.process_command_ui('quit'))},
         ]
@@ -99,7 +112,7 @@ class SequencerLayout(BoxLayout):
         menu_bar.add_widget(file_button)
 
         # Bouton Edit avec ligne en dessous
-        edit_button = MDButton(
+        edit_button = HoverableMDButton(
             MDButtonText(text="Edit"),
             style="text",
             pos_hint={'center_y': 0.5},
@@ -124,7 +137,31 @@ class SequencerLayout(BoxLayout):
         edit_button.bind(on_release=lambda x: self.edit_menu.open())
         menu_bar.add_widget(edit_button)
 
-        settings_button = MDButton(
+        # Bouton Song
+        song_button = HoverableMDButton(
+            MDButtonText(text="Song"),
+            style="text",
+            pos_hint={'center_y': 0.5},
+            md_bg_color=[0, 0, 0, 0],
+        )
+        with song_button.canvas.before:
+            Color(0.5, 0.5, 0.5, 1)
+            self.song_line = Line(points=[0, -1, song_button.width, -1], width=1)
+
+        song_items = [
+            {"leading_icon": "virtual-reality", "text": "Vports...", "on_release": lambda: self.menu_action(self.show_vports_popup)},
+            {"leading_icon": "folder-music", "text": "Set Carla Project", "on_release": lambda: self.menu_action(self.set_carla_project_popup)},
+            {"leading_icon": "lan-connect", "text": "Set Connections Snapshot", "on_release": lambda: self.menu_action(self.set_aj_snapshot_popup)},
+            {"leading_icon": "content-save-cog", "text": "Save JACK Connections", "on_release": lambda: self.menu_action(self.save_aj_snapshot_popup)},
+        ]
+        self.song_menu = MDDropdownMenu(
+            caller=song_button,
+            items=song_items,
+        )
+        song_button.bind(on_release=lambda x: self.song_menu.open())
+        menu_bar.add_widget(song_button)
+
+        settings_button = HoverableMDButton(
             MDButtonText(text="Settings"),
             style="text", 
             pos_hint={'center_y': 0.5},
@@ -136,6 +173,7 @@ class SequencerLayout(BoxLayout):
             self.settings_line = Line(points=[0, -1, settings_button.width, -1], width=1)
 
         settings_items = [
+            {"leading_icon": "cog", "text": "Preferences", "on_release": lambda: self.menu_action(self.show_preferences_popup)},
             {"leading_icon": "midi", "text": "MIDI Input Settings", "on_release": lambda: self.menu_action(self.show_midi_settings)},
             {"leading_icon": "audio-input-stereo-minijack", "text": "Audio Settings", "on_release": lambda: self.menu_action(self.show_audio_settings)},
         ]
@@ -147,7 +185,7 @@ class SequencerLayout(BoxLayout):
         settings_button.bind(on_release=lambda x: self.settings_menu.open())
         menu_bar.add_widget(settings_button)
 
-        help_button = MDButton(
+        help_button = HoverableMDButton(
             MDButtonText(text="Help"),
             style="text",
             pos_hint={'center_y': 0.5},
@@ -208,6 +246,7 @@ class SequencerLayout(BoxLayout):
             width=150,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(150, None)
@@ -220,6 +259,7 @@ class SequencerLayout(BoxLayout):
             width=20,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(80, None)
@@ -233,9 +273,11 @@ class SequencerLayout(BoxLayout):
             width=40,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             field_type='tempo',
             callback=self.handle_textinput_arrows
         )
+        self.tempo_input.bind(on_text_validate=self.on_tempo_validate)
         transport_card.add_widget(self.tempo_input)
                 
         self.timesig_label = Label(
@@ -244,6 +286,7 @@ class SequencerLayout(BoxLayout):
             width=60,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(60, None)
@@ -280,6 +323,7 @@ class SequencerLayout(BoxLayout):
             width=80, 
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},            
             halign='left', 
             valign='middle',
             text_size=(80, None)
@@ -293,6 +337,7 @@ class SequencerLayout(BoxLayout):
             width=40,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             halign='right', 
             valign='middle',
             text_size=(40, None)
@@ -306,6 +351,7 @@ class SequencerLayout(BoxLayout):
             width=55,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             field_type='position',
             callback=self.handle_textinput_arrows
         )
@@ -317,6 +363,7 @@ class SequencerLayout(BoxLayout):
             width=35,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             halign='right', 
             valign='middle',
             text_size=(35, None)
@@ -330,6 +377,7 @@ class SequencerLayout(BoxLayout):
             width=55,
             size_hint_y=None,
             height=common_height,
+            pos_hint={'center_y': 0.5},                        
             field_type='position', 
             callback=self.handle_textinput_arrows
         )
@@ -450,7 +498,7 @@ class SequencerLayout(BoxLayout):
 
         # Bouton pour ajouter une piste MIDI
         add_midi_track_button = TooltipMDIconButton(
-            icon="midi-port",
+            icon="midi",
             tooltip_text="Ajouter une piste MIDI",
             on_release=lambda x: self.add_midi_track_popup()
         )
@@ -488,7 +536,7 @@ class SequencerLayout(BoxLayout):
         toolbar_card.add_widget(zoom_out_button)
 
         reset_zoom_button = TooltipMDIconButton(
-            icon="magnify-scan",
+            icon="magnify-close",
             tooltip_text="Reset Zoom",
             on_release=lambda x: self.reset_zoom()
         )
@@ -513,6 +561,7 @@ class SequencerLayout(BoxLayout):
             height=dp(30), # Increased height for better visibility
             pixels_per_beat=self.pixels_per_beat,
         )
+        self.sequencer.bind(ui_end_pos_str=lambda instance, value: setattr(self.ruler, 'end_pos_str', value))
         track_area_card.add_widget(self.ruler)
 
         # Conteneur pour la liste des pistes avec défilement
@@ -553,6 +602,14 @@ class SequencerLayout(BoxLayout):
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
 
         Window.bind(on_key_down=self._on_keyboard_down)
+
+    def on_song_structure_changed(self, *args):
+        """
+        Callback for when the song's structure (e.g., notes in a track) changes
+        in a way that requires a full UI redraw.
+        """
+        Logger.info("UI: Song structure changed, forcing full UI refresh.")
+        self.update_status_display()
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
@@ -622,12 +679,9 @@ class SequencerLayout(BoxLayout):
             self.pause_button.md_bg_color = [0.1, 0.1, 0.1, 1]
 
         # --- Update Record Button ---
-        if is_recording:
-            self.record_button.icon = 'record-circle-outline'
-            self.record_button.md_bg_color = [0.8, 0, 0, 1]
-        else:
-            self.record_button.icon = 'record'
-            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+        # This is now handled by the binding to `is_recording` and the `update_record_button_state` method.
+        # We just need to call it here to ensure it's up-to-date with the playback state change.
+        self.update_record_button_state()
 
         # --- Final UI sync on stop ---
         if state == "stopped":
@@ -641,11 +695,23 @@ class SequencerLayout(BoxLayout):
             self.file_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'edit_line'):
             self.edit_line.points = [0, -1, instance.width, -1]
+        if hasattr(self, 'song_line'):
+            self.song_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'settings_line'):
             self.settings_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'help_line'):
             self.help_line.points = [0, -1, instance.width, -1]
 
+
+    def show_vports_popup(self):
+        """Affiche le popup de gestion des Vports."""
+        popup = VportsPopup(sequencer=self.sequencer)
+        popup.open()
+
+    def show_preferences_popup(self):
+        """Displays the preferences popup."""
+        popup = PreferencesPopup(sequencer=self.sequencer)
+        popup.open()
 
     def show_audio_settings(self):
         """Affiche les paramètres audio"""
@@ -707,7 +773,6 @@ class SequencerLayout(BoxLayout):
         # Container scrollable pour les ports
         from kivy.uix.scrollview import ScrollView
         from kivy.uix.gridlayout import GridLayout
-        from kivy.uix.button import Button
         
         scroll_view = ScrollView(size_hint=(1, 1))
         grid_layout = GridLayout(
@@ -731,7 +796,7 @@ class SequencerLayout(BoxLayout):
         
         # Créer un bouton pour chaque port
         for port in ports:
-            btn = Button(
+            btn = HoverableButton(
                 text=port,
                 size_hint_y=None,
                 height=dp(40),
@@ -932,7 +997,7 @@ class SequencerLayout(BoxLayout):
 
     def close_all_menus(self):
         """Ferme tous les menus ouverts"""
-        menus_to_close = ['file_menu', 'edit_menu', 'settings_menu', 'help_menu']
+        menus_to_close = ['file_menu', 'edit_menu', 'song_menu', 'settings_menu', 'help_menu']
         for menu_name in menus_to_close:
             if hasattr(self, menu_name) and getattr(self, menu_name):
                 try:
@@ -944,6 +1009,71 @@ class SequencerLayout(BoxLayout):
         """Exécute une action de menu et ferme le menu"""
         self.close_all_menus()
         action_callback()
+
+    def set_carla_project_popup(self):
+        """Opens a file chooser to set the Carla project path."""
+        def callback(filepath):
+            if filepath:
+                self.sequencer.song.carla_project_path = filepath
+                self.sequencer.is_dirty = True
+                # Relaunch Carla with the new project file
+                self.sequencer._start_carla_process(filepath)
+                self.show_info_popup("Success", f"Carla project loaded:\n{os.path.basename(filepath)}")
+
+        popup = FileChooserPopup(
+            callback=callback,
+            title="Select Carla Project File",
+            filters=['*.carxp'],
+            path=self.sequencer.config_manager.get_setting('default_carla_projects_dir')
+        )
+        popup.open()
+
+    def set_aj_snapshot_popup(self):
+        """Opens a file chooser to set the aj-snapshot file path."""
+        def callback(filepath):
+            if filepath:
+                self.sequencer.song.aj_snapshot_path = filepath
+                self.sequencer.is_dirty = True
+                self.show_info_popup("Success", f"aj-snapshot path set to:\n{filepath}")
+
+        popup = FileChooserPopup(
+            callback=callback,
+            title="Select aj-snapshot File",
+            filters=['*.ajs'],
+            path=self.sequencer.config_manager.get_setting('default_aj_snapshots_dir')
+        )
+        popup.open()
+
+    def save_aj_snapshot_popup(self):
+        """Opens a save file dialog to save the current JACK connections."""
+        def callback(filepath):
+            if not filepath:
+                return
+
+            # Ensure the filename ends with .ajs
+            if not filepath.endswith('.ajs'):
+                filepath += '.ajs'
+
+            # Call the backend method
+            result = self.sequencer.save_jack_connections(filepath)
+
+            if result["status"] == "success":
+                # If successful, also update the project's snapshot path
+                self.sequencer.song.aj_snapshot_path = filepath
+                self.sequencer.is_dirty = True
+                self.show_info_popup("Success", result["message"])
+            else:
+                # Show an error popup with the message from the backend
+                self.show_error_popup("Save Connections Error", result["message"])
+
+        popup = SaveAsPopup(
+            callback=callback,
+            title="Save JACK Connections As",
+            default_filename=f"{self.sequencer.song.name}.ajs",
+            filters=['*.ajs'],
+            path=self.sequencer.config_manager.get_setting('default_aj_snapshots_dir')
+        )
+        popup.open()
         
     def on_end_pos_manual_set(self, instance):
         if instance.text:
@@ -957,6 +1087,50 @@ class SequencerLayout(BoxLayout):
         # La gestion spécifique dépend de quel champ a changé
         pass
 
+    def import_midi_popup(self):
+        """Opens a file chooser to select a MIDI file to import."""
+        def file_chooser_callback(filepath):
+            if filepath:
+                self.process_command_ui(f'importmidi "{filepath}"')
+
+        popup = FileChooserPopup(
+            callback=file_chooser_callback,
+            title="Import MIDI File",
+            filters=['*.mid', '*.midi'],
+            path=self.sequencer.config_manager.get_setting('default_audio_files_dir')
+        )
+        popup.open()
+
+    def export_midi_popup(self):
+        """Opens a popup to select tracks for MIDI export."""
+
+        def on_tracks_selected(selected_indices):
+            if not selected_indices:
+                self.show_info_popup("Info", "No tracks were selected for export.")
+                return
+
+            def on_save(filepath):
+                if filepath:
+                    # Convert list of indices to a space-separated string for the command
+                    indices_str = " ".join(map(str, selected_indices))
+                    self.process_command_ui(f'exportmidi "{filepath}" {indices_str}')
+
+            save_popup = SaveAsPopup(
+                callback=on_save,
+                title="Export MIDI As",
+                default_filename=f"{self.sequencer.song.name}.mid",
+                filters=['*.mid', '*.midi'],
+                path=self.sequencer.config_manager.get_setting('default_audio_files_dir')
+            )
+            save_popup.open()
+
+        if not any(isinstance(t, MidiTrack) for t in self.sequencer.song.tracks):
+            self.show_info_popup("Info", "There are no MIDI tracks in the project to export.")
+            return
+
+        popup = TrackSelectionPopup(tracks=self.sequencer.song.tracks, callback=on_tracks_selected, sequencer_layout=self)
+        popup.open()
+
     def load_project_popup(self):
         def file_chooser_callback(filepath):
             import os
@@ -967,7 +1141,8 @@ class SequencerLayout(BoxLayout):
         popup = FileChooserPopup(
             callback=file_chooser_callback,
             title="Load Project",
-            filters=['*.proj.json']  # Seulement les fichiers projet
+            filters=['*.proj.json'],
+            path=self.sequencer.config_manager.get_setting('default_projects_dir')
         )
         popup.open()
 
@@ -990,7 +1165,14 @@ class SequencerLayout(BoxLayout):
             if filepath:
                 basename = os.path.basename(filepath).removesuffix('.proj.json')
                 self.process_command_ui(f'saveproject "{basename}"')
-        popup = SaveProjectAsPopup(sequencer=self.sequencer, callback=callback)
+
+        popup = SaveAsPopup(
+            callback=callback,
+            title="Save Project As",
+            path=self.sequencer.config_manager.get_setting('default_projects_dir'),
+            default_filename=f"{self.sequencer.song.name}.proj.json",
+            filters=['*.proj.json']
+        )
         popup.open()
 
     def add_midi_track_popup(self):
@@ -1016,8 +1198,8 @@ class SequencerLayout(BoxLayout):
 
         # Boutons
         buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        ok_button = MDButton(MDButtonText(text="OK"))
-        cancel_button = MDButton(MDButtonText(text="Annuler"))
+        ok_button = HoverableMDButton(MDButtonText(text="OK"))
+        cancel_button = HoverableMDButton(MDButtonText(text="Annuler"))
         buttons_layout.add_widget(ok_button)
         buttons_layout.add_widget(cancel_button)
         content.add_widget(buttons_layout)
@@ -1073,7 +1255,8 @@ class SequencerLayout(BoxLayout):
             file_popup = FileChooserPopup(
                 callback=file_chooser_callback,
                 title="Sélectionner un fichier audio",
-                filters=['*.wav', '*.mp3', '*.aiff', '*.ogg']
+                filters=['*.wav', '*.mp3', '*.aiff', '*.ogg'],
+                path=self.sequencer.config_manager.get_setting('default_audio_files_dir')
             )
             file_popup.open()
 
@@ -1096,7 +1279,7 @@ class SequencerLayout(BoxLayout):
         grid.bind(minimum_height=grid.setter('height'))
 
         for i, track in enumerate(tracks):
-            btn = MDButton(
+            btn = HoverableMDButton(
                 MDButtonText(text=f"{i}: {track.name}"),
                 size_hint_y=None,
                 height=dp(40)
@@ -1132,11 +1315,47 @@ class SequencerLayout(BoxLayout):
         )
         popup.open()
 
+    def toggle_record_button_color(self, dt):
+        """Alternates the record button color for blinking effect."""
+        default_color = (0.1, 0.1, 0.1, 1)
+        blink_color = (0.8, 0.0, 0.0, 1)
+        # Round the components for robust comparison
+        current_color_tuple = tuple(round(c, 1) for c in self.record_button.md_bg_color)
+
+        if current_color_tuple == default_color:
+            self.record_button.md_bg_color = blink_color
+        else:
+            self.record_button.md_bg_color = default_color
+
+    def update_record_button_state(self, *args):
+        """Centralized method to update the record button's visual state."""
+        # Stop any previous blinking timer
+        if self.record_blink_event:
+            self.record_blink_event.cancel()
+            self.record_blink_event = None
+
+        # Determine the sequencer's current recording-related state
+        is_armed = self.sequencer.is_recording and self.sequencer.playback_state == 'stopped'
+        is_actively_recording = self.sequencer.is_recording and self.sequencer.playback_state != 'stopped'
+
+        if is_armed:
+            # Start the blinking animation for the "armed" state
+            self.record_blink_event = Clock.schedule_interval(self.toggle_record_button_color, 0.5)
+            self.record_button.icon = 'record'
+        elif is_actively_recording:
+            # Set a solid red background for active recording
+            self.record_button.md_bg_color = [0.8, 0, 0, 1]
+            self.record_button.icon = 'record-circle-outline'
+        else:
+            # Revert to the default appearance
+            self.record_button.md_bg_color = [0.1, 0.1, 0.1, 1]
+            self.record_button.icon = 'record'
+
     def start_play_blink(self):
         """Démarre l'animation de clignotement du bouton play"""
         if self.blink_animation:
             self.blink_animation.cancel()
-        
+
         # Animation de clignotement
         self.blink_animation = Clock.schedule_interval(self._toggle_play_button_color, 0.5)  # Clignote toutes les 0.5 secondes
 
@@ -1158,7 +1377,7 @@ class SequencerLayout(BoxLayout):
         if self.blink_animation:
             self.blink_animation.cancel()
             self.blink_animation = None
-        
+
         # Remettre la couleur normale de l'icône seulement
         self.play_button.icon_color = [0, 0.7, 0.3, 1]
 
@@ -1170,11 +1389,11 @@ class SequencerLayout(BoxLayout):
         """Démarre la lecture après configuration du loop"""
         command = f'play "{start_pos}"'
         print(f"DEBUG: Starting playback: {command}")
-        
+
         # 1. Réinitialiser la vue de la timeline immédiatement
         for track_widget in self.track_widgets: 
             track_widget.reset_timeline_view()
-        
+
         # 2. Exécuter la commande JACK
         self.process_command_ui(command)
     
@@ -1184,34 +1403,34 @@ class SequencerLayout(BoxLayout):
         if not self.sequencer.default_record_port:
             self.show_midi_settings()
             return False
-        
+
         # Trouver la piste armée
         armed_track_index = None
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
                 if armed_track_index is not None:
-                    self.show_error_popup("Multiple Tracks Armed", 
+                    self.show_error_popup("Multiple Tracks Armed",
                                         "Multiple tracks are armed for recording.\nPlease arm only one track.")
                     return False
                 armed_track_index = i
-        
+
         if armed_track_index is None:
-            self.show_error_popup("No Track Armed", 
+            self.show_error_popup("No Track Armed",
                                 "No track is armed for recording.\nPlease arm a MIDI track first.")
             return False
-        
+
         # Récupérer la position de départ
         start_pos_text = self.start_pos_input.text.strip()
         if not start_pos_text:
             start_pos_text = "1:1"  # Par défaut
-        
+
         # Convertir en beats
         start_beat = self.sequencer.parse_position_to_beats(start_pos_text)
         if start_beat is None:
-            self.show_error_popup("Invalid Start Position", 
+            self.show_error_popup("Invalid Start Position",
                                 f"Invalid start position: {start_pos_text}")
             return False
-        
+
         # Démarrer l'enregistrement
         try:
             result = self.sequencer.record_track(
@@ -1219,13 +1438,13 @@ class SequencerLayout(BoxLayout):
                 start_beat=start_beat,
                 inport_name=self.sequencer.default_record_port
             )
-            
+
             if "Error" in result:
                 self.show_error_popup("Recording Error", result)
                 return False
-                
+
             return True
-            
+
         except Exception as e:
             self.show_error_popup("Recording Error", f"Failed to start recording:\n{str(e)}")
             return False
@@ -1260,7 +1479,7 @@ class SequencerLayout(BoxLayout):
                 command = f'play "{current_pos}" "{end_pos}"'
                 print(f"DEBUG: Loop disabled, setting play range from {current_pos} to {end_pos}")
                 self.process_command_ui(command)
-        
+
         self.is_looping = not self.is_looping
         if self.is_looping:
             self.loop_button.icon = 'repeat-variant'
@@ -1361,11 +1580,13 @@ class SequencerLayout(BoxLayout):
         current_position = self.sequencer._format_beats_to_position(self.display_beat)
         self.playhead_label.text = f"Pos: {current_position}"
         self._detect_beat_one_for_animation(current_position)
-        
+
         # 5. Check if song length has changed and update widgets if needed
         new_total_beats = self.sequencer.get_song_length_in_beats()
         if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
-             for track_widget in self.track_widgets:
+            self.ruler.total_beats = new_total_beats
+            self.ruler.redraw()
+            for track_widget in self.track_widgets:
                 if track_widget.total_beats != new_total_beats:
                     track_widget.total_beats = new_total_beats
 
@@ -1388,20 +1609,20 @@ class SequencerLayout(BoxLayout):
         """Détecte si on arrive sur un beat 1 et déclenche l'animation"""
         try:
             measure, beat = map(int, position_str.split(':'))
-            
+
             if beat == 1:
                 # Vérifier si c'est une NOUVELLE mesure
                 current_measure_key = measure  # Juste la mesure comme clé
-                
+
                 if not hasattr(self, '_current_measure') or self._current_measure != current_measure_key:
                     # Nouvelle mesure détectée !
                     self._current_measure = current_measure_key
-                    
+
                     # Déclencher l'animation seulement si en lecture
                     if self.sequencer.playback_state == "playing":
                         self.start_beat_pulse_animation()
                         print(f"DEBUG: Animation beat 1 - Mesure {measure}")
-                        
+
         except ValueError:
             # Erreur de parsing, ignorer
             pass
@@ -1412,6 +1633,10 @@ class SequencerLayout(BoxLayout):
         self.track_widgets.clear()
 
         final_total_beats = self.sequencer.get_song_length_in_beats()
+
+        # Update the main ruler's properties
+        self.ruler.total_beats = final_total_beats
+        self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
 
         for i, track in enumerate(self.sequencer.song.tracks):
             if isinstance(track, MidiTrack) and track.is_metronome:
@@ -1427,13 +1652,21 @@ class SequencerLayout(BoxLayout):
             first_track_widget = self.track_widgets[0]
             self.ruler.info_width = first_track_widget.info_width
             self.ruler.controls_width = first_track_widget.controls_width
-            
-            # Ensure ruler content has the same width as track timelines
-            self.ruler.ruler_content.width = first_track_widget.timeline_container.width
+
+            if isinstance(first_track_widget.track, MidiTrack):
+                self.ruler.keyboard_width = first_track_widget.piano_keyboard.width
+                # Bind width for dynamic changes if ever needed
+                first_track_widget.piano_keyboard.fbind('width', lambda i, v: setattr(self.ruler, 'keyboard_width', v))
+                # Ensure ruler content width matches the grid part of the piano roll
+                self.ruler.ruler_content.width = first_track_widget.piano_roll.width
+                first_track_widget.piano_roll.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
+            else:
+                self.ruler.keyboard_width = dp(40) # Set to the same as keyboard width for alignment
+                self.ruler.ruler_content.width = first_track_widget.timeline_container.width
+                first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
 
             first_track_widget.fbind('info_width', lambda i, v: setattr(self.ruler, 'info_width', v))
             first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
-            first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
 
         # --- Bind scroll views for synchronization ---
         scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]
@@ -1461,7 +1694,8 @@ class SequencerLayout(BoxLayout):
     def on_tempo_validate(self, instance=None):
         """Valide le tempo saisi"""
         try:
-            tempo = int(self.tempo_input.text)
+            # First, parse as a float to handle inputs like "120.0"
+            tempo = int(float(self.tempo_input.text))
             if 1 <= tempo <= 300:
                 self.process_command_ui(f'tempo {tempo}')
             else:
@@ -1474,10 +1708,19 @@ class SequencerLayout(BoxLayout):
     def on_start_position_validate(self, instance=None):
         """Valide la position de début"""
         position = self.start_pos_input.text
-        print(f"Start position validated: {position}")
-        # Ici vous pouvez ajouter la logique pour traiter la nouvelle position de début
-        # Par exemple :
-        # self.process_command_ui(f'startpos "{position}"')
+        self.sequencer.ui_start_pos_str = position # Ensure the backend variable is updated
+
+        # Parse the position string to beats
+        start_beat = self.sequencer.parse_position_to_beats(position)
+
+        if start_beat is not None:
+            # Force the sequencer's playhead to the new position
+            self.sequencer._resync_all_at_beat(start_beat)
+        else:
+            # If parsing fails, revert to a safe default to avoid errors
+            self.start_pos_input.text = "1:1"
+            self.sequencer.ui_start_pos_str = "1:1"
+            self.sequencer._resync_all_at_beat(0.0)
 
     def on_end_position_validate(self, instance=None):
         """Valide la position de fin"""
@@ -1499,7 +1742,7 @@ class SequencerLayout(BoxLayout):
     def handle_textinput_arrows(self, textinput, direction, modifiers, cursor_pos):
         """Gère les flèches haut/bas dans les TextInput avec position du curseur"""
         print(f"DEBUG: handle_textinput_arrows called - {textinput.field_type}, {direction}, cursor_pos: {cursor_pos}")
-        
+
         if textinput.field_type == 'position':
             self.handle_position_arrows_in_textinput(textinput, direction, modifiers, cursor_pos)
         elif textinput.field_type == 'tempo':
@@ -1512,11 +1755,11 @@ class SequencerLayout(BoxLayout):
             measure, beat = map(int, textinput.text.split(':'))
             step = 10 if 'shift' in modifiers else 1
             beats_per_measure = self.sequencer.song.time_signature_numerator
-            
+
             # Déterminer si le curseur est sur la mesure ou le beat
             cursor_index = cursor_pos
             colon_index = textinput.text.find(':')
-            
+
             if cursor_index <= colon_index:
                 # Curseur sur la mesure
                 if direction == 'up':
@@ -1529,7 +1772,7 @@ class SequencerLayout(BoxLayout):
                     # Si on est à la mesure 1, on ne change rien
                     # Le beat reste inchangé
                 print(f"DEBUG: Adjusting measure only: {measure}:{beat}")
-                
+
             else:
                 # Curseur sur le beat
                 if direction == 'up':
@@ -1547,25 +1790,25 @@ class SequencerLayout(BoxLayout):
                             beat = beats_per_measure
                         # Si measure = 1 et beat = 1, on ne fait rien
                 print(f"DEBUG: Adjusting beat only: {measure}:{beat}")
-            
+
             # Contraintes finales
             measure = max(1, measure)
             beat = max(1, min(beat, beats_per_measure))  # Entre 1 et beats_per_measure
-            
+
             new_position = f"{measure}:{beat}"
             textinput.text = new_position
-            
+
             # Restaurer la position du curseur
             self.restore_cursor_position(textinput, cursor_index, colon_index, new_position)
-            
+
             print(f"DEBUG: Position changed to {new_position}")
-            
+
             # Déclencher la validation
             if textinput == self.start_pos_input:
                 self.on_start_position_validate()
             elif textinput == self.end_pos_input:
                 self.on_end_position_validate()
-                
+
         except ValueError as e:
             print(f"DEBUG: Error parsing position: {e}")
             textinput.text = "1:1"
@@ -1573,7 +1816,7 @@ class SequencerLayout(BoxLayout):
     def restore_cursor_position(self, textinput, old_cursor_index, old_colon_index, new_text):
         """Tente de restaurer une position logique du curseur"""
         new_colon_index = new_text.find(':')
-        
+
         if old_cursor_index <= old_colon_index:
             # Curseur était sur la mesure - le garder sur la mesure
             # Calculer la nouvelle longueur de la mesure
@@ -1594,16 +1837,16 @@ class SequencerLayout(BoxLayout):
             # Curseur était sur le beat - le garder sur le beat
             old_beat_position = old_cursor_index - old_colon_index - 1
             old_beat_length = len(textinput.text) - old_colon_index - 1
-            
+
             new_beat_length = len(new_text) - new_colon_index - 1
-            
+
             if old_beat_length > 0:
                 ratio = old_beat_position / old_beat_length
                 new_beat_position = min(int(new_beat_length * ratio), new_beat_length)
                 new_cursor_pos = new_colon_index + 1 + new_beat_position
             else:
                 new_cursor_pos = new_colon_index + 1
-        
+
         # Appliquer la nouvelle position du curseur
         textinput.cursor = (new_cursor_pos, new_cursor_pos)
 
@@ -1612,16 +1855,16 @@ class SequencerLayout(BoxLayout):
         try:
             current_tempo = int(float(textinput.text))
             step = 10 if 'shift' in modifiers else 1
-            
+
             if direction == 'up':
                 new_tempo = current_tempo + step
             else:  # 'down'
                 new_tempo = max(1, current_tempo - step)
-                
+
             textinput.text = str(new_tempo)
             print(f"DEBUG: Tempo changed to {new_tempo}")
             self.on_tempo_validate()
-            
+
         except ValueError as e:
             print(f"DEBUG: Error parsing tempo: {e}")
             textinput.text = str(self.sequencer.song.tempo)
@@ -1697,7 +1940,6 @@ class SequencerLayout(BoxLayout):
         if not is_lightweight:
             print(f"DEBUG: Performing full UI refresh for command: {command}")
             self.update_status_display()
-            # Redraw the ruler only after a full UI refresh
             if hasattr(self, 'ruler'):
                 self.ruler.redraw()
         else:
@@ -1712,10 +1954,10 @@ class SequencerLayout(BoxLayout):
         # Ne pas animer si on est en pause ou arrêté
         if self.sequencer.playback_state != "playing":
             return
-            
+
         # Arrêter toute animation existante
         self.stop_beat_pulse_animation()
-        
+
         self.pulse_phase = 0
         self.original_width = self.play_button.width
         self.original_height = self.play_button.height
@@ -1729,7 +1971,7 @@ class SequencerLayout(BoxLayout):
             except:
                 pass  # Ignorer les erreurs si l'animation est déjà arrêtée
             self.beat_pulse_animation = None
-        
+
         # Remettre les valeurs originales
         self.play_button.icon_color = [0, 0.7, 0.3, 1]
         self.play_button.md_bg_color = [0.1, 0.1, 0.1, 1]
@@ -1742,29 +1984,29 @@ class SequencerLayout(BoxLayout):
         # Vérifier que l'animation est toujours valide
         if not hasattr(self, 'beat_pulse_animation') or self.beat_pulse_animation is None:
             return
-            
+
         self.pulse_phase += 1
-        
+
         if self.pulse_phase <= 5:  # Phase d'expansion (0.5 seconde)
             # Effet de glow progressif
             intensity = 0.3 + (self.pulse_phase * 0.14)  # 0.3 → 1.0
             glow_color = [intensity, 0.3 + intensity * 0.7, 0.1 + intensity * 0.3, 1]
-            
+
             self.play_button.icon_color = glow_color
-            
+
             # Effet d'agrandissement subtil
             scale = 1.0 + (self.pulse_phase * 0.03)
             self.play_button.width = self.original_width * scale
             self.play_button.height = self.original_height * scale
-            
+
         else:
             # Phase de contraction (0.5 seconde)
             if self.pulse_phase <= 10:
                 intensity = 1.0 - ((self.pulse_phase - 5) * 0.14)  # 1.0 → 0.3
                 glow_color = [intensity, 0.3 + intensity * 0.7, 0.1 + intensity * 0.3, 1]
-                
+
                 self.play_button.icon_color = glow_color
-                
+
                 scale = 1.15 - ((self.pulse_phase - 5) * 0.03)
                 self.play_button.width = self.original_width * scale
                 self.play_button.height = self.original_height * scale
@@ -1880,7 +2122,15 @@ class SequencerApp(MDApp):
     def build(self):
         self.theme_cls.theme_style = "Dark"
         self.theme_cls.primary_palette = "Blue"
-        return SequencerLayout()
+        layout = SequencerLayout()
+        # Start the Jack manager and Carla as soon as the app is built.
+        # We schedule them to avoid blocking the main UI thread during startup.
+        def startup(dt):
+            layout.sequencer.jack_manager.start()
+            layout.sequencer._start_carla_process()
+
+        Clock.schedule_once(startup, 0.1)
+        return layout
 
     def on_stop(self):
         layout = self.root

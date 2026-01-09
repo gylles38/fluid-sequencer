@@ -301,53 +301,111 @@ class TestSequencer(unittest.TestCase):
         # Assert that set_control_port was called with the correct name
         mock_set_control_port.assert_called_with("MyTestControlPort")
 
-    @patch('pydub.AudioSegment.from_file')
-    @patch('sequencer.sequencer.jack')
-    @patch('sequencer.sequencer.Clock.schedule_once')
-    def test_play_range_stops_audio(self, mock_schedule_once, mock_jack, mock_from_file):
+    @patch('kivy.clock.Clock.schedule_once')
+    def test_play_range_stops_audio(self, mock_schedule):
         """Test that reaching the end of a play range schedules a stop command."""
-        # Make the mock immediately execute the callback passed to it
-        mock_schedule_once.side_effect = lambda func, *args, **kwargs: func(0)
-
         # Setup
-        mock_from_file.return_value = MagicMock()
         sequencer = self.sequencer
-        jm = sequencer.jack_manager
-
-        # Mock the JACK client and its state
-        jm.jack_client = MagicMock()
-        jm.jack_client.transport_state = mock_jack.ROLLING
-
-        # Mock the transport query to return a valid state
-        mock_pos = MagicMock()
-        jm.jack_client.transport_query_struct.return_value = (mock_jack.ROLLING, mock_pos)
-
-        # Patch the sequencer's stop method to check if it's called
+        sequencer.play_range_enabled = True
+        sequencer.play_range_end_beat = 4.0
         sequencer.stop = MagicMock()
 
-        # Set a play range
-        sequencer.play_range_enabled = True
-        sequencer.play_range_end_beat = 4.0 # Stop at the end of the first measure
+        # Simulate the callback hitting the end of the range.
+        # This logic is now in JackManager, so we call it on the real instance.
+        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1)
 
-        # Simulate the process callback just before the end of the play range
-        jm.last_beat = 3.9
-        sequencer.song.tempo = 120.0
-        samplerate = jm.jack_client.samplerate = 48000
+        # The method should schedule sequencer.stop() to be called.
+        mock_schedule.assert_called_once()
+        # Simulate the clock tick to execute the scheduled function.
+        scheduled_function = mock_schedule.call_args[0][0]
+        scheduled_function(0) # The argument is dt (delta-time), 0 is fine.
 
-        # Calculate frames needed to cross the play_range_end_beat boundary
-        frames = 4800
-        beats_per_second = sequencer.song.tempo / 60.0
-        # This frame position ensures authoritative_beat_now is also 3.9
-        current_frame = 3.9 * (samplerate / beats_per_second)
-        mock_jack.position2dict.return_value = {'beats_per_minute': 120.0, 'frame': current_frame}
-
-
-        # Call the method under test
-        jm._process_callback(frames)
-
-        # Assertions
         sequencer.stop.assert_called_once()
         self.assertFalse(sequencer.play_range_enabled)
+
+    def test_automation_ease_in_to_none_curve(self):
+        """
+        Tests the specific bug case where an ease-in curve followed by a 'none'
+        curve was failing to generate the intermediate steps for the ease-in segment.
+        """
+        # 1. Setup the tracks
+        self.sequencer.add_track(name="Target Track", track_type='midi')
+        self.sequencer.add_automation_track(name="Volume Automation", target_track_index=0)
+        auto_track = self.sequencer.song.tracks[1]
+        self.assertIsInstance(auto_track, AutomationTrack)
+
+        # 2. Add the specific points that caused the bug
+        auto_track.add_point(AutomationPoint(start_time=0.0, parameter="vol", value=0.0, curve="ease-in"))
+        auto_track.add_point(AutomationPoint(start_time=16.0, parameter="vol", value=1.0, curve="none"))
+
+        # 3. Call the event generation function
+        generated_events = self.sequencer._generate_automation_events(auto_track)
+
+        # 4. Assertions
+        # There should be many generated events, not just the two endpoints.
+        # 16 beats at 1/16 granularity = 16*16 = 256 steps. Plus the 2 endpoints.
+        self.assertGreater(len(generated_events), 250)
+
+        # Find the event closest to the midpoint in time (8.0 beats)
+        midpoint_event = min(generated_events, key=lambda e: abs(e['time'] - 8.0))
+
+        # For an "ease-in" (t^2) curve, the value at the temporal midpoint (t=0.5)
+        # should be 0.25, which is significantly less than the linear midpoint of 0.5.
+        # This confirms the curve is being correctly applied.
+        self.assertLess(midpoint_event['value'], 0.3)
+        self.assertGreater(midpoint_event['value'], 0.2)
+
+        # Check that the start and end points are correct
+        start_event = min(generated_events, key=lambda e: e['time'])
+        end_event = max(generated_events, key=lambda e: e['time'])
+        self.assertAlmostEqual(start_event['time'], 0.0)
+        self.assertAlmostEqual(start_event['value'], 0.0)
+        self.assertAlmostEqual(end_event['time'], 16.0)
+        self.assertAlmostEqual(end_event['value'], 1.0)
+
+    @patch('pydub.AudioSegment.from_file')
+    @patch('sequencer.sequencer.JackManager._send_ipc_command')
+    def test_audio_track_automation_sends_ipc_commands(self, mock_send_ipc, mock_from_file):
+        """
+        Verify that automation events for audio tracks are correctly translated
+        into IPC commands for mpv.
+        """
+        # 1. Setup
+        mock_from_file.return_value = MagicMock()
+        self.sequencer.add_track(name="Audio", track_type='audio', filepath="test.wav")
+
+        # Mock an active audio process for this track
+        self.sequencer.jack_manager.active_audio_processes = [
+            MagicMock(track_index=0, socket_path="/tmp/mpv-socket")
+        ]
+
+        # 2. Test Volume Automation
+        vol_event = {
+            "target_track_index": 0,
+            "parameter": "vol",
+            "param_config": {}, # Not used for audio track logic
+            "value": 0.75
+        }
+        self.sequencer.jack_manager._apply_automation_event(vol_event)
+
+        # Assert that the correct volume command was sent (0.75 -> 75.0)
+        expected_vol_command = {"command": ["set_property", "volume", 75.0]}
+        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_vol_command)
+
+        # 3. Test Pan Automation
+        pan_event = {
+            "target_track_index": 0,
+            "parameter": "pan",
+            "param_config": {},
+            "value": -0.5 # Pan to the left
+        }
+        self.sequencer.jack_manager._apply_automation_event(pan_event)
+
+        # Assert that the correct pan command was sent
+        expected_pan_filter = "lavfi=[pan=stereo|c0=1.00*c0|c1=0.50*c1]"
+        expected_pan_command = {"command": ["set_property", "af", expected_pan_filter]}
+        # The mock was already called for volume, so we check the last call
+        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_pan_command)
 
 
 if __name__ == '__main__':

@@ -61,7 +61,7 @@ Pour utiliser l'interface graphique, vous aurez besoin de dépendances système 
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libjack-jackd2-dev libasound2-dev libmtdev-dev
+sudo apt-get install -y libjack-jackd2-dev libasound2-dev libmtdev-dev carla aj-snapshot
 ```
 
 Les dépendances Python, y compris `kivy` et `kivymd`, sont gérées par le fichier `requirements.txt` et installées avec la commande `pip install -r requirements.txt` mentionnée dans la section d'installation principale.

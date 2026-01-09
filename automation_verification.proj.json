@@ -1,0 +1,31 @@
+{
+    "name": "Automation Verification",
+    "tempo": 120.0,
+    "time_signature_numerator": 4,
+    "time_signature_denominator": 4,
+    "tracks": [
+        {
+            "type": "MidiTrack",
+            "name": "Piano",
+            "channel": 0,
+            "instrument": 0,
+            "is_muted": false,
+            "is_solo": false,
+            "volume": 1.0,
+            "pan": 0.0,
+            "record_mode": "OFF",
+            "events": []
+        },
+        {
+            "type": "AutomationTrack",
+            "name": "Piano Automation",
+            "target_track_index": 0,
+            "parameter": "volume",
+            "is_muted": false,
+            "is_solo": false,
+            "volume": 1.0,
+            "pan": 0.0,
+            "points": []
+        }
+    ]
+}

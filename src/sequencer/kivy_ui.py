@@ -1329,7 +1329,7 @@ class SequencerLayout(BoxLayout):
             caller=dropdown_button,
             items=menu_items,
             width_mult=4,
-            background_color=MDApp.get_running_app().theme_cls.backgroundColor,
+            md_bg_color=MDApp.get_running_app().theme_cls.backgroundColor,
         )
         dropdown_button.bind(on_release=lambda x: self.track_menu.open())
 

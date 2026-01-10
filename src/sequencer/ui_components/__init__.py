@@ -31,3 +31,4 @@ from .piano_roll_editor import PianoRollEditor
 from .AutomationControls import AutomationControls
 from .VportsPopup import VportsPopup
 from .editable_label import EditableLabel
+from .AutomationCurve import AutomationCurveWidget

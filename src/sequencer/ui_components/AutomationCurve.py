@@ -4,6 +4,27 @@ from kivy.graphics import Color, Mesh
 from kivy.properties import ListProperty, NumericProperty
 from kivy.metrics import dp
 
+# --- Easing Functions (Robert Penner equations) ---
+def _interp_linear(t):
+    return t
+
+def _interp_ease_in_quad(t):
+    return t * t
+
+def _interp_ease_out_quad(t):
+    return t * (2 - t)
+
+def _interp_ease_in_out_quad(t):
+    t *= 2
+    if t < 1:
+        return 0.5 * t * t
+    t -= 1
+    return -0.5 * (t * (t - 2) - 1)
+
+def _interp_sine(t):
+    return 0.5 * (1 - math.cos(t * math.pi))
+
+
 class AutomationCurveWidget(Widget):
     """
     A widget to display an automation curve as a filled shape.
@@ -19,20 +40,16 @@ class AutomationCurveWidget(Widget):
 
     def _get_interp_func(self, curve_type):
         """Returns the interpolation function for a given curve type."""
-    # Using standard Robert Penner easing functions for correctness
         if curve_type == "linear":
-            return lambda t: t
+            return _interp_linear
         elif curve_type == "ease-in":
-            # easeInQuad
-            return lambda t: pow(t, 2)
+            return _interp_ease_in_quad
         elif curve_type == "ease-out":
-            # easeOutQuad
-            return lambda t: 1 - pow(1 - t, 2)
+            return _interp_ease_out_quad
         elif curve_type == "ease-in-out":
-            # easeInOutQuad
-            return lambda t: 2 * t * t if t < 0.5 else 1 - pow(-2 * t + 2, 2) / 2
+            return _interp_ease_in_out_quad
         elif curve_type == "sine":
-            return lambda t: 0.5 * (1 - math.cos(t * math.pi))
+            return _interp_sine
         else:  # "none" or unknown
             return None
 

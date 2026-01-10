@@ -124,7 +124,8 @@ class TrackWidget(BoxLayout):
             font_size=dp(14),
             bold=True,
             size_hint_x=None,
-            width=dp(30)
+            width=dp(30),
+            pos_hint={'center_y': 0.5}
         )
         self.info_section.add_widget(self.index_label)
 
@@ -133,7 +134,8 @@ class TrackWidget(BoxLayout):
             text=self.track.name,
             font_size=dp(14),
             bold=True,
-            color=[0.9, 0.9, 0.9, 1]
+            color=[0.9, 0.9, 0.9, 1],
+            pos_hint={'center_y': 0.5}
         )
         self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_section.add_widget(self.name_label)

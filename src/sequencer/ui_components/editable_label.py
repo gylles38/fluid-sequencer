@@ -29,7 +29,7 @@ class EditableLabel(BoxLayout):
     def _post_kv_init(self, *args):
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(36) # Set a height to better align with other components
+        self.adaptive_height = True
         self._setup_view_mode()
 
     def _setup_view_mode(self):
@@ -53,13 +53,12 @@ class EditableLabel(BoxLayout):
             self.clear_widgets()
             self.text_field = MDTextField(
                 text=self.text,
-                max_text_length=16,
                 required=True,
                 helper_text_mode="on_error",
                 helper_text="Only a-z, A-Z, 0-9, - are allowed",
                 font_size=self.font_size
             )
-            self.text_field.bind(focus=self._on_focus)
+            self.text_field.bind(focus=self._on_focus, on_text=self._enforce_max_length)
             self.text_field.text_validate_func = self._filter_text
             self.validate_button = MDIconButton(icon='check', on_press=self._validate_text)
             self.add_widget(self.text_field)
@@ -70,6 +69,11 @@ class EditableLabel(BoxLayout):
 
     def _request_text_field_focus(self, *args):
         self.text_field.focus = True
+
+    def _enforce_max_length(self, instance, text):
+        """Manually enforces the 16-character limit for compatibility."""
+        if len(text) > 16:
+            instance.text = text[:16]
 
     def _filter_text(self, text):
         return re.match(r"^[a-zA-Z0-9-]*$", text) is not None

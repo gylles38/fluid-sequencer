@@ -138,7 +138,7 @@ class TrackWidget(BoxLayout):
                 on_press=self.on_solo_toggle,
                 pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
-                icon_color=[1, 1, 0, 1] if track.is_solo else [0.6, 0.6, 0.6, 1],
+                icon_color=[1, 1, 0, 1] if track.is_solo else [1, 1, 1, 0.8],
                 md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8]
             )
             self.controls_section.add_widget(self.solo_button)
@@ -166,7 +166,7 @@ class TrackWidget(BoxLayout):
                 on_press=self.open_piano_roll_editor,
                 pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
-                icon_color=[0.8, 0.8, 0.8, 1],
+                icon_color=[1, 1, 1, 0.8],
                 size_hint_x=None,
                 width=dp(36)
             )
@@ -290,7 +290,7 @@ class TrackWidget(BoxLayout):
             pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
 
             pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
-            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[0.8, 0.8, 0.8, 1], pos_hint={'center_x': 0.5, 'center_y': 0.5})
+            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'center_y': 0.5})
             pan_icon_container.add_widget(pan_icon)
 
             self.pan_slider = HoverableSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
@@ -399,10 +399,10 @@ class TrackWidget(BoxLayout):
 
             if isinstance(track, AudioTrack):
                 track_type_icon = "waveform"
-                track_type_color = [0.9, 0.5, 0.2, 1]
+                track_type_color = [1, 1, 1, 0.38]
             elif isinstance(track, AutomationTrack):
                 track_type_icon = "chart-line"
-                track_type_color = [0.2, 0.8, 0.8, 1]
+                track_type_color = [1, 1, 1, 0.38]
 
             icon = MDIcon(
                 icon=track_type_icon,

@@ -114,17 +114,30 @@ class TrackWidget(BoxLayout):
         # --- Left Section: Track Info ---
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[dp(4), 0, 0, 0])
 
-        self.name_label = Label(
-            text=f"[{track_index}] {track.name}",
-            halign='left', 
-            valign='middle', 
-            color=[0.9, 0.9, 0.9, 1],
+        # Non-editable track index
+        self.index_label = MDLabel(
+            text=f"[{track_index}]",
+            halign='left',
+            valign='middle',
+            theme_text_color="Custom",
+            text_color=[0.7, 0.7, 0.7, 1],
             font_size=dp(14),
             bold=True,
-            size_hint_x=None,        # On désactive l'extension automatique
-            width=self.info_width - dp(45), # On fixe la largeur (en laissant de la place pour le bouton piano)
-            text_size=(self.info_width - dp(45), None) # On force la zone de texte à cette largeur
+            size_hint_x=None,
+            width=dp(30),
+            pos_hint={'center_y': 0.5}
         )
+        self.info_section.add_widget(self.index_label)
+
+        # Editable track name
+        self.name_label = EditableLabel(
+            text=self.track.name,
+            font_size=dp(14),
+            bold=True,
+            color=[0.9, 0.9, 0.9, 1],
+            pos_hint={'center_y': 0.5}
+        )
+        self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_section.add_widget(self.name_label)
 
         # --- Middle Section: Controls ---
@@ -488,6 +501,12 @@ class TrackWidget(BoxLayout):
     def on_solo_changed(self, instance, value):
         self.update_mute_solo_appearance()
 
+    def on_name_validated(self, instance, new_name):
+        """Callback for when the user validates a new track name."""
+        # We need to escape the name in case it contains spaces in the future
+        # although the current filter doesn't allow it.
+        command = f'rename {self.track_index} "{new_name}"'
+        self.sequencer_layout.process_command_ui(command)
 
     def set_playback_position(self, current_beat: float):
         """

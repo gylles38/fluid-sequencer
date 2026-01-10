@@ -105,8 +105,10 @@ class EditableLabel(BoxLayout):
         pass
 
     def on_text(self, instance, value):
+        # This handler can be called during widget initialization before `self.label`
+        # has been created. We add a check for the attribute's existence to prevent a crash.
         if not self.edit_mode:
-            if self.label:
+            if hasattr(self, 'label') and self.label:
                 self.label.text = value
-            else:
-                self._setup_view_mode()
+            # If the label doesn't exist yet, _post_kv_init will handle the setup.
+            # We don't need an else clause here.

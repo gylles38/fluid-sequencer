@@ -19,17 +19,21 @@ class AutomationCurveWidget(Widget):
 
     def _get_interp_func(self, curve_type):
         """Returns the interpolation function for a given curve type."""
+    # Using standard Robert Penner easing functions for correctness
         if curve_type == "linear":
             return lambda t: t
         elif curve_type == "ease-in":
-            return lambda t: t * t
+            # easeInQuad
+            return lambda t: pow(t, 2)
         elif curve_type == "ease-out":
-            return lambda t: t * (2 - t)
+            # easeOutQuad
+            return lambda t: 1 - pow(1 - t, 2)
         elif curve_type == "ease-in-out":
-            return lambda t: t * t * (3.0 - 2.0 * t)
+            # easeInOutQuad
+            return lambda t: 2 * t * t if t < 0.5 else 1 - pow(-2 * t + 2, 2) / 2
         elif curve_type == "sine":
             return lambda t: 0.5 * (1 - math.cos(t * math.pi))
-        else: # "none" or unknown
+        else:  # "none" or unknown
             return None
 
     def draw_curve(self, *args):

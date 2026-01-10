@@ -31,7 +31,7 @@ class AutomationControls(BoxLayout):
                 icon=icon,
                 tooltip_text=tooltip,
                 theme_icon_color="Custom",
-                icon_color=[0.7, 0.7, 0.7, 1],
+                icon_color=[1, 1, 1, 0.8],
                 md_bg_color=[0.2, 0.2, 0.2, 1],
                 size_hint=(None, None),
                 size=(dp(36), dp(36))
@@ -50,7 +50,7 @@ class AutomationControls(BoxLayout):
         # Deselect the old button
         if self.selected_button:
             self.selected_button.md_bg_color = [0.2, 0.2, 0.2, 1]
-            self.selected_button.icon_color = [0.7, 0.7, 0.7, 1]
+            self.selected_button.icon_color = [1, 1, 1, 0.8]
 
         # Select the new button
         instance.md_bg_color = App.get_running_app().theme_cls.primaryColor

@@ -17,7 +17,10 @@ from kivy.properties import StringProperty
 from kivy.uix.widget import Widget
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.menu import MDDropdownMenu
+from kivymd.uix.list import MDListItem
+from kivymd.uix.behaviors import RectangularRippleBehavior, HoverBehavior
 from sequencer.ui_components.HoverBehavior import HoverableMDButton, HoverableButton
+from kivy.properties import ColorProperty
 from kivy.metrics import dp
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -47,6 +50,28 @@ from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from typing import Optional
 import sys, os, time
 
+# ─── Classe custom pour un item Material avec hover + ripple ───────────────
+class HoverRippleMenuItem(
+    MDListItem,
+    RectangularRippleBehavior,
+    HoverBehavior
+):
+    # Couleurs (ajuste selon ton thème)
+    bg_normal = ColorProperty([0.12, 0.12, 0.12, 1])      # fond normal (très sombre)
+    bg_hover   = ColorProperty([0.22, 0.22, 0.30, 0.7])   # fond au survol (bleuté/gris clair)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.md_bg_color = self.bg_normal
+        self.ripple_color = (0.4, 0.4, 0.8, 0.3)           # couleur du ripple (bleu léger)
+        self.ripple_scale = 1.2                            # un peu plus grand que par défaut
+
+    def on_enter(self):
+        self.md_bg_color = self.bg_hover
+
+    def on_leave(self):
+        self.md_bg_color = self.bg_normal
+
 class SequencerLayout(BoxLayout):
     sequencer = ObjectProperty(None)
 
@@ -55,6 +80,7 @@ class SequencerLayout(BoxLayout):
         self.orientation = 'vertical'
         if not self.sequencer:
             self.sequencer = Sequencer(gui_mode=True)
+            
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self.sequencer.bind(is_recording=self.update_record_button_state)
         self.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
@@ -512,6 +538,14 @@ class SequencerLayout(BoxLayout):
         )
         toolbar_card.add_widget(add_audio_track_button)
 
+        # Bouton pour ajouter une piste d'automation
+        add_automation_track_button = TooltipMDIconButton(
+            icon="chart-bell-curve",
+            tooltip_text="Ajouter une piste d'automation",
+            on_release=lambda x: self.add_automation_track_popup()
+        )
+        toolbar_card.add_widget(add_automation_track_button)
+
         # Bouton pour supprimer une piste
         delete_track_button = TooltipMDIconButton(
             icon="playlist-minus",
@@ -701,7 +735,6 @@ class SequencerLayout(BoxLayout):
             self.settings_line.points = [0, -1, instance.width, -1]
         if hasattr(self, 'help_line'):
             self.help_line.points = [0, -1, instance.width, -1]
-
 
     def show_vports_popup(self):
         """Affiche le popup de gestion des Vports."""
@@ -1265,6 +1298,120 @@ class SequencerLayout(BoxLayout):
             callback=on_name_confirm
         )
         name_popup.open()
+
+    def add_automation_track_popup(self):
+        """Affiche un popup pour ajouter une nouvelle piste d'automation."""
+
+        # Filtrer les pistes qui peuvent avoir une piste d'automation
+        eligible_tracks = []
+
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if isinstance(track, (MidiTrack, AudioTrack)):
+                is_targeted = any(
+                    isinstance(t, AutomationTrack) and t.target_track_index == i
+                    for t in self.sequencer.song.tracks
+                )
+                if not is_targeted:
+                    track_type = "midi" if isinstance(track, MidiTrack) else "audio"
+                    eligible_tracks.append((i, track.name, track_type))
+
+        if not eligible_tracks:
+            self.show_info_popup("Info", "Toutes les pistes ont déjà une piste d'automation ou il n'y a aucune piste éligible.")
+            return
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+
+        # Champ pour le nom de la piste d'automation
+        track_name_input = TextInput(
+            hint_text="Nom de la piste d'automation",
+            size_hint_y=None,
+            height=dp(40)
+        )
+        content.add_widget(track_name_input)
+
+        # Bouton pour le menu déroulant
+        dropdown_button = MDButton(
+            MDButtonText(text="Sélectionner une piste cible"),
+            size_hint_y=None,
+            height=dp(40),
+        )
+        content.add_widget(dropdown_button)
+
+        def set_item(index, name):
+            # En KivyMD 2.0, MDButton contient souvent un MDButtonText
+            if hasattr(dropdown_button, 'children') and dropdown_button.children:
+                dropdown_button.children[0].text = f"Track {index}: {name}"
+            selected_track_index[0] = index
+            self.track_menu.dismiss()
+            
+        # Utilise une closure propre pour éviter les bugs de capture de variables dans lambda
+        def make_callback(index, name):
+            def on_select():
+                set_item(index, name)
+                # self.track_menu.dismiss()  # ← souvent automatique, mais tu peux le forcer si besoin
+            return on_select
+
+        menu_items = []
+
+        for i, name, track_type in eligible_tracks:
+            if track_type == "midi":
+                leading_icon = "music-note"
+            else:
+                leading_icon = "waveform"
+
+            menu_items.append(
+                {
+                    "text": f"Track {i}: {name}",
+                    "leading_icon": leading_icon,
+                    "on_release": make_callback(i, name),
+                }
+            )
+
+        self.track_menu = MDDropdownMenu(
+            caller=dropdown_button,
+            items=menu_items,
+            width_mult=4,              # ou width=dp(320) pour valeur fixe
+            # md_bg_color=(0.12, 0.12, 0.12, 0.98),  # fond sombre global du menu → optionnel
+        )
+
+        dropdown_button.bind(on_release=lambda x: self.track_menu.open())
+
+        selected_track_index = [-1] # Using a list to be mutable inside the lambda
+
+        # Boutons OK/Annuler
+        buttons_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        ok_button = HoverableMDButton(MDButtonText(text="OK"))
+        cancel_button = HoverableMDButton(MDButtonText(text="Annuler"))
+        buttons_layout.add_widget(ok_button)
+        buttons_layout.add_widget(cancel_button)
+        content.add_widget(buttons_layout)
+
+        popup = Popup(
+            title="Ajouter une piste d'automation",
+            content=content,
+            size_hint=(0.6, None),
+            height=dp(250),
+            auto_dismiss=False
+        )
+
+        def on_ok(instance):
+            track_name = track_name_input.text.strip()
+            if not track_name:
+                self.show_error_popup("Erreur", "Le nom de la piste ne peut pas être vide.")
+                return
+
+            if selected_track_index[0] == -1:
+                self.show_error_popup("Erreur", "Veuillez sélectionner une piste cible.")
+                return
+
+            command = f'addautotrack "{track_name}" {selected_track_index[0]}'
+            self.process_command_ui(command)
+            popup.dismiss()
+
+        ok_button.bind(on_press=on_ok)
+        cancel_button.bind(on_press=popup.dismiss)
+
+        popup.open()
 
     def delete_track_popup(self):
         """Affiche une liste de pistes à supprimer."""
@@ -2122,6 +2269,7 @@ class SequencerApp(MDApp):
     def build(self):
         self.theme_cls.theme_style = "Dark"
         self.theme_cls.primary_palette = "Blue"
+        
         layout = SequencerLayout()
         # Start the Jack manager and Carla as soon as the app is built.
         # We schedule them to avoid blocking the main UI thread during startup.

@@ -1,0 +1,23 @@
+{
+    "song": {
+        "__class__": "Song",
+        "name": "Verification Project",
+        "tempo": 120,
+        "time_signature_numerator": 4,
+        "time_signature_denominator": 4,
+        "tracks": [
+            {
+                "__class__": "MidiTrack",
+                "name": "MIDI Track 1",
+                "instrument": 0,
+                "channel": 0,
+                "events": []
+            },
+            {
+                "__class__": "AudioTrack",
+                "name": "Audio Track 1",
+                "filepath": "/path/to/dummy.wav"
+            }
+        ]
+    }
+}

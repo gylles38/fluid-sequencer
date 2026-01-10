@@ -54,8 +54,6 @@ class EditableLabel(BoxLayout):
             self.text_field = MDTextField(
                 text=self.text,
                 required=True,
-                helper_text_mode="on_error",
-                helper_text="Only a-z, A-Z, 0-9, - are allowed",
                 font_size=self.font_size
             )
             self.text_field.bind(focus=self._on_focus, on_text=self._enforce_max_length)

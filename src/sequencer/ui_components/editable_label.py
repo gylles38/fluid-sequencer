@@ -29,7 +29,7 @@ class EditableLabel(BoxLayout):
     def _post_kv_init(self, *args):
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.adaptive_height = True
+        self.height = dp(36)
         self._setup_view_mode()
 
     def _setup_view_mode(self):
@@ -54,11 +54,18 @@ class EditableLabel(BoxLayout):
             self.text_field = MDTextField(
                 text=self.text,
                 required=True,
-                font_size=self.font_size
+                font_size=self.font_size,
+                size_hint_x=1,
+                size_hint_y=None,
+                height=self.height
             )
             self.text_field.bind(focus=self._on_focus, on_text=self._enforce_max_length)
             self.text_field.text_validate_func = self._filter_text
-            self.validate_button = MDIconButton(icon='check', on_press=self._validate_text)
+            self.validate_button = MDIconButton(
+                icon='check',
+                on_press=self._validate_text,
+                pos_hint={'center_y': 0.5}
+            )
             self.add_widget(self.text_field)
             self.add_widget(self.validate_button)
             self.edit_mode = True

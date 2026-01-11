@@ -5,8 +5,9 @@ from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
 from kivy.properties import StringProperty
+from .HoverBehavior import HoverBehavior
 
-class TooltipMDIconButton(MDIconButton):
+class TooltipMDIconButton(MDIconButton, HoverBehavior):
     tooltip_text = StringProperty()
 
     # --- Optimisation XRun ---
@@ -20,11 +21,10 @@ class TooltipMDIconButton(MDIconButton):
         super().__init__(**kwargs)
         self.tooltip_delay = 0.5  # Délai légèrement augmenté pour éviter les affichages accidentels
         self._show_event = None
-        # Les événements on_enter/on_leave sont gérés nativement par Kivy
-        # Il n'est PAS nécessaire de binder manuellement mouse_pos.
 
     def on_enter(self, *args):
         """Appelé lorsque la souris entre dans la zone du widget."""
+        super().on_enter(*args) # For cursor change
         # Si une autre info-bulle est active, on la cache
         if TooltipMDIconButton._active_tooltip_instance and TooltipMDIconButton._active_tooltip_instance != self:
             TooltipMDIconButton._active_tooltip_instance._hide_tooltip()
@@ -35,6 +35,7 @@ class TooltipMDIconButton(MDIconButton):
 
     def on_leave(self, *args):
         """Appelé lorsque la souris quitte la zone du widget."""
+        super().on_leave(*args) # For cursor change
         self._hide_tooltip()
         if TooltipMDIconButton._active_tooltip_instance == self:
             TooltipMDIconButton._active_tooltip_instance = None

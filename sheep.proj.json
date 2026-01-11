@@ -1,19 +1,26 @@
 {
     "song": {
-        "name": "New Song",
+        "__type__": "Song",
+        "name": "sheep",
         "tempo": 120,
         "time_signature_numerator": 4,
         "time_signature_denominator": 4,
         "ticks_per_beat": 480,
+        "sync_offset_sec": 1.0,
         "tracks": [
             {
+                "__type__": "MidiTrack",
                 "name": "rhodes",
                 "is_muted": false,
                 "is_solo": false,
+                "is_metronome": false,
                 "channel": 0,
                 "volume": 1.0,
+                "pan": 0.0,
+                "velocity": 1.0,
                 "events": [
                     {
+                        "start_time": 5.0,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -22,10 +29,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 5.0,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 5.186007976531982,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -34,10 +42,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 5.186007976531982,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 5.612826347351074,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -46,10 +55,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 5.612826347351074,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 5.791337966918945,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -58,10 +68,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 5.791337966918945,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 6.21080207824707,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -70,10 +81,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 6.21080207824707,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 6.394354343414307,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -82,10 +94,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 6.394354343414307,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 6.746277332305908,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -94,10 +107,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 6.746277332305908,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 6.880795955657959,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -106,10 +120,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 6.880795955657959,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 7.18126916885376,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -118,10 +133,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 7.18126916885376,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 7.601647853851318,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -130,10 +146,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 7.601647853851318,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 12.849421501159668,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -142,10 +159,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 12.849421501159668,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 13.290762424468994,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -154,10 +172,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 13.290762424468994,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 13.952118873596191,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -166,10 +185,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 13.952118873596191,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 14.524444580078125,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -178,10 +198,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 14.524444580078125,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 15.043288707733154,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -190,10 +211,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 15.043288707733154,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 15.391125202178955,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -202,10 +224,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 15.391125202178955,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 15.414857864379883,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -214,10 +237,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 15.414857864379883,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 20.802524089813232,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -226,10 +250,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 20.802524089813232,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 20.811476230621338,
                         "notes": [
                             {
                                 "pitch": 50,
@@ -238,10 +263,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 20.811476230621338,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 21.130425930023193,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -250,10 +276,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 21.130425930023193,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 21.14592981338501,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -262,10 +289,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 21.14592981338501,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 21.152402877807617,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -274,10 +302,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 21.152402877807617,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 21.69663429260254,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -286,10 +315,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 21.69663429260254,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 21.705307006835938,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -298,10 +328,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 21.705307006835938,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 21.713976860046387,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -310,10 +341,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 21.713976860046387,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 23.707602977752686,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -322,10 +354,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 23.707602977752686,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 23.71199941635132,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -334,10 +367,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 23.71199941635132,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 23.73353385925293,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -346,10 +380,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 23.73353385925293,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 27.410918712615967,
                         "notes": [
                             {
                                 "pitch": 38,
@@ -358,10 +393,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 27.410918712615967,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 29.048165798187256,
                         "notes": [
                             {
                                 "pitch": 50,
@@ -370,10 +406,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 29.048165798187256,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 29.678982734680176,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -382,10 +419,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 29.678982734680176,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 29.687660217285156,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -394,10 +432,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 29.687660217285156,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 29.718225479125977,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -406,10 +445,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 29.718225479125977,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 30.30983591079712,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -418,10 +458,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 30.30983591079712,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 30.318554401397705,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -430,10 +471,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 30.318554401397705,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 30.34458303451538,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -442,10 +484,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 30.34458303451538,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 30.850370407104492,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -454,10 +497,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 30.850370407104492,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 30.86588191986084,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -466,10 +510,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 30.86588191986084,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 30.883437633514404,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -478,10 +523,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 30.883437633514404,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 31.5687255859375,
                         "notes": [
                             {
                                 "pitch": 38,
@@ -490,10 +536,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 31.5687255859375,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 31.570969104766846,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -502,10 +549,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 31.570969104766846,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 31.575348377227783,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -514,10 +562,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 31.575348377227783,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 31.581881046295166,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -526,10 +575,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 31.581881046295166,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 33.79999542236328,
                         "notes": [
                             {
                                 "pitch": 50,
@@ -538,10 +588,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 33.79999542236328,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 35.79948949813843,
                         "notes": [
                             {
                                 "pitch": 38,
@@ -550,10 +601,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 35.79948949813843,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 37.19908332824707,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -562,10 +614,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 37.19908332824707,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 37.60303592681885,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -574,10 +627,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 37.60303592681885,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 37.61166334152222,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -586,10 +640,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 37.61166334152222,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 38.2266206741333,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -598,10 +653,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 38.2266206741333,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 38.24853563308716,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -610,10 +666,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 38.24853563308716,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 38.312079429626465,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -622,10 +679,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 38.312079429626465,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 38.82649040222168,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -634,10 +692,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 38.82649040222168,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 38.8396258354187,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -646,10 +705,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 38.8396258354187,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 38.86152505874634,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -658,10 +718,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 38.86152505874634,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 38.89640998840332,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -670,10 +731,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 38.89640998840332,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 39.45646810531616,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -682,10 +744,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 39.45646810531616,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 39.4608473777771,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -694,10 +757,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 39.4608473777771,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 39.48464822769165,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -706,10 +770,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 39.48464822769165,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 39.49142646789551,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -718,10 +783,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 39.49142646789551,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 41.595656394958496,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -730,10 +796,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 41.595656394958496,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 43.51161527633667,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -742,10 +809,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 43.51161527633667,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 43.52029514312744,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -754,10 +822,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 43.52029514312744,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 43.6605920791626,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -766,10 +835,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 43.6605920791626,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 44.195841789245605,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -778,10 +848,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 44.195841789245605,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 45.42631006240845,
                         "notes": [
                             {
                                 "pitch": 68,
@@ -790,10 +861,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 45.42631006240845,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 45.440001010894775,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -802,10 +874,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 45.440001010894775,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 45.4941987991333,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -814,10 +887,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 45.4941987991333,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 45.51186561584473,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -826,10 +900,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 45.51186561584473,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 46.12777662277222,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -838,10 +913,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 46.12777662277222,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 47.42726278305054,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -850,10 +926,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 47.42726278305054,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 47.44668626785278,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -862,10 +939,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 47.44668626785278,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 47.45552968978882,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -874,10 +952,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 47.45552968978882,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 47.45776844024658,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -886,10 +965,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 47.45776844024658,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 49.65666913986206,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -898,10 +978,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 49.65666913986206,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 51.65726137161255,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -910,10 +991,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 51.65726137161255,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 52.66009712219238,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -922,10 +1004,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 52.66009712219238,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 52.92201900482178,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -934,10 +1017,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 52.92201900482178,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 53.279746532440186,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -946,10 +1030,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 53.279746532440186,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 53.671886920928955,
                         "notes": [
                             {
                                 "pitch": 68,
@@ -958,10 +1043,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 53.671886920928955,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 53.70473384857178,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -970,10 +1056,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 53.70473384857178,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 54.202635765075684,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -982,10 +1069,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 54.202635765075684,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 54.23141527175903,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -994,10 +1082,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 54.23141527175903,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 54.58448553085327,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1006,10 +1095,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 54.58448553085327,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 55.518062591552734,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -1018,10 +1108,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 55.518062591552734,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 55.528921127319336,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -1030,10 +1121,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 55.528921127319336,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 55.53331804275513,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -1042,10 +1134,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 55.53331804275513,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 55.539833545684814,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1054,10 +1147,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 55.539833545684814,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 59.44237041473389,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1066,10 +1160,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 59.44237041473389,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 59.48398303985596,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -1078,10 +1173,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 59.48398303985596,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 60.08552026748657,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -1090,10 +1186,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 60.08552026748657,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 60.09419393539429,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -1102,10 +1199,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 60.09419393539429,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 61.189218521118164,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -1114,10 +1212,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 61.189218521118164,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 61.19141626358032,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1126,10 +1225,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 61.19141626358032,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 61.1979546546936,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -1138,10 +1238,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 61.1979546546936,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 61.84359169006348,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -1150,10 +1251,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 61.84359169006348,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 61.860981941223145,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -1162,10 +1264,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 61.860981941223145,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 63.294790267944336,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1174,10 +1277,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 63.294790267944336,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 63.323570728302,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1186,10 +1290,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 63.323570728302,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 63.3258056640625,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -1198,10 +1303,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 63.3258056640625,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 68.52225828170776,
                         "notes": [
                             {
                                 "pitch": 77,
@@ -1210,10 +1316,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 68.52225828170776,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 68.5570478439331,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1222,10 +1329,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 68.5570478439331,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 68.83794975280762,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1234,10 +1342,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 68.83794975280762,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 69.23818254470825,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1246,10 +1355,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 69.23818254470825,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 69.51801252365112,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1258,10 +1368,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 69.51801252365112,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 70.06941366195679,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1270,10 +1381,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 70.06941366195679,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 71.43786668777466,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1282,10 +1394,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 71.43786668777466,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 71.44009733200073,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1294,10 +1407,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 71.44009733200073,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 71.44874954223633,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1306,10 +1420,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 71.44874954223633,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 75.53489255905151,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -1318,10 +1433,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 75.53489255905151,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 77.37393045425415,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -1330,10 +1446,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 77.37393045425415,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 77.37616634368896,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -1342,10 +1459,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 77.37616634368896,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 77.38054037094116,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1354,10 +1472,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 77.38054037094116,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 77.94960737228394,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1366,10 +1485,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 77.94960737228394,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 77.96894645690918,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1378,10 +1498,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 77.96894645690918,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 77.98178768157959,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1390,10 +1511,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 77.98178768157959,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 78.4363751411438,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -1402,10 +1524,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 78.4363751411438,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 78.4513955116272,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -1414,10 +1537,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 78.4513955116272,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 78.45788097381592,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -1426,10 +1550,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 78.45788097381592,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 79.32166624069214,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1438,10 +1563,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 79.32166624069214,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 79.32599020004272,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -1450,10 +1576,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 79.32599020004272,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 79.37519407272339,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1462,10 +1589,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 79.37519407272339,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 87.25761651992798,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -1474,10 +1602,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 87.25761651992798,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 87.27487897872925,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1486,10 +1615,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 87.27487897872925,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 87.27925443649292,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -1498,10 +1628,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 87.27925443649292,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 95.29218101501465,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1510,10 +1641,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 95.29218101501465,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 95.30293607711792,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -1522,10 +1654,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 95.30293607711792,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 95.30297422409058,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1534,10 +1667,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 95.30297422409058,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 97.22550249099731,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1546,10 +1680,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 97.22550249099731,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 97.23422718048096,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1558,10 +1693,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 97.23422718048096,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 97.23427486419678,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1570,10 +1706,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 97.23427486419678,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 99.16941261291504,
                         "notes": [
                             {
                                 "pitch": 50,
@@ -1582,10 +1719,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 99.16941261291504,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 101.01064586639404,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1594,10 +1732,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 101.01064586639404,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 101.01286220550537,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1606,10 +1745,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 101.01286220550537,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 101.02832412719727,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1618,10 +1758,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 101.02832412719727,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 101.56611394882202,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -1630,10 +1771,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 101.56611394882202,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 101.5855622291565,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1642,10 +1784,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 101.5855622291565,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 101.5899224281311,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1654,10 +1797,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 101.5899224281311,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 102.07595825195312,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1666,10 +1810,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 102.07595825195312,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 102.08251953125,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1678,10 +1823,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 102.08251953125,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 102.09333753585815,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1690,10 +1836,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 102.09333753585815,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 103.12920093536377,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1702,10 +1849,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 103.12920093536377,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 103.13999223709106,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -1714,10 +1862,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 103.13999223709106,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 103.14655780792236,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1726,10 +1875,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 103.14655780792236,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 105.05283880233765,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1738,10 +1888,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 105.05283880233765,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 105.05511522293091,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1750,10 +1901,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 105.05511522293091,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 105.05515384674072,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1762,10 +1914,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 105.05515384674072,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 108.90691614151001,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -1774,10 +1927,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 108.90691614151001,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 108.91127729415894,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1786,10 +1940,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 108.91127729415894,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 108.91571378707886,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1798,10 +1953,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 108.91571378707886,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 109.66250658035278,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -1810,10 +1966,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 109.66250658035278,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 109.67170238494873,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1822,10 +1979,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 109.67170238494873,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 109.7043809890747,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1834,10 +1992,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 109.7043809890747,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 110.30697393417358,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1846,10 +2005,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 110.30697393417358,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 110.31355333328247,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1858,10 +2018,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 110.31355333328247,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 110.32222270965576,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1870,10 +2031,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 110.32222270965576,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 110.93209075927734,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1882,10 +2044,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 110.93209075927734,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 110.99327993392944,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -1894,10 +2057,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 110.99327993392944,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 111.00621557235718,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -1906,10 +2070,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 111.00621557235718,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 116.79209756851196,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -1918,10 +2083,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 116.79209756851196,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 116.85950708389282,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1930,10 +2096,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 116.85950708389282,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 117.35265016555786,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -1942,10 +2109,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 117.35265016555786,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 117.75329303741455,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1954,10 +2122,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 117.75329303741455,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 118.7484712600708,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -1966,10 +2135,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 118.7484712600708,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 118.75919246673584,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -1978,10 +2148,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 118.75919246673584,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 118.76986169815063,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -1990,10 +2161,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 118.76986169815063,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 123.73780107498169,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -2002,10 +2174,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 123.73780107498169,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 124.62938928604126,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -2014,10 +2187,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 124.62938928604126,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 124.64012050628662,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -2026,10 +2200,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 124.64012050628662,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 124.66592931747437,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2038,10 +2213,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 124.66592931747437,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 125.25583505630493,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -2050,10 +2226,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 125.25583505630493,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 125.2709093093872,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2062,10 +2239,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 125.2709093093872,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 125.28658294677734,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -2074,10 +2252,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 125.28658294677734,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 125.66111707687378,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -2086,10 +2265,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 125.66111707687378,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 125.67019081115723,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -2098,10 +2278,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 125.67019081115723,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 125.6746153831482,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2110,10 +2291,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 125.6746153831482,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 126.6351752281189,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -2122,10 +2304,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 126.6351752281189,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 126.65048503875732,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2134,10 +2317,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 126.65048503875732,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 126.6569995880127,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -2146,10 +2330,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 126.6569995880127,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 132.56772804260254,
                         "notes": [
                             {
                                 "pitch": 71,
@@ -2158,10 +2343,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 132.56772804260254,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 133.13917112350464,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2170,10 +2356,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 133.13917112350464,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 133.45371866226196,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -2182,10 +2369,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 133.45371866226196,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 134.58484029769897,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -2194,10 +2382,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 134.58484029769897,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 134.60901260375977,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -2206,10 +2395,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 134.60901260375977,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 134.61555767059326,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2218,10 +2408,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 134.61555767059326,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 139.35118532180786,
                         "notes": [
                             {
                                 "pitch": 81,
@@ -2230,10 +2421,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 139.35118532180786,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 139.63951349258423,
                         "notes": [
                             {
                                 "pitch": 80,
@@ -2242,10 +2434,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 139.63951349258423,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 139.9388518333435,
                         "notes": [
                             {
                                 "pitch": 79,
@@ -2254,10 +2447,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 139.9388518333435,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 140.22314262390137,
                         "notes": [
                             {
                                 "pitch": 77,
@@ -2266,10 +2460,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 140.22314262390137,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 140.84906435012817,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -2278,10 +2473,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 140.84906435012817,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 142.273663520813,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -2290,10 +2486,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 142.273663520813,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 142.29093551635742,
                         "notes": [
                             {
                                 "pitch": 81,
@@ -2302,10 +2499,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 142.29093551635742,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 142.3016242980957,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -2314,10 +2512,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 142.3016242980957,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 147.0592131614685,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2326,10 +2525,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 147.0592131614685,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 147.34864139556885,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -2338,10 +2538,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 147.34864139556885,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 147.70175313949585,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -2350,10 +2551,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 147.70175313949585,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 148.0324034690857,
                         "notes": [
                             {
                                 "pitch": 72,
@@ -2362,10 +2564,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 148.0324034690857,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 148.62070417404175,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -2374,10 +2577,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 148.62070417404175,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 150.09645557403564,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -2386,10 +2590,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 150.09645557403564,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 150.11624193191528,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2398,10 +2603,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 150.11624193191528,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 150.13137674331665,
                         "notes": [
                             {
                                 "pitch": 74,
@@ -2410,10 +2616,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 150.13137674331665,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 154.83868837356567,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2422,10 +2629,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 154.83868837356567,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 155.14523792266846,
                         "notes": [
                             {
                                 "pitch": 68,
@@ -2434,10 +2642,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 155.14523792266846,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 155.38167524337769,
                         "notes": [
                             {
                                 "pitch": 67,
@@ -2446,10 +2655,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 155.38167524337769,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 155.72464275360107,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2458,10 +2668,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 155.72464275360107,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 156.31306648254395,
                         "notes": [
                             {
                                 "pitch": 65,
@@ -2470,10 +2681,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 156.31306648254395,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 157.64419269561768,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -2482,10 +2694,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 157.64419269561768,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 157.65715837478638,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -2494,10 +2707,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 157.65715837478638,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 157.67895555496216,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -2506,10 +2720,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 157.67895555496216,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 163.52716541290283,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2518,10 +2733,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 163.52716541290283,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 163.54934787750244,
                         "notes": [
                             {
                                 "pitch": 55,
@@ -2530,10 +2746,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 163.54934787750244,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 163.58417892456055,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2542,10 +2759,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 163.58417892456055,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 164.25844764709473,
                         "notes": [
                             {
                                 "pitch": 55,
@@ -2554,10 +2772,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 164.25844764709473,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 164.27578449249268,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2566,10 +2785,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 164.27578449249268,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 164.27802991867065,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2578,10 +2798,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 164.27802991867065,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 164.8419885635376,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2590,10 +2811,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 164.8419885635376,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 164.86148977279663,
                         "notes": [
                             {
                                 "pitch": 55,
@@ -2602,10 +2824,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 164.86148977279663,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 164.8745551109314,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2614,10 +2837,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 164.8745551109314,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 165.6122441291809,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -2626,10 +2850,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 165.6122441291809,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 165.62088823318481,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -2638,10 +2863,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 165.62088823318481,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 165.63381576538086,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -2650,10 +2876,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 165.63381576538086,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 173.27800226211548,
                         "notes": [
                             {
                                 "pitch": 66,
@@ -2662,10 +2889,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 173.27800226211548,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 173.29099082946777,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2674,10 +2902,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 173.29099082946777,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 173.30180835723877,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2686,10 +2915,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 173.30180835723877,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 176.34409713745117,
                         "notes": [
                             {
                                 "pitch": 66,
@@ -2698,10 +2928,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 176.34409713745117,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 176.6373734474182,
                         "notes": [
                             {
                                 "pitch": 70,
@@ -2710,10 +2941,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 176.6373734474182,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 177.16381645202637,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -2722,10 +2954,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 177.16381645202637,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 177.35274648666382,
                         "notes": [
                             {
                                 "pitch": 76,
@@ -2734,10 +2967,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 177.35274648666382,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 177.96917629241943,
                         "notes": [
                             {
                                 "pitch": 73,
@@ -2746,10 +2980,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 177.96917629241943,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 178.8321418762207,
                         "notes": [
                             {
                                 "pitch": 69,
@@ -2758,10 +2993,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 178.8321418762207,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 179.26559972763062,
                         "notes": [
                             {
                                 "pitch": 66,
@@ -2770,10 +3006,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 179.26559972763062,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 180.0725965499878,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2782,10 +3019,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 180.0725965499878,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 180.39656448364258,
                         "notes": [
                             {
                                 "pitch": 61,
@@ -2794,10 +3032,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 180.39656448364258,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 181.04035186767578,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2806,10 +3045,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 181.04035186767578,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 181.15375471115112,
                         "notes": [
                             {
                                 "pitch": 50,
@@ -2818,10 +3058,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 181.15375471115112,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 181.24797010421753,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2830,10 +3071,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 181.24797010421753,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 185.10176277160645,
                         "notes": [
                             {
                                 "pitch": 50,
@@ -2842,10 +3084,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 185.10176277160645,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 187.09429168701172,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2854,10 +3097,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 187.09429168701172,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 187.10069513320923,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2866,10 +3110,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 187.10069513320923,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 187.1114149093628,
                         "notes": [
                             {
                                 "pitch": 66,
@@ -2878,10 +3123,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 187.1114149093628,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 187.66701793670654,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -2890,10 +3136,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 187.66701793670654,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 187.7380895614624,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -2902,10 +3149,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 187.7380895614624,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 188.18027782440186,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2914,10 +3162,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 188.18027782440186,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 188.19108963012695,
                         "notes": [
                             {
                                 "pitch": 55,
@@ -2926,10 +3175,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 188.19108963012695,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 188.22567558288574,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -2938,10 +3188,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 188.22567558288574,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 189.04479122161865,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -2950,10 +3201,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 189.04479122161865,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 189.0663299560547,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -2962,10 +3214,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 189.0663299560547,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 189.09073781967163,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -2974,10 +3227,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 189.09073781967163,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 191.99865627288818,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -2986,10 +3240,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 191.99865627288818,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 192.00736570358276,
                         "notes": [
                             {
                                 "pitch": 55,
@@ -2998,10 +3253,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 192.00736570358276,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 192.04179286956787,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -3010,10 +3266,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 192.04179286956787,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 192.93465042114258,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -3022,10 +3279,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 192.93465042114258,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 192.93904066085815,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -3034,10 +3292,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 192.93904066085815,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 192.96728086471558,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -3046,10 +3305,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 192.96728086471558,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 196.43957328796387,
                         "notes": [
                             {
                                 "pitch": 59,
@@ -3058,10 +3318,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 196.43957328796387,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 196.4439516067505,
                         "notes": [
                             {
                                 "pitch": 55,
@@ -3070,10 +3331,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 196.4439516067505,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 196.4894585609436,
                         "notes": [
                             {
                                 "pitch": 62,
@@ -3082,10 +3344,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 196.4894585609436,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 196.84161710739136,
                         "notes": [
                             {
                                 "pitch": 60,
@@ -3094,10 +3357,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 196.84161710739136,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 196.86967754364014,
                         "notes": [
                             {
                                 "pitch": 57,
@@ -3106,10 +3370,11 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 196.86967754364014,
+                        "cc_messages": [],
                         "__type__": "Event"
                     },
                     {
+                        "start_time": 196.87857627868652,
                         "notes": [
                             {
                                 "pitch": 64,
@@ -3118,7 +3383,7 @@
                                 "__type__": "Note"
                             }
                         ],
-                        "start_time": 196.87857627868652,
+                        "cc_messages": [],
                         "__type__": "Event"
                     }
                 ],
@@ -3126,57 +3391,62 @@
                 "bank_msb": null,
                 "bank_lsb": null,
                 "output_port_name": "rhodes",
-                "__type__": "MidiTrack"
+                "input_port_name": "Rhodes2_by_giloux:events-in",
+                "record_mode": "OVERWRITE"
             },
             {
+                "__type__": "AudioTrack",
                 "name": "voices",
                 "filepath": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/bruitage.ogg",
                 "is_muted": false,
                 "is_solo": false,
                 "start_time": 0.0,
                 "volume": 1.0,
-                "__type__": "AudioTrack"
+                "pan": 0.0,
+                "channels": 0,
+                "native_tempo": null,
+                "duration_beats": 240.924
             },
             {
-                "name": "bass",
-                "is_muted": true,
-                "is_solo": false,
-                "channel": 2,
-                "volume": 0.8,
-                "events": [],
-                "instrument": 33,
-                "bank_msb": null,
-                "bank_lsb": null,
-                "output_port_name": "bass",
-                "__type__": "MidiTrack"
-            },
-            {
+                "__type__": "AudioTrack",
                 "name": "bass",
                 "filepath": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/Sheep-bass.ogg",
                 "is_muted": false,
                 "is_solo": false,
                 "start_time": 0.0,
                 "volume": 1.0,
-                "__type__": "AudioTrack"
+                "pan": 0.0,
+                "channels": 0,
+                "native_tempo": null,
+                "duration_beats": 1237.786
             },
             {
+                "__type__": "AudioTrack",
                 "name": "rhodes",
                 "filepath": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes.ogg",
                 "is_muted": false,
                 "is_solo": false,
                 "start_time": 0.0,
                 "volume": 1.0,
-                "__type__": "AudioTrack"
+                "pan": 0.0,
+                "channels": 0,
+                "native_tempo": null,
+                "duration_beats": 235.566
             }
         ],
+        "midi_mappings": [],
         "metronome_enabled": false,
         "metronome_port_name": "metro",
-        "__type__": "Song"
+        "metronome_volume": 1.0,
+        "metronome_pan": 0.0,
+        "carla_project_path": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes-sheep.carxp",
+        "aj_snapshot_path": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes-sheep.ajs"
     },
     "virtual_ports": [
         "rhodes",
         "bass",
         "metro"
     ],
+    "control_port_name": null,
     "audio_player_command": "mpv --really-quiet --no-video --idle"
 }

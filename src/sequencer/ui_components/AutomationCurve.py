@@ -32,7 +32,9 @@ class AutomationCurveWidget(Widget):
     points = ListProperty([])
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128.0)
-
+    min_val = NumericProperty(0.0)
+    max_val = NumericProperty(127.0)
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.bind(pos=self.draw_curve, size=self.draw_curve, points=self.draw_curve,
@@ -54,86 +56,102 @@ class AutomationCurveWidget(Widget):
             return None
 
     def draw_curve(self, *args):
-        """
-        Draws the automation curve based on the provided points.
-        """
-        self.canvas.clear()
-        if len(self.points) < 1:
+        if not self.canvas:
             return
+            
+        self.canvas.clear()
+        if not self.points:
+            return
+
+        v_range = self.max_val - self.min_val
+        if v_range == 0: v_range = 1 
+
+        def normalize(val):
+            v_range = self.max_val - self.min_val
+            if v_range == 0: v_range = 1
+            return (val - self.min_val) / v_range
 
         with self.canvas:
             Color(0.5, 0.5, 0.8, 0.4)
-
-            # Sort points just in case they are not ordered
             sorted_points = sorted(self.points, key=lambda p: p.start_time)
 
             vertices = []
             indices = []
+            v_index = 0
 
-            # Start the filled area from the bottom-left of the first point
-            start_x = sorted_points[0].start_time * self.pixels_per_beat
-            vertices.extend([start_x, self.y, 0, 0])
+            # --- 1. GESTION DU DÉBUT (VIDE JUSQU'AU PREMIER POINT) ---
+            first_p = sorted_points[0]
+            first_x = first_p.start_time * self.pixels_per_beat
+            
+            if first_x > 0:
+                # On dessine un segment plat à ZÉRO (bas du widget) jusqu'au premier point
+                # pour laisser la zone "vide" visuellement
+                vertices.extend([0, self.y, 0, 0, 0, self.y, 0, 0])
+                indices.extend([v_index, v_index + 1])
+                v_index += 2
+                vertices.extend([first_x, self.y, 0, 0, first_x, self.y, 0, 0])
+                indices.extend([v_index, v_index + 1])
+                v_index += 2
 
-            # Add the first point's value at its start time
-            start_y = self.y + sorted_points[0].value * self.height
-            vertices.extend([start_x, start_y, 0, 0])
-
-            # Iterate through segments
+            # --- 2. BOUCLE DE DESSIN DES POINTS ---
             for i in range(len(sorted_points)):
                 p1 = sorted_points[i]
+                x1 = p1.start_time * self.pixels_per_beat
+                y1 = self.y + (normalize(p1.value) * self.height)
 
-                # For the last point, or segments with "none" curve, just draw a line to it
-                if i == len(sorted_points) - 1 or p1.curve == "none":
-                    x1 = p1.start_time * self.pixels_per_beat
-                    y1 = self.y + p1.value * self.height
+                vertices.extend([x1, self.y, 0, 0, x1, y1, 0, 0])
+                indices.extend([v_index, v_index + 1])
+                v_index += 2
 
-                    # If the previous point was also "none", we need to create a step
-                    if i > 0 and sorted_points[i-1].curve == "none":
-                         prev_x = sorted_points[i-1].start_time * self.pixels_per_beat
-                         prev_y = self.y + sorted_points[i-1].value * self.height
-                         vertices.extend([x1, prev_y, 0, 0])
+                if i < len(sorted_points) - 1:
+                    p2 = sorted_points[i+1]
+                    x2 = p2.start_time * self.pixels_per_beat
+                    
+                    # On ne fait un "escalier" QUE si curve est explicitement "none"
+                    if p1.curve != "none":
+                        interp_func = self._get_interp_func(p1.curve)
+                        num_steps = max(2, min(100, int((x2 - x1) / 5)))
+                        for step in range(1, num_steps):
+                            t = step / num_steps
+                            curr_x = x1 + t * (x2 - x1)
+                            # Interpolation entre les valeurs 0-127
+                            real_val = p1.value + interp_func(t) * (p2.value - p1.value)
+                            curr_y = self.y + (normalize(real_val) * self.height)
+                            vertices.extend([curr_x, self.y, 0, 0, curr_x, curr_y, 0, 0])
+                            indices.extend([v_index, v_index + 1])
+                            v_index += 2
+                    else:
+                        # Maintien de la valeur (Escalier)
+                        vertices.extend([x2, self.y, 0, 0, x2, y1, 0, 0])
+                        indices.extend([v_index, v_index + 1])
+                        v_index += 2
 
-                    vertices.extend([x1, y1, 0, 0])
-                    continue
+            # --- 3. GESTION DE LA FIN (MAINTIEN JUSQU'AU BOUT) ---
+            last_p = sorted_points[-1]
+            last_x = last_p.start_time * self.pixels_per_beat
+            final_x = self.total_beats * self.pixels_per_beat
+            
+            if last_x < final_x:
+                y_last = self.y + (normalize(last_p.value) * self.height)
+                # On prolonge la dernière valeur jusqu'à la fin de la timeline
+                vertices.extend([final_x, self.y, 0, 0, final_x, y_last, 0, 0])
+                indices.extend([v_index, v_index + 1])
+                v_index += 2
 
-                p2 = sorted_points[i+1]
-                interp_func = self._get_interp_func(p1.curve)
+            Mesh(vertices=vertices, indices=indices, mode='triangle_strip')
 
-                start_beat = p1.start_time
-                end_beat = p2.start_time
-                start_val = p1.value
-                end_val = p2.value
-
-                beat_range = end_beat - start_beat
-                val_range = end_val - start_val
-
-                # If there's no time difference, just jump to the next point
-                if beat_range <= 0:
-                    continue
-
-                # Generate interpolated points for the curve
-                # Use a reasonable number of steps, e.g., 2 steps per pixel
-                num_steps = int((beat_range * self.pixels_per_beat) * 2)
-                if num_steps < 2: num_steps = 2
-                if num_steps > 200: num_steps = 200 # Avoid too many vertices
-
-                for step in range(1, num_steps + 1):
-                    t = step / num_steps
-                    eased_t = interp_func(t)
-
-                    current_beat = start_beat + t * beat_range
-                    current_val = start_val + eased_t * val_range
-
-                    x = current_beat * self.pixels_per_beat
-                    y = self.y + current_val * self.height
-                    vertices.extend([x, y, 0, 0])
-
-            # Add the bottom-right point to close the shape
-            last_x = sorted_points[-1].start_time * self.pixels_per_beat
-            vertices.extend([last_x, self.y, 0, 0])
-
-            # Create indices for the triangle fan
-            for i in range(len(vertices) // 4):
-                indices.append(i)
-
-            Mesh(vertices=vertices, indices=indices, mode='triangle_fan')
+    def on_points(self, instance, value):
+        if not value:
+            return
+        
+        param = value[0].parameter
+        # Vélocité et Program Change partagent l'échelle 0-127
+        if param in ["prog", "vel"]:
+            self.min_val, self.max_val = 0.0, 127.0
+        elif param == "pan":
+            self.min_val, self.max_val = -1.0, 1.0
+        else: # vol, etc.
+            self.min_val, self.max_val = 0.0, 1.0
+        
+        if self.canvas:
+            self.draw_curve()

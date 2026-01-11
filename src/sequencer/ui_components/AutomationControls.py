@@ -50,27 +50,32 @@ class AutomationControls(BoxLayout):
             self.add_widget(button)
             self.buttons.append(button)
             self.width += dp(36) + self.spacing
+            
+        # Sélection automatique du premier bouton (Volume) au démarrage
+        if self.buttons:
+            first_button = self.buttons[0]
+            # On utilise Clock pour être sûr que l'interface est prête
+            Clock.schedule_once(lambda dt: self._on_button_press(first_button))
 
     def _on_button_press(self, instance):
         selected_param = None
 
         if self.selected_button == instance:
-            # Deselect the current button
+            # Désélection (votre code actuel)
             self.selected_button.md_bg_color = [0.2, 0.2, 0.2, 1]
             self.selected_button.icon_color = [1, 1, 1, 0.8]
             self.selected_button = None
             selected_param = None
         else:
-            # Deselect the old button
+            # Désélection de l'ancien
             if self.selected_button:
                 self.selected_button.md_bg_color = [0.2, 0.2, 0.2, 1]
                 self.selected_button.icon_color = [1, 1, 1, 0.8]
 
-            # Select the new button
-            instance.md_bg_color = App.get_running_app().theme_cls.primaryColor
-            instance.icon_color = [1, 0.6, 0, 1]
+            # Sélection du nouveau (Orange vif)
             self.selected_button = instance
+            instance.icon_color = [1, 0.6, 0, 1] # Votre orange vif
             selected_param = instance.param_name
 
         if self.on_selection_change:
-            self.on_selection_change(selected_param)
+            self.on_selection_change(selected_param)            

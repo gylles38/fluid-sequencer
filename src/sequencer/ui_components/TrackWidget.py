@@ -93,6 +93,9 @@ class TrackWidget(BoxLayout):
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
+        # Initialisez une liste pour stocker les widgets de courbes pour les pistes d'automation
+        self.automation_curves = []
+        
         self.orientation = 'horizontal'
         self.size_hint_y = None
         if isinstance(track, MidiTrack):
@@ -161,7 +164,11 @@ class TrackWidget(BoxLayout):
             automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
 
             # On crée les contrôles d'automation à la place du bouton Record
-            self.automation_controls = AutomationControls(track_type=automation_type)
+            self.automation_controls = AutomationControls(
+                track_type=automation_type,
+                #on_selection_change=self.on_automation_selection_change,
+                on_selection_change=self.update_automation_visibility
+            )
             self.automation_controls.size_hint_y = None
             self.automation_controls.height = dp(36)
             self.automation_controls.pos_hint = {'center_y': 0.5}
@@ -442,6 +449,44 @@ class TrackWidget(BoxLayout):
                 pixels_per_beat=self.pixels_per_beat
             )
             self.timeline_container.add_widget(self.measure_grid)
+
+            if isinstance(track, AutomationTrack):
+                # --- ÉTAPE 1 : GROUPER LES POINTS PAR PARAMÈTRE ---
+                points_by_param = {}
+                for p in track.points:
+                    if p.parameter not in points_by_param:
+                        points_by_param[p.parameter] = []
+                    points_by_param[p.parameter].append(p)
+
+                # --- ÉTAPE 2 : CRÉER UN WIDGET POUR CHAQUE PARAMÈTRE TROUVÉ ---
+                for param, filtered_points in points_by_param.items():
+                    # Définition des bornes selon le paramètre
+                    min_v, max_v = 0.0, 1.0
+                    if param in ["prog", "vel"]: 
+                        min_v, max_v = 0.0, 127.0
+                    elif param == "pan": 
+                        min_v, max_v = -1.0, 1.0
+
+                    # On n'affiche que le volume par défaut
+                    is_vol = (param == "vol")
+
+                    curve_widget = AutomationCurveWidget(
+                        size_hint=(1, 1),
+                        total_beats=self.total_beats,
+                        pixels_per_beat=self.pixels_per_beat,
+                        min_val=min_v,
+                        max_val=max_v,
+                        points=filtered_points, # On ne donne QUE les points de ce paramètre
+                        opacity=1 if is_vol else 0,
+                        disabled=not is_vol
+                    )
+                    
+                    # On ajoute une propriété personnalisée pour l'identifier facilement
+                    curve_widget.param_type = param 
+                    
+                    self.automation_curves.append(curve_widget)
+                    self.timeline_container.add_widget(curve_widget)
+
             self.timeline_scroll.add_widget(self.timeline_container)
 
             # Add the icon and timeline directly to the main layout
@@ -491,6 +536,9 @@ class TrackWidget(BoxLayout):
             # Vous le faisiez déjà ici pour measure_grid, mais pas pour piano_roll !
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
+            if hasattr(self, 'automation_curve'):
+                self.automation_curve.total_beats = self.total_beats
+                self.automation_curve.pixels_per_beat = self.pixels_per_beat
 
     def update_playback_rect(self, *args):
         self.playback_rect.pos = self.playback_line.pos
@@ -501,12 +549,35 @@ class TrackWidget(BoxLayout):
     def on_solo_changed(self, instance, value):
         self.update_mute_solo_appearance()
 
+    def on_automation_selection_change(self, selected_param):
+        """
+        Callback from AutomationControls when the user selects a new parameter to view.
+        """
+        if not hasattr(self, 'automation_curve'):
+            return
+
+        if selected_param is None:
+            self.automation_curve.points = []
+        else:
+            filtered_points = [p for p in self.track.points if p.parameter == selected_param]
+            self.automation_curve.points = filtered_points
+
     def on_name_validated(self, instance, new_name):
         """Callback for when the user validates a new track name."""
         # We need to escape the name in case it contains spaces in the future
         # although the current filter doesn't allow it.
         command = f'rename {self.track_index} "{new_name}"'
         self.sequencer_layout.process_command_ui(command)
+
+    def update_automation_visibility(self, selected_param):
+        """Affiche le calque correspondant au bouton cliqué."""
+        for curve in self.automation_curves:
+            if curve.param_type == selected_param:
+                curve.opacity = 1
+                curve.disabled = False
+            else:
+                curve.opacity = 0
+                curve.disabled = True
 
     def set_playback_position(self, current_beat: float):
         """

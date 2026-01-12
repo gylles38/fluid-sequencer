@@ -1505,11 +1505,6 @@ class Sequencer(EventDispatcher):
                 project_data = json.load(f, object_hook=song_decoder)
             self.song = project_data.get("song", Song(name="New Song"))
 
-            # --- NEW SORTING LOGIC ---
-            # Ensure automation points are sorted by time upon loading
-            for track in self.song.tracks:
-                if isinstance(track, AutomationTrack):
-                    track.points.sort(key=lambda p: p.start_time)
 
             self.audio_player_command = project_data.get("audio_player_command", self.DEFAULT_AUDIO_PLAYER_COMMAND)
             if "mplayer" in self.audio_player_command:
@@ -2223,8 +2218,7 @@ class Sequencer(EventDispatcher):
         Generates a list of concrete MIDI/audio events from an automation track.
         """
         generated_events = []
-        points = sorted(auto_track.points, key=lambda p: p.start_time)
-        if not points:
+        if not auto_track.points:
             return []
 
         target_track_index = auto_track.target_track_index
@@ -2234,10 +2228,11 @@ class Sequencer(EventDispatcher):
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
         points_by_parameter: Dict[str, List[AutomationPoint]] = {}
-        for p in points:
+        for p in auto_track.points:
             points_by_parameter.setdefault(p.parameter, []).append(p)
 
         for parameter, param_points in points_by_parameter.items():
+            param_points.sort(key=lambda p: p.start_time)
             param_config = param_map.get(parameter.lower())
             if not param_config:
                 continue

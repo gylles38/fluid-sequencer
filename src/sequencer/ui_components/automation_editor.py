@@ -669,12 +669,18 @@ class AutomationEditor(ModalView):
             self._apply_state(next_state)
 
     def _record_state(self):
-        state = [p.to_dict() for p in self.track_copy.points]
+        state = [{
+            'start_time': p.start_time,
+            'value': p.value,
+            'curve': p.curve,
+            'parameter': p.parameter
+        } for p in self.track_copy.points]
         self.history.record_state(state)
         self._update_undo_redo_buttons_state()
 
     def _apply_state(self, state):
-        self.track_copy.points_from_list(state)
+        from sequencer.models import AutomationPoint
+        self.track_copy.points = [AutomationPoint(**data) for data in state]
         # Re-filter visible points based on the current parameter
         self.on_automation_selection_change(None, self.selected_parameter)
         self.is_dirty = True

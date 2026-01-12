@@ -724,6 +724,17 @@ class AutomationEditor(ModalView):
 
         dropdown = DropDown()
         curve_types = ['none', 'linear', 'ease-in', 'ease-out', 'ease-in-out', 'sine']
+
+        # Calculate width needed for the longest text
+        max_width = 0
+        for curve_type in curve_types:
+            lbl = Label(text=curve_type, font_size='15sp')
+            lbl.texture_update()
+            if lbl.texture_size[0] > max_width:
+                max_width = lbl.texture_size[0]
+
+        dropdown.width = max_width + dp(20) # Add some padding
+
         for curve_type in curve_types:
             btn = Button(text=curve_type, size_hint_y=None, height=dp(44))
             btn.bind(on_release=lambda btn, t=curve_type: self.set_curve_type(point, t, dropdown))

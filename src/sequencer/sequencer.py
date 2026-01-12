@@ -1566,7 +1566,7 @@ class Sequencer(EventDispatcher):
             if directory:
                 os.makedirs(directory, exist_ok=True)
 
-            command = ["aj-snapshot", "-d", filepath]
+            command = ["aj-snapshot", filepath]
             print(f"Executing: {' '.join(command)}")
             result = subprocess.run(
                 command,

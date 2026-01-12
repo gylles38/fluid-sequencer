@@ -25,6 +25,18 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 
 
+class AutomationGrid(Widget):
+    def __init__(self, track_widget, **kwargs):
+        super().__init__(**kwargs)
+        self.track_widget = track_widget
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and touch.is_double_tap:
+            self.track_widget.open_automation_editor()
+            return True
+        return super().on_touch_down(touch)
+
+
 class MidiInputSelectorPopup(Popup):
     def __init__(self, track_widget, **kwargs):
         super().__init__(**kwargs)
@@ -439,10 +451,9 @@ class TrackWidget(BoxLayout):
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
-            self.timeline_scroll.bind(on_touch_down=self._on_timeline_touch_down, on_touch_up=self._on_timeline_touch_up)
 
             # A ScrollView must have a single child.
-            self.timeline_container = Widget(size_hint=(None, 1))
+            self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1), # The grid itself can fill the container
                 beat_per_measure=4,
@@ -509,16 +520,6 @@ class TrackWidget(BoxLayout):
 
         self.track.bind(is_solo=self.on_solo_changed)
         
-    def _on_timeline_touch_down(self, instance, touch):
-        if instance.collide_point(*touch.pos):
-            Window.set_system_cursor('hand')
-            if touch.is_double_tap:
-                if isinstance(self.track, AutomationTrack):
-                    self.open_automation_editor()
-
-    def _on_timeline_touch_up(self, instance, touch):
-        Window.set_system_cursor('arrow')
-
     def update_timeline_size(self, *args):
         if hasattr(self, 'content'):
             # For MIDI tracks

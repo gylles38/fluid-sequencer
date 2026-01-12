@@ -970,7 +970,7 @@ class JackManager:
                     msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
                     port.send(msg)
             elif param_config.get('type') == 'velocity_multiplier':
-                target_track.velocity = value
+                target_track.velocity = float(value)
 
         elif isinstance(target_track, AudioTrack):
             ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)

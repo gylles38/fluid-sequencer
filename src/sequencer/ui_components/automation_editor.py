@@ -106,13 +106,21 @@ class AutomationValueAxis(Widget):
         v_range = self.max_val - self.min_val
         if v_range == 0: return
 
-        def add_label(value, text=None):
+        def add_label(value, y_align, text=None):
             if text is None: text = f"{value:.1f}"
             y_pos = self.y + ((value - self.min_val) / v_range) * self.height
+
+            if y_align == 'bottom':
+                y_pos = self.y
+            elif y_align == 'top':
+                y_pos = self.top - dp(16)
+            else: # Center
+                y_pos -= dp(8)
+
             label = Label(
                 text=text,
                 font_size='10sp',
-                pos=(self.x, y_pos - dp(8)),
+                pos=(self.x, y_pos),
                 size=(self.width - dp(4), dp(16)),
                 halign='right',
                 valign='middle',
@@ -121,10 +129,10 @@ class AutomationValueAxis(Widget):
             self.labels.append(label)
             self.add_widget(label)
 
-        add_label(self.max_val)
-        add_label(self.min_val)
+        add_label(self.max_val, y_align='top')
+        add_label(self.min_val, y_align='bottom')
         if self.min_val < 0 < self.max_val:
-            add_label(0.0)
+            add_label(0.0, y_align='center')
 
 
 class EditableAutomationGrid(Widget):
@@ -169,7 +177,7 @@ class EditableAutomationGrid(Widget):
 
         if touch.button == 'right':
             if clicked_point:
-                self.editor.show_curve_type_popup(clicked_point)
+                self.editor.show_curve_type_popup(clicked_point, touch)
             return True
 
         if edit_mode == 'insert':
@@ -710,7 +718,7 @@ class AutomationEditor(ModalView):
             self._record_state()
             self.is_dirty = True
 
-    def show_curve_type_popup(self, point):
+    def show_curve_type_popup(self, point, touch):
         if self.selected_parameter == 'prog': # Program change has no curve
             return
 
@@ -718,13 +726,17 @@ class AutomationEditor(ModalView):
         curve_types = ['none', 'linear', 'ease-in', 'ease-out', 'ease-in-out', 'sine']
         for curve_type in curve_types:
             btn = Button(text=curve_type, size_hint_y=None, height=dp(44))
-            btn.bind(on_release=lambda btn: self.set_curve_type(point, btn.text))
+            btn.bind(on_release=lambda btn, t=curve_type: self.set_curve_type(point, t, dropdown))
             dropdown.add_widget(btn)
 
-        dropdown.open(self.ids.grid)
+        proxy_widget = Widget(size_hint=(None, None), size=(1, 1), pos=touch.pos)
+        self.add_widget(proxy_widget)
+        dropdown.open(proxy_widget)
+        dropdown.bind(on_dismiss=lambda instance: self.remove_widget(proxy_widget))
 
-    def set_curve_type(self, point, curve_type):
+    def set_curve_type(self, point, curve_type, dropdown):
         point.curve = curve_type
+        dropdown.dismiss()
         self.ids.grid.draw_curve_and_points()
         self._record_state()
         self.is_dirty = True

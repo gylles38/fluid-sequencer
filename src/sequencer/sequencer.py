@@ -1504,6 +1504,8 @@ class Sequencer(EventDispatcher):
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
             self.song = project_data.get("song", Song(name="New Song"))
+
+
             self.audio_player_command = project_data.get("audio_player_command", self.DEFAULT_AUDIO_PLAYER_COMMAND)
             if "mplayer" in self.audio_player_command:
                 print("Warning: Old 'mplayer' command found in project. Updating to 'mpv' default.")
@@ -1558,8 +1560,13 @@ class Sequencer(EventDispatcher):
         if not filepath:
             return {"status": "error", "message": "Filepath cannot be empty."}
 
-        command = ["aj-snapshot", "-d", filepath]
         try:
+            # --- FIX: Ensure the target directory exists before saving ---
+            directory = os.path.dirname(filepath)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+
+            command = ["aj-snapshot", filepath]
             print(f"Executing: {' '.join(command)}")
             result = subprocess.run(
                 command,
@@ -2216,8 +2223,7 @@ class Sequencer(EventDispatcher):
         Generates a list of concrete MIDI/audio events from an automation track.
         """
         generated_events = []
-        points = sorted(auto_track.points, key=lambda p: p.start_time)
-        if not points:
+        if not auto_track.points:
             return []
 
         target_track_index = auto_track.target_track_index
@@ -2227,10 +2233,11 @@ class Sequencer(EventDispatcher):
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
         points_by_parameter: Dict[str, List[AutomationPoint]] = {}
-        for p in points:
+        for p in auto_track.points:
             points_by_parameter.setdefault(p.parameter, []).append(p)
 
         for parameter, param_points in points_by_parameter.items():
+            param_points.sort(key=lambda p: p.start_time)
             param_config = param_map.get(parameter.lower())
             if not param_config:
                 continue

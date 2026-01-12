@@ -536,9 +536,11 @@ class TrackWidget(BoxLayout):
             # Vous le faisiez déjà ici pour measure_grid, mais pas pour piano_roll !
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
-            if hasattr(self, 'automation_curve'):
-                self.automation_curve.total_beats = self.total_beats
-                self.automation_curve.pixels_per_beat = self.pixels_per_beat
+            # --- FIX: Propagate zoom changes to ALL automation curve widgets ---
+            if hasattr(self, 'automation_curves'):
+                for curve in self.automation_curves:
+                    curve.total_beats = self.total_beats
+                    curve.pixels_per_beat = self.pixels_per_beat
 
     def update_playback_rect(self, *args):
         self.playback_rect.pos = self.playback_line.pos
@@ -575,6 +577,10 @@ class TrackWidget(BoxLayout):
             if curve.param_type == selected_param:
                 curve.opacity = 1
                 curve.disabled = False
+                # Re-filter the points from the original track data to ensure the list is fresh
+                filtered_points = [p for p in self.track.points if p.parameter == selected_param]
+                curve.points = filtered_points
+                # The on_points binding on the curve widget will automatically call draw_curve
             else:
                 curve.opacity = 0
                 curve.disabled = True

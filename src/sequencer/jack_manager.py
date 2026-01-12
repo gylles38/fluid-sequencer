@@ -839,7 +839,9 @@ class JackManager:
                 if start_beat_of_block <= event.start_time < end_beat_of_block:
                     if should_be_audible:
                         for note in event.notes:
-                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
+                            final_velocity = int(note.velocity * track.velocity)
+                            final_velocity = max(0, min(127, final_velocity))
+                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=final_velocity)
                             port.send(note_on_msg)
                             note_end_beat = event.start_time + note.duration
                             self._active_notes[(i, note.pitch)] = note_end_beat
@@ -952,11 +954,13 @@ class JackManager:
                     if param_name == 'vol':
                         midi_value = int(value * 127)
                     elif param_name == 'pan':
-                        # CORRECT: Convert pan from -1.0..1.0 to 0..127 for MIDI
                         midi_value = int((value + 1.0) / 2.0 * 127)
                     else:
                         midi_value = int(value)
+
+                    # --- FIX: Clamp the final value to the valid MIDI range ---
                     midi_value = max(0, min(127, midi_value))
+
                     msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
                     port.send(msg)
             elif param_config.get('type') == 'program_change':
@@ -966,7 +970,7 @@ class JackManager:
                     msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
                     port.send(msg)
             elif param_config.get('type') == 'velocity_multiplier':
-                target_track.velocity = value
+                target_track.velocity = float(value)
 
         elif isinstance(target_track, AudioTrack):
             ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)

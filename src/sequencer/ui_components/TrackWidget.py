@@ -103,6 +103,7 @@ class TrackWidget(BoxLayout):
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs):
         super(TrackWidget, self).__init__(**kwargs)
+        self._editor_opening = False
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
@@ -764,9 +765,16 @@ class TrackWidget(BoxLayout):
             editor.open()
 
     def open_automation_editor(self, instance=None):
+        if self._editor_opening:
+            return
         if isinstance(self.track, AutomationTrack):
+            self._editor_opening = True
             editor = AutomationEditor(track=self.track, sequencer_layout=self.sequencer_layout)
+            editor.bind(on_dismiss=self._on_editor_dismiss)
             editor.open()
+
+    def _on_editor_dismiss(self, instance):
+        self._editor_opening = False
 
     def select_midi_port_popup(self, instance):
         """Opens a popup to select a MIDI output port for the track."""

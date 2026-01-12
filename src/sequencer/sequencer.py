@@ -1560,8 +1560,13 @@ class Sequencer(EventDispatcher):
         if not filepath:
             return {"status": "error", "message": "Filepath cannot be empty."}
 
-        command = ["aj-snapshot", "-d", filepath]
         try:
+            # --- FIX: Ensure the target directory exists before saving ---
+            directory = os.path.dirname(filepath)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+
+            command = ["aj-snapshot", "-d", filepath]
             print(f"Executing: {' '.join(command)}")
             result = subprocess.run(
                 command,

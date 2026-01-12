@@ -1504,6 +1504,13 @@ class Sequencer(EventDispatcher):
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
             self.song = project_data.get("song", Song(name="New Song"))
+
+            # --- NEW SORTING LOGIC ---
+            # Ensure automation points are sorted by time upon loading
+            for track in self.song.tracks:
+                if isinstance(track, AutomationTrack):
+                    track.points.sort(key=lambda p: p.start_time)
+
             self.audio_player_command = project_data.get("audio_player_command", self.DEFAULT_AUDIO_PLAYER_COMMAND)
             if "mplayer" in self.audio_player_command:
                 print("Warning: Old 'mplayer' command found in project. Updating to 'mpv' default.")

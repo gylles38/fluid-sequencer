@@ -487,9 +487,6 @@ class TrackWidget(BoxLayout):
                     self.automation_curves.append(curve_widget)
                     self.timeline_container.add_widget(curve_widget)
 
-                    if is_vol:
-                        Clock.schedule_once(lambda dt: curve_widget.draw_curve(), 0.1)
-
             self.timeline_scroll.add_widget(self.timeline_container)
 
             # Add the icon and timeline directly to the main layout

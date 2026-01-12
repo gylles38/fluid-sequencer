@@ -4,6 +4,7 @@ from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
 from .HoverBehavior import HoverBehavior, HoverableMDButton
 from kivymd.uix.slider import MDSlider
+from .automation_editor import AutomationEditor
 
 class HoverableSlider(MDSlider, HoverBehavior):
     pass
@@ -511,6 +512,9 @@ class TrackWidget(BoxLayout):
     def _on_timeline_touch_down(self, instance, touch):
         if instance.collide_point(*touch.pos):
             Window.set_system_cursor('hand')
+            if touch.is_double_tap:
+                if isinstance(self.track, AutomationTrack):
+                    self.open_automation_editor()
 
     def _on_timeline_touch_up(self, instance, touch):
         Window.set_system_cursor('arrow')
@@ -756,6 +760,11 @@ class TrackWidget(BoxLayout):
                 sequencer.current_beat = captured_beat
 
             editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
+            editor.open()
+
+    def open_automation_editor(self, instance=None):
+        if isinstance(self.track, AutomationTrack):
+            editor = AutomationEditor(track=self.track, sequencer_layout=self.sequencer_layout)
             editor.open()
 
     def select_midi_port_popup(self, instance):

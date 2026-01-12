@@ -839,7 +839,9 @@ class JackManager:
                 if start_beat_of_block <= event.start_time < end_beat_of_block:
                     if should_be_audible:
                         for note in event.notes:
-                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=int(note.velocity * track.velocity))
+                            final_velocity = int(note.velocity * track.velocity)
+                            final_velocity = max(0, min(127, final_velocity))
+                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=final_velocity)
                             port.send(note_on_msg)
                             note_end_beat = event.start_time + note.duration
                             self._active_notes[(i, note.pitch)] = note_end_beat

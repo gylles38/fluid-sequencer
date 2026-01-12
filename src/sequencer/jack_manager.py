@@ -952,11 +952,13 @@ class JackManager:
                     if param_name == 'vol':
                         midi_value = int(value * 127)
                     elif param_name == 'pan':
-                        # CORRECT: Convert pan from -1.0..1.0 to 0..127 for MIDI
                         midi_value = int((value + 1.0) / 2.0 * 127)
                     else:
                         midi_value = int(value)
+
+                    # --- FIX: Clamp the final value to the valid MIDI range ---
                     midi_value = max(0, min(127, midi_value))
+
                     msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
                     port.send(msg)
             elif param_config.get('type') == 'program_change':

@@ -1,81 +1,81 @@
 from . import *
 from kivy.app import App
+from kivy.properties import StringProperty
+from kivy.event import EventDispatcher
 
-class AutomationControls(BoxLayout):
-    def __init__(self, track_type='midi', on_selection_change=None, **kwargs):
+class AutomationControls(BoxLayout, EventDispatcher):
+    selected_param = StringProperty(None, allownone=True)
+    track_type = StringProperty('midi')
+
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.register_event_type('on_selection_change')
         self.orientation = 'horizontal'
         self.spacing = dp(4)
         self.size_hint_x = None
         self.width = 0
-        self.on_selection_change = on_selection_change
+        self.buttons = {}
+        self.bind(track_type=self.build_buttons)
+        self.build_buttons()
 
-        self.buttons = []
-        self.selected_button = None
+    def build_buttons(self, *args):
+        self.clear_widgets()
+        self.buttons.clear()
+        self.width = 0
 
         param_map = {
-            'Volume': 'vol',
-            'Pan': 'pan',
-            'Velocity': 'vel',
-            'Program Change': 'prog',
-            'Control Change': 'cc' # This is a placeholder, might need more specific handling
+            'Volume': 'vol', 'Pan': 'pan', 'Velocity': 'vel', 'Program Change': 'prog'
         }
 
-        if track_type == 'midi':
+        if self.track_type == 'midi':
             automation_types = [
-                ("volume-high", "Volume"),
-                ("swap-horizontal", "Pan"),
-                ("speedometer", "Velocity"),
-                ("music-box-outline", "Program Change"),
-                # ("knob", "Control Change") # CC is more complex, handle later
+                ("volume-high", "Volume", "vol"),
+                ("swap-horizontal", "Pan", "pan"),
+                ("speedometer", "Velocity", "vel"),
+                ("music-box-outline", "Program Change", "prog"),
             ]
         else: # audio
             automation_types = [
-                ("volume-high", "Volume"),
-                ("swap-horizontal", "Pan")
+                ("volume-high", "Volume", "vol"),
+                ("swap-horizontal", "Pan", "pan")
             ]
 
-        for icon, tooltip in automation_types:
+        for icon, tooltip, param_name in automation_types:
             button = TooltipMDIconButton(
                 icon=icon,
                 tooltip_text=tooltip,
                 theme_icon_color="Custom",
-                icon_color=[1, 1, 1, 0.8],
-                md_bg_color=[0.2, 0.2, 0.2, 1],
                 size_hint=(None, None),
                 size=(dp(36), dp(36))
             )
-            button.param_name = param_map.get(tooltip)
+            button.param_name = param_name
             button.bind(on_press=self._on_button_press)
             self.add_widget(button)
-            self.buttons.append(button)
+            self.buttons[param_name] = button
             self.width += dp(36) + self.spacing
-            
-        # Sélection automatique du premier bouton (Volume) au démarrage
-        if self.buttons:
-            first_button = self.buttons[0]
-            # On utilise Clock pour être sûr que l'interface est prête
-            Clock.schedule_once(lambda dt: self._on_button_press(first_button))
+
+        self.select_param('vol')
+
+    def select_param(self, param_name):
+        if param_name == self.selected_param:
+             # If the same button is clicked, deselect it
+            self.selected_param = None
+        else:
+            self.selected_param = param_name
+        self._update_button_states()
+        self.dispatch('on_selection_change', self.selected_param)
 
     def _on_button_press(self, instance):
-        selected_param = None
+        self.select_param(instance.param_name)
 
-        if self.selected_button == instance:
-            # Désélection (votre code actuel)
-            self.selected_button.md_bg_color = [0.2, 0.2, 0.2, 1]
-            self.selected_button.icon_color = [1, 1, 1, 0.8]
-            self.selected_button = None
-            selected_param = None
-        else:
-            # Désélection de l'ancien
-            if self.selected_button:
-                self.selected_button.md_bg_color = [0.2, 0.2, 0.2, 1]
-                self.selected_button.icon_color = [1, 1, 1, 0.8]
+    def _update_button_states(self, *args):
+        for param, button in self.buttons.items():
+            if param == self.selected_param:
+                button.md_bg_color = App.get_running_app().theme_cls.primary_color
+                button.icon_color = [1, 1, 1, 1]
+            else:
+                button.md_bg_color = [0.2, 0.2, 0.2, 1]
+                button.icon_color = [1, 1, 1, 0.8]
 
-            # Sélection du nouveau (Orange vif)
-            self.selected_button = instance
-            instance.icon_color = [1, 0.6, 0, 1] # Votre orange vif
-            selected_param = instance.param_name
-
-        if self.on_selection_change:
-            self.on_selection_change(selected_param)            
+    def on_selection_change(self, *args):
+        pass # Kivy event dispatcher requires this method to exist

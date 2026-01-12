@@ -591,7 +591,7 @@ class AutomationEditor(ModalView):
         automation_controls.bind(on_selection_change=self.on_automation_selection_change)
 
         # Manually trigger the first selection to initialize the view
-        automation_controls.ids.vol_button.trigger_action(0)
+        self.on_automation_selection_change(automation_controls, 'vol')
 
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button

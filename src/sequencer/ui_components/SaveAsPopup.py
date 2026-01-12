@@ -48,8 +48,8 @@ class SaveAsPopup(Popup):
         self.content = layout
 
     def on_save(self, instance):
-        # The path from the file chooser is the selected directory
-        directory = self.filechooser.path
+        # Prioritize the selected directory, fall back to the current path
+        directory = self.filechooser.selection[0] if self.filechooser.selection else self.filechooser.path
         filename = self.filename_input.text.strip()
 
         if filename:

@@ -71,7 +71,7 @@ class AutomationControls(BoxLayout, EventDispatcher):
     def _update_button_states(self, *args):
         for param, button in self.buttons.items():
             if param == self.selected_param:
-                button.md_bg_color = App.get_running_app().theme_cls.primary_color
+                button.md_bg_color = App.get_running_app().theme_cls.primaryColor
                 button.icon_color = [1, 1, 1, 1]
             else:
                 button.md_bg_color = [0.2, 0.2, 0.2, 1]

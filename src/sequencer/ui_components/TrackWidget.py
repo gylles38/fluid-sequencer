@@ -179,10 +179,10 @@ class TrackWidget(BoxLayout):
 
             # On crée les contrôles d'automation à la place du bouton Record
             self.automation_controls = AutomationControls(
-                track_type=automation_type,
-                #on_selection_change=self.on_automation_selection_change,
-                on_selection_change=self.update_automation_visibility
+                track_type=automation_type
             )
+            # Liez l'événement personnalisé à la méthode de mise à jour
+            self.automation_controls.bind(on_selection_change=self.update_automation_visibility)
             self.automation_controls.size_hint_y = None
             self.automation_controls.height = dp(36)
             self.automation_controls.pos_hint = {'center_y': 0.5}

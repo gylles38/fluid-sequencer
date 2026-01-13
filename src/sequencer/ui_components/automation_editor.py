@@ -591,7 +591,13 @@ class AutomationEditor(ModalView):
         automation_controls.bind(on_selection_change=self.on_automation_selection_change)
 
         # Manually trigger the first selection to initialize the view
-        self.on_automation_selection_change(automation_controls, 'vol')
+        def initial_setup(dt):
+            automation_controls.select_param('vol')
+            # The select_param call triggers the on_automation_selection_change,
+            # which updates the grid's points. The property binding should handle the redraw,
+            # but we call it explicitly here to ensure the initial view is correct.
+            self.ids.grid.draw()
+        Clock.schedule_once(initial_setup)
 
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button

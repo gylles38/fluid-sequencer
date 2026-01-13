@@ -58,10 +58,9 @@ class AutomationControls(BoxLayout, EventDispatcher):
 
     def select_param(self, param_name):
         if param_name == self.selected_param:
-             # If the same button is clicked, deselect it
-            self.selected_param = None
-        else:
-            self.selected_param = param_name
+            return # Do nothing if the same button is clicked
+
+        self.selected_param = param_name
         self._update_button_states()
         self.dispatch('on_selection_change', self.selected_param)
 

@@ -145,6 +145,7 @@ class EditableAutomationGrid(Widget):
     beats_per_measure = NumericProperty(4)
     _dragged_point = ObjectProperty(None, allownone=True)
     _drag_offset = (0, 0)
+    selected_point = ObjectProperty(None, allownone=True)    
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -157,29 +158,45 @@ class EditableAutomationGrid(Widget):
             return super().on_touch_down(touch)
 
         local_pos = self.to_local(*touch.pos)
+        # On calcule le beat cliqué en tenant compte de l'origine du widget
         clicked_beat = (local_pos[0] - self.x) / self.pixels_per_beat
 
         v_range = self.max_val - self.min_val
         if v_range == 0: v_range = 1
+        
+        # Valeur cliquée relative à la hauteur du widget
         clicked_value = self.min_val + ((local_pos[1] - self.y) / self.height) * v_range
 
-
+        # On calcule le beat cliqué en tenant compte de l'origine du widget
+        clicked_beat = (local_pos[0] - self.x) / self.pixels_per_beat
         edit_mode = self.editor.edit_mode
-
-        # Find clicked point
+        
+        # --- Recherche du point cliqué (Précision accrue) ---
         clicked_point = None
+        # On définit une zone de clic confortable (environ 20-25 pixels)
+        click_threshold = dp(12) 
+
         for point in self.points:
+            # On calcule la position ABSOLUE du point sur l'écran
             point_x = self.x + point.start_time * self.pixels_per_beat
             point_y = self.y + ((point.value - self.min_val) / v_range) * self.height
-            if abs(local_pos[0] - point_x) < dp(8) and abs(local_pos[1] - point_y) < dp(8):
+            
+            # On compare avec touch.pos (coordonnées écran directes)
+            if abs(touch.x - point_x) < click_threshold and abs(touch.y - point_y) < click_threshold:
                 clicked_point = point
                 break
 
+        self.selected_point = clicked_point
+        # Force le rafraîchissement pour l'orange
+        self.draw_curve_and_points()
+        # Mettre à jour la barre de statut via l'éditeur
+        self.editor.update_status_bar(clicked_point)
+        
         if touch.button == 'right':
             if clicked_point:
                 self.editor.show_curve_type_popup(clicked_point, touch)
             return True
-
+        
         if edit_mode == 'insert':
             quantized_beat = round(clicked_beat * 4) / 4 # Snap to 16th
             self.editor.add_point(quantized_beat, clicked_value)
@@ -192,14 +209,15 @@ class EditableAutomationGrid(Widget):
 
         elif edit_mode == 'move':
             if clicked_point:
+                # On synchronise les deux variables de sélection
                 self.editor.selected_point = clicked_point
+                self.selected_point = clicked_point 
+                
                 self._dragged_point = clicked_point
+                # Offset par rapport à la position réelle du point
                 self._drag_offset = (local_pos[0] - (self.x + clicked_point.start_time * self.pixels_per_beat)), \
                                     (local_pos[1] - (self.y + ((clicked_point.value - self.min_val) / v_range) * self.height))
                 touch.grab(self)
-            else:
-                self.editor.selected_point = None
-            return True
 
         return super().on_touch_down(touch)
 
@@ -226,6 +244,10 @@ class EditableAutomationGrid(Widget):
 
             self.editor.is_dirty = True
             self.draw_curve_and_points()
+            
+            # Mise à jour de la barre de statut pendant le drag
+            self.editor.update_status_bar(self._dragged_point)
+                    
             return True
 
         return super().on_touch_move(touch)
@@ -333,25 +355,35 @@ class EditableAutomationGrid(Widget):
 
             Mesh(vertices=vertices, indices=indices, mode='triangle_strip')
 
-
             # --- Draw Lines & Points ---
-            Color(0.8, 0.8, 1, 0.9)
             point_radius = dp(4)
-            for i in range(len(sorted_points)):
-                p1 = sorted_points[i]
+            selected_radius = dp(7) # Plus grand pour faciliter la saisie visuelle
+
+            # 1. Dessiner d'abord toutes les lignes de liaison
+            Color(0.8, 0.8, 1, 0.9)
+            for i in range(len(sorted_points) - 1):
+                p1, p2 = sorted_points[i], sorted_points[i+1]
                 x1 = self.x + p1.start_time * self.pixels_per_beat
                 y1 = self.y + normalize(p1.value) * self.height
+                x2 = self.x + p2.start_time * self.pixels_per_beat
+                y2 = self.y + normalize(p2.value) * self.height
+                Line(points=[x1, y1, x2, y2], width=1.2)
 
-                # Draw point
-                Rectangle(pos=(x1 - point_radius, y1 - point_radius), size=(point_radius * 2, point_radius * 2))
+            # 2. Dessiner les points normaux (on saute le sélectionné)
+            for p in sorted_points:
+                if p == self.selected_point: continue
+                x = self.x + p.start_time * self.pixels_per_beat
+                y = self.y + normalize(p.value) * self.height
+                Color(0.8, 0.8, 1, 0.9)
+                Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
 
-                # Draw line to next point
-                if i < len(sorted_points) - 1:
-                    p2 = sorted_points[i+1]
-                    x2 = self.x + p2.start_time * self.pixels_per_beat
-                    y2 = self.y + normalize(p2.value) * self.height
-                    Line(points=[x1, y1, x2, y2], width=1.2)
-
+            # 3. Dessiner le point sélectionné en DERNIER (Orange et par-dessus)
+            if self.selected_point:
+                p = self.selected_point
+                x = self.x + p.start_time * self.pixels_per_beat
+                y = self.y + normalize(p.value) * self.height
+                Color(1, 0.6, 0, 1) # Orange vif
+                Rectangle(pos=(x - selected_radius, y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
 
 Builder.load_string("""
 <AutomationEditor>:
@@ -496,22 +528,38 @@ Builder.load_string("""
 
             ScrollView:
                 id: timeline_scroll
+                size_hint: (1, 1)
+                do_scroll_x: True
                 do_scroll_y: False
-                bar_width: dp(20)
-                scroll_type: ['bars']
+                bar_width: dp(15)
+                scroll_type: ['bars', 'content']
+                bar_pos_x: 'bottom'
+                bar_margin: dp(2)
 
-                EditableAutomationGrid:
-                    id: grid
-                    editor: root
-                    size_hint: None, 1
-                    width: root.total_beats * root.pixels_per_beat
-                    points: root.visible_points
-                    total_beats: root.total_beats
-                    pixels_per_beat: root.pixels_per_beat
-                    min_val: root.min_val
-                    max_val: root.max_val
-                    beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
+                # Conteneur pour forcer un espace en bas
+                BoxLayout:
+                    orientation: 'vertical'
+                    size_hint_x: None
+                    width: grid.width # Important pour que le ScrollView sache la largeur
+                    padding: [0, 0, 0, dp(15)] # Padding bas égal à la bar_width
 
+                    EditableAutomationGrid:
+                        id: grid
+                        editor: root
+                        size_hint: None, 1 # Il prend tout l'espace restant AU-DESSUS du padding
+                        width: root.total_beats * root.pixels_per_beat
+                        points: root.visible_points
+                        total_beats: root.total_beats
+                        pixels_per_beat: root.pixels_per_beat
+                        min_val: root.min_val
+                        max_val: root.max_val
+                        beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
+
+                    # LE PIXEL DE SÉCURITÉ :
+                    # Ce widget vide garantit que rien ne sera dessiné sous la barre
+                    Widget:
+                        size_hint_y: None
+                        height: dp(18)
 
         # Bottom Toolbar
         MDBoxLayout:
@@ -521,9 +569,31 @@ Builder.load_string("""
             spacing: dp(8)
             md_bg_color: 0.2, 0.2, 0.2, 1
 
-            Label:
-                id: status_label
-                text: "Point: Time=1:1, Value=0.0"
+            MDBoxLayout:
+                id: edit_zone
+                adaptive_width: True
+                spacing: dp(10)
+                opacity: 0 # Caché par défaut si rien n'est sélectionné
+
+                MDLabel:
+                    text: "Beat:"
+                    adaptive_width: True
+                TextInput:
+                    id: input_beat
+                    size_hint: None, None
+                    size: dp(60), dp(30)
+                    multiline: False
+                    on_text_validate: root.apply_manual_edit()
+
+                MDLabel:
+                    text: "Value:"
+                    adaptive_width: True
+                TextInput:
+                    id: input_value
+                    size_hint: None, None
+                    size: dp(80), dp(30)
+                    multiline: False
+                    on_text_validate: root.apply_manual_edit()
 
             Widget:
                 size_hint_x: 1
@@ -589,10 +659,13 @@ class AutomationEditor(ModalView):
         automation_controls = self.ids.automation_controls
         automation_controls.track_type = track_type
         automation_controls.bind(on_selection_change=self.on_automation_selection_change)
+        
+        # ASTUCE : On réinitialise proprement pour forcer le rafraîchissement visuel
+        automation_controls.selected_param = None        
 
-        # Defer the selection to the next frame to ensure the UI is ready
-        Clock.schedule_once(lambda dt: automation_controls.select_param('vol'))
-
+        # On utilise Clock pour être sûr que le canevas et les boutons sont prêts
+        Clock.schedule_once(lambda dt: self._force_initial_selection(automation_controls), 0)
+        
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button
         }
@@ -608,6 +681,49 @@ class AutomationEditor(ModalView):
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
 
+    def _force_initial_selection(self, controls):
+        # On sélectionne 'vol'
+        controls.select_param('vol')
+        # On force l'appel de mise à jour de la courbe
+        self.on_automation_selection_change(controls, 'vol')
+
+    def update_status_bar(self, point):
+        """Met à jour les champs de saisie en bas."""
+        if point:
+            self.ids.edit_zone.opacity = 1
+            # On remplit les champs avec les valeurs actuelles
+            self.ids.input_beat.text = f"{point.start_time:.2f}"
+            self.ids.input_value.text = f"{point.value:.3f}"
+        else:
+            self.ids.edit_zone.opacity = 0
+
+    def apply_manual_edit(self):
+        """Applique les modifications saisies manuellement."""
+        if not self.ids.grid.selected_point:
+            return
+
+        point = self.ids.grid.selected_point
+        try:
+            # Récupération et conversion des textes
+            new_beat = float(self.ids.input_beat.text)
+            new_val = float(self.ids.input_value.text)
+
+            # Application des limites (clamping)
+            point.start_time = max(0, min(self.total_beats, new_beat))
+            point.value = max(self.min_val, min(self.max_val, new_val))
+
+            # Mise à jour visuelle et historique
+            self.is_dirty = True
+            self.ids.grid.draw_curve_and_points()
+            self._record_state()
+            
+            # On retire le focus pour valider visuellement
+            self.ids.input_beat.focus = False
+            self.ids.input_value.focus = False
+            
+        except ValueError:
+            # En cas d'erreur de saisie (ex: texte au lieu de chiffre), on réinitialise
+            self.update_status_bar(point)
 
     def on_automation_selection_change(self, instance, param):
         self.selected_parameter = param
@@ -618,6 +734,10 @@ class AutomationEditor(ModalView):
             self.min_val, self.max_val = -1.0, 1.0
         else: # vol, etc.
             self.min_val, self.max_val = 0.0, 1.0
+
+        # --- FIX : Réinitialiser la sélection visuelle et textuelle ---
+        self.ids.grid.selected_point = None
+        self.update_status_bar(None)
 
         self.visible_points = [p for p in self.track_copy.points if p.parameter == param]
         self.ids.grid.points = self.visible_points
@@ -655,9 +775,12 @@ class AutomationEditor(ModalView):
                     delta = 1.0 if text == '+' else -1.0
 
                 new_val = self.selected_point.value + delta
+
                 self.selected_point.value = max(self.min_val, min(self.max_val, new_val))
                 self.is_dirty = True
                 self.ids.grid.draw_curve_and_points()
+                # AJOUT : Mise à jour des champs de texte
+                self.update_status_bar(self.selected_point)
                 self._record_state()
 
         return False
@@ -734,26 +857,54 @@ class AutomationEditor(ModalView):
             self.is_dirty = True
 
     def show_curve_type_popup(self, point, touch):
-        if self.selected_parameter == 'prog': # Program change has no curve
+        if self.selected_parameter == 'prog': 
             return
 
+        # 1. On récupère la position souris AVANT toute chose
+        from kivy.core.window import Window
+        mouse_x, mouse_y = Window.mouse_pos
+
+        # 2. Création d'une NOUVELLE instance à chaque clic
         dropdown = DropDown()
+        dropdown.auto_width = False
+        dropdown.width = dp(160)
+        
         curve_types = ['none', 'linear', 'ease-in', 'ease-out', 'ease-in-out', 'sine']
-        dropdown.width = dp(150)
 
         for curve_type in curve_types:
-            btn = Button(text=curve_type, size_hint_y=None, height=dp(44))
+            btn = Button(
+                text=curve_type, 
+                size_hint=(None, None),
+                height=dp(44),
+                width=dp(160),
+                background_color=[0.15, 0.15, 0.15, 1],
+                halign='center'
+            )
+            btn.text_size = (dp(160), None)
+            
+            # Utilisation d'un callback qui ferme bien l'instance locale 'dropdown'
             btn.bind(on_release=lambda btn, t=curve_type: self.set_curve_type(point, t, dropdown))
             dropdown.add_widget(btn)
 
-        proxy_widget = Widget(size_hint=(None, None), size=(1, 1), pos=touch.pos)
-        self.add_widget(proxy_widget)
+        # 3. Le proxy_widget doit être géré proprement
+        proxy_widget = Widget(size_hint=(None, None), size=(1, 1), pos=(mouse_x, mouse_y))
+        Window.add_widget(proxy_widget)
+        
+        # 4. Ouverture
         dropdown.open(proxy_widget)
-        dropdown.bind(on_dismiss=lambda instance: self.remove_widget(proxy_widget))
+        
+        # NETTOYAGE : On enlève le proxy ET on réinitialise la sélection visuelle
+        def on_menu_close(instance):
+            Window.remove_widget(proxy_widget)
+            self.ids.grid.selected_point = None # Désélectionne le point orange
+            self.ids.grid.draw_curve_and_points() # Force le retour au blanc
+            
+        dropdown.bind(on_dismiss=on_menu_close)
 
     def set_curve_type(self, point, curve_type, dropdown):
         point.curve = curve_type
         dropdown.dismiss()
+        self.ids.grid.selected_point = None # Le point redevient blanc après l'action
         self.ids.grid.draw_curve_and_points()
         self._record_state()
         self.is_dirty = True

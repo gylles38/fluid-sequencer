@@ -1,5 +1,6 @@
 from . import *
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.properties import StringProperty
 from kivy.event import EventDispatcher
 
@@ -45,6 +46,8 @@ class AutomationControls(BoxLayout, EventDispatcher):
                 icon=icon,
                 tooltip_text=tooltip,
                 theme_icon_color="Custom",
+                icon_color=[1, 1, 1, 0.8],
+                md_bg_color=[0.2, 0.2, 0.2, 1],
                 size_hint=(None, None),
                 size=(dp(36), dp(36))
             )
@@ -53,6 +56,13 @@ class AutomationControls(BoxLayout, EventDispatcher):
             self.add_widget(button)
             self.buttons[param_name] = button
             self.width += dp(36) + self.spacing
+            
+        # Sélection automatique du premier bouton (Volume) au démarrage
+        if automation_types:
+            first_param = automation_types[0][2] # Récupère 'vol'
+            # On utilise Clock.schedule_once pour s'assurer que l'App est bien prête
+            # et que les couleurs peuvent être appliquées
+            Clock.schedule_once(lambda dt: self.select_param(first_param), 0)     
 
     def select_param(self, param_name):
         if param_name == self.selected_param:
@@ -69,10 +79,10 @@ class AutomationControls(BoxLayout, EventDispatcher):
         for param, button in self.buttons.items():
             if param == self.selected_param:
                 button.md_bg_color = App.get_running_app().theme_cls.primaryColor
-                button.icon_color = [1, 1, 1, 1]
+                button.icon_color = [1, 0.6, 0, 1] # orange vif
             else:
-                button.md_bg_color = [0.2, 0.2, 0.2, 1]
                 button.icon_color = [1, 1, 1, 0.8]
+                button.md_bg_color = [0.2, 0.2, 0.2, 1]
 
     def on_selection_change(self, *args):
         pass # Kivy event dispatcher requires this method to exist

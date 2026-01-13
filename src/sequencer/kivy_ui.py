@@ -2,6 +2,10 @@
 import kivy
 kivy.require('2.3.1')
 
+from kivy.config import Config
+# Désactive l'émulation du clic droit par un point rouge (multitouch)
+Config.set('input', 'mouse', 'mouse,disable_multitouch')
+
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout

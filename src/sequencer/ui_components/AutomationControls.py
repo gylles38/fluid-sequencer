@@ -74,12 +74,5 @@ class AutomationControls(BoxLayout, EventDispatcher):
                 button.md_bg_color = [0.2, 0.2, 0.2, 1]
                 button.icon_color = [1, 1, 1, 0.8]
 
-    def on_kv_post(self, base_widget):
-        """
-        Called after the kv string is loaded. We schedule the default selection here
-        to ensure all parent bindings are established before the event is dispatched.
-        """
-        Clock.schedule_once(lambda dt: self.select_param('vol'), 0)
-
     def on_selection_change(self, *args):
         pass # Kivy event dispatcher requires this method to exist

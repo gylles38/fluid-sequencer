@@ -590,8 +590,8 @@ class AutomationEditor(ModalView):
         automation_controls.track_type = track_type
         automation_controls.bind(on_selection_change=self.on_automation_selection_change)
 
-        # Manually trigger the first selection to initialize the view
-        automation_controls.select_param('vol')
+        # Defer the selection to the next frame to ensure the UI is ready
+        Clock.schedule_once(lambda dt: automation_controls.select_param('vol'))
 
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button

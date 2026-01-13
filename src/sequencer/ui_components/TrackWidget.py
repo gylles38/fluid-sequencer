@@ -577,7 +577,7 @@ class TrackWidget(BoxLayout):
         command = f'rename {self.track_index} "{new_name}"'
         self.sequencer_layout.process_command_ui(command)
 
-    def update_automation_visibility(self, selected_param):
+    def update_automation_visibility(self, instance, selected_param):
         """Affiche le calque correspondant au bouton cliqué."""
         for curve in self.automation_curves:
             if curve.param_type == selected_param:

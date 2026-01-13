@@ -591,13 +591,7 @@ class AutomationEditor(ModalView):
         automation_controls.bind(on_selection_change=self.on_automation_selection_change)
 
         # Manually trigger the first selection to initialize the view
-        def initial_setup(dt):
-            automation_controls.select_param('vol')
-            # The select_param call triggers the on_automation_selection_change,
-            # which updates the grid's points. The property binding should handle the redraw,
-            # but we call it explicitly here to ensure the initial view is correct.
-            self.ids.grid.draw()
-        Clock.schedule_once(initial_setup)
+        automation_controls.select_param('vol')
 
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button
@@ -671,11 +665,26 @@ class AutomationEditor(ModalView):
     # Placeholder methods for actions
     def set_edit_mode(self, mode, btn):
         self.edit_mode = mode
-        # self._update_button_states(self.mode_buttons, btn)
+        self._update_button_states(self.mode_buttons, btn)
         print(f"Edit mode set to: {mode}")
 
+    def _update_button_states(self, buttons, active_button):
+        """Mise à jour visuelle des boutons de mode d'édition."""
+        from kivy.app import App
+        theme = App.get_running_app().theme_cls
+
+        for button in buttons.values():
+            if button == active_button:
+                button.md_bg_color = theme.primary_color
+                button.icon_color = [1, 1, 1, 1]
+            else:
+                button.md_bg_color = [0.2, 0.2, 0.2, 1]
+                button.icon_color = [1, 1, 1, 0.8]
+
     def undo(self):
-        print("Undo pressed")
+        previous_state = self.history.undo()
+        if previous_state:
+            self._apply_state(previous_state)
 
     def redo(self):
         next_state = self.history.redo()
@@ -804,5 +813,6 @@ class AutomationEditor(ModalView):
         # Find the corresponding track widget and tell it to refresh
         for tw in self.sequencer_layout.track_widgets:
             if tw.track == self.track:
-                tw.update_automation_visibility(tw.automation_controls.selected_param)
+                # Pass both the instance and the param name to the event handler
+                tw.update_automation_visibility(tw.automation_controls, tw.automation_controls.selected_param)
                 break

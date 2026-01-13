@@ -675,7 +675,7 @@ class AutomationEditor(ModalView):
 
         for button in buttons.values():
             if button == active_button:
-                button.md_bg_color = theme.primary_color
+                button.md_bg_color = theme.primaryColor
                 button.icon_color = [1, 1, 1, 1]
             else:
                 button.md_bg_color = [0.2, 0.2, 0.2, 1]

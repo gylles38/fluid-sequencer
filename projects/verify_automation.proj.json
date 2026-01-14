@@ -1,0 +1,48 @@
+{
+    "__class__": "Song",
+    "version": "1.0",
+    "tempo": 120.0,
+    "time_signature_numerator": 4,
+    "time_signature_denominator": 4,
+    "tracks": [
+        {
+            "__class__": "MidiTrack",
+            "name": "MIDI Track 1",
+            "channel": 0,
+            "instrument": 0,
+            "is_muted": false,
+            "is_solo": false,
+            "volume": 1.0,
+            "pan": 0.0,
+            "events": [],
+            "output_port_name": null,
+            "input_port_name": null,
+            "record_mode": "OFF"
+        },
+        {
+            "__class__": "AutomationTrack",
+            "name": "Automation for MIDI 1",
+            "target_track_index": 0,
+            "is_muted": false,
+            "is_solo": false,
+            "volume": 1.0,
+            "pan": 0.0,
+            "points": [
+                {
+                    "__class__": "AutomationPoint",
+                    "start_time": 0.0,
+                    "value": 0.5,
+                    "curve": "linear",
+                    "parameter": "vol"
+                },
+                {
+                    "__class__": "AutomationPoint",
+                    "start_time": 4.0,
+                    "value": 1.0,
+                    "curve": "linear",
+                    "parameter": "vol"
+                }
+            ]
+        }
+    ]
+}

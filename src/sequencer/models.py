@@ -128,6 +128,7 @@ class AutomationPoint:
     parameter: str  # e.g., "volume", "pan", "cc_10"
     value: float  # The value of the parameter at this point
     curve: str = "none"  # "none", "linear", "ease-in", "ease-out", "ease-in-out", "sine"
+    curve_value: float = 1.0    
 
     def __post_init__(self):
         if self.start_time < 0:
@@ -135,6 +136,10 @@ class AutomationPoint:
 
         if self.curve not in self.VALID_CURVES:
             raise ValueError(f"Curve type must be one of {self.VALID_CURVES}.")
+            
+        # Validation de la limite sine (on bride à 20 pour la stabilité)
+        if self.curve == "sine":
+            self.curve_value = max(0.5, min(20.0, self.curve_value))
 
         # Validate parameter format
         param_lower = self.parameter.lower()

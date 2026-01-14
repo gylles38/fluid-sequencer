@@ -677,8 +677,6 @@ Builder.load_string("""
             # --- Boutons de Transport (Existant) ---
             MDIconButton:
                 id: play_pause_btn
-                # ... suite du code ...
-
 
             Widget:
                 size_hint_x: 1

@@ -2317,6 +2317,64 @@ class Sequencer(EventDispatcher):
         if self.gui_mode:
             self.current_beat = beat # Update the Kivy property for the UI
 
+            # --- Step 1.5: Update UI-facing properties based on automation ---
+            # This ensures sliders snap to the correct value when seeking while stopped.
+            automation_map = {} # key: target_track_index, value: AutomationTrack instance
+            for i, track in enumerate(self.song.tracks):
+                if isinstance(track, AutomationTrack):
+                    # Store the first automation track found for a target
+                    if track.target_track_index not in automation_map:
+                        automation_map[track.target_track_index] = track
+
+            for i, track in enumerate(self.song.tracks):
+                if not isinstance(track, (MidiTrack, AudioTrack)):
+                    continue
+
+                # Reset automation flags before checking
+                track.volume_is_automated = False
+                track.pan_is_automated = False
+
+                if i in automation_map:
+                    auto_track = automation_map[i]
+
+                    vol_points = [p for p in auto_track.points if p.parameter == 'vol']
+                    if vol_points:
+                        track.volume_is_automated = True
+                        start_point = next((p for p in reversed(vol_points) if p.start_time <= beat), None)
+                        if start_point:
+                            end_point = next((p for p in vol_points if p.start_time > beat), None)
+                            value_to_apply = start_point.value
+                            if end_point and start_point.curve != 'none':
+                                time_diff = end_point.start_time - start_point.start_time
+                                if time_diff > 0:
+                                    t = (beat - start_point.start_time) / time_diff
+                                    value_range = end_point.value - start_point.value
+                                    curve = start_point.curve
+                                    if curve == "linear": value_to_apply = start_point.value + t * value_range
+                                    elif curve == "ease-in": value_to_apply = start_point.value + (t**2) * value_range
+                                    elif curve == "ease-out": value_to_apply = start_point.value + (1 - (1 - t)**2) * value_range
+                                    elif curve in ["ease-in-out", "sine"]: value_to_apply = start_point.value + (0.5 * (1 - math.cos(math.pi * t))) * value_range
+                            track.volume = value_to_apply
+
+                    pan_points = [p for p in auto_track.points if p.parameter == 'pan']
+                    if pan_points:
+                        track.pan_is_automated = True
+                        start_point = next((p for p in reversed(pan_points) if p.start_time <= beat), None)
+                        if start_point:
+                            end_point = next((p for p in pan_points if p.start_time > beat), None)
+                            value_to_apply = start_point.value
+                            if end_point and start_point.curve != 'none':
+                                time_diff = end_point.start_time - start_point.start_time
+                                if time_diff > 0:
+                                    t = (beat - start_point.start_time) / time_diff
+                                    value_range = end_point.value - start_point.value
+                                    curve = start_point.curve
+                                    if curve == "linear": value_to_apply = start_point.value + t * value_range
+                                    elif curve == "ease-in": value_to_apply = start_point.value + (t**2) * value_range
+                                    elif curve == "ease-out": value_to_apply = start_point.value + (1 - (1 - t)**2) * value_range
+                                    elif curve in ["ease-in-out", "sine"]: value_to_apply = start_point.value + (0.5 * (1 - math.cos(math.pi * t))) * value_range
+                            track.pan = value_to_apply
+
         # --- Step 2: Handle JACK and external processes (if running) ---
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("[DIAGNOSTIC] JACK not running. Skipping transport and audio sync.")

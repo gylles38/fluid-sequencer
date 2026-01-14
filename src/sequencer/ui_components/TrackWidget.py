@@ -1,4 +1,5 @@
 from . import *  # Importe tous les imports communs
+from kivymd.app import App
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
@@ -305,17 +306,23 @@ class TrackWidget(BoxLayout):
 
         if not isinstance(track, AutomationTrack):
             volume_layout.add_widget(mute_button_container)
-            self.volume_slider = HoverableSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.volume_slider = HoverableSlider(
+                min=0, max=1, value=track.volume, orientation='vertical',
+                size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16),
+                disabled=track.volume_is_automated
+            )
+            # Change color if automated
+            if track.volume_is_automated:
+                self.volume_slider.track_active_color = App.get_running_app().theme_cls.primary_light
+                self.volume_slider.thumb_color_active = App.get_running_app().theme_cls.primary_light
+
             self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
             volume_layout.add_widget(self.volume_slider)
             volume_layout.add_widget(self.volume_label)
             self.volume_slider.bind(value=self.on_volume_change)
             self.track.bind(volume=self.on_track_volume_changed)
-        #else:
-            # For automation tracks, add spacers to center the button
-        #    volume_layout.add_widget(Widget())
-        #    volume_layout.add_widget(mute_button_container)
-        #    volume_layout.add_widget(Widget())
+            self.track.bind(volume_is_automated=self.on_volume_automation_changed)
+
 
         self.controls_section.add_widget(volume_layout)
 
@@ -327,13 +334,24 @@ class TrackWidget(BoxLayout):
             pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'center_y': 0.5})
             pan_icon_container.add_widget(pan_icon)
 
-            self.pan_slider = HoverableSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.pan_slider = HoverableSlider(
+                min=-1, max=1, value=track.pan, orientation='vertical',
+                size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16),
+                disabled=track.pan_is_automated
+            )
+            if track.pan_is_automated:
+                self.pan_slider.track_active_color = App.get_running_app().theme_cls.primary_light
+                self.pan_slider.thumb_color_active = App.get_running_app().theme_cls.primary_light
+
             self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
             pan_layout.add_widget(pan_icon_container)
             pan_layout.add_widget(self.pan_slider)
             pan_layout.add_widget(self.pan_label)
             self.pan_slider.bind(value=self.on_pan_change)
+            self.track.bind(pan=self.on_track_pan_changed)
+            self.track.bind(pan_is_automated=self.on_pan_automation_changed)
+
             self.controls_section.add_widget(pan_layout)
         else:
             # Add a spacer to maintain alignment
@@ -684,6 +702,34 @@ class TrackWidget(BoxLayout):
         self.volume_label.text = f"{int(value * 100)}"
         if abs(self.volume_slider.value - value) > 0.001:
             self.volume_slider.value = value
+
+    def on_track_pan_changed(self, instance, value):
+        """Callback for when the track's pan property changes in the backend model."""
+        self.pan_label.text = f"{value:+.1f}"
+        if abs(self.pan_slider.value - value) > 0.001:
+            self.pan_slider.value = value
+
+    def on_volume_automation_changed(self, instance, value):
+        """Callback when the volume automation state changes."""
+        self.volume_slider.disabled = value
+        theme = App.get_running_app().theme_cls
+        if value:
+            self.volume_slider.track_active_color = theme.primary_light
+            self.volume_slider.thumb_color_active = theme.primary_light
+        else:
+            self.volume_slider.track_active_color = theme.primary_color
+            self.volume_slider.thumb_color_active = theme.primary_color
+
+    def on_pan_automation_changed(self, instance, value):
+        """Callback when the pan automation state changes."""
+        self.pan_slider.disabled = value
+        theme = App.get_running_app().theme_cls
+        if value:
+            self.pan_slider.track_active_color = theme.primary_light
+            self.pan_slider.thumb_color_active = theme.primary_light
+        else:
+            self.pan_slider.track_active_color = theme.primary_color
+            self.pan_slider.thumb_color_active = theme.primary_color
 
     def on_volume_change(self, instance, value):
         """Callback for when the user moves the volume slider."""

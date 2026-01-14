@@ -945,6 +945,13 @@ class JackManager:
         value = event['value']
         param_name = event['parameter'].lower()
 
+        # --- Dual Logic: Update UI via Clock and send MIDI/IPC directly ---
+        if self.sequencer.gui_mode:
+            if param_name == 'vol':
+                Clock.schedule_once(lambda dt: setattr(target_track, 'volume', value))
+            elif param_name == 'pan':
+                Clock.schedule_once(lambda dt: setattr(target_track, 'pan', value))
+
         # Branch by Track Type first for clarity and correctness
         if isinstance(target_track, MidiTrack):
             if param_config.get('type') == 'midi_cc':

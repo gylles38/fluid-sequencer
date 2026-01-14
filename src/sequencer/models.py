@@ -57,8 +57,11 @@ from kivy.event import EventDispatcher
 class MidiTrack(BaseTrack, EventDispatcher):
     """Represents a MIDI track, which is a sequence of musical events."""
     volume = NumericProperty(0.8)
+    pan = NumericProperty(0.0)
     is_solo = BooleanProperty(False)
     velocity = NumericProperty(1.0)
+    volume_is_automated = BooleanProperty(False)
+    pan_is_automated = BooleanProperty(False)
 
     def __init__(self, name: str, is_muted: bool = False, is_solo: bool = False, is_metronome: bool = False,
                  channel: int = 0, volume: float = 0.8, pan: float = 0.0, velocity: float = 1.0,
@@ -98,7 +101,10 @@ class MidiTrack(BaseTrack, EventDispatcher):
 class AudioTrack(BaseTrack, EventDispatcher):
     """Represents an audio track, which is a single audio file."""
     volume = NumericProperty(0.5)
+    pan = NumericProperty(0.0)
     is_solo = BooleanProperty(False)
+    volume_is_automated = BooleanProperty(False)
+    pan_is_automated = BooleanProperty(False)
 
     def __init__(self, name: str, filepath: str, is_muted: bool = False, is_solo: bool = False,
                  start_time: float = 0.0, volume: float = 0.5, pan: float = 0.0,

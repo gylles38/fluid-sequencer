@@ -78,25 +78,12 @@ def song_decoder(d):
     if '__type__' in d:
         type_name = d.pop('__type__')
 
-        from sequencer.models import Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint, MidiMapping
+        # The classes are defined in the 'sequencer.models' module.
+        # We need to look there to find the class definitions.
+        module = sys.modules.get('sequencer.models')
+        if module:
+            cls = getattr(module, type_name, None)
+            if cls:
+                return cls(**d)
 
-        class_map = {
-            "Song": Song,
-            "MidiTrack": MidiTrack,
-            "AudioTrack": AudioTrack,
-            "AutomationTrack": AutomationTrack,
-            "Event": Event,
-            "Note": Note,
-            "CCMessage": CCMessage,
-            "AutomationPoint": AutomationPoint,
-            "MidiMapping": MidiMapping,
-        }
-
-        cls = class_map.get(type_name)
-
-        if cls:
-            return cls(**d)
-        else:
-            d["__type__"] = type_name
-            return d
     return d

@@ -75,13 +75,10 @@ class CustomSongEncoder(json.JSONEncoder):
         return super().default(o)
 
 def song_decoder(d):
-    # The JSON file uses '__class__' but the logic here was checking for '__type__'.
-    # Let's check for the correct key.
-    if "__class__" in d:
-        class_name = d.pop("__class__")
+    if '__type__' in d:
+        type_name = d.pop('__type__')
 
-        # --- FIX: Explicitly import models inside the decoder ---
-        from sequencer.models import Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint
+        from sequencer.models import Song, MidiTrack, AudioTrack, AutomationTrack, Event, Note, CCMessage, AutomationPoint, MidiMapping
 
         class_map = {
             "Song": Song,
@@ -92,15 +89,14 @@ def song_decoder(d):
             "Note": Note,
             "CCMessage": CCMessage,
             "AutomationPoint": AutomationPoint,
+            "MidiMapping": MidiMapping,
         }
 
-        cls = class_map.get(class_name)
+        cls = class_map.get(type_name)
 
         if cls:
-            # Instantiate the class with the dictionary's contents
             return cls(**d)
         else:
-            # If the class name is not in our map, put it back and return the dict as is.
-            d["__class__"] = class_name
+            d["__type__"] = type_name
             return d
     return d

@@ -5,6 +5,7 @@ from kivy.core.window import Window
 from .HoverBehavior import HoverBehavior, HoverableMDButton
 from kivymd.uix.slider import MDSlider
 from .automation_editor import AutomationEditor
+from .AutomationCurve import AutomationCurveWidget
 
 class HoverableSlider(MDSlider, HoverBehavior):
     pass
@@ -24,13 +25,12 @@ from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 
-
 class AutomationGrid(Widget):
-    def __init__(self, track_widget, **kwargs):
+    def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.track_widget = track_widget
+        self.track_widget: Any = track_widget
 
-    def on_touch_down(self, touch):
+    def on_touch_down(self, touch) -> None | bool:
         if self.collide_point(*touch.pos) and touch.is_double_tap:
             self.track_widget.open_automation_editor()
             return True
@@ -38,7 +38,7 @@ class AutomationGrid(Widget):
 
 
 class MidiInputSelectorPopup(Popup):
-    def __init__(self, track_widget, **kwargs):
+    def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
         self.track_widget = track_widget
         self.sequencer = track_widget.sequencer_layout.sequencer
@@ -68,7 +68,7 @@ class MidiInputSelectorPopup(Popup):
         content.add_widget(scroll_view)
         self.content = content
 
-    def select_port(self, port_name):
+    def select_port(self, port_name) -> None:
         track = self.track_widget.track
 
         # Disconnect existing connection if a new port is chosen or disconnect is clicked
@@ -101,7 +101,7 @@ class TrackWidget(BoxLayout):
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(400))
         
-    def __init__(self, track, track_index, sequencer_layout, **kwargs):
+    def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         super(TrackWidget, self).__init__(**kwargs)
         self._editor_opening = False
         self.track = track
@@ -463,40 +463,45 @@ class TrackWidget(BoxLayout):
             )
             self.timeline_container.add_widget(self.measure_grid)
 
-            if isinstance(track, AutomationTrack):
-                # --- ÉTAPE 1 : GROUPER LES POINTS PAR PARAMÈTRE ---
-                points_by_param = {}
-                for p in track.points:
-                    if p.parameter not in points_by_param:
-                        points_by_param[p.parameter] = []
-                    points_by_param[p.parameter].append(p)
+            if isinstance(self.track, AutomationTrack):
+                # --- ÉTAPE 1 : IDENTIFIER LES PARAMÈTRES ---
+                # On définit les paramètres par défaut + ceux présents dans les points
+                params: set[str] = {"vol", "pan"} 
+                for p in self.track.points:
+                    params.add(p.parameter)
 
-                # --- ÉTAPE 2 : CRÉER UN WIDGET POUR CHAQUE PARAMÈTRE TROUVÉ ---
-                for param, filtered_points in points_by_param.items():
-                    # Définition des bornes selon le paramètre
+                # --- ÉTAPE 2 : CRÉER LES WIDGETS ---
+                for param in params:
                     min_v, max_v = 0.0, 1.0
-                    if param in ["prog", "vel"]: 
-                        min_v, max_v = 0.0, 127.0
-                    elif param == "pan": 
-                        min_v, max_v = -1.0, 1.0
+                    if param in ["prog", "vel"]: min_v, max_v = 0.0, 127.0
+                    elif param == "pan": min_v, max_v = -1.0, 1.0
 
-                    # On n'affiche que le volume par défaut
-                    is_vol = (param == "vol")
+                    is_vol: bool = (param == "vol")
+                    
+                    # Filtrer les points pour ce widget
+                    filtered_points: list[AutomationPoint] = [p for p in self.track.points if p.parameter == param]
 
                     curve_widget = AutomationCurveWidget(
                         size_hint=(1, 1),
-                        total_beats=self.total_beats,
+                        total_beats=self.sequencer_layout.sequencer.get_song_length_in_beats(),
                         pixels_per_beat=self.pixels_per_beat,
                         min_val=min_v,
                         max_val=max_v,
-                        points=filtered_points, # On ne donne QUE les points de ce paramètre
+                        points=filtered_points,
                         opacity=1 if is_vol else 0,
                         disabled=not is_vol
                     )
                     
-                    # On ajoute une propriété personnalisée pour l'identifier facilement
                     curve_widget.param_type = param 
                     
+                    # --- ÉTAPE 3 : BINDINGS DYNAMIQUES (Le secret du Zoom) ---
+                    # On lie le widget aux propriétés du TrackWidget pour le zoom
+                    self.bind(pixels_per_beat=curve_widget.setter('pixels_per_beat'))
+                    
+                    # On force la mise à jour si la durée du morceau change
+                    # (via une petite fonction pour appeler get_song_length_in_beats)
+                    self.bind(size=lambda *x: self._sync_curve_durations())
+
                     self.automation_curves.append(curve_widget)
                     self.timeline_container.add_widget(curve_widget)
 
@@ -521,7 +526,21 @@ class TrackWidget(BoxLayout):
 
         self.track.bind(is_solo=self.on_solo_changed)
         
-    def update_timeline_size(self, *args):
+        # Liaison avec le séquenceur pour la mise à jour en temps réel
+        self.sequencer_layout.sequencer.bind(current_beat=lambda instance, val: self.update_sliders_from_automation(val))
+        
+        # Appel initial pour régler les sliders au chargement du projet
+        Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
+
+    def _sync_curve_durations(self, *args) -> None:
+        total = self.sequencer_layout.sequencer.get_song_length_in_beats()
+        for curve in self.automation_curves:
+            curve.total_beats = total
+            # Recalcul manuel du pixels_per_beat si nécessaire
+            if total > 0:
+                curve.pixels_per_beat = self.timeline_container.width / total
+
+    def update_timeline_size(self, *args) -> None:
         if hasattr(self, 'content'):
             # For MIDI tracks
             self.content.width = self.total_beats * self.pixels_per_beat
@@ -548,16 +567,16 @@ class TrackWidget(BoxLayout):
                     curve.total_beats = self.total_beats
                     curve.pixels_per_beat = self.pixels_per_beat
 
-    def update_playback_rect(self, *args):
+    def update_playback_rect(self, *args) -> None:
         self.playback_rect.pos = self.playback_line.pos
         self.playback_rect.size = self.playback_line.size
 
     # ... (le reste de la classe reste inchangé : set_playback_position, update_grid_parameters, etc.)
 
-    def on_solo_changed(self, instance, value):
+    def on_solo_changed(self, instance, value) -> None:
         self.update_mute_solo_appearance()
 
-    def on_automation_selection_change(self, selected_param):
+    def on_automation_selection_change(self, selected_param) -> None:
         """
         Callback from AutomationControls when the user selects a new parameter to view.
         """
@@ -570,7 +589,7 @@ class TrackWidget(BoxLayout):
             filtered_points = [p for p in self.track.points if p.parameter == selected_param]
             self.automation_curve.points = filtered_points
 
-    def on_name_validated(self, instance, new_name):
+    def on_name_validated(self, instance, new_name) -> None:
         """Callback for when the user validates a new track name."""
         # We need to escape the name in case it contains spaces in the future
         # although the current filter doesn't allow it.
@@ -591,7 +610,7 @@ class TrackWidget(BoxLayout):
                 curve.opacity = 0
                 curve.disabled = True
 
-    def set_playback_position(self, current_beat: float):
+    def set_playback_position(self, current_beat: float) -> None:
         """
         Updates the visual position of the playback line (cursor) and handles automatic
         scrolling of the timeline to keep the cursor in view during playback.
@@ -651,7 +670,7 @@ class TrackWidget(BoxLayout):
 
             scroll_view.scroll_x = max(0.0, min(1.0, normalized_scroll_value))
 
-    def update_grid_parameters(self, total_beats: float, pixels_per_beat: float):
+    def update_grid_parameters(self, total_beats: float, pixels_per_beat: float) -> None:
         """Called by the parent layout to propagate zoom/length changes to this widget."""
         self.total_beats = total_beats
         self.pixels_per_beat = pixels_per_beat
@@ -662,7 +681,7 @@ class TrackWidget(BoxLayout):
             self.playback_line.x = 0 
         self.timeline_scroll.scroll_x = 0.0
 
-    def _update_graphics(self, *args):
+    def _update_graphics(self, *args) -> None:
         """Callback to update the size and position of canvas elements when the widget moves or resizes."""
         if hasattr(self, 'background_rect'):
             self.background_rect.pos = self.pos
@@ -670,7 +689,7 @@ class TrackWidget(BoxLayout):
         if hasattr(self, 'border_line'):
             self.border_line.points = [self.x, self.y, self.x + self.width, self.y]
 
-    def _update_type_icon_bg(self, *args):
+    def _update_type_icon_bg(self, *args) -> None:
         """Updates the background of the track type icon."""
         if hasattr(self, 'type_bg_rect'):
             self.type_bg_rect.pos = self.children[-1].pos
@@ -679,31 +698,31 @@ class TrackWidget(BoxLayout):
             self.type_border_rect.rectangle = [self.children[-1].x, self.children[-1].y, 
                                              self.children[-1].width, self.children[-1].height]
 
-    def on_track_volume_changed(self, instance, value):
+    def on_track_volume_changed(self, instance, value) -> None:
         """Callback for when the track's volume property changes in the backend model."""
         self.volume_label.text = f"{int(value * 100)}"
         if abs(self.volume_slider.value - value) > 0.001:
             self.volume_slider.value = value
 
-    def on_volume_change(self, instance, value):
+    def on_volume_change(self, instance, value) -> None:
         """Callback for when the user moves the volume slider."""
         self.volume_label.text = f"{int(value * 100)}"
         self.sequencer_layout.process_slider_command(f'volume {self.track_index} {value}')
 
-    def on_pan_change(self, instance, value):
+    def on_pan_change(self, instance, value) -> None:
         """Callback for when the user moves the pan slider."""
         self.pan_label.text = f"{value:+.1f}"
         self.sequencer_layout.process_slider_command(f'pan {self.track_index} {value}')
 
-    def on_mute_toggle(self, instance):
+    def on_mute_toggle(self, instance) -> None:
         """Called when the mute button is pressed."""
         self.sequencer_layout.toggle_track_mute(self.track_index)
 
-    def on_solo_toggle(self, instance):
+    def on_solo_toggle(self, instance) -> None:
         """Called when the solo button is pressed."""
         self.sequencer_layout.toggle_track_solo(self.track_index)
 
-    def update_mute_solo_appearance(self):
+    def update_mute_solo_appearance(self) -> None:
         """Updates the visual state of the mute and solo buttons based on the track's state."""
         is_muted = self.track.is_muted
         self.mute_button.icon = 'volume-off' if is_muted else 'volume-high'
@@ -718,33 +737,33 @@ class TrackWidget(BoxLayout):
             self.solo_button.icon_color = [1, 1, 0, 1] if is_solo else [0.6, 0.6, 0.6, 1]
             self.solo_button.md_bg_color = [0.3, 0.3, 0.1, 0.8] if is_solo else [0.1, 0.1, 0.1, 0.8]
 
-    def get_record_mode_tooltip(self, mode):
+    def get_record_mode_tooltip(self, mode) -> str:
         """Returns the appropriate tooltip text for the given record mode."""
-        tooltips = {
+        tooltips: dict[str, str] = {
             'OFF': 'Record: OFF - Piste désactivée',
             'OVERWRITE': 'Record: OVERWRITE - Écrase les notes existantes',
             'KEEP': 'Record: KEEP - Conserve les notes existantes'
         }
         return tooltips.get(mode, 'Record Mode')
 
-    def on_record_mode_change(self, track):
+    def on_record_mode_change(self, track) -> None:
         """Callback for when the record mode button changes state."""
         print(f"Record mode changed for track {self.track_index}: {track.record_mode}")
         self.record_mode_button.tooltip_text = self.get_record_mode_tooltip(track.record_mode)
 
-    def on_channel_change(self, instance):
+    def on_channel_change(self, instance) -> None:
         """Callback for when the MIDI channel spinner value changes."""
         self.sequencer_layout.process_slider_command(f'setch {self.track_index} {instance.text}')
 
-    def on_program_change(self, instance):
+    def on_program_change(self, instance) -> None:
         """Callback for when the MIDI program spinner value changes."""
         self.sequencer_layout.process_slider_command(f'setprog {self.track_index} {instance.text}')
 
-    def on_set_as_metronome(self, instance):
+    def on_set_as_metronome(self, instance) -> None:
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
 
-    def open_piano_roll_editor(self, instance=None):
+    def open_piano_roll_editor(self, instance=None) -> None:
         """Creates and opens the piano roll editor popup for the current track."""
         if isinstance(self.track, MidiTrack):
             sequencer = self.sequencer_layout.sequencer
@@ -764,7 +783,7 @@ class TrackWidget(BoxLayout):
             editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
             editor.open()
 
-    def open_automation_editor(self, instance=None):
+    def open_automation_editor(self, instance=None) -> None:
         if self._editor_opening:
             return
         if isinstance(self.track, AutomationTrack):
@@ -773,10 +792,10 @@ class TrackWidget(BoxLayout):
             editor.bind(on_dismiss=self._on_editor_dismiss)
             editor.open()
 
-    def _on_editor_dismiss(self, instance):
+    def _on_editor_dismiss(self, instance) -> None:
         self._editor_opening = False
 
-    def select_midi_port_popup(self, instance):
+    def select_midi_port_popup(self, instance) -> None:
         """Opens a popup to select a MIDI output port for the track."""
         standard_ports = mido.get_output_names()
         virtual_port_names = [p.name for p in self.sequencer_layout.sequencer.virtual_ports]
@@ -793,8 +812,8 @@ class TrackWidget(BoxLayout):
             size_hint=(0.5, 0.7)
         )
 
-        def select_port(port_name):
-            command = f'assign {self.track_index} "{port_name}"'
+        def select_port(port_name) -> None:
+            command: str = f'assign {self.track_index} "{port_name}"'
             self.sequencer_layout.process_command_ui(command)
             self.port_button_text.text = f"Port: {port_name}"
             popup.dismiss()
@@ -809,8 +828,50 @@ class TrackWidget(BoxLayout):
 
         popup.open()
 
-    def select_midi_input_popup(self, instance):
+    def select_midi_input_popup(self, instance) -> None:
         """Opens a popup to select a MIDI input port for the track."""
-        popup = MidiInputSelectorPopup(track_widget=self)
+        popup: MidiInputSelectorPopup = MidiInputSelectorPopup(track_widget=self)
         popup.open()
-        
+
+    def update_sliders_from_automation(self, current_beat) -> None:
+        if isinstance(self.track, AutomationTrack):
+            return
+
+        # Sécurité : On vérifie que les objets nécessaires existent
+        if not self.sequencer_layout or not self.sequencer_layout.sequencer:
+            return
+
+        vol_slider = getattr(self, 'volume_slider', None)
+        pan_slider = getattr(self, 'pan_slider', None)
+        if not vol_slider or not pan_slider:
+            return
+
+        found_vol = False
+        found_pan = False
+
+        # On itère sur les pistes de la chanson
+        for t in self.sequencer_layout.sequencer.song.tracks:
+            if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index:
+                
+                # VOLUME
+                # On ne filtre les points qu'une seule fois pour la performance
+                points_vol = [p for p in t.points if p.parameter == 'vol']
+                if points_vol:
+                    found_vol = True
+                    vol_slider.value = t.get_value_at(current_beat, 'vol')
+                
+                # PAN
+                points_pan = [p for p in t.points if p.parameter == 'pan']
+                if points_pan:
+                    found_pan = True
+                    pan_slider.value = t.get_value_at(current_beat, 'pan')
+
+        # Mise à jour des PROPRIÉTÉS
+        # Note : Kivy ne déclenche l'événement que si la valeur CHANGE vraiment,
+        # ce qui est excellent pour les performances.
+        self.vol_automated = found_vol
+        self.pan_automated = found_pan
+
+        # Gestion de l'opacité (puisque ce n'est pas bindé automatiquement)
+        vol_slider.opacity = 0.6 if found_vol else 1.0
+        pan_slider.opacity = 0.6 if found_pan else 1.0

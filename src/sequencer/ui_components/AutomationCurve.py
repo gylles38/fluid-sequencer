@@ -53,8 +53,10 @@ class AutomationCurveWidget(Widget):
     def draw_curve(self, *args):
         if not self.canvas:
             return
-            
+
+        # On efface systématiquement avant de redessiner
         self.canvas.clear()
+        
         if not self.points:
             return
 
@@ -151,14 +153,25 @@ class AutomationCurveWidget(Widget):
             Line(points=line_points, width=1.1)
 
     def on_points(self, instance, value):
-        if not value: return
-        # Mise à jour des bornes selon le paramètre (utilisé pour normaliser)
+        # Sécurité : Si le widget n'est pas encore prêt (canvas est None), 
+        # ou si la liste est vide, on nettoie si possible et on s'arrête.
+        if self.canvas is None:
+            return
+        
+        if not value:
+            self.canvas.clear()
+            self.canvas.after.clear()            
+            return
+            
+        # Mise à jour des bornes selon le paramètre
         param = value[0].parameter
-        self.param_type = param # On stocke le type pour draw_curve
+        self.param_type = param
+        
         if param in ["prog", "vel"]:
             self.min_val, self.max_val = 0.0, 127.0
         elif param == "pan":
             self.min_val, self.max_val = -1.0, 1.0
-        else:
+        else: # vol
             self.min_val, self.max_val = 0.0, 1.0
+            
         self.draw_curve()

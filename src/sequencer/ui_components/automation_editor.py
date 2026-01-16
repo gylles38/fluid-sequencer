@@ -292,8 +292,13 @@ class EditableAutomationGrid(Widget):
         self.draw_curve_and_points()
 
     def draw_curve_and_points(self, *args):
+        # 1. On efface le calque de dessin (courbes + points carrés)
+        # Note: La grille de fond est dans canvas.before, donc elle reste affichée.
         self.canvas.clear()
-        if not self.points: return
+        
+        # 2. Si la liste est vide, on s'arrête là -> L'écran reste vide (juste la grille de fond)
+        if not self.points: 
+            return
 
         v_range = self.max_val - self.min_val
         if v_range == 0: v_range = 1
@@ -453,6 +458,13 @@ Builder.load_string("""
                 tooltip_text: "Delete Mode (Ctrl+D)"
                 theme_bg_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
+
+            TooltipMDIconButton:
+                id: clear_button
+                icon: 'eraser'
+                tooltip_text: "Delete Automation Points (Ctrl+E)"
+                theme_bg_color: "Custom"
+                on_release: root.clear_all_points()
 
             MDDivider:
                 orientation: 'vertical'
@@ -1112,6 +1124,24 @@ class AutomationEditor(ModalView):
             self._record_state()
             self.is_dirty = True
 
+    def clear_all_points(self, *args):
+        # 1. Vider la source de données (copie de travail)
+        self.track_copy.points = [] 
+        self.is_dirty = True
+        
+        # 2. Réinitialiser les sélections (important pour éviter les crashs si on bouge la souris après)
+        self.selected_point = None
+        self.ids.grid.selected_point = None
+        self.update_status_bar(None)
+
+        # 3. Vider la liste VISIBLE (C'est le déclencheur clé pour Kivy)
+        # Le widget 'grid' est lié à 'visible_points' dans le KV.
+        self.visible_points = []
+        
+        # 4. Forcer le redessin du widget Grille
+        # On appelle directement sa méthode de dessin pour être sûr à 100%
+        self.ids.grid.draw_curve_and_points()
+
     def show_curve_type_popup(self, point, touch):
         if self.selected_parameter == 'prog': 
             return
@@ -1262,13 +1292,20 @@ class AutomationEditor(ModalView):
             super().dismiss()
         elif answer == 'd':
             super().dismiss()
-
+            
     def _save_changes(self):
+        # 1. On applique les changements aux points (qu'ils soient vides ou modifiés)
         self.track.points = copy.deepcopy(self.track_copy.points)
         self.is_dirty = False
-        # Find the corresponding track widget and tell it to refresh
+        
+        # 2. On rafraîchit l'affichage des miniatures (Timeline)
         for tw in self.sequencer_layout.track_widgets:
             if tw.track == self.track:
-                # Pass both the instance and the param name to the event handler
-                tw.update_automation_visibility(tw.automation_controls, tw.automation_controls.selected_param)
-                break
+                for curve in tw.automation_curves:
+                    curve.points = [p for p in self.track.points if p.parameter == curve.param_type]
+            
+            # 3. MISE À JOUR DES VALEURS (Optionnel mais recommandé)
+            # Si on vient de sauvegarder, on demande au widget cible de se caler 
+            # sur la valeur de l'automation à la position actuelle du curseur.
+            if hasattr(tw.track, 'track_index') and tw.track.track_index == self.track.target_track_index:
+                tw.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat)

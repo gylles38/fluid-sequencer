@@ -176,6 +176,53 @@ class AutomationTrack(BaseTrack, EventDispatcher):
         self.points.append(point)
         self.points.sort(key=lambda p: p.start_time)
 
+    def get_value_at(self, beat: float, parameter: str = 'vol') -> float:
+        import math
+        # 1. Filtrage et tri des points par paramètre
+        pts = sorted([p for p in self.points if p.parameter == parameter], key=lambda x: x.start_time)
+
+        if not pts:
+            return 0.0 if parameter == 'pan' else 1.0
+
+        if beat <= pts[0].start_time: return pts[0].value
+        if beat >= pts[-1].start_time: return pts[-1].value
+
+        # 2. Recherche du segment correspondant au beat actuel
+        for i in range(len(pts) - 1):
+            p1, p2 = pts[i], pts[i+1]
+            if p1.start_time <= beat <= p2.start_time:
+                # t est la progression normalisée (0.0 à 1.0) entre les deux points
+                duration = p2.start_time - p1.start_time
+                if duration == 0: return p1.value # Sécurité division par zéro
+                
+                t = (beat - p1.start_time) / duration
+                
+                c = p1.curve.lower()
+                
+                if c == "none":
+                    return p1.value
+                
+                # --- CALCUL DU FACTEUR D'INTERPOLATION (ti) ---
+                if c == "linear":
+                    ti = t
+                elif c == "ease-in":
+                    ti = t * t
+                elif c == "ease-out":
+                    ti = t * (2 - t)
+                elif c == "ease-in-out":
+                    ti = 0.5 * (1 - math.cos(t * math.pi))
+                elif c == "sine":
+                    # --- CORRECTION MAJEURE ICI ---
+                    freq = getattr(p1, 'curve_value', 1.0)
+                    ti = 0.5 * (1 - math.cos(t * math.pi * freq))
+                else:
+                    ti = t
+
+                # --- APPLICATION DE LA VALEUR ---
+                return p1.value + (p2.value - p1.value) * ti
+
+        return 1.0
+
     def __repr__(self):
         return (f"AutomationTrack(name='{self.name}', target_track_index={self.target_track_index}, "
                 f"points=[...{len(self.points)} items...])")

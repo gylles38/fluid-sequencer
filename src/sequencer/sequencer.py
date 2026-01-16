@@ -1530,15 +1530,23 @@ class Sequencer(EventDispatcher):
             self.jack_manager.start()
             time.sleep(0.5) # Give Jack time to register ports
 
-            # --- Restore JACK connections with aj-snapshot if specified ---
+            # --- Restore JACK connections with aj-snapshot ---
             if self.song.aj_snapshot_path and os.path.exists(self.song.aj_snapshot_path):
                 try:
                     print(f"Restoring JACK connections from {self.song.aj_snapshot_path}...")
-                    subprocess.run(["aj-snapshot", "-r", self.song.aj_snapshot_path], check=True)
-                except FileNotFoundError:
-                    print("Error: 'aj-snapshot' command not found. Please ensure it is installed.", file=sys.stderr)
+                    
+                    # Option 1: Utiliser -p (poll) pour attendre que les ports apparaissent
+                    # aj-snapshot attendra que les clients mentionnés dans le fichier soient présents
+                    subprocess.run(["aj-snapshot", "-rj", "-p", "2", self.song.aj_snapshot_path], check=True)
+                    
                 except subprocess.CalledProcessError as e:
-                    print(f"Error restoring aj-snapshot: {e}", file=sys.stderr)
+                    # Si cela échoue encore, on fait une deuxième tentative après un délai plus long
+                    print("First attempt failed, retrying in 5 seconds...")
+                    time.sleep(5)
+                    try:
+                        subprocess.run(["aj-snapshot", "-rj", self.song.aj_snapshot_path], check=True)
+                    except Exception as e2:
+                        print(f"Final error restoring aj-snapshot: {e2}", file=sys.stderr)
             else:
                 # --- Auto-connect MIDI tracks based on project data (fallback) ---
                 for track in self.song.tracks:

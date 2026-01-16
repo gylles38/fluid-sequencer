@@ -444,26 +444,26 @@ Builder.load_string("""
                 id: insert_button
                 icon: 'pencil'
                 tooltip_text: "Insert Mode (Ctrl+I)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_edit_mode('insert', self)
             TooltipMDIconButton:
                 id: move_button
                 icon: 'cursor-move'
                 tooltip_text: "Move Mode (Ctrl+M)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_edit_mode('move', self)
             TooltipMDIconButton:
                 id: delete_button
                 icon: 'eraser'
                 tooltip_text: "Delete Mode (Ctrl+D)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
-
             TooltipMDIconButton:
                 id: clear_button
-                icon: 'eraser'
+                icon: 'trash-can-outline'
                 tooltip_text: "Delete Automation Points (Ctrl+E)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
+                icon_color: [1, 1, 1, 0.5]
                 on_release: root.clear_all_points()
 
             MDDivider:
@@ -736,6 +736,8 @@ class AutomationEditor(ModalView):
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
 
         Clock.schedule_once(self._post_kv_init)
+        # On lance la surveillance automatique
+        Clock.schedule_interval(self._sync_ui, 0.1)        
         Window.bind(on_key_down=self._on_key_down)
 
     def _post_kv_init(self, dt):
@@ -812,6 +814,14 @@ class AutomationEditor(ModalView):
         """Répercute le défilement de la grille sur la règle."""
         if hasattr(self.ids.ruler, 'scroll_view'):
             self.ids.ruler.scroll_view.scroll_x = value
+
+    def _sync_ui(self, dt):
+        # 1. Synchronisation de l'icône Play/Pause
+        btn = self.ids.get('play_button')
+        sequencer = self.sequencer_layout.sequencer        
+        if btn :
+            is_playing = sequencer.playback_state == 'playing'
+            btn.icon = "pause" if is_playing else "play"
 
     def update_status_bar(self, point):
         if point:
@@ -1058,20 +1068,25 @@ class AutomationEditor(ModalView):
         self.edit_mode = mode
         self._update_button_states(self.mode_buttons, btn)
         print(f"Edit mode set to: {mode}")
+        
+    def _update_button_states(self, group, active_button) -> None:
+        """Met à jour l'apparence des boutons d'outils selon l'outil sélectionné."""
+        orange_vif = [1, 0.6, 0, 1]
+        blanc_semi = [1, 1, 1, 0.8]
 
-    def _update_button_states(self, buttons, active_button):
-        """Mise à jour visuelle des boutons de mode d'édition."""
-        from kivy.app import App
-        theme = App.get_running_app().theme_cls
-
-        for button in buttons.values():
-            if button == active_button:
-                button.md_bg_color = theme.primaryColor
-                button.icon_color = [1, 1, 1, 1]
+        for btn in group.values():
+            if btn == active_button:
+                # On force la couleur orange
+                btn.icon_color = orange_vif
+                # Optionnel : On peut aussi augmenter l'opacité pour plus de peps
+                btn.opacity = 1.0
             else:
-                button.md_bg_color = [0.2, 0.2, 0.2, 1]
-                button.icon_color = [1, 1, 1, 0.8]
-
+                # On remet en blanc semi-transparent
+                btn.icon_color = blanc_semi
+                btn.opacity = 0.8
+                
+            btn.canvas.ask_update()                
+  
     def undo(self):
         previous_state = self.history.undo()
         if previous_state:

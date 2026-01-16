@@ -556,19 +556,19 @@ Builder.load_string("""
                 id: insert_button
                 icon: 'pencil'
                 tooltip_text: "Insert Mode"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_edit_mode('insert', self)
             TooltipMDIconButton:
                 id: move_button
                 icon: 'cursor-move'
                 tooltip_text: "Move Mode"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_edit_mode('move', self)
             TooltipMDIconButton:
                 id: delete_button
                 icon: 'eraser'
                 tooltip_text: "Delete Mode"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_edit_mode('delete', self)
 
             MDDivider:
@@ -599,37 +599,37 @@ Builder.load_string("""
                 id: whole_note_button
                 icon: 'music-note-whole'
                 tooltip_text: "Whole Note (4 beats)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_note_duration(4.0, self)
             TooltipMDIconButton:
                 id: half_note_button
                 icon: 'music-note-half'
                 tooltip_text: "Half Note (2 beats)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_note_duration(2.0, self)
             TooltipMDIconButton:
                 id: quarter_note_button
                 icon: 'music-note-quarter'
                 tooltip_text: "Quarter Note (1 beat)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_note_duration(1.0, self)
             TooltipMDIconButton:
                 id: eighth_note_button
                 icon: 'music-note-eighth'
                 tooltip_text: "Eighth Note (0.5 beats)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_note_duration(0.5, self)
             TooltipMDIconButton:
                 id: sixteenth_note_button
                 icon: 'music-note-sixteenth'
                 tooltip_text: "Sixteenth Note (0.25 beats)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_note_duration(0.25, self)
             TooltipMDIconButton:
                 id: thirty_second_note_button
                 icon: 'music-note-thirty-second'
                 tooltip_text: "Thirty-second Note (0.125 beats)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.set_note_duration(0.125, self)
 
             MDDivider:
@@ -639,7 +639,7 @@ Builder.load_string("""
                 id: dotted_button
                 icon: 'circle-small'
                 tooltip_text: "Dotted Note (Toggle)"
-                theme_bg_color: "Custom"
+                theme_icon_color: "Custom"
                 on_press: root.toggle_dotted_mode()
 
             MDDivider:
@@ -1579,23 +1579,22 @@ class PianoRollEditor(ModalView):
             self.ids.grid_viewer.grid.draw()
 
     def _update_button_states(self, group, active_btn) -> None:
-        """
-        Updates the visual state of a group of buttons by changing their background color
-        to a fixed, high-contrast color to ensure visibility regardless of theme.
-        """
-        # A bright yellow, similar to the main pause button, for high visibility.
-        active_bg_color = [0.9, 0.7, 0, 1]
-        # A neutral dark color for inactive buttons.
-        inactive_bg_color = [0.2, 0.2, 0.2, 1]
-        # A dark icon for good contrast on the yellow background.
-        active_icon_color = [0.1, 0.1, 0.1, 1]
-         # A light grey icon for the inactive state.
-        inactive_icon_color = [0.8, 0.8, 0.8, 1]
+        """Met à jour l'apparence des boutons d'outils selon l'outil sélectionné."""
+        orange_vif = [1, 0.6, 0, 1]
+        blanc_semi = [1, 1, 1, 0.8]
 
         for btn in group.values():
-            is_active = btn == active_btn
-            btn.md_bg_color = active_bg_color if is_active else inactive_bg_color
-            btn.icon_color = active_icon_color if is_active else inactive_icon_color
+            if btn == active_btn:
+                # On force la couleur orange
+                btn.icon_color = orange_vif
+                # Optionnel : On peut aussi augmenter l'opacité pour plus de peps
+                btn.opacity = 1.0
+            else:
+                # On remet en blanc semi-transparent
+                btn.icon_color = blanc_semi
+                btn.opacity = 0.8
+                
+            btn.canvas.ask_update()                
 
     def sync_horizontal_scroll(self, instance, value) -> None:
         if self._is_scrolling: return

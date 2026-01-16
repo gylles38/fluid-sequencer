@@ -297,7 +297,6 @@ class TrackWidget(BoxLayout):
             on_press=self.on_mute_toggle,
             pos_hint={'center_x': 0.5, 'center_y': 0.5},
             theme_icon_color="Custom",
-            #icon_color=[0.3, 0.2, 0.1, 0.8]
             icon_color = [0.8, 0.3, 0, 1] if track.is_muted else [1, 0.6, 0, 1],
             md_bg_color = [0.4, 0.2, 0.1, 0.8] if track.is_muted else [0.3, 0.2, 0.1, 0.8]            
         )
@@ -837,10 +836,6 @@ class TrackWidget(BoxLayout):
         if isinstance(self.track, AutomationTrack):
             return
 
-        # Sécurité : On vérifie que les objets nécessaires existent
-        if not self.sequencer_layout or not self.sequencer_layout.sequencer:
-            return
-
         vol_slider = getattr(self, 'volume_slider', None)
         pan_slider = getattr(self, 'pan_slider', None)
         if not vol_slider or not pan_slider:
@@ -849,15 +844,15 @@ class TrackWidget(BoxLayout):
         found_vol = False
         found_pan = False
 
-        # On itère sur les pistes de la chanson
+        # On cherche l'automation cible
         for t in self.sequencer_layout.sequencer.song.tracks:
             if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index:
                 
-                # VOLUME
-                # On ne filtre les points qu'une seule fois pour la performance
+                # VOLUME : On récupère les points pour ce paramètre précis
                 points_vol = [p for p in t.points if p.parameter == 'vol']
                 if points_vol:
                     found_vol = True
+                    # ON APPLIQUE LA VALEUR (C'est ça qui fait bouger le slider)
                     vol_slider.value = t.get_value_at(current_beat, 'vol')
                 
                 # PAN
@@ -866,12 +861,15 @@ class TrackWidget(BoxLayout):
                     found_pan = True
                     pan_slider.value = t.get_value_at(current_beat, 'pan')
 
-        # Mise à jour des PROPRIÉTÉS
-        # Note : Kivy ne déclenche l'événement que si la valeur CHANGE vraiment,
-        # ce qui est excellent pour les performances.
+        # Mise à jour des drapeaux (utile pour changer l'opacité ou l'icône)
         self.vol_automated = found_vol
         self.pan_automated = found_pan
 
-        # Gestion de l'opacité (puisque ce n'est pas bindé automatiquement)
-        vol_slider.opacity = 0.6 if found_vol else 1.0
-        pan_slider.opacity = 0.6 if found_pan else 1.0
+        # IMPORTANT : On s'assure que le slider est TOUJOURS utilisable
+        # On ne met JAMAIS disabled = True ici.
+        vol_slider.disabled = False
+        pan_slider.disabled = False
+        
+        # Optionnel : baisser légèrement l'opacité pour indiquer qu'une automation "pilote" le slider
+        vol_slider.opacity = 0.7 if found_vol else 1.0
+        pan_slider.opacity = 0.7 if found_pan else 1.0

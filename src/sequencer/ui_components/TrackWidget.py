@@ -24,6 +24,7 @@ from kivy.effects.scroll import ScrollEffect
 from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
+from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 
 class AutomationGrid(Widget):
     def __init__(self, track_widget, **kwargs) -> None:
@@ -36,6 +37,45 @@ class AutomationGrid(Widget):
             return True
         return super().on_touch_down(touch)
 
+class ChangeTargetPopup(Popup):
+    def __init__(self, track_widget, **kwargs):
+        super().__init__(**kwargs)
+        self.track_widget = track_widget
+        self.title = "Choisir la piste cible"
+        self.size_hint = (0.5, 0.6)
+        self.background_color = [0.1, 0.1, 0.1, 1]
+
+        layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        scroll = ScrollView()
+        list_layout = GridLayout(cols=1, spacing=dp(5), size_hint_y=None)
+        list_layout.bind(minimum_height=list_layout.setter('height'))
+
+        sequencer = track_widget.sequencer_layout.sequencer
+        for i, track in enumerate(sequencer.song.tracks):
+            # On liste tout sauf les pistes d'automation
+            if not isinstance(track, AutomationTrack):
+                # Création du bouton style KivyMD
+                btn = MDButton(
+                    MDButtonText(text=f"Track {i}: {track.name}"),
+                    style="filled",
+                    size_hint_x=1,
+                    on_release=lambda x, idx=i: self.select_target(idx)
+                )
+                list_layout.add_widget(btn)
+
+        scroll.add_widget(list_layout)
+        layout.add_widget(scroll)
+        self.content = layout
+
+    def select_target(self, index):
+        # 1. On change l'index dans le modèle de données
+        self.track_widget.track.target_track_index = index
+        
+        # 2. On rafraîchit l'UI du TrackWidget
+        self.track_widget.update_track_name_display()
+        
+        # 3. On ferme la popin
+        self.dismiss()
 
 class MidiInputSelectorPopup(Popup):
     def __init__(self, track_widget, **kwargs) -> None:
@@ -157,6 +197,21 @@ class TrackWidget(BoxLayout):
         self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_section.add_widget(self.name_label)
 
+        # AJOUT : Section pour les pistes d'automation
+        if isinstance(self.track, AutomationTrack):
+            # 1. Icône de ciblage (flèche ou œil) avec tooltip explicatif
+            self.target_indicator_icon = TooltipMDIconButton(
+                icon='target', # Ou 'arrow-right-thin', 'eye', 'link'
+                tooltip_text=self._get_target_track_name_for_tooltip(), # Fonction pour le nom
+                pos_hint={'center_y': 0.5},
+                theme_icon_color="Custom",
+                icon_color=[0.9, 0.9, 0.9, 1],
+                size_hint_x=None,
+                on_release=self.open_change_target_popup,
+                width=dp(24)
+            )
+            self.info_section.add_widget(self.target_indicator_icon)
+         
         # --- Middle Section: Controls ---
         self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
 
@@ -539,6 +594,41 @@ class TrackWidget(BoxLayout):
             if total > 0:
                 curve.pixels_per_beat = self.timeline_container.width / total
 
+    def _get_target_track_name_for_tooltip(self) -> str:
+        """Retourne le nom de la piste cible pour le tooltip."""
+        if not isinstance(self.track, AutomationTrack):
+            return "" # Non applicable si ce n'est pas une automation
+
+        sequencer = self.sequencer_layout.sequencer
+        target_idx = self.track.target_track_index
+
+        if 0 <= target_idx < len(sequencer.song.tracks):
+            target_track = sequencer.song.tracks[target_idx]
+            return f"Cible: Piste {target_idx}: {target_track.name}"
+        else:
+            return "Cible: Piste inconnue ou invalide"
+
+    def open_change_target_popup(self, *args):
+        # Puisque la classe est dans le même fichier, l'appel est direct
+        popup = ChangeTargetPopup(track_widget=self)
+        popup.open()
+
+    def update_track_name_display(self):
+        """Met à jour le texte du bouton d'index [#] et le tooltip de l'icône de ciblage."""
+        if isinstance(self.track, AutomationTrack):
+            # Mise à jour du bouton [#]
+            if hasattr(self, 'target_btn'):
+                for child in self.target_btn.children:
+                    if isinstance(child, MDButtonText):
+                        child.text = f"[{self.track.target_track_index}]"
+            
+            # Mise à jour du tooltip de l'icône de ciblage
+            if hasattr(self, 'target_indicator_icon'):
+                self.target_indicator_icon.tooltip_text = self._get_target_track_name_for_tooltip()
+        
+        # Mise à jour du label de nom (toujours)
+        self.name_label.text = self.track.name
+        
     def update_timeline_size(self, *args) -> None:
         if hasattr(self, 'content'):
             # For MIDI tracks
@@ -569,8 +659,6 @@ class TrackWidget(BoxLayout):
     def update_playback_rect(self, *args) -> None:
         self.playback_rect.pos = self.playback_line.pos
         self.playback_rect.size = self.playback_line.size
-
-    # ... (le reste de la classe reste inchangé : set_playback_position, update_grid_parameters, etc.)
 
     def on_solo_changed(self, instance, value) -> None:
         self.update_mute_solo_appearance()

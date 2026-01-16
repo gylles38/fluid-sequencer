@@ -1824,6 +1824,7 @@ class SequencerLayout(BoxLayout):
         for sv in scroll_views:
             sv.fbind('scroll_x', lambda instance, value: self._synchronize_scroll(instance, value))
             sv.bind(on_scroll_stop=self._on_scroll_stop)
+            
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"

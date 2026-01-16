@@ -724,8 +724,10 @@ class AutomationEditor(ModalView):
     history = ObjectProperty(None)
 
 
-    def __init__(self, **kwargs):
+    def __init__(self, initial_param='vol', **kwargs):
         self.history = EditHistoryManager()
+        # On extrait track et sequencer_layout de kwargs avant le super s'ils y sont
+        # ou on s'assure qu'ils sont passés par propriétés.        
         super(AutomationEditor, self).__init__(**kwargs)
 
         self.track_copy = AutomationTrack(
@@ -735,9 +737,12 @@ class AutomationEditor(ModalView):
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
 
+        # On stocke le paramètre souhaité
+        self.selected_parameter = initial_param
+        
         Clock.schedule_once(self._post_kv_init)
         # On lance la surveillance automatique
-        Clock.schedule_interval(self._sync_ui, 0.1)        
+        Clock.schedule_interval(self._sync_ui, 0.1)
         Window.bind(on_key_down=self._on_key_down)
 
     def _post_kv_init(self, dt):
@@ -753,7 +758,7 @@ class AutomationEditor(ModalView):
         automation_controls.selected_param = None        
 
         # On utilise Clock pour être sûr que le canevas et les boutons sont prêts
-        Clock.schedule_once(lambda dt: self._force_initial_selection(automation_controls), 0)
+        Clock.schedule_once(lambda dt: self._force_initial_selection(automation_controls, self.selected_parameter), 0)
         
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button
@@ -770,11 +775,11 @@ class AutomationEditor(ModalView):
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
 
-    def _force_initial_selection(self, controls):
-        # On sélectionne 'vol'
-        controls.select_param('vol')
-        # On force l'appel de mise à jour de la courbe
-        self.on_automation_selection_change(controls, 'vol')
+    def _force_initial_selection(self, controls, param_name):
+        # On sélectionne le paramètre passé en argument (au lieu de 'vol' en dur)
+        controls.select_param(param_name)
+        # On force l'appel de mise à jour de la courbe pour ce paramètre
+        self.on_automation_selection_change(controls, param_name)
 
     def on_open(self):
         if not self.track:

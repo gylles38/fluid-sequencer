@@ -870,12 +870,25 @@ class TrackWidget(BoxLayout):
             editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
             editor.open()
 
-    def open_automation_editor(self, instance=None) -> None:
+    def open_automation_editor(self):
         if self._editor_opening:
             return
+        
         if isinstance(self.track, AutomationTrack):
             self._editor_opening = True
-            editor = AutomationEditor(track=self.track, sequencer_layout=self.sequencer_layout)
+            
+            # On demande à l'objet automation_controls quel paramètre est actif
+            active_param = 'vol' # Valeur de sécurité
+            if hasattr(self, 'automation_controls'):
+                active_param = self.automation_controls.selected_param            
+
+            # On passe ce paramètre à l'initialisation de l'éditeur
+            editor = AutomationEditor(
+                track=self.track,
+                sequencer_layout=self.sequencer_layout,
+                initial_param=active_param
+            )
+            
             editor.bind(on_dismiss=self._on_editor_dismiss)
             editor.open()
 

@@ -25,6 +25,7 @@ from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
+from kivymd.uix.boxlayout import MDBoxLayout
 
 class AutomationGrid(Widget):
     def __init__(self, track_widget, **kwargs) -> None:
@@ -139,7 +140,7 @@ class TrackWidget(BoxLayout):
     pixels_per_beat = NumericProperty(dp(100))
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
-    controls_width = NumericProperty(dp(400))
+    controls_width = NumericProperty(dp(430))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         super(TrackWidget, self).__init__(**kwargs)
@@ -157,20 +158,30 @@ class TrackWidget(BoxLayout):
         else:
             self.height = dp(112)
         self.spacing = dp(12)
-        self.padding = [dp(12), 0, dp(12), 0]
-
-        # --- Canvas Background ---
+        
+        #self.padding = [dp(12), 0, dp(12), 0]
+        self.padding = [0, 0, 0, 0] # REMISE À ZÉRO POUR TESTS          
+        
         with self.canvas.before:
-            Color(0.15, 0.15, 0.15, 1) if track_index % 2 == 0 else Color(0.12, 0.12, 0.12, 1)
+            if track_index % 2 == 0:
+                Color(0.1, 0.1, 0.1, 1)
+            else:
+                Color(0.12, 0.12, 0.12, 1)
+            # BIEN ASSIGNER À SELF ICI
             self.background_rect = Rectangle(pos=self.pos, size=self.size)
-            Color(0.3, 0.3, 0.3, 0.5)
-            self.border_line = Line(points=[self.x, self.y, self.x + self.width, self.y], width=0.5)
 
+        with self.canvas.after:
+            # On ne garde que le séparateur vertical (Section Gauche / Grille)
+            Color(0, 0, 0, 1) # Noir pur pour la coupure verticale
+            self.vert_separator = Rectangle(pos=self.pos, size=(dp(2), self.height))
+
+        # Assurez-vous que le fond (background_rect) est bien défini dans canvas.before
         self.bind(pos=self._update_graphics, size=self._update_graphics)
-
+        
         # --- Left Section: Track Info ---
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[dp(4), 0, 0, 0])
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[dp(10), dp(2), dp(10), dp(2)])
 
+        labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
         # Non-editable track index
         self.index_label = MDLabel(
             text=f"[{track_index}]",
@@ -178,11 +189,12 @@ class TrackWidget(BoxLayout):
             valign='middle',
             theme_text_color="Custom",
             text_color=[0.7, 0.7, 0.7, 1],
-            font_size=dp(14),
             bold=True,
             size_hint_x=None,
             width=dp(30),
-            pos_hint={'center_y': 0.5}
+            # Ajoute ceci :
+            padding=labelPadding,          # ← top=2dp → descend le texte de 2 pixels
+            # ou inverse si tu veux monter : padding=[0, 0, 0, dp(2)] pour bottom
         )
         self.info_section.add_widget(self.index_label)
 
@@ -192,7 +204,8 @@ class TrackWidget(BoxLayout):
             font_size=dp(14),
             bold=True,
             color=[0.9, 0.9, 0.9, 1],
-            pos_hint={'center_y': 0.5}
+            pos_hint={'center_y': 0.5},
+            padding=[0, 0, 0, dp(1)] #bottom=1dp → monte le texte de 1 pixel
         )
         self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_section.add_widget(self.name_label)
@@ -768,13 +781,35 @@ class TrackWidget(BoxLayout):
             self.playback_line.x = 0 
         self.timeline_scroll.scroll_x = 0.0
 
-    def _update_graphics(self, *args) -> None:
-        """Callback to update the size and position of canvas elements when the widget moves or resizes."""
-        if hasattr(self, 'background_rect'):
-            self.background_rect.pos = self.pos
-            self.background_rect.size = self.size
-        if hasattr(self, 'border_line'):
-            self.border_line.points = [self.x, self.y, self.x + self.width, self.y]
+    def _update_graphics(self, *args):
+        # Sécurité : on vérifie que background_rect existe
+        if not hasattr(self, 'background_rect'):
+            return
+
+        self.background_rect.pos = self.pos
+        self.background_rect.size = self.size
+
+        if hasattr(self, 'vert_separator'):
+            # On cherche le point de séparation le plus fiable
+            split_x = None
+            
+            # 1. On tente via le clavier MIDI
+            if hasattr(self, 'keyboard_sv'):
+                split_x = self.keyboard_sv.x
+            # 2. On tente via le scroll de la timeline
+            elif hasattr(self, 'timeline_scroll'):
+                split_x = self.timeline_scroll.x
+            
+            # Si split_x a été trouvé, on dessine. Sinon, on calcule une valeur par défaut
+            # pour éviter que le trait disparaisse totalement sur les pistes suivantes
+            if split_x is None:
+                # Fallback basé sur les largeurs connues (ajustez les noms selon vos variables)
+                split_x = self.x + self.info_width + self.controls_width
+                if isinstance(self.track, MidiTrack):
+                    split_x += dp(40) # Largeur du clavier
+
+            self.vert_separator.pos = (split_x - dp(1), self.y)
+            self.vert_separator.size = (dp(2), self.height)
 
     def _update_type_icon_bg(self, *args) -> None:
         """Updates the background of the track type icon."""

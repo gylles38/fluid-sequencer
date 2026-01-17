@@ -1145,22 +1145,35 @@ class AutomationEditor(ModalView):
             self.is_dirty = True
 
     def clear_all_points(self, *args):
-        # 1. Vider la source de données (copie de travail)
-        self.track_copy.points = [] 
-        self.is_dirty = True
+        # 1. Filtrage de la source de données (ne supprime que le paramètre actuel)
+        # On garde les points qui appartiennent à d'autres types d'automation
+        self.track_copy.points = [
+            p for p in self.track_copy.points 
+            if p.parameter != self.selected_parameter
+        ]
         
-        # 2. Réinitialiser les sélections (important pour éviter les crashs si on bouge la souris après)
-        self.selected_point = None
-        self.ids.grid.selected_point = None
-        self.update_status_bar(None)
-
-        # 3. Vider la liste VISIBLE (C'est le déclencheur clé pour Kivy)
-        # Le widget 'grid' est lié à 'visible_points' dans le KV.
+        # 2. Vider la liste VISIBLE pour ce paramètre
+        # Comme on ne visualise qu'un paramètre à la fois dans la grille, 
+        # vider cette liste efface la courbe à l'écran.
         self.visible_points = []
         
-        # 4. Forcer le redessin du widget Grille
-        # On appelle directement sa méthode de dessin pour être sûr à 100%
-        self.ids.grid.draw_curve_and_points()
+        self.is_dirty = True
+        
+        # 3. Réinitialiser les sélections (évite les crashs après suppression)
+        self.selected_point = None
+        if hasattr(self.ids, 'grid'):
+            self.ids.grid.selected_point = None
+            
+        if hasattr(self, 'update_status_bar'):
+            self.update_status_bar(None)
+
+        # 4. Gestion de l'historique (Undo)
+        if hasattr(self, 'undo_stack'):
+            self.undo_stack.append(copy.deepcopy(self.track_copy.points))
+
+        # 5. Forcer le redessin du widget Grille
+        if hasattr(self.ids, 'grid'):
+            self.ids.grid.draw_curve_and_points()
 
     def show_curve_type_popup(self, point, touch):
         if self.selected_parameter == 'prog': 

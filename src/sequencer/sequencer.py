@@ -372,57 +372,49 @@ class Sequencer(EventDispatcher):
             return 0.0
 
     def get_song_length_in_beats(self) -> float:
-        """
-        Calculates the total length of the song in beats.
-        If recording, the length is dynamic and extends to the current playhead position.
-        Otherwise, it's based on the last event and cached for performance.
-        """
-        # If not recording, try to use the cache first.
+        """Calcule la durée totale en beats, incluant le réglage manuel de l'UI."""
+        # 1. Utiliser le cache si disponible et qu'on n'enregistre pas
         if not self.is_recording and self._cached_song_length_beats is not None:
             return self._cached_song_length_beats
 
+        # 2. Calculer la longueur "naturelle" (basée sur les notes/audio)
         max_beat = 0.0
-        # Always calculate the "natural" end of the song based on existing events
         for track in self.song.tracks:
             if isinstance(track, AudioTrack):
-                duration_beats = self._get_audio_duration_in_beats(track)
-                end_beat = track.start_time + duration_beats
-                if end_beat > max_beat:
-                    max_beat = end_beat
+                duration = self._get_audio_duration_in_beats(track)
+                max_beat = max(max_beat, track.start_time + duration)
             elif isinstance(track, MidiTrack):
-                if hasattr(track, 'events') and track.events:
-                    for event in track.events:
-                        for note in event.notes:
-                            end_beat = event.start_time + note.duration
-                            if end_beat > max_beat:
-                                max_beat = end_beat
+                for event in getattr(track, 'events', []):
+                    for note in event.notes:
+                        max_beat = max(max_beat, event.start_time + note.duration)
             elif isinstance(track, AutomationTrack):
-                if hasattr(track, 'points') and track.points:
-                    last_point_beat = max(p.start_time for p in track.points)
-                    if last_point_beat > max_beat:
-                        max_beat = last_point_beat
+                if track.points:
+                    max_beat = max(max_beat, max(p.start_time for p in track.points))
 
-        # If recording, the dynamic length is the greater of the natural end or the current playhead
-        if self.is_recording:
-            current_beat = self.jack_manager.get_current_beat()
-            max_beat = max(max_beat, current_beat)
+        # 3. Intégrer la position de fin manuelle saisie dans l'UI
+        if self.ui_end_pos_str:
+            manual_beats = self.parse_position_to_beats(self.ui_end_pos_str)
+            if manual_beats is not None:
+                max_beat = max(max_beat, manual_beats)
 
-        # Round up to the next measure
-        beats_per_measure = self.song.time_signature_numerator
-        min_length = beats_per_measure * 4
-
-        if max_beat > 0.0:
-            rounded_length = math.ceil((max_beat + 0.0001) / beats_per_measure) * beats_per_measure
-        else:
-            rounded_length = min_length
-
-        rounded_length = max(rounded_length, min_length)
-
-        # Only cache the result if we are NOT recording
+        # 4. Appliquer un minimum de 4 mesures et arrondir à la mesure supérieure
+        beats_per_measure = self.song.time_signature_numerator or 4
+        min_length = float(beats_per_measure * 4)
+        
+        total = max(max_beat, min_length)
+        rounded_length = math.ceil((total + 0.0001) / beats_per_measure) * beats_per_measure
+        
         if not self.is_recording:
             self._cached_song_length_beats = rounded_length
+            
+        return float(rounded_length)
 
-        return rounded_length
+    def set_song_length_from_ui(self, position_str: str):
+        """Définit manuellement la fin du morceau et rafraîchit l'UI"""
+        self.ui_end_pos_str = position_str
+        self.invalidate_song_length_cache()
+        # On déclenche l'événement pour que Kivy mette à jour les widgets
+        self.song_structure_changed += 1
 
     def _all_notes_off(self):
         for port in self.open_ports.values():

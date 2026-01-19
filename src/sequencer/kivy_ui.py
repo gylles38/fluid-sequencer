@@ -1877,15 +1877,26 @@ class SequencerLayout(BoxLayout):
             self.sequencer._resync_all_at_beat(0.0)
 
     def on_end_position_validate(self, instance=None):
-        """Valide la position de fin"""
+        """Appelé quand l'utilisateur valide le champ 'End:'"""
         position = self.end_pos_input.text
+        
+        # 1. Mettre à jour la valeur dans le séquenceur
         self.sequencer.ui_end_pos_str = position
-        print(f"End position validated: {position}")
         self.end_pos_manual_override = True
-        # Ici vous pouvez ajouter la logique pour traiter la nouvelle position de fin
-        # Par exemple :
-        # self.process_command_ui(f'endpos "{position}"')
-
+        
+        # 2. Forcer le recalcul de la longueur (invalider le cache)
+        self.sequencer.invalidate_song_length_cache()
+        
+        # 3. Notifier l'UI que la structure a changé pour redessiner la grille
+        # Cela appellent update_track_list qui utilise la nouvelle valeur
+        self.sequencer.song_structure_changed += 1 
+        
+        new_beat = self.sequencer.parse_position_to_beats(position)        
+        self.ruler.total_beats = new_beat
+        self.ruler.redraw()
+        
+        print(f"Grid extended to: {position}")
+        
     def on_start_pos_text_change(self, instance, value):
         self.sequencer.ui_start_pos_str = value
 

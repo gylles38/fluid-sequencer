@@ -105,7 +105,7 @@ class Ruler(BoxLayout):
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
     spacing = NumericProperty(dp(12))
-    padding = ListProperty([dp(12), dp(6), dp(12), dp(6)])
+    padding = ListProperty([dp(1), dp(6), dp(12), dp(6)])
     label_padding_x = NumericProperty(dp(4))
     end_pos_str = StringProperty('')
 

@@ -24,10 +24,10 @@ class MeasureGrid(Widget):
         
         with self.canvas:
             current_beat = 0
-            while current_beat < self.total_beats:
+            while current_beat <= self.total_beats:
                 x_pos = current_beat * self.pixels_per_beat
                 
-                if x_pos >= total_width:
+                if x_pos > total_width + 1:
                     break 
 
                 # Style de la ligne

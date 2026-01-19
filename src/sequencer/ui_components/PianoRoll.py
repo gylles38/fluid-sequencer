@@ -65,7 +65,7 @@ class PianoRoll(Widget):
                     Line(points=[self.x, octave_line_y, self.x + self.width, octave_line_y], width=1.2)
 
             current_beat = 0
-            while current_beat < self.total_beats:
+            while current_beat <= self.total_beats:
                 x_pos = current_beat * self.pixels_per_beat
                 if current_beat % self.beat_per_measure == 0:
                     Color(0.8, 0.8, 0.8, 0.8)

@@ -2185,13 +2185,26 @@ class SequencerLayout(BoxLayout):
             return
         self._is_scrolling = True
 
+        # Calculate the absolute pixel offset from the source.
+        # This ensures perfect alignment even if viewport widths differ (e.g. vertical scrollbars).
+        content_width_source = source_scroll_view.children[0].width
+        viewport_width_source = source_scroll_view.width
+        max_scroll_source = content_width_source - viewport_width_source
+        pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
+
         scrollable_widgets = [self.ruler.scroll_view] + [
             track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
         ]
 
         for scroll_widget in scrollable_widgets:
             if scroll_widget is not source_scroll_view:
-                scroll_widget.scroll_x = scroll_x_value
+                content_width = scroll_widget.children[0].width
+                viewport_width = scroll_widget.width
+                max_scroll = content_width - viewport_width
+                if max_scroll > 0:
+                    scroll_widget.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
+                else:
+                    scroll_widget.scroll_x = 0
 
         self._is_scrolling = False
 

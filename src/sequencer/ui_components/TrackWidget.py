@@ -465,8 +465,8 @@ class TrackWidget(BoxLayout):
             self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
 
             # Link vertical scrolling between keyboard and timeline
-            keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
-            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+            self.keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
+            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(self.keyboard_sv, 'scroll_y', v))
 
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
@@ -480,7 +480,7 @@ class TrackWidget(BoxLayout):
                     scroll_y = 1 - (desired_top_y / max_top_y)
                 else:
                     scroll_y = 0
-                keyboard_sv.scroll_y = scroll_y
+                self.keyboard_sv.scroll_y = scroll_y
             Clock.schedule_once(set_default_scroll)
 
             # Add to main layout

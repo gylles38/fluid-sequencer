@@ -31,7 +31,7 @@ class RulerContent(RelativeLayout):
         self.bg_rect.size = self.size
 
     def redraw(self, *args):
-        self.canvas.after.clear()
+        self.canvas.clear()
         self.clear_widgets()
 
         if self.total_beats <= 0 or self.beats_per_measure <= 0:
@@ -40,7 +40,7 @@ class RulerContent(RelativeLayout):
         pixels_per_beat = self.pixels_per_beat
         num_measures = math.ceil(self.total_beats / self.beats_per_measure)
 
-        with self.canvas.after:
+        with self.canvas:
             # --- Draw Measure Lines ---
             for i in range(1, num_measures + 2):
                 beat_pos = (i - 1) * self.beats_per_measure

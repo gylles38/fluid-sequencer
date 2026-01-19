@@ -407,25 +407,25 @@ class TrackWidget(BoxLayout):
             self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(50)))
 
         # --- Left Panel Container ---
-        left_panel = BoxLayout(
+        self.left_panel = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
             spacing=self.spacing
         )
-        left_panel.add_widget(self.info_section)
-        left_panel.add_widget(self.controls_section)
-        left_panel.width = self.info_width + self.controls_width + self.spacing
-        self.add_widget(left_panel)
+        self.left_panel.add_widget(self.info_section)
+        self.left_panel.add_widget(self.controls_section)
+        self.left_panel.width = self.info_width + self.controls_width + self.spacing
+        self.add_widget(self.left_panel)
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
             note_height = dp(12)
 
             # 1. Keyboard (fixed width)
-            keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
-            keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
+            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
+            self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
-            keyboard_sv.add_widget(self.piano_keyboard)
+            self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
@@ -484,12 +484,12 @@ class TrackWidget(BoxLayout):
             Clock.schedule_once(set_default_scroll)
 
             # Add to main layout
-            self.add_widget(keyboard_sv)
+            self.add_widget(self.keyboard_sv)
             self.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
             # Create a layout for the track type icon, replacing the old spacer
-            icon_layout = BoxLayout(
+            self.icon_layout = BoxLayout(
                 size_hint_x=None,
                 width=dp(40),
                 orientation='vertical'
@@ -513,9 +513,9 @@ class TrackWidget(BoxLayout):
                 valign='center'
             )
 
-            icon_layout.add_widget(Widget()) # Top spacer
-            icon_layout.add_widget(icon)
-            icon_layout.add_widget(Widget()) # Bottom spacer
+            self.icon_layout.add_widget(Widget()) # Top spacer
+            self.icon_layout.add_widget(icon)
+            self.icon_layout.add_widget(Widget()) # Bottom spacer
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
@@ -575,7 +575,7 @@ class TrackWidget(BoxLayout):
             self.timeline_scroll.add_widget(self.timeline_container)
 
             # Add the icon and timeline directly to the main layout
-            self.add_widget(icon_layout)
+            self.add_widget(self.icon_layout)
             self.add_widget(self.timeline_scroll)
 
             # --- Playback Line (Cursor) ---
@@ -791,22 +791,14 @@ class TrackWidget(BoxLayout):
 
         if hasattr(self, 'vert_separator'):
             # On cherche le point de séparation le plus fiable
-            split_x = None
-            
-            # 1. On tente via le clavier MIDI
-            if hasattr(self, 'keyboard_sv'):
-                split_x = self.keyboard_sv.x
-            # 2. On tente via le scroll de la timeline
-            elif hasattr(self, 'timeline_scroll'):
-                split_x = self.timeline_scroll.x
-            
-            # Si split_x a été trouvé, on dessine. Sinon, on calcule une valeur par défaut
-            # pour éviter que le trait disparaisse totalement sur les pistes suivantes
-            if split_x is None:
-                # Fallback basé sur les largeurs connues (ajustez les noms selon vos variables)
-                split_x = self.x + self.info_width + self.controls_width
-                if isinstance(self.track, MidiTrack):
-                    split_x += dp(40) # Largeur du clavier
+            # On utilise le bord droit du left_panel pour placer le séparateur
+            if hasattr(self, 'left_panel'):
+                split_x = self.left_panel.right + self.spacing / 2
+            else:
+                # Fallback basé sur les largeurs connues
+                split_x = self.x + self.info_width + self.controls_width + self.spacing / 2
+                if self.padding:
+                    split_x += self.padding[0]
 
             self.vert_separator.pos = (split_x - dp(1), self.y)
             self.vert_separator.size = (dp(2), self.height)

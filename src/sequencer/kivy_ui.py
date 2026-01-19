@@ -1795,6 +1795,7 @@ class SequencerLayout(BoxLayout):
 
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
             track_widget.total_beats = final_total_beats
+            track_widget.pixels_per_beat = self.pixels_per_beat
             self.track_widgets.append(track_widget)
             # Force l'appel de la mise à jour graphique une fois que tout est rendu
             Clock.schedule_once(track_widget._update_graphics, 0) 

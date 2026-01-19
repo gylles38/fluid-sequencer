@@ -1,5 +1,6 @@
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.properties import ObjectProperty, NumericProperty, ListProperty
 from kivy.uix.label import Label
 from kivy.metrics import dp
@@ -11,7 +12,7 @@ from sequencer.models import MidiTrack
 from kivy.properties import StringProperty
 
 
-class RulerContent(Widget):
+class RulerContent(RelativeLayout):
     sequencer_layout = ObjectProperty(None)
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
@@ -23,11 +24,10 @@ class RulerContent(Widget):
         super().__init__(**kwargs)
         with self.canvas.before:
             Color(0.18, 0.18, 0.18, 1)
-            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
-        self.bind(pos=self._update_bg, size=self._update_bg, end_pos_str=self.redraw)
+            self.bg_rect = Rectangle(pos=(0, 0), size=self.size)
+        self.bind(size=self._update_bg, end_pos_str=self.redraw)
 
     def _update_bg(self, *args):
-        self.bg_rect.pos = self.pos
         self.bg_rect.size = self.size
 
     def redraw(self, *args):
@@ -46,7 +46,7 @@ class RulerContent(Widget):
                 beat_pos = (i - 1) * self.beats_per_measure
                 x_pos = beat_pos * pixels_per_beat
                 Color(0.4, 0.4, 0.4, 1)
-                Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1)
+                Line(points=[x_pos, 0, x_pos, self.height], width=1)
 
             # --- Draw End Position Marker ---
             if self.sequencer_layout and self.end_pos_str:
@@ -54,7 +54,7 @@ class RulerContent(Widget):
                 if end_beat is not None:
                     x_pos = end_beat * pixels_per_beat
                     Color(0.2, 0.5, 0.8, 1)  # A distinct blue color
-                    Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=dp(1.5))
+                    Line(points=[x_pos, 0, x_pos, self.height], width=dp(1.5))
 
         for i in range(1, num_measures + 2):
             beat_pos = (i - 1) * self.beats_per_measure
@@ -105,7 +105,7 @@ class Ruler(BoxLayout):
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
     spacing = NumericProperty(dp(12))
-    padding = ListProperty([dp(1), dp(6), dp(12), dp(6)])
+    padding = ListProperty([0, dp(6), 0, dp(6)])
     label_padding_x = NumericProperty(dp(4))
     end_pos_str = StringProperty('')
 

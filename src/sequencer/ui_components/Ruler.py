@@ -64,6 +64,7 @@ class RulerContent(RelativeLayout):
                 text=str(i),
                 font_size='10sp',
                 pos=(x_pos, 0),
+                size_hint=(None, None),
                 size=(pixels_per_beat * self.beats_per_measure, self.height),
                 halign='left',
                 valign='middle',

@@ -22,17 +22,28 @@ class RulerContent(RelativeLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        with self.canvas.before:
+        # Separate widget for drawing to avoid clearing RelativeLayout's matrix
+        self.drawing_widget = Widget(size_hint=(1, 1))
+        self.add_widget(self.drawing_widget)
+
+        with self.drawing_widget.canvas.before:
             Color(0.18, 0.18, 0.18, 1)
             self.bg_rect = Rectangle(pos=(0, 0), size=self.size)
-        self.bind(size=self._update_bg, end_pos_str=self.redraw)
+
+        self.bind(size=self._update_bg, end_pos_str=self.redraw,
+                  total_beats=self.redraw, pixels_per_beat=self.redraw)
 
     def _update_bg(self, *args):
         self.bg_rect.size = self.size
+        self.drawing_widget.size = self.size
 
     def redraw(self, *args):
-        self.canvas.clear()
-        self.clear_widgets()
+        # Clear only labels (widgets that are not the drawing_widget)
+        for child in list(self.children):
+            if child is not self.drawing_widget:
+                self.remove_widget(child)
+
+        self.drawing_widget.canvas.clear()
 
         if self.total_beats <= 0 or self.beats_per_measure <= 0:
             return
@@ -40,7 +51,7 @@ class RulerContent(RelativeLayout):
         pixels_per_beat = self.pixels_per_beat
         num_measures = math.ceil(self.total_beats / self.beats_per_measure)
 
-        with self.canvas:
+        with self.drawing_widget.canvas:
             # --- Draw Measure Lines ---
             for i in range(1, num_measures + 2):
                 beat_pos = (i - 1) * self.beats_per_measure
@@ -52,9 +63,9 @@ class RulerContent(RelativeLayout):
             if self.sequencer_layout and self.end_pos_str:
                 end_beat = self.sequencer_layout.sequencer.parse_position_to_beats(self.end_pos_str)
                 if end_beat is not None:
-                    x_pos = end_beat * pixels_per_beat
+                    end_x_pos = end_beat * pixels_per_beat
                     Color(0.2, 0.5, 0.8, 1)  # A distinct blue color
-                    Line(points=[x_pos, 0, x_pos, self.height], width=dp(1.5))
+                    Line(points=[end_x_pos, 0, end_x_pos, self.height], width=dp(1.5))
 
         for i in range(1, num_measures + 2):
             beat_pos = (i - 1) * self.beats_per_measure
@@ -116,10 +127,24 @@ class Ruler(BoxLayout):
         self.bind(spacing=self.setter('spacing'))
         self.bind(padding=self.setter('padding'))
 
+        # --- Group left spacers to match TrackWidget structure ---
+        self.ruler_left_panel = BoxLayout(
+            orientation='horizontal',
+            size_hint_x=None,
+            spacing=self.spacing
+        )
         self.left_spacer = Widget(size_hint_x=None)
         self.controls_spacer = Widget(size_hint_x=None)
+        self.ruler_left_panel.add_widget(self.left_spacer)
+        self.ruler_left_panel.add_widget(self.controls_spacer)
+
         self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
-        self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
+        self.scroll_view = ScrollView(
+            size_hint_x=1,
+            do_scroll_y=False,
+            scroll_type=['content'],
+            bar_width=dp(10)
+        )
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
             pixels_per_beat=self.pixels_per_beat,
@@ -130,11 +155,15 @@ class Ruler(BoxLayout):
         )
         self.scroll_view.add_widget(self.ruler_content)
 
-        self.add_widget(self.left_spacer)
-        self.add_widget(self.controls_spacer)
+        self.add_widget(self.ruler_left_panel)
         self.add_widget(self.keyboard_spacer)
         self.add_widget(self.scroll_view)
 
+        # Helper to update ruler_left_panel width
+        def _update_ruler_left_width(*args):
+            self.ruler_left_panel.width = self.info_width + self.controls_width + self.spacing
+
+        self.bind(info_width=_update_ruler_left_width, controls_width=_update_ruler_left_width, spacing=_update_ruler_left_width)
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))

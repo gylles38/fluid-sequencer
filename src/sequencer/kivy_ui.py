@@ -603,7 +603,11 @@ class SequencerLayout(BoxLayout):
         track_area_card.add_widget(self.ruler)
 
         # Conteneur pour la liste des pistes avec défilement
-        self.scroll_view = ScrollView(size_hint=(1, 1))
+        self.scroll_view = ScrollView(
+            size_hint=(1, 1),
+            scroll_type=['content'],
+            bar_width=dp(10)
+        )
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(6))
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
         self.scroll_view.add_widget(self.track_list_layout)
@@ -2186,25 +2190,32 @@ class SequencerLayout(BoxLayout):
         self._is_scrolling = True
 
         # Calculate the absolute pixel offset from the source.
-        # This ensures perfect alignment even if viewport widths differ (e.g. vertical scrollbars).
-        content_width_source = source_scroll_view.children[0].width
-        viewport_width_source = source_scroll_view.width
-        max_scroll_source = content_width_source - viewport_width_source
-        pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
+        # Use children[0] width as content width.
+        try:
+            content_width_source = source_scroll_view.children[0].width
+            viewport_width_source = source_scroll_view.width
+            # Robust max_scroll calculation
+            max_scroll_source = max(0, content_width_source - viewport_width_source)
+            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
 
-        scrollable_widgets = [self.ruler.scroll_view] + [
-            track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
-        ]
+            scrollable_widgets = [self.ruler.scroll_view] + [
+                track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
+            ]
 
-        for scroll_widget in scrollable_widgets:
-            if scroll_widget is not source_scroll_view:
-                content_width = scroll_widget.children[0].width
-                viewport_width = scroll_widget.width
-                max_scroll = content_width - viewport_width
-                if max_scroll > 0:
-                    scroll_widget.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
-                else:
-                    scroll_widget.scroll_x = 0
+            for scroll_widget in scrollable_widgets:
+                if scroll_widget is not source_scroll_view:
+                    try:
+                        content_width = scroll_widget.children[0].width
+                        viewport_width = scroll_widget.width
+                        max_scroll = max(0, content_width - viewport_width)
+                        if max_scroll > 0:
+                            scroll_widget.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
+                        else:
+                            scroll_widget.scroll_x = 0
+                    except (IndexError, AttributeError):
+                        continue
+        except (IndexError, AttributeError):
+            pass
 
         self._is_scrolling = False
 

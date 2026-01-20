@@ -38,8 +38,8 @@ class MeasureGrid(Widget):
                     line_width = 0.5
                     Color(0.5, 0.5, 0.5, 0.4) # Temps intermédiaire (si vous implémentez l'affichage des temps)
 
-                # Dessin : self.x est l'origine du MeasureGrid dans le ScrollView
-                Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=line_width)
+                # Dessin : local coordinates thanks to RelativeLayout parent
+                Line(points=[x_pos, 0, x_pos, self.height], width=line_width)
 
                 # Incrémenter par 1 beat pour afficher les temps
                 current_beat += 1

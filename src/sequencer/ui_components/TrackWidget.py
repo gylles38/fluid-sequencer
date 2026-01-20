@@ -11,6 +11,7 @@ class HoverableSlider(MDSlider, HoverBehavior):
     pass
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
@@ -27,7 +28,7 @@ from kivy.graphics import Color, Rectangle
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.boxlayout import MDBoxLayout
 
-class AutomationGrid(Widget):
+class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
         self.track_widget: Any = track_widget
@@ -143,6 +144,7 @@ class TrackWidget(BoxLayout):
     controls_width = NumericProperty(dp(430))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
+        self.spacing = dp(12) # Définir avant super().__init__ pour que BoxLayout l'utilise
         super(TrackWidget, self).__init__(**kwargs)
         self._editor_opening = False
         self.track = track
@@ -157,7 +159,6 @@ class TrackWidget(BoxLayout):
             self.height = dp(128)
         else:
             self.height = dp(112)
-        self.spacing = dp(12)
         
         #self.padding = [dp(12), 0, dp(12), 0]
         self.padding = [0, 0, 0, 0] # REMISE À ZÉRO POUR TESTS          
@@ -428,12 +429,18 @@ class TrackWidget(BoxLayout):
             self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
-            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
+            self.timeline_scroll = ScrollView(
+                size_hint_x=1,
+                do_scroll_x=True,
+                do_scroll_y=True,
+                scroll_type=['content'],
+                bar_width=dp(10)
+            )
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
             self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
 
-            # Content container (FloatLayout for overlaying playback line)
-            self.content = FloatLayout(size_hint=(None, None))
+            # Content container (RelativeLayout for local coordinate system)
+            self.content = RelativeLayout(size_hint=(None, None))
             self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
             self.timeline_container = self.content  # For compatibility with other methods
 
@@ -517,7 +524,13 @@ class TrackWidget(BoxLayout):
             self.icon_layout.add_widget(icon)
             self.icon_layout.add_widget(Widget()) # Bottom spacer
 
-            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
+            self.timeline_scroll = ScrollView(
+                size_hint_x=1,
+                do_scroll_x=True,
+                do_scroll_y=False,
+                scroll_type=['content'],
+                bar_width=dp(10)
+            )
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
 
             # A ScrollView must have a single child.
@@ -565,10 +578,6 @@ class TrackWidget(BoxLayout):
                     # On lie le widget aux propriétés du TrackWidget pour le zoom
                     self.bind(pixels_per_beat=curve_widget.setter('pixels_per_beat'))
                     
-                    # On force la mise à jour si la durée du morceau change
-                    # (via une petite fonction pour appeler get_song_length_in_beats)
-                    self.bind(size=lambda *x: self._sync_curve_durations())
-
                     self.automation_curves.append(curve_widget)
                     self.timeline_container.add_widget(curve_widget)
 
@@ -599,13 +608,6 @@ class TrackWidget(BoxLayout):
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
 
-    def _sync_curve_durations(self, *args) -> None:
-        total = self.sequencer_layout.sequencer.get_song_length_in_beats()
-        for curve in self.automation_curves:
-            curve.total_beats = total
-            # Recalcul manuel du pixels_per_beat si nécessaire
-            if total > 0:
-                curve.pixels_per_beat = self.timeline_container.width / total
 
     def _get_target_track_name_for_tooltip(self) -> str:
         """Retourne le nom de la piste cible pour le tooltip."""

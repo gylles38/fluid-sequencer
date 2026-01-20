@@ -50,29 +50,29 @@ class PianoRoll(Widget):
             # --- Grid ---
             for i in range(128):
                 # Y-coordinate is now proportional to pitch (bottom-up)
-                note_y = self.y + i * self.note_height
+                note_y = i * self.note_height
                 if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1) # Black keys
                 else: Color(0.2, 0.2, 0.22, 1) # White keys
 
                 # Draw horizontal lines for note separation
-                Line(points=[self.x, note_y, self.x + self.width, note_y], width=0.6)
+                Line(points=[0, note_y, self.width, note_y], width=0.6)
 
                 # Draw thicker lines to mark octaves (after B notes)
                 if (i % 12) == 11:
                     Color(0.8, 0.8, 0.8, 0.6)
                     # Draw octave line at the TOP of the B key row, to separate from C
                     octave_line_y = note_y + self.note_height
-                    Line(points=[self.x, octave_line_y, self.x + self.width, octave_line_y], width=1.2)
+                    Line(points=[0, octave_line_y, self.width, octave_line_y], width=1.2)
 
             current_beat = 0
             while current_beat <= self.total_beats:
                 x_pos = current_beat * self.pixels_per_beat
                 if current_beat % self.beat_per_measure == 0:
                     Color(0.8, 0.8, 0.8, 0.8)
-                    Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=1.5)
+                    Line(points=[x_pos, 0, x_pos, self.height], width=1.5)
                 else:
                     Color(0.5, 0.5, 0.5, 0.4)
-                    Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=0.5)
+                    Line(points=[x_pos, 0, x_pos, self.height], width=0.5)
                 current_beat += 1
 
         # --- Notes ---
@@ -81,7 +81,7 @@ class PianoRoll(Widget):
                 for event in self.track.events:
                     for note in event.notes:
                         note_x = event.start_time * self.pixels_per_beat
-                        note_y = self.y + note.pitch * self.note_height
+                        note_y = note.pitch * self.note_height
                         note_width = note.duration * self.pixels_per_beat
                         note_color = self._velocity_to_color(note.velocity)
 

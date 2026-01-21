@@ -62,8 +62,8 @@ Builder.load_string("""
         text_color: 1, 1, 1, 0.5
         size_hint: None, None
         size: dp(24), dp(24)
-        # Use absolute positioning with root.width for RelativeLayout
-        x: root.width - self.width
+        # Reactive positioning
+        right: root.width
         y: 0
 """)
 
@@ -71,29 +71,21 @@ class FloatingWindow(RelativeLayout):
     title = StringProperty("Window")
     is_maximized = BooleanProperty(False)
     _prev_state = ObjectProperty(None, allownone=True)
+    _touch_lock = BooleanProperty(True)
 
     def __init__(self, **kwargs):
         self.register_event_type('on_open')
         self.register_event_type('on_dismiss')
         super().__init__(**kwargs)
         self._drag_mode = None
-        # Ensure handle is correctly positioned after initialization
-        Clock.schedule_once(self._force_reposition_handle, 0)
-
-    def _force_reposition_handle(self, dt):
-        if 'resize_handle' in self.ids:
-            self.ids.resize_handle.x = self.width - self.ids.resize_handle.width
-            self.ids.resize_handle.y = 0
+        # Unlock touch after a short delay to prevent Accidental triggers on open (like double-click second tap)
+        Clock.schedule_once(lambda dt: setattr(self, '_touch_lock', False), 0.3)
 
     def add_widget(self, widget, index=0, canvas=None):
         # redirection logic
         if hasattr(self, 'ids') and 'window_content' in self.ids:
-            # Check for internal components by ID if possible, or class name as fallback
-            is_internal = False
-            if 'card' in self.ids and widget is self.ids.card: is_internal = True
-            if 'resize_handle' in self.ids and widget is self.ids.resize_handle: is_internal = True
-
-            if is_internal or widget.__class__.__name__ in ('MDCard', 'MDIcon'):
+            # Check for internal components by identity
+            if widget is self.ids.get('card') or widget is self.ids.get('resize_handle'):
                 super().add_widget(widget, index, canvas)
             else:
                 self.ids.window_content.add_widget(widget, index, canvas)
@@ -104,7 +96,11 @@ class FloatingWindow(RelativeLayout):
         if not self.collide_point(*touch.pos):
             return False
 
-        self.bring_to_front()
+        if self._touch_lock:
+            return True # Consume and ignore
+
+        # Bring to front using Clock to avoid breaking current touch dispatch
+        Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
 
         # Transform touch pos to local coordinates because RelativeLayout
         local_touch_pos = self.to_local(*touch.pos)

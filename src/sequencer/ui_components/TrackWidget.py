@@ -889,8 +889,12 @@ class TrackWidget(BoxLayout):
 
     def open_piano_roll_editor(self, instance=None) -> None:
         """Creates and opens the piano roll editor window for the current track."""
-        if not isinstance(self.track, MidiTrack):
+        # Use a more persistent flag if _editor_opening is being reset too quickly
+        if not isinstance(self.track, MidiTrack) or getattr(self, '_is_opening_editor', False):
             return
+
+        self._is_opening_editor = True
+        Clock.schedule_once(lambda dt: setattr(self, '_is_opening_editor', False), 0.5)
 
         from .piano_roll_editor import PianoRollEditor
         existing = self._find_existing_editor('PianoRollEditor')
@@ -899,7 +903,7 @@ class TrackWidget(BoxLayout):
             return
 
         sequencer = self.sequencer_layout.sequencer
-        
+
         # 1. Capturer la position actuelle AVANT d'arrêter
         captured_beat = sequencer.current_beat
 
@@ -915,6 +919,12 @@ class TrackWidget(BoxLayout):
         editor.open()
 
     def open_automation_editor(self, param=None):
+        if getattr(self, '_is_opening_editor', False):
+            return
+
+        self._is_opening_editor = True
+        Clock.schedule_once(lambda dt: setattr(self, '_is_opening_editor', False), 0.5)
+
         # Determine the target AutomationTrack
         target_at = None
         if isinstance(self.track, AutomationTrack):

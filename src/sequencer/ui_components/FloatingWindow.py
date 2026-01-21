@@ -1,4 +1,4 @@
-from kivymd.uix.relativelayout import MDRelativeLayout
+from kivy.uix.relativelayout import RelativeLayout
 from kivymd.uix.card import MDCard
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.properties import StringProperty, BooleanProperty, ObjectProperty
@@ -61,10 +61,9 @@ Builder.load_string("""
         text_color: 1, 1, 1, 0.5
         size_hint: None, None
         size: dp(24), dp(24)
-        pos: root.width - self.width, 0
 """)
 
-class FloatingWindow(MDRelativeLayout):
+class FloatingWindow(RelativeLayout):
     title = StringProperty("Window")
     is_maximized = BooleanProperty(False)
     _prev_state = ObjectProperty(None, allownone=True)
@@ -74,24 +73,21 @@ class FloatingWindow(MDRelativeLayout):
         self.register_event_type('on_dismiss')
         super().__init__(**kwargs)
         self._drag_mode = None
+        self.bind(size=self._reposition_handle)
+
+    def _reposition_handle(self, *args):
+        if 'resize_handle' in self.ids:
+            self.ids.resize_handle.x = self.width - self.ids.resize_handle.width
+            self.ids.resize_handle.y = 0
 
     def add_widget(self, widget, index=0, canvas=None):
-        # We only redirect if window_content exists AND this is not an internal widget.
-        # However, internal widgets are added during FloatingWindow KV loading,
-        # before ids are fully populated or available.
-        # After that, derived classes (Editors) will add their content.
-
-        # A simple check: if window_content is in ids, and we are not currently
-        # adding the card or handle (which we can check by looking at them if they exist).
-
-        content_area = self.ids.get('window_content')
-        if content_area:
-            # Check if this widget is already known as an internal one to avoid redirecting it
-            # But wait, they are already children.
-            if widget is self.ids.get('card') or widget is self.ids.get('resize_handle'):
+        # redirection logic
+        if hasattr(self, 'ids') and 'window_content' in self.ids:
+            if widget.__class__.__name__ in ('MDCard', 'MDIcon'):
+                # Heuristic: these are our internal components
                 super().add_widget(widget, index, canvas)
             else:
-                content_area.add_widget(widget, index, canvas)
+                self.ids.window_content.add_widget(widget, index, canvas)
         else:
             super().add_widget(widget, index, canvas)
 

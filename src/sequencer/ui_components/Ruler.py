@@ -5,6 +5,7 @@ from kivy.properties import ObjectProperty, NumericProperty, ListProperty, Strin
 from kivy.uix.label import Label
 from kivy.metrics import dp
 import math
+from kivy.clock import Clock
 from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle, Line
 
@@ -18,6 +19,7 @@ class RulerContent(RelativeLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._redraw_event = None
         self.drawing_widget = Widget(size_hint=(1, 1), pos=(0, 0))
         self.add_widget(self.drawing_widget)
 
@@ -25,13 +27,19 @@ class RulerContent(RelativeLayout):
             Color(0.18, 0.18, 0.18, 1)
             self.bg_rect = Rectangle(pos=(0, 0), size=self.size)
 
-        self.bind(size=self._update_bg, end_pos_str=self.redraw,
-                  total_beats=self.redraw, pixels_per_beat=self.redraw)
+        self.bind(size=self._update_bg, end_pos_str=self.trigger_redraw,
+                  total_beats=self.trigger_redraw, pixels_per_beat=self.trigger_redraw)
 
     def _update_bg(self, *args):
         self.bg_rect.size = self.size
         self.drawing_widget.size = self.size
         self.drawing_widget.pos = (0, 0)
+        self.trigger_redraw()
+
+    def trigger_redraw(self, *args):
+        if self._redraw_event:
+            self._redraw_event.cancel()
+        self._redraw_event = Clock.schedule_once(self.redraw)
 
     def redraw(self, *args):
         for child in list(self.children):
@@ -43,11 +51,13 @@ class RulerContent(RelativeLayout):
             return
 
         pixels_per_beat = self.pixels_per_beat
-        num_measures = math.ceil(self.total_beats / self.beats_per_measure)
+        # num_measures is the number of full measures in the project
+        num_measures = int(self.total_beats / self.beats_per_measure)
 
         with self.drawing_widget.canvas:
-            for i in range(1, num_measures + 2):
-                beat_pos = (i - 1) * self.beats_per_measure
+            # Draw lines for each measure boundary, including the last one
+            for i in range(num_measures + 1):
+                beat_pos = i * self.beats_per_measure
                 x_pos = beat_pos * pixels_per_beat
                 Color(0.4, 0.4, 0.4, 1)
                 Line(points=[x_pos, 0, x_pos, self.height], width=1)
@@ -59,12 +69,13 @@ class RulerContent(RelativeLayout):
                     Color(0.2, 0.5, 0.8, 1)
                     Line(points=[end_x_pos, 0, end_x_pos, self.height], width=dp(1.5))
 
-        for i in range(1, num_measures + 2):
-            beat_pos = (i - 1) * self.beats_per_measure
+        # Draw labels for each measure
+        for i in range(num_measures):
+            beat_pos = i * self.beats_per_measure
             x_pos = beat_pos * pixels_per_beat
 
             label = Label(
-                text=str(i),
+                text=str(i + 1),
                 font_size='10sp',
                 pos=(x_pos, 0),
                 size=(pixels_per_beat * self.beats_per_measure, self.height),
@@ -158,6 +169,14 @@ class Ruler(BoxLayout):
         self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))
         self.bind(label_padding_x=lambda i,v: setattr(self.ruler_content, 'label_padding_x', v))
         self.bind(end_pos_str=lambda i, v: setattr(self.ruler_content, 'end_pos_str', v))
+
+        # Ensure Ruler is reactive to total_beats and pixels_per_beat changes
+        self.bind(total_beats=self.trigger_redraw, pixels_per_beat=self.trigger_redraw)
+
+    def trigger_redraw(self, *args):
+        # We need to update the content width before redrawing
+        self.ruler_content.width = self.total_beats * self.pixels_per_beat
+        self.ruler_content.trigger_redraw()
 
     def redraw(self, *args):
         self.ruler_content.width = self.total_beats * self.pixels_per_beat

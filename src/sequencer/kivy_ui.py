@@ -1896,11 +1896,8 @@ class SequencerLayout(BoxLayout):
         
         # 3. Notifier l'UI que la structure a changé pour redessiner la grille
         # Cela appellent update_track_list qui utilise la nouvelle valeur
+        # update_track_list se chargera de mettre à jour ruler.total_beats et d'appeler ruler.redraw()
         self.sequencer.song_structure_changed += 1 
-        
-        new_beat = self.sequencer.parse_position_to_beats(position)        
-        self.ruler.total_beats = new_beat
-        self.ruler.redraw()
         
         print(f"Grid extended to: {position}")
         

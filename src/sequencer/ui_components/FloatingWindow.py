@@ -38,6 +38,12 @@ Builder.load_string("""
                 valign: 'middle'
 
             MDIconButton:
+                icon: 'window-maximize' if not root.is_maximized else 'window-restore'
+                theme_icon_color: "Custom"
+                icon_color: 1, 1, 1, 1
+                on_release: root.toggle_maximize()
+
+            MDIconButton:
                 icon: 'close'
                 theme_icon_color: "Custom"
                 icon_color: 1, 1, 1, 1
@@ -60,6 +66,8 @@ Builder.load_string("""
 
 class FloatingWindow(MDRelativeLayout):
     title = StringProperty("Window")
+    is_maximized = BooleanProperty(False)
+    _prev_state = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kwargs):
         self.register_event_type('on_open')
@@ -97,7 +105,7 @@ class FloatingWindow(MDRelativeLayout):
         local_touch_pos = self.to_local(*touch.pos)
 
         # Check resize handle (needs local pos relative to FloatingWindow)
-        if self.ids.resize_handle.collide_point(*local_touch_pos):
+        if not self.is_maximized and self.ids.resize_handle.collide_point(*local_touch_pos):
             touch.grab(self)
             self._drag_mode = 'resize'
             return True
@@ -117,6 +125,12 @@ class FloatingWindow(MDRelativeLayout):
             return super().on_touch_move(touch)
 
         if self._drag_mode == 'drag':
+            if self.is_maximized:
+                # dragging while maximized restores it
+                self.toggle_maximize()
+                # Center it around mouse if possible, or just restore
+                # For now, simple restore is safer.
+
             self.x += touch.dx
             self.y += touch.dy
         elif self._drag_mode == 'resize':
@@ -131,6 +145,27 @@ class FloatingWindow(MDRelativeLayout):
 
             self.width = target_width
         return True
+
+    def toggle_maximize(self):
+        if not self.parent:
+            return
+
+        if not self.is_maximized:
+            # Store current state
+            self._prev_state = (self.pos[:], self.size[:])
+            # Maximize
+            self.pos = (0, 0)
+            self.size = self.parent.size
+            self.is_maximized = True
+            # Hide resize handle when maximized
+            self.ids.resize_handle.opacity = 0
+        else:
+            # Restore
+            if self._prev_state:
+                self.pos, self.size = self._prev_state
+            self.is_maximized = False
+            # Show resize handle
+            self.ids.resize_handle.opacity = 1
 
     def on_touch_up(self, touch):
         if touch.grab_current is self:

@@ -4,7 +4,6 @@ from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
 from .HoverBehavior import HoverBehavior, HoverableMDButton
 from kivymd.uix.slider import MDSlider
-from .automation_editor import AutomationEditor
 from .AutomationCurve import AutomationCurveWidget
 
 class HoverableSlider(MDSlider, HoverBehavior):
@@ -929,7 +928,6 @@ class TrackWidget(BoxLayout):
             
             if not target_at:
                 # Create a new one
-                from sequencer.models import AutomationTrack
                 target_at = AutomationTrack(
                     name=f"Auto {self.track.name}",
                     target_track_index=self.track_index,

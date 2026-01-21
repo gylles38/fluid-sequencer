@@ -1,16 +1,12 @@
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
 from kivy.uix.relativelayout import RelativeLayout
-from kivy.properties import ObjectProperty, NumericProperty, ListProperty
+from kivy.properties import ObjectProperty, NumericProperty, ListProperty, StringProperty
 from kivy.uix.label import Label
 from kivy.metrics import dp
 import math
 from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Color, Rectangle, Line
-from sequencer.models import MidiTrack
-
-from kivy.properties import StringProperty
-
 
 class RulerContent(RelativeLayout):
     sequencer_layout = ObjectProperty(None)
@@ -22,7 +18,6 @@ class RulerContent(RelativeLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Separate widget for drawing to avoid clearing RelativeLayout's matrix
         self.drawing_widget = Widget(size_hint=(1, 1))
         self.add_widget(self.drawing_widget)
 
@@ -38,13 +33,11 @@ class RulerContent(RelativeLayout):
         self.drawing_widget.size = self.size
 
     def redraw(self, *args):
-        # Clear only labels (widgets that are not the drawing_widget)
         for child in list(self.children):
             if child is not self.drawing_widget:
                 self.remove_widget(child)
 
         self.drawing_widget.canvas.clear()
-
         if self.total_beats <= 0 or self.beats_per_measure <= 0:
             return
 
@@ -52,30 +45,29 @@ class RulerContent(RelativeLayout):
         num_measures = math.ceil(self.total_beats / self.beats_per_measure)
 
         with self.drawing_widget.canvas:
-            # --- Draw Measure Lines ---
             for i in range(1, num_measures + 2):
                 beat_pos = (i - 1) * self.beats_per_measure
                 x_pos = beat_pos * pixels_per_beat
                 Color(0.4, 0.4, 0.4, 1)
                 Line(points=[x_pos, 0, x_pos, self.height], width=1)
 
-            # --- Draw End Position Marker ---
             if self.sequencer_layout and self.end_pos_str:
                 end_beat = self.sequencer_layout.sequencer.parse_position_to_beats(self.end_pos_str)
                 if end_beat is not None:
                     end_x_pos = end_beat * pixels_per_beat
-                    Color(0.2, 0.5, 0.8, 1)  # A distinct blue color
+                    Color(0.2, 0.5, 0.8, 1)
                     Line(points=[end_x_pos, 0, end_x_pos, self.height], width=dp(1.5))
 
         for i in range(1, num_measures + 2):
             beat_pos = (i - 1) * self.beats_per_measure
-            x_pos = (beat_pos * pixels_per_beat)
+            x_pos = beat_pos * pixels_per_beat
 
             label = Label(
                 text=str(i),
                 font_size='10sp',
                 pos=(x_pos, 0),
                 size=(pixels_per_beat * self.beats_per_measure, self.height),
+                size_hint=(None, None),
                 halign='left',
                 valign='middle',
                 color=(0.8, 0.8, 0.8, 1),
@@ -88,10 +80,8 @@ class RulerContent(RelativeLayout):
         if self.collide_point(*touch.pos):
             if not self.sequencer_layout or self.total_beats <= 0 or self.pixels_per_beat <= 0:
                 return True
-
             local_x, _ = self.to_local(*touch.pos)
             clicked_beat = local_x / self.pixels_per_beat
-
             if self.sequencer_layout.sequencer.playback_state == 'stopped':
                 if touch.button == 'left':
                     self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
@@ -102,16 +92,15 @@ class RulerContent(RelativeLayout):
                     new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
                     self.sequencer_layout.sequencer.ui_end_pos_str = new_pos_str
                     self.sequencer_layout.end_pos_input.text = new_pos_str
-
             return True
         return super().on_touch_down(touch)
 
 class Ruler(BoxLayout):
     sequencer_layout = ObjectProperty(None)
     scroll_view = ObjectProperty(None)
-    info_width = NumericProperty(0)
-    controls_width = NumericProperty(0)
-    keyboard_width = NumericProperty(0)
+    info_width = NumericProperty(dp(150))
+    controls_width = NumericProperty(dp(430))
+    keyboard_width = NumericProperty(dp(40))
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
@@ -123,21 +112,23 @@ class Ruler(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
-        self.bind(spacing=self.setter('spacing'))
-        self.bind(padding=self.setter('padding'))
+        self.spacing = dp(12)
+        self.padding = [0, 0, 0, 0]
 
-        # --- Group left spacers to match TrackWidget structure ---
+        # --- Exact mirror of TrackWidget layout ---
         self.ruler_left_panel = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
-            spacing=self.spacing
+            spacing=self.spacing,
+            width=self.info_width + self.controls_width + self.spacing
         )
-        self.left_spacer = Widget(size_hint_x=None)
-        self.controls_spacer = Widget(size_hint_x=None)
+        self.left_spacer = Widget(size_hint_x=None, width=self.info_width)
+        self.controls_spacer = Widget(size_hint_x=None, width=self.controls_width)
         self.ruler_left_panel.add_widget(self.left_spacer)
         self.ruler_left_panel.add_widget(self.controls_spacer)
 
         self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
+
         self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
@@ -153,11 +144,11 @@ class Ruler(BoxLayout):
         self.add_widget(self.keyboard_spacer)
         self.add_widget(self.scroll_view)
 
-        # Helper to update ruler_left_panel width
-        def _update_ruler_left_width(*args):
-            self.ruler_left_panel.width = self.info_width + self.controls_width + self.spacing
+        # Dynamic updates
+        def update_left_panel_width(*args):
+             self.ruler_left_panel.width = self.info_width + self.controls_width + self.spacing
 
-        self.bind(info_width=_update_ruler_left_width, controls_width=_update_ruler_left_width, spacing=_update_ruler_left_width)
+        self.bind(info_width=update_left_panel_width, controls_width=update_left_panel_width)
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
@@ -166,10 +157,6 @@ class Ruler(BoxLayout):
         self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))
         self.bind(label_padding_x=lambda i,v: setattr(self.ruler_content, 'label_padding_x', v))
         self.bind(end_pos_str=lambda i, v: setattr(self.ruler_content, 'end_pos_str', v))
-
-    def on_sequencer_layout(self, instance, value):
-        if hasattr(self, 'ruler_content'):
-            self.ruler_content.sequencer_layout = value
 
     def redraw(self, *args):
         self.ruler_content.width = self.total_beats * self.pixels_per_beat

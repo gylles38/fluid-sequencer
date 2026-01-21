@@ -144,7 +144,7 @@ class TrackWidget(BoxLayout):
     controls_width = NumericProperty(dp(430))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
-        self.spacing = dp(12) # Définir avant super().__init__ pour que BoxLayout l'utilise
+        self.spacing = dp(12)
         super(TrackWidget, self).__init__(**kwargs)
         self._editor_opening = False
         self.track = track
@@ -159,6 +159,7 @@ class TrackWidget(BoxLayout):
             self.height = dp(128)
         else:
             self.height = dp(112)
+        self.spacing = dp(12)
         
         #self.padding = [dp(12), 0, dp(12), 0]
         self.padding = [0, 0, 0, 0] # REMISE À ZÉRO POUR TESTS          
@@ -429,13 +430,7 @@ class TrackWidget(BoxLayout):
             self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
-            self.timeline_scroll = ScrollView(
-                size_hint_x=1,
-                do_scroll_x=True,
-                do_scroll_y=True,
-                scroll_type=['content'],
-                bar_width=dp(10)
-            )
+            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
             self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
 
@@ -524,13 +519,10 @@ class TrackWidget(BoxLayout):
             self.icon_layout.add_widget(icon)
             self.icon_layout.add_widget(Widget()) # Bottom spacer
 
-            self.timeline_scroll = ScrollView(
-                size_hint_x=1,
-                do_scroll_x=True,
-                do_scroll_y=False,
-                scroll_type=['content'],
-                bar_width=dp(10)
-            )
+            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
+            # Add to main layout
+            self.add_widget(self.icon_layout)
+            self.add_widget(self.timeline_scroll)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
 
             # A ScrollView must have a single child.
@@ -577,15 +569,12 @@ class TrackWidget(BoxLayout):
                     # --- ÉTAPE 3 : BINDINGS DYNAMIQUES (Le secret du Zoom) ---
                     # On lie le widget aux propriétés du TrackWidget pour le zoom
                     self.bind(pixels_per_beat=curve_widget.setter('pixels_per_beat'))
-                    
+                    self.bind(total_beats=curve_widget.setter('total_beats'))
+
                     self.automation_curves.append(curve_widget)
                     self.timeline_container.add_widget(curve_widget)
 
             self.timeline_scroll.add_widget(self.timeline_container)
-
-            # Add the icon and timeline directly to the main layout
-            self.add_widget(self.icon_layout)
-            self.add_widget(self.timeline_scroll)
 
             # --- Playback Line (Cursor) ---
             self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -799,8 +788,6 @@ class TrackWidget(BoxLayout):
             else:
                 # Fallback basé sur les largeurs connues
                 split_x = self.x + self.info_width + self.controls_width + self.spacing / 2
-                if self.padding:
-                    split_x += self.padding[0]
 
             self.vert_separator.pos = (split_x - dp(1), self.y)
             self.vert_separator.size = (dp(2), self.height)

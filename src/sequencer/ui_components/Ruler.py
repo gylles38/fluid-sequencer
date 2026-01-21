@@ -75,7 +75,6 @@ class RulerContent(RelativeLayout):
                 text=str(i),
                 font_size='10sp',
                 pos=(x_pos, 0),
-                size_hint=(None, None),
                 size=(pixels_per_beat * self.beats_per_measure, self.height),
                 halign='left',
                 valign='middle',
@@ -117,7 +116,7 @@ class Ruler(BoxLayout):
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
     spacing = NumericProperty(dp(12))
-    padding = ListProperty([0, dp(6), 0, dp(6)])
+    padding = ListProperty([0, 0, 0, 0])
     label_padding_x = NumericProperty(dp(4))
     end_pos_str = StringProperty('')
 
@@ -139,12 +138,7 @@ class Ruler(BoxLayout):
         self.ruler_left_panel.add_widget(self.controls_spacer)
 
         self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
-        self.scroll_view = ScrollView(
-            size_hint_x=1,
-            do_scroll_y=False,
-            scroll_type=['content'],
-            bar_width=dp(10)
-        )
+        self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
             pixels_per_beat=self.pixels_per_beat,

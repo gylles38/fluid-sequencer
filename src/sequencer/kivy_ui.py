@@ -603,11 +603,7 @@ class SequencerLayout(BoxLayout):
         track_area_card.add_widget(self.ruler)
 
         # Conteneur pour la liste des pistes avec défilement
-        self.scroll_view = ScrollView(
-            size_hint=(1, 1),
-            scroll_type=['content'],
-            bar_width=dp(10)
-        )
+        self.scroll_view = ScrollView(size_hint=(1, 1))
         self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(6))
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
         self.scroll_view.add_widget(self.track_list_layout)
@@ -1799,7 +1795,6 @@ class SequencerLayout(BoxLayout):
 
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
             track_widget.total_beats = final_total_beats
-            track_widget.pixels_per_beat = self.pixels_per_beat
             self.track_widgets.append(track_widget)
             # Force l'appel de la mise à jour graphique une fois que tout est rendu
             Clock.schedule_once(track_widget._update_graphics, 0) 

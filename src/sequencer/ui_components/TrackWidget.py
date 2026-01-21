@@ -906,7 +906,8 @@ class TrackWidget(BoxLayout):
             editor = AutomationEditor(
                 track=self.track,
                 sequencer_layout=self.sequencer_layout,
-                initial_param=active_param
+                initial_param=active_param,
+                pixels_per_beat=self.pixels_per_beat
             )
             
             editor.bind(on_dismiss=self._on_editor_dismiss)

@@ -1,0 +1,186 @@
+from kivymd.uix.relativelayout import MDRelativeLayout
+from kivymd.uix.card import MDCard
+from kivymd.uix.boxlayout import MDBoxLayout
+from kivy.properties import StringProperty, BooleanProperty, ObjectProperty
+from kivy.lang import Builder
+from kivy.metrics import dp
+from kivy.core.window import Window
+from kivy.uix.boxlayout import BoxLayout
+
+Builder.load_string("""
+<FloatingWindow>:
+    size_hint: None, None
+    size: dp(800), dp(600)
+
+    MDCard:
+        id: card
+        orientation: 'vertical'
+        pos: 0, 0
+        size: root.size
+        elevation: 2
+        md_bg_color: 0.1, 0.1, 0.1, 1
+        radius: [dp(8),]
+
+        # Title Bar
+        MDBoxLayout:
+            id: title_bar
+            size_hint_y: None
+            height: dp(40)
+            md_bg_color: 0.15, 0.15, 0.15, 1
+            padding: [dp(10), 0]
+            radius: [dp(8), dp(8), 0, 0]
+
+            MDLabel:
+                text: root.title
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                bold: True
+                valign: 'middle'
+
+            MDIconButton:
+                icon: 'close'
+                theme_icon_color: "Custom"
+                icon_color: 1, 1, 1, 1
+                on_release: root.dismiss()
+
+        # Content area
+        BoxLayout:
+            id: window_content
+
+    # Resize handle icon
+    MDIcon:
+        id: resize_handle
+        icon: 'resize-bottom-right'
+        theme_text_color: "Custom"
+        text_color: 1, 1, 1, 0.5
+        size_hint: None, None
+        size: dp(24), dp(24)
+        pos: root.width - self.width, 0
+""")
+
+class FloatingWindow(MDRelativeLayout):
+    title = StringProperty("Window")
+
+    def __init__(self, **kwargs):
+        self.register_event_type('on_open')
+        self.register_event_type('on_dismiss')
+        super().__init__(**kwargs)
+        self._drag_mode = None
+
+    def add_widget(self, widget, index=0, canvas=None):
+        # We only redirect if window_content exists AND this is not an internal widget.
+        # However, internal widgets are added during FloatingWindow KV loading,
+        # before ids are fully populated or available.
+        # After that, derived classes (Editors) will add their content.
+
+        # A simple check: if window_content is in ids, and we are not currently
+        # adding the card or handle (which we can check by looking at them if they exist).
+
+        content_area = self.ids.get('window_content')
+        if content_area:
+            # Check if this widget is already known as an internal one to avoid redirecting it
+            # But wait, they are already children.
+            if widget is self.ids.get('card') or widget is self.ids.get('resize_handle'):
+                super().add_widget(widget, index, canvas)
+            else:
+                content_area.add_widget(widget, index, canvas)
+        else:
+            super().add_widget(widget, index, canvas)
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+
+        self.bring_to_front()
+
+        # Transform touch pos to local coordinates because RelativeLayout
+        local_touch_pos = self.to_local(*touch.pos)
+
+        # Check resize handle (needs local pos relative to FloatingWindow)
+        if self.ids.resize_handle.collide_point(*local_touch_pos):
+            touch.grab(self)
+            self._drag_mode = 'resize'
+            return True
+
+        # Check title bar (needs local pos relative to card/title_bar)
+        # title_bar is inside card, card is at (0,0) in root
+        if self.ids.title_bar.collide_point(*local_touch_pos):
+            touch.grab(self)
+            self._drag_mode = 'drag'
+            return True
+
+        # Normal content interaction
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is not self:
+            return super().on_touch_move(touch)
+
+        if self._drag_mode == 'drag':
+            self.x += touch.dx
+            self.y += touch.dy
+        elif self._drag_mode == 'resize':
+            # Relative to parent (assuming parent starts at 0,0 like window_manager)
+            target_width = max(dp(400), touch.x - self.x)
+            target_height = max(dp(300), self.top - touch.y)
+
+            # To keep top edge fixed while pulling bottom-right handle
+            delta_h = target_height - self.height
+            self.height = target_height
+            self.y -= delta_h
+
+            self.width = target_width
+        return True
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            self._drag_mode = None
+            return True
+        return super().on_touch_up(touch)
+
+    def bring_to_front(self):
+        if self.parent:
+            parent = self.parent
+            parent.remove_widget(self)
+            parent.add_widget(self)
+
+    def open(self, *args):
+        from kivy.app import App
+        app = App.get_running_app()
+
+        # Try to find window_manager in the root layout
+        target = None
+        if hasattr(app.root, 'window_manager'):
+            target = app.root.window_manager
+
+        if target:
+            if self not in target.children:
+                target.add_widget(self)
+                # Center it if not positioned, with a small offset for each new window
+                if self.pos == [0, 0]:
+                    # Find how many windows are already open to offset the new one
+                    num_windows = len([c for c in target.children if isinstance(c, FloatingWindow)])
+                    offset = (num_windows - 1) * dp(30)
+                    self.center = target.center
+                    self.x += offset
+                    self.y -= offset
+                self.dispatch('on_open')
+        else:
+            # Fallback to adding to Window
+            if self not in Window.children:
+                Window.add_widget(self)
+                if self.pos == [0, 0]:
+                    self.center = Window.center
+                self.dispatch('on_open')
+
+    def dismiss(self, *args):
+        self.dispatch('on_dismiss')
+        if self.parent:
+            self.parent.remove_widget(self)
+
+    def on_open(self):
+        pass
+
+    def on_dismiss(self):
+        pass

@@ -8,6 +8,7 @@ Config.set('input', 'mouse', 'mouse,disable_multitouch')
 
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
@@ -76,12 +77,16 @@ class HoverRippleMenuItem(
     def on_leave(self):
         self.md_bg_color = self.bg_normal
 
-class SequencerLayout(BoxLayout):
+class SequencerLayout(FloatLayout):
     sequencer = ObjectProperty(None)
 
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
-        self.orientation = 'vertical'
+        self.main_stack = BoxLayout(orientation='vertical')
+        self.add_widget(self.main_stack)
+
+        self.window_manager = FloatLayout()
+        self.add_widget(self.window_manager)
         if not self.sequencer:
             self.sequencer = Sequencer(gui_mode=True)
             
@@ -246,10 +251,10 @@ class SequencerLayout(BoxLayout):
         # Lier la mise à jour des lignes à la taille du menu_bar
         menu_bar.bind(size=update_lines)
 
-        self.add_widget(menu_bar)
+        self.main_stack.add_widget(menu_bar)
 
         # Ajouter un espacement entre le menu et la ligne de statut
-        self.add_widget(Widget(size_hint_y=None, height=dp(15)))
+        self.main_stack.add_widget(Widget(size_hint_y=None, height=dp(15)))
         
         # Affichage de la premiere ligne (Titre, ... transport)
         # Définir une hauteur commune
@@ -508,10 +513,10 @@ class SequencerLayout(BoxLayout):
         # Espace flexible à droite
         transport_card.add_widget(Widget(size_hint_x=1))
         
-        self.add_widget(transport_card_container)
+        self.main_stack.add_widget(transport_card_container)
 
         # Ajouter un espacement entre la ligne de statut et les pistes
-        self.add_widget(Widget(size_hint_y=None, height=dp(15)))
+        self.main_stack.add_widget(Widget(size_hint_y=None, height=dp(15)))
 
         # Layout principal pour la barre d'outils et la liste des pistes
         main_content_layout = BoxLayout(orientation='horizontal', spacing=dp(5), padding=dp(5))
@@ -610,7 +615,7 @@ class SequencerLayout(BoxLayout):
 
         track_area_card.add_widget(self.scroll_view)
         main_content_layout.add_widget(track_area_card)
-        self.add_widget(main_content_layout)
+        self.main_stack.add_widget(main_content_layout)
 
         bottom_layout = BoxLayout(orientation='vertical', size_hint_y=0.3)
         self.output_label = Label(size_hint_y=0.1, text="Welcome!")
@@ -623,7 +628,7 @@ class SequencerLayout(BoxLayout):
         self.send_button = TooltipMDIconButton(icon='send', tooltip_text='Send', size_hint_y=0.1)
         self.send_button.bind(on_press=self.on_enter)
         bottom_layout.add_widget(self.send_button)
-        self.add_widget(bottom_layout)
+        self.main_stack.add_widget(bottom_layout)
 
         # update_status_display() appelle update_track_list() qui utilise self.track_list_layout
         # donc il DOIT être appelé APRÈS la création de track_list_layout
@@ -1780,6 +1785,17 @@ class SequencerLayout(BoxLayout):
 
 
     def update_track_list(self):
+        # --- Clean up orphaned floating windows ---
+        if hasattr(self, 'window_manager'):
+            for child in list(self.window_manager.children):
+                if hasattr(child, 'track'):
+                    if child.__class__.__name__ == 'AutomationEditor':
+                        if child.track not in self.sequencer.song.automation_tracks:
+                            child.dismiss()
+                    elif child.__class__.__name__ == 'PianoRollEditor':
+                        if child.track not in self.sequencer.song.tracks:
+                            child.dismiss()
+
         self.track_list_layout.clear_widgets()
         self.track_widgets.clear()
 

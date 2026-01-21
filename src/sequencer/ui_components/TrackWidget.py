@@ -870,48 +870,99 @@ class TrackWidget(BoxLayout):
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
 
+    def _find_existing_editor(self, editor_class_name):
+        """Finds if an editor of a specific class for this track is already open in the window manager."""
+        window_manager = getattr(self.sequencer_layout, 'window_manager', None)
+        if not window_manager:
+            return None
+            
+        for child in window_manager.children:
+            if child.__class__.__name__ == editor_class_name:
+                # For PianoRollEditor, child.track is the MidiTrack
+                if editor_class_name == 'PianoRollEditor':
+                    if child.track == self.track:
+                        return child
+                # For AutomationEditor, child.track is the AutomationTrack, which has target_track_index
+                elif editor_class_name == 'AutomationEditor':
+                    if child.track.target_track_index == self.track_index:
+                        return child
+        return None
+
     def open_piano_roll_editor(self, instance=None) -> None:
-        """Creates and opens the piano roll editor popup for the current track."""
-        if isinstance(self.track, MidiTrack):
-            sequencer = self.sequencer_layout.sequencer
-            
-            # 1. Capturer la position actuelle AVANT d'arrêter
-            captured_beat = sequencer.current_beat
-
-            # 2. Arrêter la lecture
-            if sequencer.playback_state in ['playing', 'recording']:
-                sequencer.stop()
-
-            # 3. Restaurer la position dans le séquenceur
-            # (Car sequencer.stop() l'a probablement remise à 0)
-            if captured_beat > 0:
-                sequencer.current_beat = captured_beat
-
-            editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
-            editor.open()
-
-    def open_automation_editor(self):
-        if self._editor_opening:
+        """Creates and opens the piano roll editor window for the current track."""
+        if not isinstance(self.track, MidiTrack):
             return
-        
-        if isinstance(self.track, AutomationTrack):
-            self._editor_opening = True
-            
-            # On demande à l'objet automation_controls quel paramètre est actif
-            active_param = 'vol' # Valeur de sécurité
-            if hasattr(self, 'automation_controls'):
-                active_param = self.automation_controls.selected_param            
 
-            # On passe ce paramètre à l'initialisation de l'éditeur
-            editor = AutomationEditor(
-                track=self.track,
-                sequencer_layout=self.sequencer_layout,
-                initial_param=active_param,
-                pixels_per_beat=self.pixels_per_beat
-            )
+        from .piano_roll_editor import PianoRollEditor
+        existing = self._find_existing_editor('PianoRollEditor')
+        if existing:
+            existing.bring_to_front()
+            return
+
+        sequencer = self.sequencer_layout.sequencer
+        
+        # 1. Capturer la position actuelle AVANT d'arrêter
+        captured_beat = sequencer.current_beat
+
+        # 2. Arrêter la lecture
+        if sequencer.playback_state in ['playing', 'recording']:
+            sequencer.stop()
+
+        # 3. Restaurer la position dans le séquenceur
+        if captured_beat > 0:
+            sequencer.current_beat = captured_beat
+
+        editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
+        editor.open()
+
+    def open_automation_editor(self, param=None):
+        # Determine the target AutomationTrack
+        target_at = None
+        if isinstance(self.track, AutomationTrack):
+            target_at = self.track
+        else:
+            # Look for an existing automation track targeting this track
+            for at in self.sequencer_layout.sequencer.song.automation_tracks:
+                if at.target_track_index == self.track_index:
+                    target_at = at
+                    break
             
-            editor.bind(on_dismiss=self._on_editor_dismiss)
-            editor.open()
+            if not target_at:
+                # Create a new one
+                from sequencer.models import AutomationTrack
+                target_at = AutomationTrack(
+                    name=f"Auto {self.track.name}",
+                    target_track_index=self.track_index,
+                    points=[]
+                )
+                self.sequencer_layout.sequencer.song.automation_tracks.append(target_at)
+                # Note: The UI will refresh and create a new TrackWidget for this AT.
+                # But we can still open the editor for it now.
+
+        from .automation_editor import AutomationEditor
+        existing = self._find_existing_editor('AutomationEditor')
+
+        # Determine active param
+        active_param = param
+        if not active_param:
+            if hasattr(self, 'automation_controls'):
+                active_param = self.automation_controls.selected_param
+            else:
+                active_param = 'vol'
+
+        if existing:
+            existing.on_automation_selection_change(None, active_param)
+            existing.bring_to_front()
+            return
+
+        # On passe ce paramètre à l'initialisation de l'éditeur
+        editor = AutomationEditor(
+            track=target_at,
+            sequencer_layout=self.sequencer_layout,
+            initial_param=active_param,
+            pixels_per_beat=self.pixels_per_beat
+        )
+        editor.open()
 
     def _on_editor_dismiss(self, instance) -> None:
         self._editor_opening = False

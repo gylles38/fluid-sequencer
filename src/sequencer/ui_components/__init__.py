@@ -26,6 +26,7 @@ from kivy.uix.widget import Widget
 from kivymd.uix.label import MDIcon
 from .PianoRoll import PianoRoll, PianoRollViewer
 from .PianoKeyboard import PianoKeyboard
+from .FloatingWindow import FloatingWindow
 from .bounded_scroll_view import BoundedScrollView
 from .piano_roll_editor import PianoRollEditor
 from .automation_editor import AutomationEditor

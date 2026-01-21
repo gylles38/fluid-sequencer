@@ -6,6 +6,7 @@ from kivy.lang import Builder
 from kivy.metrics import dp
 from kivy.core.window import Window
 from kivy.uix.boxlayout import BoxLayout
+from kivy.clock import Clock
 
 Builder.load_string("""
 <FloatingWindow>:
@@ -61,6 +62,9 @@ Builder.load_string("""
         text_color: 1, 1, 1, 0.5
         size_hint: None, None
         size: dp(24), dp(24)
+        # Use absolute positioning with root.width for RelativeLayout
+        x: root.width - self.width
+        y: 0
 """)
 
 class FloatingWindow(RelativeLayout):
@@ -73,9 +77,10 @@ class FloatingWindow(RelativeLayout):
         self.register_event_type('on_dismiss')
         super().__init__(**kwargs)
         self._drag_mode = None
-        self.bind(size=self._reposition_handle)
+        # Ensure handle is correctly positioned after initialization
+        Clock.schedule_once(self._force_reposition_handle, 0)
 
-    def _reposition_handle(self, *args):
+    def _force_reposition_handle(self, dt):
         if 'resize_handle' in self.ids:
             self.ids.resize_handle.x = self.width - self.ids.resize_handle.width
             self.ids.resize_handle.y = 0
@@ -83,8 +88,12 @@ class FloatingWindow(RelativeLayout):
     def add_widget(self, widget, index=0, canvas=None):
         # redirection logic
         if hasattr(self, 'ids') and 'window_content' in self.ids:
-            if widget.__class__.__name__ in ('MDCard', 'MDIcon'):
-                # Heuristic: these are our internal components
+            # Check for internal components by ID if possible, or class name as fallback
+            is_internal = False
+            if 'card' in self.ids and widget is self.ids.card: is_internal = True
+            if 'resize_handle' in self.ids and widget is self.ids.resize_handle: is_internal = True
+
+            if is_internal or widget.__class__.__name__ in ('MDCard', 'MDIcon'):
                 super().add_widget(widget, index, canvas)
             else:
                 self.ids.window_content.add_widget(widget, index, canvas)
@@ -171,7 +180,7 @@ class FloatingWindow(RelativeLayout):
         return super().on_touch_up(touch)
 
     def bring_to_front(self):
-        if self.parent:
+        if self.parent and self.parent.children[0] is not self:
             parent = self.parent
             parent.remove_widget(self)
             parent.add_widget(self)

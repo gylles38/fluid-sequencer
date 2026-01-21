@@ -27,6 +27,8 @@ from kivy.graphics import Color, Rectangle
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.boxlayout import MDBoxLayout
 
+_IS_OPENING_EDITOR = False
+
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -869,7 +871,7 @@ class TrackWidget(BoxLayout):
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
 
-    def _find_existing_editor(self, editor_class_name):
+    def _find_existing_editor(self, editor_class_name, track=None):
         """Finds if an editor of a specific class for this track is already open in the window manager."""
         window_manager = getattr(self.sequencer_layout, 'window_manager', None)
         if not window_manager:
@@ -877,27 +879,37 @@ class TrackWidget(BoxLayout):
             
         for child in window_manager.children:
             if child.__class__.__name__ == editor_class_name:
-                # For PianoRollEditor, child.track is the MidiTrack
+                # Priority: direct track identity check
+                if track is not None and getattr(child, 'track', None) is track:
+                    return child
+
+                # Fallbacks
                 if editor_class_name == 'PianoRollEditor':
                     if child.track == self.track:
                         return child
-                # For AutomationEditor, child.track is the AutomationTrack, which has target_track_index
                 elif editor_class_name == 'AutomationEditor':
+                    # If we are an AutomationTrack widget, self.track is the AT
+                    if isinstance(self.track, AutomationTrack) and child.track == self.track:
+                        return child
+                    # If we are a normal track widget, child.track.target_track_index should match us
                     if child.track.target_track_index == self.track_index:
                         return child
         return None
 
     def open_piano_roll_editor(self, instance=None) -> None:
         """Creates and opens the piano roll editor window for the current track."""
-        # Use a more persistent flag if _editor_opening is being reset too quickly
-        if not isinstance(self.track, MidiTrack) or getattr(self, '_is_opening_editor', False):
+        global _IS_OPENING_EDITOR
+        if not isinstance(self.track, MidiTrack) or _IS_OPENING_EDITOR:
             return
 
-        self._is_opening_editor = True
-        Clock.schedule_once(lambda dt: setattr(self, '_is_opening_editor', False), 0.5)
+        _IS_OPENING_EDITOR = True
+        def reset_lock(dt):
+            global _IS_OPENING_EDITOR
+            _IS_OPENING_EDITOR = False
+        Clock.schedule_once(reset_lock, 0.5)
 
         from .piano_roll_editor import PianoRollEditor
-        existing = self._find_existing_editor('PianoRollEditor')
+        existing = self._find_existing_editor('PianoRollEditor', track=self.track)
         if existing:
             existing.bring_to_front()
             return
@@ -919,11 +931,15 @@ class TrackWidget(BoxLayout):
         editor.open()
 
     def open_automation_editor(self, param=None):
-        if getattr(self, '_is_opening_editor', False):
+        global _IS_OPENING_EDITOR
+        if _IS_OPENING_EDITOR:
             return
 
-        self._is_opening_editor = True
-        Clock.schedule_once(lambda dt: setattr(self, '_is_opening_editor', False), 0.5)
+        _IS_OPENING_EDITOR = True
+        def reset_lock(dt):
+            global _IS_OPENING_EDITOR
+            _IS_OPENING_EDITOR = False
+        Clock.schedule_once(reset_lock, 0.5)
 
         # Determine the target AutomationTrack
         target_at = None
@@ -948,7 +964,7 @@ class TrackWidget(BoxLayout):
                 # But we can still open the editor for it now.
 
         from .automation_editor import AutomationEditor
-        existing = self._find_existing_editor('AutomationEditor')
+        existing = self._find_existing_editor('AutomationEditor', track=target_at)
 
         # Determine active param
         active_param = param

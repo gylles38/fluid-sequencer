@@ -747,17 +747,29 @@ Builder.load_string("""
             BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: False
-                bar_width: dp(20)
-                scroll_type: ['bars']
-                padding: [0, 0, 0, dp(20)]
+                do_scroll_x: True
+                bar_width: dp(15)
+                scroll_type: ['bars', 'content']
+                bar_pos_x: 'bottom'
+                bar_margin: dp(2)
 
-                EditablePianoRollViewer:
-                    id: grid_viewer
-                    editor: root
-                    track: root.track_copy
-                    total_beats: root.total_beats
-                    pixels_per_beat: root.pixels_per_beat
-                    note_height: root.note_height
+                BoxLayout:
+                    orientation: 'vertical'
+                    size_hint_x: None
+                    width: grid_viewer.width
+                    padding: [0, 0, 0, dp(15)]
+
+                    EditablePianoRollViewer:
+                        id: grid_viewer
+                        editor: root
+                        track: root.track_copy
+                        total_beats: root.total_beats
+                        pixels_per_beat: root.pixels_per_beat
+                        note_height: root.note_height
+
+                    Widget:
+                        size_hint_y: None
+                        height: dp(18)
 
         MDBoxLayout:
             size_hint_y: None

@@ -94,7 +94,7 @@ class RulerContent(RelativeLayout):
                 return True
             local_x, _ = self.to_local(*touch.pos)
             clicked_beat = local_x / self.pixels_per_beat
-            if self.sequencer_layout.sequencer.playback_state == 'stopped':
+            if True: # Allow seeking even when playing/paused
                 if touch.button == 'left':
                     self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
                     new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
@@ -165,6 +165,7 @@ class Ruler(BoxLayout):
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
+        self.bind(sequencer_layout=lambda i, v: setattr(self.ruler_content, 'sequencer_layout', v))
         self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
         self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))
         self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))

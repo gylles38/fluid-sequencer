@@ -562,6 +562,8 @@ Builder.load_string("""
             sequencer_layout: root.sequencer_layout
             pixels_per_beat: root.pixels_per_beat
             total_beats: root.total_beats
+            end_pos_str: root.end_pos_str
+            beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             info_width: dp(60) 
             controls_width: 0
             keyboard_width: 0
@@ -721,6 +723,7 @@ class AutomationEditor(ModalView):
 
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
+    end_pos_str = StringProperty('')
 
     edit_mode = StringProperty('insert')
     is_dirty = BooleanProperty(False)
@@ -747,6 +750,10 @@ class AutomationEditor(ModalView):
             points=copy.deepcopy(self.track.points)
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
+
+        # Bind end_pos_str to sequencer
+        self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self.setter('end_pos_str'))
 
         # On stocke le paramètre souhaité
         self.selected_parameter = initial_param

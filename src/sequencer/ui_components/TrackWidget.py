@@ -139,6 +139,7 @@ class TrackWidget(BoxLayout):
     """
     total_beats = NumericProperty(128.0) 
     pixels_per_beat = NumericProperty(dp(100))
+    beats_per_measure = NumericProperty(4)
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
@@ -444,6 +445,7 @@ class TrackWidget(BoxLayout):
                 track=track,
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat,
+                beat_per_measure=self.beats_per_measure,
                 note_height=note_height,
                 size_hint=(None, None)
             )
@@ -529,7 +531,7 @@ class TrackWidget(BoxLayout):
             self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1), # The grid itself can fill the container
-                beat_per_measure=4,
+                beat_per_measure=self.beats_per_measure,
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat
             )
@@ -644,6 +646,7 @@ class TrackWidget(BoxLayout):
             # avant d'appeler draw()
             self.piano_roll.total_beats = self.total_beats
             self.piano_roll.pixels_per_beat = self.pixels_per_beat
+            self.piano_roll.beat_per_measure = self.beats_per_measure
             # ----------------------
             
             self.piano_roll.draw()
@@ -654,6 +657,7 @@ class TrackWidget(BoxLayout):
             # Vous le faisiez déjà ici pour measure_grid, mais pas pour piano_roll !
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
+            self.measure_grid.beat_per_measure = self.beats_per_measure
             # --- FIX: Propagate zoom changes to ALL automation curve widgets ---
             if hasattr(self, 'automation_curves'):
                 for curve in self.automation_curves:

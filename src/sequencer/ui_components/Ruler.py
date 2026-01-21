@@ -18,7 +18,7 @@ class RulerContent(RelativeLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.drawing_widget = Widget(size_hint=(1, 1))
+        self.drawing_widget = Widget(size_hint=(1, 1), pos=(0, 0))
         self.add_widget(self.drawing_widget)
 
         with self.drawing_widget.canvas.before:
@@ -31,6 +31,7 @@ class RulerContent(RelativeLayout):
     def _update_bg(self, *args):
         self.bg_rect.size = self.size
         self.drawing_widget.size = self.size
+        self.drawing_widget.pos = (0, 0)
 
     def redraw(self, *args):
         for child in list(self.children):

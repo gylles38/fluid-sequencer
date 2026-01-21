@@ -1795,6 +1795,8 @@ class SequencerLayout(BoxLayout):
 
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
             track_widget.total_beats = final_total_beats
+            track_widget.pixels_per_beat = self.pixels_per_beat
+            track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
             self.track_widgets.append(track_widget)
             # Force l'appel de la mise à jour graphique une fois que tout est rendu
             Clock.schedule_once(track_widget._update_graphics, 0) 
@@ -1822,9 +1824,14 @@ class SequencerLayout(BoxLayout):
             first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
 
         # --- Bind scroll views for synchronization ---
+        # First, unbind the persistent ruler scroll view to avoid duplicate bindings
+        self.ruler.scroll_view.funbind('scroll_x', self._synchronize_scroll)
+
         scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]
         for sv in scroll_views:
-            sv.fbind('scroll_x', lambda instance, value: self._synchronize_scroll(instance, value))
+            # We use funbind/fbind with the direct method reference to prevent accumulation
+            sv.funbind('scroll_x', self._synchronize_scroll)
+            sv.fbind('scroll_x', self._synchronize_scroll)
             sv.bind(on_scroll_stop=self._on_scroll_stop)
             
     def update_status_display(self):

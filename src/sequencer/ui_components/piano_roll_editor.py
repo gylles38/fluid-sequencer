@@ -720,14 +720,17 @@ Builder.load_string("""
             end_pos_str: root.end_pos_str
             size_hint_y: None
             height: dp(30)
-            keyboard_width: -dp(138)
+            info_width: 0
+            controls_width: 0
             spacing: 0
-            padding: [0, dp(6), 0, dp(6)]
+            keyboard_width: dp(60)
+            padding: [0, 0, 0, 0]
             label_padding_x: 0
 
         BoxLayout:
             id: main_content
             orientation: 'horizontal'
+            spacing: 0
 
             BoundedScrollView:
                 id: keyboard_sv
@@ -1596,12 +1599,36 @@ class PianoRollEditor(ModalView):
                 
             btn.canvas.ask_update()                
 
-    def sync_horizontal_scroll(self, instance, value) -> None:
+    def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value) -> None:
         if self._is_scrolling: return
         self._is_scrolling = True
-        ruler_scroll, timeline_scroll = self.ids.ruler.scroll_view, self.ids.timeline_scroll
-        if instance == ruler_scroll: timeline_scroll.scroll_x = value
-        else: ruler_scroll.scroll_x = value
+
+        try:
+            # Calculate absolute pixel offset from source
+            content_width_source = source_scroll_view.children[0].width
+            viewport_width_source = source_scroll_view.width
+            max_scroll_source = max(0, content_width_source - viewport_width_source)
+            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
+
+            ruler_scroll = self.ids.ruler.scroll_view
+            timeline_scroll = self.ids.timeline_scroll
+
+            targets = [ruler_scroll, timeline_scroll]
+            for sv in targets:
+                if sv is not source_scroll_view:
+                    try:
+                        content_width = sv.children[0].width
+                        viewport_width = sv.width
+                        max_scroll = max(0, content_width - viewport_width)
+                        if max_scroll > 0:
+                            sv.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
+                        else:
+                            sv.scroll_x = 0
+                    except (IndexError, AttributeError):
+                        continue
+        except (IndexError, AttributeError):
+            pass
+
         self._is_scrolling = False
 
     def _center_view_on_c4(self) -> None:

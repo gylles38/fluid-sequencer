@@ -116,16 +116,16 @@ class Ruler(BoxLayout):
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
-    spacing = NumericProperty(dp(12))
-    padding = ListProperty([0, 0, 0, 0])
+    # Use standard BoxLayout properties for spacing/padding
     label_padding_x = NumericProperty(dp(4))
     end_pos_str = StringProperty('')
 
     def __init__(self, **kwargs):
+        # Set defaults before super().__init__ if not provided in kwargs
+        kwargs.setdefault('orientation', 'horizontal')
+        kwargs.setdefault('spacing', dp(12))
+        kwargs.setdefault('padding', [0, 0, 0, 0])
         super().__init__(**kwargs)
-        self.orientation = 'horizontal'
-        self.spacing = dp(12)
-        self.padding = [0, 0, 0, 0]
 
         # --- Exact mirror of TrackWidget layout ---
         self.ruler_left_panel = BoxLayout(
@@ -160,7 +160,8 @@ class Ruler(BoxLayout):
         def update_left_panel_width(*args):
              self.ruler_left_panel.width = self.info_width + self.controls_width + self.spacing
 
-        self.bind(info_width=update_left_panel_width, controls_width=update_left_panel_width)
+        self.bind(info_width=update_left_panel_width, controls_width=update_left_panel_width, spacing=update_left_panel_width)
+        self.bind(spacing=lambda i, v: setattr(self.ruler_left_panel, 'spacing', v))
         self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
         self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
         self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))

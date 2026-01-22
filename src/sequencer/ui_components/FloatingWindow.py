@@ -64,8 +64,8 @@ Builder.load_string("""
         text_color: 1, 1, 1, 0.5
         size_hint: None, None
         size: dp(24), dp(24)
-        # Explicit positioning for maximum robustness
-        x: root.width - self.width
+        # Force position in KV
+        x: root.width - dp(24)
         y: 0
 """)
 
@@ -82,6 +82,18 @@ class FloatingWindow(RelativeLayout):
         self._drag_mode = None
         # Unlock touch after a short delay to prevent Accidental triggers on open (like double-click second tap)
         Clock.schedule_once(lambda dt: setattr(self, '_touch_lock', False), 0.3)
+        # Force handle repositioning after first layout and on size change
+        self.bind(size=self._ensure_handle_pos)
+        Clock.schedule_once(self._ensure_handle_pos, 0.1)
+
+    def _ensure_handle_pos(self, *args):
+        if hasattr(self, 'ids'):
+            if 'resize_handle' in self.ids:
+                self.ids.resize_handle.x = self.width - dp(24)
+                self.ids.resize_handle.y = 0
+            # Ensure card follows root size exactly
+            if 'card' in self.ids:
+                self.ids.card.size = self.size
 
     def add_widget(self, widget, index=0, canvas=None):
         # redirection logic: internal widgets go to self, others go to window_content
@@ -99,36 +111,51 @@ class FloatingWindow(RelativeLayout):
             return False
 
         if self._touch_lock:
-            return True # Consume and ignore
-
-        # 1. Try children first (buttons, content)
-        # We use a flag to track if we should bring to front
-        handled = super().on_touch_down(touch)
-
-        # Bring to front on any click inside, but after dispatch
-        Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
-
-        if handled:
             return True
 
-        # 2. If not handled by children, check for our own drag/resize
-        # Transform touch pos to local coordinates because RelativeLayout
+        # Transform touch pos to local coordinates
+        # (RelativeLayout handles this if we use its children dispatching,
+        # but for our custom logic we do it here)
         local_touch_pos = self.to_local(*touch.pos)
 
-        # Check resize handle (needs local pos relative to FloatingWindow)
+        # 1. Handle resize handle first
+        # We check collision in local space
         if not self.is_maximized and self.ids.resize_handle.collide_point(*local_touch_pos):
             touch.grab(self)
             self._drag_mode = 'resize'
+            Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
             return True
 
-        # Check title bar (drag)
-        # title_bar is inside card, card is at (0,0) in root
-        if self.ids.title_bar.collide_point(*local_touch_pos):
-            touch.grab(self)
-            self._drag_mode = 'drag'
-            return True
+        # 2. Handle title bar (buttons priority, then drag)
+        # Title bar is at top (height-40 to height)
+        if local_touch_pos[1] >= self.height - dp(40):
+            # Try buttons first
+            # We use title_bar's on_touch_down but need to ensure touch.pos is correct for it.
+            # Since card/title_bar are at 0,0 and not RelativeLayouts,
+            # we can temporarily push local_touch_pos to touch.pos
+            original_pos = touch.pos
+            touch.pos = local_touch_pos
+            handled = self.ids.title_bar.on_touch_down(touch)
+            touch.pos = original_pos
 
-        return False
+            if handled:
+                Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
+                return True
+
+            # If no button handled it, it's a drag
+            if not self.is_maximized:
+                touch.grab(self)
+                self._drag_mode = 'drag'
+                Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
+                return True
+            else:
+                Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
+                return True
+
+        # 3. Normal content interaction
+        handled = super().on_touch_down(touch)
+        Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
+        return handled
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:

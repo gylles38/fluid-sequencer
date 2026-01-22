@@ -42,6 +42,7 @@ class RulerContent(RelativeLayout):
         self._redraw_event = Clock.schedule_once(self.redraw)
 
     def redraw(self, *args):
+        # Remove old labels
         for child in list(self.children):
             if child is not self.drawing_widget:
                 self.remove_widget(child)
@@ -50,14 +51,15 @@ class RulerContent(RelativeLayout):
         if self.total_beats <= 0 or self.beats_per_measure <= 0:
             return
 
-        pixels_per_beat = self.pixels_per_beat
+        pixels_per_beat = float(self.pixels_per_beat)
+        beats_per_measure = float(self.beats_per_measure)
         # num_measures is the number of full measures in the project
-        num_measures = int(self.total_beats / self.beats_per_measure)
+        num_measures = int(self.total_beats / beats_per_measure)
 
         with self.drawing_widget.canvas:
             # Draw lines for each measure boundary, including the last one
             for i in range(num_measures + 1):
-                beat_pos = i * self.beats_per_measure
+                beat_pos = i * beats_per_measure
                 x_pos = beat_pos * pixels_per_beat
                 Color(0.4, 0.4, 0.4, 1)
                 Line(points=[x_pos, 0, x_pos, self.height], width=1)
@@ -71,14 +73,14 @@ class RulerContent(RelativeLayout):
 
         # Draw labels for each measure
         for i in range(num_measures):
-            beat_pos = i * self.beats_per_measure
+            beat_pos = i * beats_per_measure
             x_pos = beat_pos * pixels_per_beat
 
             label = Label(
                 text=str(i + 1),
                 font_size='10sp',
                 pos=(x_pos, 0),
-                size=(pixels_per_beat * self.beats_per_measure, self.height),
+                size=(pixels_per_beat * beats_per_measure, self.height),
                 size_hint=(None, None),
                 halign='left',
                 valign='middle',
@@ -176,10 +178,15 @@ class Ruler(BoxLayout):
         self.bind(total_beats=self.trigger_redraw, pixels_per_beat=self.trigger_redraw)
 
     def trigger_redraw(self, *args):
-        # We need to update the content width before redrawing
+        # Sync properties explicitly before triggering redraw
+        self.ruler_content.pixels_per_beat = self.pixels_per_beat
+        self.ruler_content.total_beats = self.total_beats
+        self.ruler_content.beats_per_measure = self.beats_per_measure
         self.ruler_content.width = self.total_beats * self.pixels_per_beat
         self.ruler_content.trigger_redraw()
 
     def redraw(self, *args):
+        self.ruler_content.pixels_per_beat = self.pixels_per_beat
+        self.ruler_content.total_beats = self.total_beats
         self.ruler_content.width = self.total_beats * self.pixels_per_beat
         self.ruler_content.redraw(*args)

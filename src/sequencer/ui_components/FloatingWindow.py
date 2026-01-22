@@ -15,10 +15,11 @@ Builder.load_string("""
 
     MDCard:
         id: card
+        _is_internal_widget: True
         orientation: 'vertical'
         pos: 0, 0
         size: root.size
-        elevation: 2
+        elevation: 4
         md_bg_color: 0.1, 0.1, 0.1, 1
         radius: [dp(8),]
 
@@ -57,13 +58,14 @@ Builder.load_string("""
     # Resize handle icon
     MDIcon:
         id: resize_handle
+        _is_internal_widget: True
         icon: 'resize-bottom-right'
         theme_text_color: "Custom"
         text_color: 1, 1, 1, 0.5
         size_hint: None, None
         size: dp(24), dp(24)
-        # Reactive positioning
-        right: root.width
+        # Explicit positioning for maximum robustness
+        x: root.width - self.width
         y: 0
 """)
 
@@ -82,13 +84,13 @@ class FloatingWindow(RelativeLayout):
         Clock.schedule_once(lambda dt: setattr(self, '_touch_lock', False), 0.3)
 
     def add_widget(self, widget, index=0, canvas=None):
-        # redirection logic
+        # redirection logic: internal widgets go to self, others go to window_content
+        if hasattr(widget, '_is_internal_widget'):
+            super().add_widget(widget, index, canvas)
+            return
+
         if hasattr(self, 'ids') and 'window_content' in self.ids:
-            # Check for internal components by identity
-            if widget is self.ids.get('card') or widget is self.ids.get('resize_handle'):
-                super().add_widget(widget, index, canvas)
-            else:
-                self.ids.window_content.add_widget(widget, index, canvas)
+            self.ids.window_content.add_widget(widget, index, canvas)
         else:
             super().add_widget(widget, index, canvas)
 
@@ -99,9 +101,17 @@ class FloatingWindow(RelativeLayout):
         if self._touch_lock:
             return True # Consume and ignore
 
-        # Bring to front using Clock to avoid breaking current touch dispatch
+        # 1. Try children first (buttons, content)
+        # We use a flag to track if we should bring to front
+        handled = super().on_touch_down(touch)
+
+        # Bring to front on any click inside, but after dispatch
         Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
 
+        if handled:
+            return True
+
+        # 2. If not handled by children, check for our own drag/resize
         # Transform touch pos to local coordinates because RelativeLayout
         local_touch_pos = self.to_local(*touch.pos)
 
@@ -111,15 +121,14 @@ class FloatingWindow(RelativeLayout):
             self._drag_mode = 'resize'
             return True
 
-        # Check title bar (needs local pos relative to card/title_bar)
+        # Check title bar (drag)
         # title_bar is inside card, card is at (0,0) in root
         if self.ids.title_bar.collide_point(*local_touch_pos):
             touch.grab(self)
             self._drag_mode = 'drag'
             return True
 
-        # Normal content interaction
-        return super().on_touch_down(touch)
+        return False
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:

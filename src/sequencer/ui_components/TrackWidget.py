@@ -872,28 +872,33 @@ class TrackWidget(BoxLayout):
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
 
     def _find_existing_editor(self, editor_class_name, track=None):
-        """Finds if an editor of a specific class for this track is already open in the window manager."""
+        """Finds if an editor of a specific class for this track is already open."""
+        # Search in window_manager and also in global Window children to be safe
         window_manager = getattr(self.sequencer_layout, 'window_manager', None)
-        if not window_manager:
-            return None
+        containers = []
+        if window_manager:
+            containers.append(window_manager)
+        containers.append(Window)
             
-        for child in window_manager.children:
-            if child.__class__.__name__ == editor_class_name:
-                # Priority: direct track identity check
-                if track is not None and getattr(child, 'track', None) is track:
-                    return child
+        for container in containers:
+            for child in container.children:
+                if child.__class__.__name__ == editor_class_name:
+                    # Priority: direct track identity check
+                    if track is not None and getattr(child, 'track', None) is track:
+                        return child
 
-                # Fallbacks
-                if editor_class_name == 'PianoRollEditor':
-                    if child.track == self.track:
-                        return child
-                elif editor_class_name == 'AutomationEditor':
-                    # If we are an AutomationTrack widget, self.track is the AT
-                    if isinstance(self.track, AutomationTrack) and child.track == self.track:
-                        return child
-                    # If we are a normal track widget, child.track.target_track_index should match us
-                    if child.track.target_track_index == self.track_index:
-                        return child
+                    # Fallbacks
+                    if editor_class_name == 'PianoRollEditor':
+                        # Use identity check if possible
+                        if getattr(child, 'track', None) is self.track:
+                            return child
+                    elif editor_class_name == 'AutomationEditor':
+                        # If we are an AutomationTrack widget, self.track is the AT
+                        if isinstance(self.track, AutomationTrack) and getattr(child, 'track', None) is self.track:
+                            return child
+                        # If we are a normal track widget, child.track.target_track_index should match us
+                        if hasattr(child, 'track') and getattr(child.track, 'target_track_index', -1) == self.track_index:
+                            return child
         return None
 
     def open_piano_roll_editor(self, instance=None) -> None:

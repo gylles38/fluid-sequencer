@@ -13,15 +13,26 @@ Builder.load_string("""
     size_hint: None, None
     size: dp(800), dp(600)
 
-    MDCard:
+    # Main window body using standard BoxLayout to avoid MDCard touch issues
+    BoxLayout:
         id: card
         _is_internal_widget: True
         orientation: 'vertical'
         pos: 0, 0
         size: root.size
-        elevation: 4
-        md_bg_color: 0.1, 0.1, 0.1, 1
-        radius: [dp(8),]
+        canvas.before:
+            Color:
+                rgba: 0.1, 0.1, 0.1, 1
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(8),]
+            # Simple border
+            Color:
+                rgba: 0.3, 0.3, 0.3, 1
+            Line:
+                width: 1
+                rounded_rectangle: (self.x, self.y, self.width, self.height, dp(8))
 
         # Title Bar
         MDBoxLayout:
@@ -30,7 +41,14 @@ Builder.load_string("""
             height: dp(40)
             md_bg_color: 0.15, 0.15, 0.15, 1
             padding: [dp(10), 0]
-            radius: [dp(8), dp(8), 0, 0]
+            # Manual radius simulation for background
+            canvas.before:
+                Color:
+                    rgba: 0.15, 0.15, 0.15, 1
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(8), dp(8), 0, 0]
 
             MDLabel:
                 text: root.title
@@ -55,17 +73,17 @@ Builder.load_string("""
         BoxLayout:
             id: window_content
 
-    # Resize handle icon
+    # Resize handle icon (moved last to be in front)
     MDIcon:
         id: resize_handle
         _is_internal_widget: True
         icon: 'resize-bottom-right'
         theme_text_color: "Custom"
-        text_color: 1, 1, 1, 0.5
+        text_color: 1, 1, 1, 0.9
         size_hint: None, None
         size: dp(24), dp(24)
-        # Force position in KV
-        x: root.width - dp(24)
+        # Force initial position in KV using root properties
+        x: root.width - self.width
         y: 0
 """)
 
@@ -89,11 +107,13 @@ class FloatingWindow(RelativeLayout):
     def _ensure_handle_pos(self, *args):
         if hasattr(self, 'ids'):
             if 'resize_handle' in self.ids:
-                self.ids.resize_handle.x = self.width - dp(24)
+                # Use absolute positioning relative to self
+                self.ids.resize_handle.x = self.width - self.ids.resize_handle.width
                 self.ids.resize_handle.y = 0
             # Ensure card follows root size exactly
             if 'card' in self.ids:
                 self.ids.card.size = self.size
+                self.ids.card.pos = (0, 0)
 
     def add_widget(self, widget, index=0, canvas=None):
         # redirection logic: internal widgets go to self, others go to window_content
@@ -113,28 +133,21 @@ class FloatingWindow(RelativeLayout):
         if self._touch_lock:
             return True
 
-        # Transform touch pos to local coordinates
-        # (RelativeLayout handles this if we use its children dispatching,
-        # but for our custom logic we do it here)
-        local_touch_pos = self.to_local(*touch.pos)
+        local_pos = self.to_local(*touch.pos)
 
-        # 1. Handle resize handle first
-        # We check collision in local space
-        if not self.is_maximized and self.ids.resize_handle.collide_point(*local_touch_pos):
+        # 1. Check resize handle first (highest priority)
+        if not self.is_maximized and self.ids.resize_handle.collide_point(*local_pos):
             touch.grab(self)
             self._drag_mode = 'resize'
             Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
             return True
 
-        # 2. Handle title bar (buttons priority, then drag)
-        # Title bar is at top (height-40 to height)
-        if local_touch_pos[1] >= self.height - dp(40):
-            # Try buttons first
-            # We use title_bar's on_touch_down but need to ensure touch.pos is correct for it.
-            # Since card/title_bar are at 0,0 and not RelativeLayouts,
-            # we can temporarily push local_touch_pos to touch.pos
+        # 2. Special handling for title bar to ensure buttons work and dragging is robust
+        if local_pos[1] >= self.height - dp(40):
+            # Try to dispatch to buttons manually as it proved more robust
+            # title_bar is at (0, height-40) in FloatingWindow space
             original_pos = touch.pos
-            touch.pos = local_touch_pos
+            touch.pos = local_pos
             handled = self.ids.title_bar.on_touch_down(touch)
             touch.pos = original_pos
 
@@ -153,9 +166,13 @@ class FloatingWindow(RelativeLayout):
                 return True
 
         # 3. Normal content interaction
-        handled = super().on_touch_down(touch)
+        if super().on_touch_down(touch):
+            Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
+            return True
+
+        # Background click also brings to front and consumes touch
         Clock.schedule_once(lambda dt: self.bring_to_front(), 0)
-        return handled
+        return True
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:

@@ -147,7 +147,6 @@ class TrackWidget(BoxLayout):
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         self.spacing = dp(12)
         super(TrackWidget, self).__init__(**kwargs)
-        self._editor_opening = False
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
@@ -870,9 +869,21 @@ class TrackWidget(BoxLayout):
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
 
+    def _find_existing_editor(self):
+        if self.sequencer_layout.window_manager:
+            for window in self.sequencer_layout.window_manager.children:
+                if hasattr(window, 'source_track') and window.source_track is self.track:
+                    return window
+        return None
+
     def open_piano_roll_editor(self, instance=None) -> None:
-        """Creates and opens the piano roll editor popup for the current track."""
+        """Creates and opens the piano roll editor for the current track."""
         if isinstance(self.track, MidiTrack):
+            existing = self._find_existing_editor()
+            if existing:
+                existing._bring_to_front()
+                return
+
             sequencer = self.sequencer_layout.sequencer
             
             # 1. Capturer la position actuelle AVANT d'arrêter
@@ -883,23 +894,28 @@ class TrackWidget(BoxLayout):
                 sequencer.stop()
 
             # 3. Restaurer la position dans le séquenceur
-            # (Car sequencer.stop() l'a probablement remise à 0)
             if captured_beat > 0:
                 sequencer.current_beat = captured_beat
 
-            editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
-            editor.open()
+            editor = PianoRollEditor(
+                track=self.track,
+                sequencer_layout=self.sequencer_layout,
+                size_hint=(0.9, 0.8),
+                pos_hint={'center_x': 0.5, 'center_y': 0.5}
+            )
+            if self.sequencer_layout.window_manager:
+                self.sequencer_layout.window_manager.add_widget(editor)
 
     def open_automation_editor(self):
-        if self._editor_opening:
-            return
-        
         if isinstance(self.track, AutomationTrack):
-            self._editor_opening = True
+            existing = self._find_existing_editor()
+            if existing:
+                existing._bring_to_front()
+                return
             
             # On demande à l'objet automation_controls quel paramètre est actif
             active_param = 'vol' # Valeur de sécurité
-            if hasattr(self, 'automation_controls'):
+            if hasattr(self, 'automation_controls') and self.automation_controls.selected_param:
                 active_param = self.automation_controls.selected_param            
 
             # On passe ce paramètre à l'initialisation de l'éditeur
@@ -907,14 +923,14 @@ class TrackWidget(BoxLayout):
                 track=self.track,
                 sequencer_layout=self.sequencer_layout,
                 initial_param=active_param,
-                pixels_per_beat=self.pixels_per_beat
+                pixels_per_beat=self.pixels_per_beat,
+                size_hint=(0.9, 0.8),
+                pos_hint={'center_x': 0.5, 'center_y': 0.5}
             )
             
-            editor.bind(on_dismiss=self._on_editor_dismiss)
-            editor.open()
+            if self.sequencer_layout.window_manager:
+                self.sequencer_layout.window_manager.add_widget(editor)
 
-    def _on_editor_dismiss(self, instance) -> None:
-        self._editor_opening = False
 
     def select_midi_port_popup(self, instance) -> None:
         """Opens a popup to select a MIDI output port for the track."""

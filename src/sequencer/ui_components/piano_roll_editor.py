@@ -1,5 +1,5 @@
 from turtle import position
-from kivy.uix.modalview import ModalView
+from .floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
@@ -534,7 +534,6 @@ class EditablePianoRollViewer(ScrollView):
 Builder.load_string("""
 <PianoRollEditor>:
     size_hint: 0.9, 0.9
-    auto_dismiss: False
 
     MDBoxLayout:
         orientation: 'vertical'
@@ -804,7 +803,7 @@ Builder.load_string("""
                 on_press: root.dismiss()
 """)
 
-class PianoRollEditor(ModalView):
+class PianoRollEditor(FloatingWindow):
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
     original_track_index = NumericProperty(None)
@@ -829,6 +828,8 @@ class PianoRollEditor(ModalView):
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
         super(PianoRollEditor, self).__init__(**kwargs)
+        self.source_track = self.track
+        self.title = f"Piano Roll: {self.track.name}"
         self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
             name=self.track.name,

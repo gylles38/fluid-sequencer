@@ -8,6 +8,7 @@ Config.set('input', 'mouse', 'mouse,disable_multitouch')
 
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
@@ -78,6 +79,7 @@ class HoverRippleMenuItem(
 
 class SequencerLayout(BoxLayout):
     sequencer = ObjectProperty(None)
+    window_manager = ObjectProperty(None)
 
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
@@ -1780,6 +1782,12 @@ class SequencerLayout(BoxLayout):
 
 
     def update_track_list(self):
+        # Close floating windows of tracks that no longer exist
+        if self.window_manager:
+            for window in list(self.window_manager.children):
+                if hasattr(window, 'source_track') and window.source_track not in self.sequencer.song.tracks:
+                    window.dismiss()
+
         self.track_list_layout.clear_widgets()
         self.track_widgets.clear()
 
@@ -2312,18 +2320,25 @@ class SequencerApp(MDApp):
         self.theme_cls.theme_style = "Dark"
         self.theme_cls.primary_palette = "Blue"
         
-        layout = SequencerLayout()
+        root = FloatLayout()
+        self.sequencer_layout = SequencerLayout(size_hint=(1, 1))
+        self.window_manager = FloatLayout(size_hint=(1, 1))
+        self.sequencer_layout.window_manager = self.window_manager
+
+        root.add_widget(self.sequencer_layout)
+        root.add_widget(self.window_manager)
+
         # Start the Jack manager and Carla as soon as the app is built.
         # We schedule them to avoid blocking the main UI thread during startup.
         def startup(dt):
-            layout.sequencer.jack_manager.start()
-            layout.sequencer._start_carla_process()
+            self.sequencer_layout.sequencer.jack_manager.start()
+            self.sequencer_layout.sequencer._start_carla_process()
 
         Clock.schedule_once(startup, 0.1)
-        return layout
+        return root
 
     def on_stop(self):
-        layout = self.root
+        layout = self.sequencer_layout
         layout.sequencer.stop()
         layout.sequencer.close_virtual_ports()
 

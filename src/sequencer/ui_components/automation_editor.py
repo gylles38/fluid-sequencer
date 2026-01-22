@@ -1,4 +1,4 @@
-from kivy.uix.modalview import ModalView
+from .floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
@@ -424,7 +424,6 @@ class EditableAutomationGrid(RelativeLayout):
 Builder.load_string("""
 <AutomationEditor>:
     size_hint: 0.9, 0.9
-    auto_dismiss: False
 
     MDBoxLayout:
         orientation: 'vertical'
@@ -715,7 +714,7 @@ Builder.load_string("""
                 on_press: root.dismiss()
 """)
 
-class AutomationEditor(ModalView):
+class AutomationEditor(FloatingWindow):
     sequencer_layout = ObjectProperty()
     track = ObjectProperty() # This will be the AutomationTrack
     original_track_index = NumericProperty(None)
@@ -743,6 +742,8 @@ class AutomationEditor(ModalView):
         # On extrait track et sequencer_layout de kwargs avant le super s'ils y sont
         # ou on s'assure qu'ils sont passés par propriétés.        
         super(AutomationEditor, self).__init__(**kwargs)
+        self.source_track = self.track
+        self.title = f"Automation: {self.track.name}"
 
         self.track_copy = AutomationTrack(
             name=self.track.name,

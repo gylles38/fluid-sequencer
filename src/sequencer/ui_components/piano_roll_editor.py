@@ -538,177 +538,185 @@ Builder.load_string("""
     MDBoxLayout:
         orientation: 'vertical'
 
-        MDBoxLayout:
-            id: toolbar
+        ScrollView:
             size_hint_y: None
             height: dp(56)
-            padding: dp(8)
-            spacing: dp(8)
-            md_bg_color: 0.2, 0.2, 0.2, 1
-
-            Label:
-                text: "Modes:"
-                size_hint_x: None
-                width: self.texture_size[0]
-
-            TooltipMDIconButton:
-                id: insert_button
-                icon: 'pencil'
-                tooltip_text: "Insert Mode"
-                theme_icon_color: "Custom"
-                on_press: root.set_edit_mode('insert', self)
-            TooltipMDIconButton:
-                id: move_button
-                icon: 'cursor-move'
-                tooltip_text: "Move Mode"
-                theme_icon_color: "Custom"
-                on_press: root.set_edit_mode('move', self)
-            TooltipMDIconButton:
-                id: delete_button
-                icon: 'eraser'
-                tooltip_text: "Delete Mode"
-                theme_icon_color: "Custom"
-                on_press: root.set_edit_mode('delete', self)
-
-            MDDivider:
-                orientation: 'vertical'
-
-            TooltipMDIconButton:
-                id: undo_button
-                icon: 'undo'
-                tooltip_text: "Undo (Ctrl+Z)"
-                on_press: root.undo()
-                disabled: True
-            TooltipMDIconButton:
-                id: redo_button
-                icon: 'redo'
-                tooltip_text: "Redo (Ctrl+Y)"
-                on_press: root.redo()
-                disabled: True
-
-            Widget:
-                size_hint_x: 1
-
-            Label:
-                text: "Duration:"
-                size_hint_x: None
-                width: self.texture_size[0]
-
-            TooltipMDIconButton:
-                id: whole_note_button
-                icon: 'music-note-whole'
-                tooltip_text: "Whole Note (4 beats)"
-                theme_icon_color: "Custom"
-                on_press: root.set_note_duration(4.0, self)
-            TooltipMDIconButton:
-                id: half_note_button
-                icon: 'music-note-half'
-                tooltip_text: "Half Note (2 beats)"
-                theme_icon_color: "Custom"
-                on_press: root.set_note_duration(2.0, self)
-            TooltipMDIconButton:
-                id: quarter_note_button
-                icon: 'music-note-quarter'
-                tooltip_text: "Quarter Note (1 beat)"
-                theme_icon_color: "Custom"
-                on_press: root.set_note_duration(1.0, self)
-            TooltipMDIconButton:
-                id: eighth_note_button
-                icon: 'music-note-eighth'
-                tooltip_text: "Eighth Note (0.5 beats)"
-                theme_icon_color: "Custom"
-                on_press: root.set_note_duration(0.5, self)
-            TooltipMDIconButton:
-                id: sixteenth_note_button
-                icon: 'music-note-sixteenth'
-                tooltip_text: "Sixteenth Note (0.25 beats)"
-                theme_icon_color: "Custom"
-                on_press: root.set_note_duration(0.25, self)
-            TooltipMDIconButton:
-                id: thirty_second_note_button
-                icon: 'music-note-thirty-second'
-                tooltip_text: "Thirty-second Note (0.125 beats)"
-                theme_icon_color: "Custom"
-                on_press: root.set_note_duration(0.125, self)
-
-            MDDivider:
-                orientation: 'vertical'
-
-            TooltipMDIconButton:
-                id: dotted_button
-                icon: 'circle-small'
-                tooltip_text: "Dotted Note (Toggle)"
-                theme_icon_color: "Custom"
-                on_press: root.toggle_dotted_mode()
-
-            MDDivider:
-                orientation: "vertical"
-                adaptive_height: False
-                height: dp(30)
-                pos_hint: {"center_y": .5}
-                
-            # --- Boutons de Zoom (À insérer après duration_1_16) ---
+            do_scroll_y: False
             MDBoxLayout:
-                adaptive_width: True
-                spacing: dp(4)
-                
-                TooltipMDIconButton:
-                    icon: "magnify-plus-outline"
-                    tooltip_text: "Zoom In"
-                    on_release: root.zoom_in()
-                
-                TooltipMDIconButton:
-                    icon: "magnify-minus-outline"
-                    tooltip_text: "Zoom Out"
-                    on_release: root.zoom_out()
-                
-                TooltipMDIconButton:
-                    icon: "magnify-close"
-                    tooltip_text: "Reset Zoom"
-                    on_release: root.zoom_reset()
-
-            MDDivider:
-                orientation: "vertical"
-                adaptive_height: False
-                height: dp(30)
-                pos_hint: {"center_y": .5}
-            
-            # --- Boutons de Transport (Existant) ---
-            MDIconButton:
-                id: play_pause_btn
-
-            Widget:
-                size_hint_x: 1
-
-            TooltipMDIconButton:
-                id: rewind_button
-                icon: 'skip-backward'
-                tooltip_text: "Rewind to Start"
-                on_press: root.rewind_pressed()
-            TooltipMDIconButton:
-                id: play_button
-                icon: 'play'
-                tooltip_text: "Play / Pause"
-                on_press: root.play_pressed()
-            TooltipMDIconButton:
-                id: stop_button
-                icon: 'stop'
-                tooltip_text: "Stop"
-                on_press: root.stop_pressed()
-            TooltipMDIconButton:
-                id: record_button
-                icon: 'record-circle-outline'
-                tooltip_text: "Record"
-                on_press: root.record_pressed()
-
-            Widget:
-                size_hint_x: 0.5
-
-            Label:
-                id: pos_label
-                text: "Pos: 1:1"
+                id: toolbar
                 size_hint_x: None
-                width: self.texture_size[0]
+                width: self.minimum_width
+                height: dp(56)
+                padding: dp(8)
+                spacing: dp(8)
+                md_bg_color: 0.2, 0.2, 0.2, 1
+
+                Label:
+                    text: "Modes:"
+                    size_hint_x: None
+                    width: self.texture_size[0]
+
+                TooltipMDIconButton:
+                    id: insert_button
+                    icon: 'pencil'
+                    tooltip_text: "Insert Mode"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_edit_mode('insert', self)
+                TooltipMDIconButton:
+                    id: move_button
+                    icon: 'cursor-move'
+                    tooltip_text: "Move Mode"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_edit_mode('move', self)
+                TooltipMDIconButton:
+                    id: delete_button
+                    icon: 'eraser'
+                    tooltip_text: "Delete Mode"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_edit_mode('delete', self)
+
+                MDDivider:
+                    orientation: 'vertical'
+
+                TooltipMDIconButton:
+                    id: undo_button
+                    icon: 'undo'
+                    tooltip_text: "Undo (Ctrl+Z)"
+                    on_press: root.undo()
+                    disabled: True
+                TooltipMDIconButton:
+                    id: redo_button
+                    icon: 'redo'
+                    tooltip_text: "Redo (Ctrl+Y)"
+                    on_press: root.redo()
+                    disabled: True
+
+                Widget:
+                    size_hint_x: None
+                    width: dp(20)
+
+                Label:
+                    text: "Duration:"
+                    size_hint_x: None
+                    width: self.texture_size[0]
+
+                TooltipMDIconButton:
+                    id: whole_note_button
+                    icon: 'music-note-whole'
+                    tooltip_text: "Whole Note (4 beats)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_note_duration(4.0, self)
+                TooltipMDIconButton:
+                    id: half_note_button
+                    icon: 'music-note-half'
+                    tooltip_text: "Half Note (2 beats)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_note_duration(2.0, self)
+                TooltipMDIconButton:
+                    id: quarter_note_button
+                    icon: 'music-note-quarter'
+                    tooltip_text: "Quarter Note (1 beat)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_note_duration(1.0, self)
+                TooltipMDIconButton:
+                    id: eighth_note_button
+                    icon: 'music-note-eighth'
+                    tooltip_text: "Eighth Note (0.5 beats)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_note_duration(0.5, self)
+                TooltipMDIconButton:
+                    id: sixteenth_note_button
+                    icon: 'music-note-sixteenth'
+                    tooltip_text: "Sixteenth Note (0.25 beats)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_note_duration(0.25, self)
+                TooltipMDIconButton:
+                    id: thirty_second_note_button
+                    icon: 'music-note-thirty-second'
+                    tooltip_text: "Thirty-second Note (0.125 beats)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_note_duration(0.125, self)
+
+                MDDivider:
+                    orientation: 'vertical'
+
+                TooltipMDIconButton:
+                    id: dotted_button
+                    icon: 'circle-small'
+                    tooltip_text: "Dotted Note (Toggle)"
+                    theme_icon_color: "Custom"
+                    on_press: root.toggle_dotted_mode()
+
+                MDDivider:
+                    orientation: "vertical"
+                    adaptive_height: False
+                    height: dp(30)
+                    pos_hint: {"center_y": .5}
+
+                # --- Boutons de Zoom (À insérer après duration_1_16) ---
+                MDBoxLayout:
+                    adaptive_width: True
+                    spacing: dp(4)
+
+                    TooltipMDIconButton:
+                        icon: "magnify-plus-outline"
+                        tooltip_text: "Zoom In"
+                        on_release: root.zoom_in()
+
+                    TooltipMDIconButton:
+                        icon: "magnify-minus-outline"
+                        tooltip_text: "Zoom Out"
+                        on_release: root.zoom_out()
+
+                    TooltipMDIconButton:
+                        icon: "magnify-close"
+                        tooltip_text: "Reset Zoom"
+                        on_release: root.zoom_reset()
+
+                MDDivider:
+                    orientation: "vertical"
+                    adaptive_height: False
+                    height: dp(30)
+                    pos_hint: {"center_y": .5}
+
+                # --- Boutons de Transport (Existant) ---
+                MDIconButton:
+                    id: play_pause_btn
+
+                Widget:
+                    size_hint_x: None
+                    width: dp(20)
+
+                TooltipMDIconButton:
+                    id: rewind_button
+                    icon: 'skip-backward'
+                    tooltip_text: "Rewind to Start"
+                    on_press: root.rewind_pressed()
+                TooltipMDIconButton:
+                    id: play_button
+                    icon: 'play'
+                    tooltip_text: "Play / Pause"
+                    on_press: root.play_pressed()
+                TooltipMDIconButton:
+                    id: stop_button
+                    icon: 'stop'
+                    tooltip_text: "Stop"
+                    on_press: root.stop_pressed()
+                TooltipMDIconButton:
+                    id: record_button
+                    icon: 'record-circle-outline'
+                    tooltip_text: "Record"
+                    on_press: root.record_pressed()
+
+                Widget:
+                    size_hint_x: None
+                    width: dp(20)
+
+                Label:
+                    id: pos_label
+                    text: "Pos: 1:1"
+                    size_hint_x: None
+                    width: self.texture_size[0]
 
         Ruler:
             id: ruler
@@ -770,41 +778,48 @@ Builder.load_string("""
                         size_hint_y: None
                         height: dp(18)
 
-        MDBoxLayout:
+        ScrollView:
             size_hint_y: None
             height: dp(48)
-            padding: dp(8)
-            spacing: dp(8)
-            md_bg_color: 0.2, 0.2, 0.2, 1
+            do_scroll_y: False
+            MDBoxLayout:
+                size_hint_x: None
+                width: self.minimum_width
+                height: dp(48)
+                padding: dp(8)
+                spacing: dp(8)
+                md_bg_color: 0.2, 0.2, 0.2, 1
 
-            Label:
-                id: status_label
-                text: "Note: C4"
-                size_hint_x: None
-                width: self.texture_size[0]
-                color: 0.8, 0.8, 0.8, 1
+                Label:
+                    id: status_label
+                    text: "Note: C4"
+                    size_hint_x: None
+                    width: self.texture_size[0]
+                    color: 0.8, 0.8, 0.8, 1
 
-            Widget:
-                size_hint_x: 1
-            HoverableButton:
-                text: 'Save & Close'
-                size_hint_x: None
-                width: dp(120)
-                on_press: root.dismiss('save_and_close')
-            HoverableButton:
-                text: 'Discard & Close'
-                size_hint_x: None
-                width: dp(140)
-                on_press: root.dismiss('discard_and_close')
-            HoverableButton:
-                text: 'Cancel'
-                size_hint_x: None
-                width: dp(100)
-                on_press: root.dismiss()
+                Widget:
+                    size_hint_x: None
+                    width: dp(20)
+
+                HoverableButton:
+                    text: 'Save & Close'
+                    size_hint_x: None
+                    width: dp(120)
+                    on_press: root.dismiss('save_and_close')
+                HoverableButton:
+                    text: 'Discard & Close'
+                    size_hint_x: None
+                    width: dp(140)
+                    on_press: root.dismiss('discard_and_close')
+                HoverableButton:
+                    text: 'Cancel'
+                    size_hint_x: None
+                    width: dp(100)
+                    on_press: root.dismiss()
 """)
 
 class PianoRollEditor(FloatingWindow):
-    min_width = NumericProperty(dp(1100))
+    min_width = NumericProperty(dp(600))
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
     original_track_index = NumericProperty(None)

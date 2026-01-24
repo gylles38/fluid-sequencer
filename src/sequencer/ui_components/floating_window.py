@@ -25,20 +25,12 @@ class InternalIconButton(MDIconButton):
 Builder.load_string("""
 <FloatingWindow>:
     canvas.before:
-        StencilPush
-        Rectangle:
-            pos: 0, 0
-            size: self.size
-        StencilUse
         Color:
             rgba: 0.15, 0.15, 0.15, 1
         Rectangle:
             pos: 0, 0
             size: self.size
-
     canvas.after:
-        StencilUnUse
-        StencilPop
         Color:
             rgba: 0.3, 0.3, 0.3, 1
         Line:
@@ -251,12 +243,8 @@ class FloatingWindow(RelativeLayout):
                 # 1. Width (Right edge)
                 new_width = self._resize_start_widget_size[0] + dx
                 new_width = max(self.min_width, new_width)
-                # Cap width so right edge doesn't go off-screen, BUT prioritize min_width
+                # Cap width so right edge doesn't go off-screen
                 if self.x + new_width > self.parent.width:
-                    # Try to stay in bounds if possible, otherwise hit parent edge
-                    # but if we are below min_width, we'll stay at min_width and overflow parent
-                    # This is better than shrinking too much.
-                    # HOWEVER, user wants to limit resize, so let's stick to parent bounds if above min_width.
                     new_width = max(self.min_width, self.parent.width - self.x)
 
                 # 2. Height (Bottom edge)

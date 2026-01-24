@@ -429,129 +429,136 @@ Builder.load_string("""
         orientation: 'vertical'
 
         # Top Toolbar
-        MDBoxLayout:
-            id: toolbar
+        ScrollView:
             size_hint_y: None
             height: dp(56)
-            padding: dp(8)
-            spacing: dp(8)
-            md_bg_color: 0.2, 0.2, 0.2, 1
-
-            AutomationControls:
-                id: automation_controls
-                size_hint_x: None
-                width: dp(200) # Adjust as needed
-                pos_hint: {'center_y': 0.5}
-
-            MDDivider:
-                orientation: 'vertical'
-
-            Label:
-                text: "Modes:"
-                size_hint_x: None
-                width: self.texture_size[0]
-
-            TooltipMDIconButton:
-                id: insert_button
-                icon: 'pencil'
-                tooltip_text: "Insert Mode (Ctrl+I)"
-                theme_icon_color: "Custom"
-                on_press: root.set_edit_mode('insert', self)
-            TooltipMDIconButton:
-                id: move_button
-                icon: 'cursor-move'
-                tooltip_text: "Move Mode (Ctrl+M)"
-                theme_icon_color: "Custom"
-                on_press: root.set_edit_mode('move', self)
-            TooltipMDIconButton:
-                id: delete_button
-                icon: 'eraser'
-                tooltip_text: "Delete Mode (Ctrl+D)"
-                theme_icon_color: "Custom"
-                on_press: root.set_edit_mode('delete', self)
-            TooltipMDIconButton:
-                id: clear_button
-                icon: 'trash-can-outline'
-                tooltip_text: "Delete Automation Points (Ctrl+E)"
-                theme_icon_color: "Custom"
-                icon_color: [1, 1, 1, 0.5]
-                on_release: root.clear_all_points()
-
-            MDDivider:
-                orientation: 'vertical'
-
-            TooltipMDIconButton:
-                id: undo_button
-                icon: 'undo'
-                tooltip_text: "Undo (Ctrl+Z)"
-                on_press: root.undo()
-                disabled: True
-            TooltipMDIconButton:
-                id: redo_button
-                icon: 'redo'
-                tooltip_text: "Redo (Ctrl+Y)"
-                on_press: root.redo()
-                disabled: True
-
-            Widget:
-                size_hint_x: 1
-
+            do_scroll_y: False
             MDBoxLayout:
-                adaptive_width: True
-                spacing: dp(4)
-
-                TooltipMDIconButton:
-                    icon: "magnify-plus-outline"
-                    tooltip_text: "Zoom In"
-                    on_release: root.zoom_in()
-
-                TooltipMDIconButton:
-                    icon: "magnify-minus-outline"
-                    tooltip_text: "Zoom Out"
-                    on_release: root.zoom_out()
-
-                TooltipMDIconButton:
-                    icon: "magnify-close"
-                    tooltip_text: "Reset Zoom"
-                    on_release: root.zoom_reset()
-
-            MDDivider:
-                orientation: "vertical"
-
-            TooltipMDIconButton:
-                id: rewind_button
-                icon: 'skip-backward'
-                tooltip_text: "Rewind to Start"
-                on_press: root.rewind_pressed()
-            TooltipMDIconButton:
-                id: play_button
-                icon: 'play'
-                tooltip_text: "Play / Pause"
-                on_press: root.play_pressed()
-            TooltipMDIconButton:
-                id: stop_button
-                icon: 'stop'
-                tooltip_text: "Stop"
-                on_press: root.stop_pressed()
-
-            Widget:
-                size_hint_x: 0.5
-
-            Label:
-                text: "Pos:"
+                id: toolbar
                 size_hint_x: None
-                width: self.texture_size[0]
+                width: self.minimum_width
+                height: dp(56)
+                padding: dp(8)
+                spacing: dp(8)
+                md_bg_color: 0.2, 0.2, 0.2, 1
 
-            TextInput:
-                id: pos_label
-                text: "1:1"
-                size_hint_x: None
-                size_hint_y: None
-                height: dp(30)
-                pos_hint: {"center_y": .5}                
-                width: dp(70)
-                multiline: False
-                on_text_validate: root.seek_from_input(self.text)
+                AutomationControls:
+                    id: automation_controls
+                    size_hint_x: None
+                    width: dp(200) # Adjust as needed
+                    pos_hint: {'center_y': 0.5}
+
+                MDDivider:
+                    orientation: 'vertical'
+
+                Label:
+                    text: "Modes:"
+                    size_hint_x: None
+                    width: self.texture_size[0]
+
+                TooltipMDIconButton:
+                    id: insert_button
+                    icon: 'pencil'
+                    tooltip_text: "Insert Mode (Ctrl+I)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_edit_mode('insert', self)
+                TooltipMDIconButton:
+                    id: move_button
+                    icon: 'cursor-move'
+                    tooltip_text: "Move Mode (Ctrl+M)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_edit_mode('move', self)
+                TooltipMDIconButton:
+                    id: delete_button
+                    icon: 'eraser'
+                    tooltip_text: "Delete Mode (Ctrl+D)"
+                    theme_icon_color: "Custom"
+                    on_press: root.set_edit_mode('delete', self)
+                TooltipMDIconButton:
+                    id: clear_button
+                    icon: 'trash-can-outline'
+                    tooltip_text: "Delete Automation Points (Ctrl+E)"
+                    theme_icon_color: "Custom"
+                    icon_color: [1, 1, 1, 0.5]
+                    on_release: root.clear_all_points()
+
+                MDDivider:
+                    orientation: 'vertical'
+
+                TooltipMDIconButton:
+                    id: undo_button
+                    icon: 'undo'
+                    tooltip_text: "Undo (Ctrl+Z)"
+                    on_press: root.undo()
+                    disabled: True
+                TooltipMDIconButton:
+                    id: redo_button
+                    icon: 'redo'
+                    tooltip_text: "Redo (Ctrl+Y)"
+                    on_press: root.redo()
+                    disabled: True
+
+                Widget:
+                    size_hint_x: None
+                    width: dp(20)
+
+                MDBoxLayout:
+                    adaptive_width: True
+                    spacing: dp(4)
+
+                    TooltipMDIconButton:
+                        icon: "magnify-plus-outline"
+                        tooltip_text: "Zoom In"
+                        on_release: root.zoom_in()
+
+                    TooltipMDIconButton:
+                        icon: "magnify-minus-outline"
+                        tooltip_text: "Zoom Out"
+                        on_release: root.zoom_out()
+
+                    TooltipMDIconButton:
+                        icon: "magnify-close"
+                        tooltip_text: "Reset Zoom"
+                        on_release: root.zoom_reset()
+
+                MDDivider:
+                    orientation: "vertical"
+
+                TooltipMDIconButton:
+                    id: rewind_button
+                    icon: 'skip-backward'
+                    tooltip_text: "Rewind to Start"
+                    on_press: root.rewind_pressed()
+                TooltipMDIconButton:
+                    id: play_button
+                    icon: 'play'
+                    tooltip_text: "Play / Pause"
+                    on_press: root.play_pressed()
+                TooltipMDIconButton:
+                    id: stop_button
+                    icon: 'stop'
+                    tooltip_text: "Stop"
+                    on_press: root.stop_pressed()
+
+                Widget:
+                    size_hint_x: None
+                    width: dp(20)
+
+                Label:
+                    text: "Pos:"
+                    size_hint_x: None
+                    width: self.texture_size[0]
+
+                TextInput:
+                    id: pos_label
+                    text: "1:1"
+                    size_hint_x: None
+                    size_hint_y: None
+                    height: dp(30)
+                    pos_hint: {"center_y": .5}
+                    width: dp(70)
+                    multiline: False
+                    on_text_validate: root.seek_from_input(self.text)
 
         # Ruler
         Ruler:
@@ -633,89 +640,95 @@ Builder.load_string("""
                                 size: self.size
 
         # Bottom Toolbar
-        MDBoxLayout:
+        ScrollView:
             size_hint_y: None
             height: dp(48)
-            padding: dp(8)
-            spacing: dp(8)
-            md_bg_color: 0.2, 0.2, 0.2, 1
-
+            do_scroll_y: False
             MDBoxLayout:
-                id: edit_zone
-                adaptive_width: True
-                spacing: dp(10)
-                opacity: 0 # Caché par défaut si rien n'est sélectionné
-
-                MDLabel:
-                    text: "Beat:"
-                    adaptive_width: True
-                TextInput:
-                    id: input_beat
-                    size_hint: None, None
-                    size: dp(60), dp(30)
-                    multiline: False
-                    on_text_validate: root.apply_manual_edit()
-
-                MDLabel:
-                    text: "Value:"
-                    adaptive_width: True
-                TextInput:
-                    id: input_value
-                    size_hint: None, None
-                    size: dp(80), dp(30)
-                    multiline: False
-                    on_text_validate: root.apply_manual_edit()
+                size_hint_x: None
+                width: self.minimum_width
+                height: dp(48)
+                padding: dp(8)
+                spacing: dp(8)
+                md_bg_color: 0.2, 0.2, 0.2, 1
 
                 MDBoxLayout:
-                    id: sine_zone
+                    id: edit_zone
                     adaptive_width: True
-                    spacing: dp(5)
-                    opacity: 0  # Caché par défaut
-                    disabled: True
+                    spacing: dp(10)
+                    opacity: 0 # Caché par défaut si rien n'est sélectionné
 
                     MDLabel:
-                        text: "Sine Ph:"
+                        text: "Beat:"
                         adaptive_width: True
-                  
-                    MDIconButton:
-                        icon: "minus"
-                        user_font_size: "16sp"
-                        on_release: root.adjust_sine_value(-0.5)
-                                
                     TextInput:
-                        id: input_sine
+                        id: input_beat
                         size_hint: None, None
                         size: dp(60), dp(30)
                         multiline: False
                         on_text_validate: root.apply_manual_edit()
 
-                    MDIconButton:
-                        icon: "plus"
-                        user_font_size: "16sp"
-                        on_release: root.adjust_sine_value(0.5)
+                    MDLabel:
+                        text: "Value:"
+                        adaptive_width: True
+                    TextInput:
+                        id: input_value
+                        size_hint: None, None
+                        size: dp(80), dp(30)
+                        multiline: False
+                        on_text_validate: root.apply_manual_edit()
 
-            Widget:
-                size_hint_x: 1
+                    MDBoxLayout:
+                        id: sine_zone
+                        adaptive_width: True
+                        spacing: dp(5)
+                        opacity: 0  # Caché par défaut
+                        disabled: True
 
-            HoverableButton:
-                text: 'Save & Close'
-                size_hint_x: None
-                width: dp(120)
-                on_press: root.dismiss('save_and_close')
-            HoverableButton:
-                text: 'Discard & Close'
-                size_hint_x: None
-                width: dp(140)
-                on_press: root.dismiss('discard_and_close')
-            HoverableButton:
-                text: 'Cancel'
-                size_hint_x: None
-                width: dp(100)
-                on_press: root.dismiss()
+                        MDLabel:
+                            text: "Sine Ph:"
+                            adaptive_width: True
+
+                        MDIconButton:
+                            icon: "minus"
+                            user_font_size: "16sp"
+                            on_release: root.adjust_sine_value(-0.5)
+
+                        TextInput:
+                            id: input_sine
+                            size_hint: None, None
+                            size: dp(60), dp(30)
+                            multiline: False
+                            on_text_validate: root.apply_manual_edit()
+
+                        MDIconButton:
+                            icon: "plus"
+                            user_font_size: "16sp"
+                            on_release: root.adjust_sine_value(0.5)
+
+                Widget:
+                    size_hint_x: None
+                    width: dp(20)
+
+                HoverableButton:
+                    text: 'Save & Close'
+                    size_hint_x: None
+                    width: dp(120)
+                    on_press: root.dismiss('save_and_close')
+                HoverableButton:
+                    text: 'Discard & Close'
+                    size_hint_x: None
+                    width: dp(140)
+                    on_press: root.dismiss('discard_and_close')
+                HoverableButton:
+                    text: 'Cancel'
+                    size_hint_x: None
+                    width: dp(100)
+                    on_press: root.dismiss()
 """)
 
 class AutomationEditor(FloatingWindow):
-    min_width = NumericProperty(dp(900))
+    min_width = NumericProperty(dp(600))
     sequencer_layout = ObjectProperty()
     track = ObjectProperty() # This will be the AutomationTrack
     original_track_index = NumericProperty(None)

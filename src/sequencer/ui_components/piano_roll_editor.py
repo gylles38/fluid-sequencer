@@ -804,7 +804,7 @@ Builder.load_string("""
 """)
 
 class PianoRollEditor(FloatingWindow):
-    min_width = NumericProperty(dp(750))
+    min_width = NumericProperty(dp(1100))
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
     original_track_index = NumericProperty(None)

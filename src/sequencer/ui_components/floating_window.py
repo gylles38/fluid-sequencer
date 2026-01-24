@@ -133,23 +133,24 @@ class FloatingWindow(RelativeLayout):
         if self.parent:
             Clock.schedule_once(lambda dt: self._bring_to_front(), 0)
 
-        # 1. Let children handle touch first
-        if super(RelativeLayout, self).on_touch_down(touch):
-            touch.pop()
-            return True
-
-        # 2. dragging/resizing logic
         local_pos = touch.pos
 
-        # Check resize handle
+        # 1. Check resize handle first (chrome priority)
         if 'resize_handle' in self.ids and self.ids.resize_handle.collide_point(*local_pos) and not self.is_maximized:
             self.pos_hint = {}
             self.size_hint = (None, None)
             self._is_resizing = True
             touch.grab(self)
+            # Re-apply transform because grab might have affected it? No, but let's be safe.
             touch.pop()
             return True
 
+        # 2. Let children handle touch (like title bar buttons or content)
+        if super(RelativeLayout, self).on_touch_down(touch):
+            touch.pop()
+            return True
+
+        # 3. dragging logic (title bar)
         # Check title bar
         if 'title_bar' in self.ids and self.ids.title_bar.collide_point(*local_pos) and not self.is_maximized:
             self.pos_hint = {}
@@ -176,7 +177,8 @@ class FloatingWindow(RelativeLayout):
 
         if self._is_dragging:
             if self.parent:
-                parent_pos = self.parent.to_local(*touch.pos)
+                # Use parent coordinates to avoid feedback loop when moving RelativeLayout
+                parent_pos = self.parent.to_local(*self.to_window(*touch.pos))
                 self.x = parent_pos[0] - self._drag_offset[0]
                 self.y = parent_pos[1] - self._drag_offset[1]
 
@@ -185,14 +187,27 @@ class FloatingWindow(RelativeLayout):
             return True
 
         if self._is_resizing:
-            local_pos = touch.pos
+            if self.parent:
+                # Use parent coordinates to avoid coordinate system movement during resize
+                parent_pos = self.parent.to_local(*self.to_window(*touch.pos))
 
-            new_width = max(dp(300), local_pos[0])
-            delta_y = local_pos[1]
-            if self.height - delta_y > dp(200):
-                self.y += delta_y
-                self.height -= delta_y
-            self.width = new_width
+                # New width is distance from our x to mouse x (right edge moves)
+                new_width = max(dp(300), parent_pos[0] - self.x)
+
+                # To keep the top edge fixed: new_y + new_height = old_top
+                old_top = self.y + self.height
+                new_y = parent_pos[1]
+                new_height = old_top - new_y
+
+                if new_height >= dp(200):
+                    self.y = new_y
+                    self.height = new_height
+                else:
+                    # Anchor at minimum height
+                    self.y = old_top - dp(200)
+                    self.height = dp(200)
+
+                self.width = new_width
             return True
 
         return super().on_touch_move(touch)

@@ -1638,12 +1638,6 @@ class SequencerLayout(BoxLayout):
     def record_pressed(self, instance):
         self.sequencer.process_transport_command("record")
 
-    def get_armed_track(self) -> Optional[int]:
-        """Retourne l'index de la piste armée, ou None si aucune piste n'est armée."""
-        for i, track in enumerate(self.song.tracks):
-            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
-                return i
-        return None
 
     def loop_pressed(self, instance):
         # Si on désactive le looping pendant la lecture

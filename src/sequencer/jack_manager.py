@@ -972,12 +972,18 @@ class JackManager:
         """Returns the target track index for MIDI input routing at the given beat."""
         for track in self.sequencer.song.tracks:
             if isinstance(track, AutomationTrack):
-                # We look for a track that has 'input_routing' points
-                # Note: We assume the parameter is named 'input_routing'
-                if any(p.parameter == 'input_routing' for p in track.points):
+                # Check if this track has 'input_routing' points
+                has_routing = False
+                for p in track.points:
+                    if p.parameter == 'input_routing':
+                        has_routing = True
+                        break
+                if has_routing:
                     val = track.get_value_at(beat, 'input_routing')
                     return int(val)
-        return None
+
+        # Fallback to armed track
+        return self.sequencer.get_armed_track_index()
 
     def _handle_control_midi(self, msg: mido.Message):
         """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""

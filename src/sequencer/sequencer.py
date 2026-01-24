@@ -376,6 +376,13 @@ class Sequencer(EventDispatcher):
         """Retourne le port d'enregistrement par défaut"""
         return self.default_record_port
 
+    def get_armed_track_index(self) -> Optional[int]:
+        """Returns the index of the currently armed MIDI track, or None if no track is armed."""
+        for i, track in enumerate(self.song.tracks):
+            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+                return i
+        return None
+
     def get_input_routing_track(self) -> AutomationTrack:
         """Returns or creates the global MIDI input routing automation track."""
         for track in self.song.tracks:

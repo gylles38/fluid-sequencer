@@ -133,6 +133,9 @@ class FloatingWindow(RelativeLayout):
         if not self.collide_point(*touch.pos):
             return False
 
+        # Capture GLOBAL coordinates here before transformation
+        global_touch_pos = (touch.x, touch.y)
+
         # Apply transformation to get local coordinates for collision checks
         touch.push()
         touch.apply_transform_2d(self.to_local)
@@ -157,7 +160,7 @@ class FloatingWindow(RelativeLayout):
                 self.size = old_size
 
                 self._is_resizing = True
-                self._resize_start_touch_pos = (touch.x, touch.y)
+                self._resize_start_touch_pos = global_touch_pos
                 self._resize_start_widget_size = self.size[:]
                 self._resize_start_widget_pos = self.pos[:]
                 # Use real top as anchor to avoid jumps during move
@@ -184,7 +187,7 @@ class FloatingWindow(RelativeLayout):
                 self.size = old_size
 
                 self._is_dragging = True
-                self._drag_start_touch_pos = (touch.x, touch.y)
+                self._drag_start_touch_pos = global_touch_pos
                 self._drag_start_widget_pos = self.pos[:]
 
                 touch.grab(self)

@@ -160,7 +160,8 @@ class FloatingWindow(RelativeLayout):
                 self._resize_start_touch_pos = (touch.x, touch.y)
                 self._resize_start_widget_size = self.size[:]
                 self._resize_start_widget_pos = self.pos[:]
-                self._resize_start_top = self.y + self.height
+                # Robustly capture top edge clamped to parent
+                self._resize_start_top = min(self.parent.height, self.y + self.height)
 
                 touch.grab(self)
                 touch.pop()
@@ -211,12 +212,19 @@ class FloatingWindow(RelativeLayout):
                 dy = touch.y - self._drag_start_touch_pos[1]
 
                 # Update position based on initial position + delta
-                self.x = self._drag_start_widget_pos[0] + dx
-                self.y = self._drag_start_widget_pos[1] + dy
+                new_x = self._drag_start_widget_pos[0] + dx
+                new_y = self._drag_start_widget_pos[1] + dy
 
-                # Keep in bounds
-                self.x = max(0, min(self.x, self.parent.width - self.width))
-                self.y = max(0, min(self.y, self.parent.height - self.height))
+                # Robust clamping allowing scrolling if taller/wider than parent
+                if self.width <= self.parent.width:
+                    self.x = max(0, min(new_x, self.parent.width - self.width))
+                else:
+                    self.x = max(self.parent.width - self.width, min(new_x, 0))
+
+                if self.height <= self.parent.height:
+                    self.y = max(0, min(new_y, self.parent.height - self.height))
+                else:
+                    self.y = max(self.parent.height - self.height, min(new_y, 0))
             return True
 
         if self._is_resizing:
@@ -227,14 +235,13 @@ class FloatingWindow(RelativeLayout):
 
                 # Resize handle is bottom-right.
                 # Right edge moves: width changes based on dx
+                # Width is capped to fit in parent
                 new_width = max(dp(300), self._resize_start_widget_size[0] + dx)
-                # Clamp width to parent right edge
                 new_width = min(new_width, self.parent.width - self.x)
 
                 # Bottom edge moves: y changes, height changes to keep top fixed.
                 new_y = self._resize_start_widget_pos[1] + dy
-                # Clamp bottom edge to parent bottom (y=0)
-                new_y = max(0, new_y)
+                new_y = max(0, new_y) # Clamp to parent bottom
 
                 new_height = self._resize_start_top - new_y
 
@@ -281,12 +288,15 @@ class FloatingWindow(RelativeLayout):
                 if not self.parent: return
                 # Restore absolute size if hints are empty
                 if self.size_hint[0] is None and self.size_hint[1] is None:
-                    self.size = self._restore_size
+                    # Ensure restored size does not exceed parent size
+                    r_w = min(self._restore_size[0], self.parent.width)
+                    r_h = min(self._restore_size[1], self.parent.height)
+                    self.size = (r_w, r_h)
                 # Restore absolute position if hint is empty
                 if not self.pos_hint:
-                    # Use restored size for clamping to ensure it stays on screen
-                    target_x = max(0, min(self._restore_pos[0], self.parent.width - self._restore_size[0]))
-                    target_y = max(0, min(self._restore_pos[1], self.parent.height - self._restore_size[1]))
+                    # Use current size for clamping to ensure it stays on screen
+                    target_x = max(0, min(self._restore_pos[0], self.parent.width - self.width))
+                    target_y = max(0, min(self._restore_pos[1], self.parent.height - self.height))
                     self.pos = (target_x, target_y)
 
             Clock.schedule_once(finish_restore)

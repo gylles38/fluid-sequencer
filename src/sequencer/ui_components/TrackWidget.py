@@ -15,7 +15,7 @@ from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
-from kivy.properties import NumericProperty, ObjectProperty
+from kivy.properties import NumericProperty, ObjectProperty, BooleanProperty
 from kivy.uix.label import Label 
 from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
@@ -143,6 +143,7 @@ class TrackWidget(BoxLayout):
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
+    is_active_routing = BooleanProperty(False)
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         self.spacing = dp(12)
@@ -165,10 +166,8 @@ class TrackWidget(BoxLayout):
         self.padding = [0, 0, 0, 0] # REMISE À ZÉRO POUR TESTS          
         
         with self.canvas.before:
-            if track_index % 2 == 0:
-                Color(0.1, 0.1, 0.1, 1)
-            else:
-                Color(0.12, 0.12, 0.12, 1)
+            self.bg_color = Color(0, 0, 0, 1)
+            self._update_bg_color()
             # BIEN ASSIGNER À SELF ICI
             self.background_rect = Rectangle(pos=self.pos, size=self.size)
 
@@ -591,9 +590,13 @@ class TrackWidget(BoxLayout):
         self.update_timeline_size()
 
         self.track.bind(is_solo=self.on_solo_changed)
+        self.bind(is_active_routing=self._update_bg_color)
         
         # Liaison avec le séquenceur pour la mise à jour en temps réel
-        self.sequencer_layout.sequencer.bind(current_beat=lambda instance, val: self.update_sliders_from_automation(val))
+        self.sequencer_layout.sequencer.bind(
+            current_beat=lambda instance, val: self.update_sliders_from_automation(val),
+            current_routing_index=self._sync_routing_status
+        )
         
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
@@ -669,6 +672,17 @@ class TrackWidget(BoxLayout):
 
     def on_solo_changed(self, instance, value) -> None:
         self.update_mute_solo_appearance()
+
+    def _sync_routing_status(self, instance, value):
+        self.is_active_routing = (value == self.track_index)
+
+    def _update_bg_color(self, *args):
+        if self.is_active_routing:
+            self.bg_color.rgba = [0.2, 0.25, 0.3, 1] # Slightly blue highlight for active routing
+        elif self.track_index % 2 == 0:
+            self.bg_color.rgba = [0.1, 0.1, 0.1, 1]
+        else:
+            self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
 
     def on_automation_selection_change(self, selected_param) -> None:
         """

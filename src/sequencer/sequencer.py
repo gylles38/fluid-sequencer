@@ -38,6 +38,7 @@ from kivy.clock import Clock
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
     last_beat_update_time = NumericProperty(0)
+    current_routing_index = NumericProperty(-1)
     playback_state = StringProperty("stopped")
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
@@ -100,6 +101,17 @@ class Sequencer(EventDispatcher):
 
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
+
+        self.bind(current_beat=self._update_current_routing)
+
+    def _update_current_routing(self, *args):
+        """Updates the current_routing_index property based on the current beat."""
+        if self.jack_manager:
+            idx = self.jack_manager._get_input_routing_value(self.current_beat)
+            if idx is not None:
+                self.current_routing_index = idx
+            else:
+                self.current_routing_index = -1
 
     def _start_carla_process(self, carla_project_path: Optional[str] = None):
         """

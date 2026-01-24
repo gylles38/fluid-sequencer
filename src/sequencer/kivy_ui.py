@@ -362,6 +362,22 @@ class SequencerLayout(BoxLayout):
         )
         transport_card.add_widget(self.playhead_label)
 
+        # Bridge Status
+        self.bridge_label = MDLabel(
+            text="Bridge: -",
+            size_hint_x=None,
+            width=dp(120),
+            size_hint_y=None,
+            height=common_height,
+            pos_hint={'center_y': 0.5},
+            theme_text_color="Custom",
+            text_color=[0.2, 0.6, 0.8, 1],
+            font_size="11sp",
+            halign='left',
+            valign='middle'
+        )
+        transport_card.add_widget(self.bridge_label)
+
         # Start/End avec hauteur synchronisée
         start_label = Label(
             text='Start:', 
@@ -638,6 +654,7 @@ class SequencerLayout(BoxLayout):
         # update_status_display() appelle update_track_list() qui utilise self.track_list_layout
         # donc il DOIT être appelé APRÈS la création de track_list_layout
         self.update_status_display()
+        self.sequencer.bind(current_routing_index=self.update_bridge_label)
 
         # Re-introducing a clock for smooth UI updates, but at a more reasonable rate
         Clock.schedule_interval(self.update_playhead, 1/30.0)
@@ -1863,6 +1880,19 @@ class SequencerLayout(BoxLayout):
             sv.fbind('scroll_x', self._synchronize_scroll)
             sv.bind(on_scroll_stop=self._on_scroll_stop)
             
+    def update_bridge_label(self, instance, value):
+        if value == -1:
+            self.bridge_label.text = "Bridge: OFF"
+            self.bridge_label.text_color = [0.5, 0.5, 0.5, 1]
+        else:
+            try:
+                track_name = self.sequencer.song.tracks[value].name
+                self.bridge_label.text = f"Bridge -> [{value}]"
+                self.bridge_label.text_color = [0.2, 0.8, 1.0, 1]
+            except (IndexError, AttributeError):
+                self.bridge_label.text = "Bridge: ?"
+                self.bridge_label.text_color = [1, 0.5, 0, 1]
+
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"
@@ -1878,6 +1908,7 @@ class SequencerLayout(BoxLayout):
         self.sequencer.ui_start_pos_str = self.start_pos_input.text
         self.sequencer.ui_end_pos_str = self.end_pos_input.text
 
+        self.update_bridge_label(None, self.sequencer.current_routing_index)
         self.update_track_list()
         
 ####

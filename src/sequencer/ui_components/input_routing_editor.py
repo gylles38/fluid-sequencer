@@ -52,10 +52,11 @@ class EditHistoryManager:
 
 class RoutingValueAxis(Widget):
     midi_tracks = ListProperty([]) # List of (absolute_index, track_name)
+    active_index = NumericProperty(-1)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.draw, size=self.draw, midi_tracks=self.draw)
+        self.bind(pos=self.draw, size=self.draw, midi_tracks=self.draw, active_index=self.draw)
         self.labels = []
 
     def draw(self, *args):
@@ -79,6 +80,12 @@ class RoutingValueAxis(Widget):
             if num_tracks == 1:
                 y_pos = self.y + self.height / 2
 
+            is_active = (abs_idx == self.active_index)
+            if is_active:
+                with self.canvas:
+                    Color(0.2, 0.3, 0.4, 1)
+                    Rectangle(pos=(self.x, y_pos - dp(10)), size=(self.width, dp(20)))
+
             label = Label(
                 text=f"{abs_idx}: {name}",
                 font_size='10sp',
@@ -86,7 +93,8 @@ class RoutingValueAxis(Widget):
                 size=(self.width - dp(4), dp(16)),
                 halign='right',
                 valign='middle',
-                color=(0.8, 0.8, 0.8, 1)
+                color=(1, 1, 1, 1) if is_active else (0.8, 0.8, 0.8, 1),
+                bold=is_active
             )
             self.labels.append(label)
             self.add_widget(label)
@@ -94,6 +102,7 @@ class RoutingValueAxis(Widget):
 class EditableRoutingGrid(RelativeLayout):
     editor = ObjectProperty()
     points = ListProperty([])
+    active_index = NumericProperty(-1)
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128.0)
     midi_tracks = ListProperty([]) # List of (absolute_index, track_name)
@@ -111,7 +120,7 @@ class EditableRoutingGrid(RelativeLayout):
 
         self.bind(size=self._update_layout, points=self.draw,
                   pixels_per_beat=self.draw, total_beats=self.draw,
-                  midi_tracks=self.draw)
+                  midi_tracks=self.draw, active_index=self.draw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
@@ -234,6 +243,10 @@ class EditableRoutingGrid(RelativeLayout):
             # Horizontal lines for each MIDI track
             for abs_idx, name in self.midi_tracks:
                 y = self._get_y_from_abs_idx(abs_idx)
+                if abs_idx == self.active_index:
+                    Color(0.2, 0.3, 0.4, 0.5)
+                    Rectangle(pos=(0, y - dp(10)), size=(self.width, dp(20)))
+                    Color(0.2, 0.2, 0.2, 1)
                 Line(points=[0, y, self.width, y], width=0.5)
 
         self.draw_curve_and_points()
@@ -405,6 +418,7 @@ Builder.load_string("""
                 size_hint_x: None
                 width: dp(120)
                 midi_tracks: root.midi_tracks
+                active_index: root.current_routing_index
 
             ScrollView:
                 id: timeline_scroll
@@ -433,6 +447,7 @@ Builder.load_string("""
                             pixels_per_beat: root.pixels_per_beat
                             midi_tracks: root.midi_tracks
                             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
+                            active_index: root.current_routing_index
 
                         Widget:
                             size_hint_y: None
@@ -484,6 +499,7 @@ class InputRoutingEditor(FloatingWindow):
     track_copy = ObjectProperty()
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
+    current_routing_index = NumericProperty(-1)
     end_pos_str = StringProperty('')
     midi_tracks = ListProperty([])
     edit_mode = StringProperty('insert')
@@ -504,6 +520,9 @@ class InputRoutingEditor(FloatingWindow):
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
         self.update_midi_tracks()
+
+        self.sequencer_layout.sequencer.bind(current_routing_index=self.setter('current_routing_index'))
+        self.current_routing_index = self.sequencer_layout.sequencer.current_routing_index
 
         Clock.schedule_once(self._post_kv_init)
         Clock.schedule_interval(self.update_playhead, 1/60)

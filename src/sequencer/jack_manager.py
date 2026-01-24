@@ -48,6 +48,7 @@ class JackManager:
         self._recorded_notes = {} # pitch -> (start_beat, target_track_idx, velocity)
         self._recorded_events_to_merge = collections.deque()
         self._live_forwarded_notes = {} # pitch -> target_track_idx
+        self._live_forwarded_ccs = collections.defaultdict(set) # cc_num -> set(target_track_idx)
         self.next_event_indices = []
         self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
         self._metronome_notes_to_turn_off = []
@@ -59,6 +60,7 @@ class JackManager:
         self.automation_events = []
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
+        self._routing_track: Optional[AutomationTrack] = None
 
         # --- Dynamic Audio Correction ---
         self.CORRECTION_GAIN = 0.02
@@ -321,10 +323,17 @@ class JackManager:
     def _prepare_automation_events(self):
         """Generates and sorts all automation events for the song."""
         self.automation_events.clear()
+        self._routing_track = None
         tracks = self.sequencer.song.tracks
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
         for track in tracks:
             if isinstance(track, AutomationTrack):
+                # Check for routing track
+                for p in track.points:
+                    if p.parameter == 'input_routing':
+                        self._routing_track = track
+                        break
+
                 # Only process automation for tracks that should be audible
                 target_track_index = track.target_track_index
                 if 0 <= target_track_index < len(tracks):
@@ -530,6 +539,20 @@ class JackManager:
             # If JACK is not running, we might still have mido ports open in self.open_ports
             # but usually this is called when JACK is active.
             pass
+
+    def _write_midi_safe(self, port, offset: int, data: bytes):
+        """Safely writes MIDI data to a JACK port, catching buffer overflows."""
+        try:
+            port.write_midi_event(offset, data)
+        except Exception as e:
+            # Error -105 is typically ENOBUFS (buffer overflow)
+            # We catch it to prevent the entire process callback from failing.
+            if "-105" in str(e):
+                # We don't print to avoid flooding the console/stderr in the realtime thread
+                pass
+            else:
+                # Still log other unexpected errors, but sparingly
+                pass
 
     def silence_all_midi_notes(self):
         """Sends note_off messages for all currently playing MIDI notes."""
@@ -876,12 +899,12 @@ class JackManager:
                             final_velocity = int(note.velocity * track.velocity)
                             final_velocity = max(0, min(127, final_velocity))
                             note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=final_velocity)
-                            port.write_midi_event(offset, note_on_msg.bytes())
+                            self._write_midi_safe(port, offset, note_on_msg.bytes())
                             note_end_beat = event.start_time + note.duration
                             self._active_notes[(i, note.pitch)] = note_end_beat
                         for cc in event.cc_messages:
                             cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
-                            port.write_midi_event(offset, cc_msg.bytes())
+                            self._write_midi_safe(port, offset, cc_msg.bytes())
                     self.next_event_indices[i] += 1
                 elif event.start_time >= end_beat_of_block:
                     break
@@ -970,16 +993,12 @@ class JackManager:
 
     def _get_input_routing_value(self, beat: float) -> Optional[int]:
         """Returns the target track index for MIDI input routing at the given beat."""
-        for track in self.sequencer.song.tracks:
-            if isinstance(track, AutomationTrack):
-                # Check if this track has 'input_routing' points
-                has_routing = False
-                for p in track.points:
-                    if p.parameter == 'input_routing':
-                        has_routing = True
-                        break
-                if has_routing:
-                    val = track.get_value_at(beat, 'input_routing')
+        if self._routing_track:
+            # Check if this track has any 'input_routing' points defined
+            has_routing_points = any(p.parameter == 'input_routing' for p in self._routing_track.points)
+            if has_routing_points:
+                val = self._routing_track.get_value_at(beat, 'input_routing')
+                if val is not None:
                     return int(val)
 
         # Fallback to armed track
@@ -1075,14 +1094,14 @@ class JackManager:
 
                 msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
                 if self._in_process_callback and target_track_index in self.midi_out_ports:
-                    self.midi_out_ports[target_track_index].write_midi_event(offset, msg.bytes())
+                    self._write_midi_safe(self.midi_out_ports[target_track_index], offset, msg.bytes())
                 else:
                     self._queue_midi_message(target_track_index, msg)
             elif param_config.get('type') == 'program_change':
                 program_value = max(0, min(127, int(value)))
                 msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
                 if self._in_process_callback and target_track_index in self.midi_out_ports:
-                    self.midi_out_ports[target_track_index].write_midi_event(offset, msg.bytes())
+                    self._write_midi_safe(self.midi_out_ports[target_track_index], offset, msg.bytes())
                 else:
                     self._queue_midi_message(target_track_index, msg)
             elif param_config.get('type') == 'velocity_multiplier':
@@ -1133,9 +1152,11 @@ class JackManager:
 
                 midi_pan = int((self.sequencer.song.metronome_pan + 1.0) / 2.0 * 127)
                 pan_msg = mido.Message('control_change', channel=self.sequencer.metronome_channel, control=10, value=midi_pan)
-                port.write_midi_event(offset, pan_msg.bytes())
+                self._write_midi_safe(port, offset, pan_msg.bytes())
 
-            while beat_to_check < end_beat_of_block:
+            # Safeguard: don't generate more than 16 metronome ticks in one block
+            ticks_this_block = 0
+            while beat_to_check < end_beat_of_block and ticks_this_block < 16:
                 # Offset for the note
                 offset = int((beat_to_check - start_beat_of_block) / (end_beat_of_block - start_beat_of_block) * self._current_block_frames) if end_beat_of_block > start_beat_of_block else 0
                 offset = max(0, min(self._current_block_frames - 1, offset))
@@ -1146,9 +1167,10 @@ class JackManager:
                 velocity = int(100 * self.sequencer.song.metronome_volume)
                 note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=velocity)
                 note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)
-                port.write_midi_event(offset, note_on.bytes())
+                self._write_midi_safe(port, offset, note_on.bytes())
                 self._metronome_notes_to_turn_off.append((note_off, offset)) # Store offset for note_off
                 beat_to_check += 1
+                ticks_this_block += 1
 
     def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
         if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
@@ -1198,32 +1220,41 @@ class JackManager:
             end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second if samplerate > 0 else authoritative_beat_now
 
             # --- 1. Handle UI-queued MIDI events ---
-            while True:
+            # Limit the number of events per block to avoid overflow
+            events_processed = 0
+            while events_processed < 64:
                 try:
                     track_idx, msg = self._out_event_queue.popleft()
                     if track_idx == -1: # Metronome
                         if self.metronome_port:
-                            self.metronome_port.write_midi_event(0, msg.bytes())
+                            self._write_midi_safe(self.metronome_port, 0, msg.bytes())
                     elif track_idx in self.midi_out_ports:
-                        self.midi_out_ports[track_idx].write_midi_event(0, msg.bytes())
+                        self._write_midi_safe(self.midi_out_ports[track_idx], 0, msg.bytes())
+                    events_processed += 1
                 except IndexError:
                     break
 
             # --- 1.5 Handle Clavier Input Routing & Pass-through ---
             if self.clavier_port:
-                current_routing_idx = self._get_input_routing_value(start_beat_of_block)
-
                 for offset, data in self.clavier_port.incoming_midi_events():
                     try:
                         # Convert to bytes and parse once
                         data_bytes = bytes(data)
+                        # Quick filter: skip high-rate real-time messages (Clock, Active Sensing)
+                        if data_bytes[0] >= 0xF8:
+                            continue
+
                         msg = mido.Message.from_bytes(data_bytes)
                     except Exception:
                         continue # Skip invalid/incomplete MIDI messages
 
+                    # Determine target track for THIS specific event's timing
+                    accurate_event_beat = start_beat_of_block + (offset / samplerate) * beats_per_second if samplerate > 0 else start_beat_of_block
+                    current_routing_idx = self._get_input_routing_value(accurate_event_beat)
+
                     if msg.type == 'note_on' and msg.velocity > 0:
                         if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                            self.midi_out_ports[current_routing_idx].write_midi_event(offset, data_bytes)
+                            self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
                             self._live_forwarded_notes[msg.note] = current_routing_idx
 
                     elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
@@ -1231,16 +1262,34 @@ class JackManager:
                         if msg.note in self._live_forwarded_notes:
                             track_idx = self._live_forwarded_notes.pop(msg.note)
                             if track_idx in self.midi_out_ports:
-                                self.midi_out_ports[track_idx].write_midi_event(offset, data_bytes)
+                                self._write_midi_safe(self.midi_out_ports[track_idx], offset, data_bytes)
                         else:
                             # If we don't know where it started, just send to current routing
                             if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                                self.midi_out_ports[current_routing_idx].write_midi_event(offset, data_bytes)
+                                self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
 
-                    else:
-                        # Forward other messages (CC, etc.) to current target
+                    elif msg.type == 'control_change':
+                        # Special handling for sustain pedal (CC 64)
+                        if msg.control == 64:
+                            if msg.value >= 64: # Sustain ON
+                                if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
+                                    self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
+                                    self._live_forwarded_ccs[64].add(current_routing_idx)
+                            else: # Sustain OFF
+                                # Send to ALL tracks that received sustain ON
+                                for track_idx in list(self._live_forwarded_ccs[64]):
+                                    if track_idx in self.midi_out_ports:
+                                        self._write_midi_safe(self.midi_out_ports[track_idx], offset, data_bytes)
+                                self._live_forwarded_ccs[64].clear()
+                        else:
+                            # Forward other CCs to current target
+                            if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
+                                self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
+
+                    elif msg.type in ['pitchwheel', 'aftertouch', 'polytouch', 'program_change']:
+                        # Forward expressive messages to current target
                         if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                            self.midi_out_ports[current_routing_idx].write_midi_event(offset, data_bytes)
+                            self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
 
                     # Also handle transport/control CCs
                     self._handle_control_midi(msg)
@@ -1261,7 +1310,7 @@ class JackManager:
                 if self.sequencer.song.metronome_enabled and self.metronome_port:
                     port = self.metronome_port
                     for note_off_msg, offset in self._metronome_notes_to_turn_off:
-                        port.write_midi_event(offset, note_off_msg.bytes())
+                        self._write_midi_safe(port, offset, note_off_msg.bytes())
                     self._metronome_notes_to_turn_off.clear()
 
                 if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
@@ -1270,7 +1319,7 @@ class JackManager:
                             if track_idx in self.midi_out_ports:
                                 port = self.midi_out_ports[track_idx]
                                 track = self.sequencer.song.tracks[track_idx]
-                                port.write_midi_event(0, mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes())
+                                self._write_midi_safe(port, 0, mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes())
                         self._active_notes.clear()
                     return
 
@@ -1286,7 +1335,7 @@ class JackManager:
                             offset = int((end_beat - start_beat_of_block) / (end_beat_of_block - start_beat_of_block) * self._current_block_frames)
                             offset = max(0, min(self._current_block_frames - 1, offset))
 
-                        port.write_midi_event(offset, mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes())
+                        self._write_midi_safe(port, offset, mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes())
                     del self._active_notes[(track_idx, pitch)]
 
             self._process_midi_events(start_beat_of_block, end_beat_of_block)

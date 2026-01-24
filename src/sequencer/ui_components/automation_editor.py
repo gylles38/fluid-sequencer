@@ -1,5 +1,6 @@
-from kivy.uix.modalview import ModalView
+from .floating_window import FloatingWindow
 from kivy.lang import Builder
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, AutomationControls
 from sequencer.models import AutomationTrack, MidiTrack
@@ -137,7 +138,7 @@ class AutomationValueAxis(Widget):
             add_label(0.0, y_align='center')
 
 
-class EditableAutomationGrid(Widget):
+class EditableAutomationGrid(RelativeLayout):
     editor = ObjectProperty()
     points = ListProperty([])
     pixels_per_beat = NumericProperty(dp(100))
@@ -151,26 +152,36 @@ class EditableAutomationGrid(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.draw, size=self.draw, points=self.draw,
+        self.grid_widget = Widget(size_hint=(1, 1), pos=(0, 0))
+        self.curve_widget = Widget(size_hint=(1, 1), pos=(0, 0))
+        self.add_widget(self.grid_widget)
+        self.add_widget(self.curve_widget)
+
+        self.bind(size=self._update_layout, points=self.draw,
                   pixels_per_beat=self.draw, total_beats=self.draw,
-                  min_val=self.draw_curve_and_points, max_val=self.draw_curve_and_points)
+                  min_val=self.draw, max_val=self.draw)
+
+    def _update_layout(self, *args):
+        self.grid_widget.size = self.size
+        self.grid_widget.pos = (0, 0)
+        self.curve_widget.size = self.size
+        self.curve_widget.pos = (0, 0)
+        self.draw()
 
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
 
         local_pos = self.to_local(*touch.pos)
-        # On calcule le beat cliqué en tenant compte de l'origine du widget
-        clicked_beat = (local_pos[0] - self.x) / self.pixels_per_beat
+        # RELATIVELAYOUT: local_pos is already relative to (0,0)
+        clicked_beat = local_pos[0] / self.pixels_per_beat
 
         v_range = self.max_val - self.min_val
         if v_range == 0: v_range = 1
         
         # Valeur cliquée relative à la hauteur du widget
-        clicked_value = self.min_val + ((local_pos[1] - self.y) / self.height) * v_range
+        clicked_value = self.min_val + (local_pos[1] / self.height) * v_range
 
-        # On calcule le beat cliqué en tenant compte de l'origine du widget
-        clicked_beat = (local_pos[0] - self.x) / self.pixels_per_beat
         edit_mode = self.editor.edit_mode
         
         # --- Recherche du point cliqué (Précision accrue) ---
@@ -179,12 +190,12 @@ class EditableAutomationGrid(Widget):
         click_threshold = dp(12) 
 
         for point in self.points:
-            # On calcule la position ABSOLUE du point sur l'écran
-            point_x = self.x + point.start_time * self.pixels_per_beat
-            point_y = self.y + ((point.value - self.min_val) / v_range) * self.height
+            # On calcule la position locale du point
+            point_x = point.start_time * self.pixels_per_beat
+            point_y = ((point.value - self.min_val) / v_range) * self.height
             
-            # On compare avec touch.pos (coordonnées écran directes)
-            if abs(touch.x - point_x) < click_threshold and abs(touch.y - point_y) < click_threshold:
+            # On compare avec local_pos
+            if abs(local_pos[0] - point_x) < click_threshold and abs(local_pos[1] - point_y) < click_threshold:
                 clicked_point = point
                 break
 
@@ -216,9 +227,9 @@ class EditableAutomationGrid(Widget):
                 self.selected_point = clicked_point 
                 
                 self._dragged_point = clicked_point
-                # Offset par rapport à la position réelle du point
-                self._drag_offset = (local_pos[0] - (self.x + clicked_point.start_time * self.pixels_per_beat)), \
-                                    (local_pos[1] - (self.y + ((clicked_point.value - self.min_val) / v_range) * self.height))
+                # Offset par rapport à la position réelle du point (en coordonnées locales)
+                self._drag_offset = (local_pos[0] - (clicked_point.start_time * self.pixels_per_beat)), \
+                                    (local_pos[1] - (((clicked_point.value - self.min_val) / v_range) * self.height))
                 touch.grab(self)
 
         return super().on_touch_down(touch)
@@ -232,7 +243,8 @@ class EditableAutomationGrid(Widget):
 
             # --- Time (X-axis) Calculation ---
             new_x = local_pos[0] - self._drag_offset[0]
-            new_beat = (new_x - self.x) / self.pixels_per_beat
+            # RELATIVELAYOUT: local_pos is already relative to (0,0)
+            new_beat = new_x / self.pixels_per_beat
             quantized_beat = round(new_beat * 4) / 4 # Snap to 16th
             self._dragged_point.start_time = max(0, quantized_beat)
 
@@ -240,7 +252,7 @@ class EditableAutomationGrid(Widget):
             v_range = self.max_val - self.min_val
             if v_range == 0: v_range = 1
             new_y = local_pos[1] - self._drag_offset[1]
-            new_value_normalized = (new_y - self.y) / self.height
+            new_value_normalized = new_y / self.height
             new_value = self.min_val + new_value_normalized * v_range
             self._dragged_point.value = max(self.min_val, min(self.max_val, new_value))
 
@@ -268,35 +280,35 @@ class EditableAutomationGrid(Widget):
 
 
     def draw(self, *args):
-        self.canvas.before.clear()
-        with self.canvas.before:
+        self.grid_widget.canvas.clear()
+        with self.grid_widget.canvas:
             # Background
             Color(0.1, 0.1, 0.1, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            # RELATIVELAYOUT: Draw relative to (0,0)
+            Rectangle(pos=(0, 0), size=self.size)
 
             # --- Grid Lines ---
             # Vertical lines (beats)
             Color(0.2, 0.2, 0.2, 1)
             for i in range(int(self.total_beats) + 1):
-                x = self.x + i * self.pixels_per_beat
-                if x > self.right: break
+                x = i * self.pixels_per_beat
+                if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
-                Line(points=[x, self.y, x, self.top], width=1.5 if is_measure else 0.5)
+                Line(points=[x, 0, x, self.height], width=1.5 if is_measure else 0.5)
 
             # Horizontal lines (values)
             num_h_lines = 10
             for i in range(num_h_lines + 1):
-                y = self.y + (i / num_h_lines) * self.height
-                Line(points=[self.x, y, self.right, y], width=0.5)
+                y = (i / num_h_lines) * self.height
+                Line(points=[0, y, self.width, y], width=0.5)
 
         self.draw_curve_and_points()
 
     def draw_curve_and_points(self, *args):
         # 1. On efface le calque de dessin (courbes + points carrés)
-        # Note: La grille de fond est dans canvas.before, donc elle reste affichée.
-        self.canvas.clear()
+        self.curve_widget.canvas.clear()
         
-        # 2. Si la liste est vide, on s'arrête là -> L'écran reste vide (juste la grille de fond)
+        # 2. Si la liste est vide, on s'arrête là
         if not self.points: 
             return
 
@@ -308,40 +320,40 @@ class EditableAutomationGrid(Widget):
 
         sorted_points = sorted(self.points, key=lambda p: p.start_time)
 
-        with self.canvas:
+        with self.curve_widget.canvas:
             # --- Draw Curve ---
             Color(0.5, 0.5, 0.8, 0.4)
             vertices, indices, v_index = [], [], 0
 
             first_p = sorted_points[0]
-            first_x = self.x + first_p.start_time * self.pixels_per_beat
-            if first_x > self.x:
-                vertices.extend([self.x, self.y, 0, 0, self.x, self.y, 0, 0])
+            first_x = first_p.start_time * self.pixels_per_beat
+            if first_x > 0:
+                vertices.extend([0, 0, 0, 0, 0, 0, 0, 0])
                 indices.extend([v_index, v_index + 1])
                 v_index += 2
-                vertices.extend([first_x, self.y, 0, 0, first_x, self.y, 0, 0])
+                vertices.extend([first_x, 0, 0, 0, first_x, 0, 0, 0])
                 indices.extend([v_index, v_index + 1])
                 v_index += 2
 
             for i in range(len(sorted_points)):
                 p1 = sorted_points[i]
-                x1 = self.x + p1.start_time * self.pixels_per_beat
-                y1 = self.y + (normalize(p1.value) * self.height)
+                x1 = p1.start_time * self.pixels_per_beat
+                y1 = (normalize(p1.value) * self.height)
 
-                vertices.extend([x1, self.y, 0, 0, x1, y1, 0, 0])
+                vertices.extend([x1, 0, 0, 0, x1, y1, 0, 0])
                 indices.extend([v_index, v_index + 1])
                 v_index += 2
 
                 if i < len(sorted_points) - 1:
                     p2 = sorted_points[i+1]
-                    x2 = self.x + p2.start_time * self.pixels_per_beat
-                    y2 = self.y + (normalize(p2.value) * self.height) # Position Y du point suivant
+                    x2 = p2.start_time * self.pixels_per_beat
+                    y2 = (normalize(p2.value) * self.height) # Position Y du point suivant
 
                     # --- LOGIQUE EN ESCALIER POUR PROGRAM CHANGE ---
                     if self.editor.selected_parameter == "prog":
                         # On crée un point intermédiaire à la même hauteur que p1, mais au temps de p2
                         # Cela crée la ligne horizontale de l'escalier
-                        vertices.extend([x2, self.y, 0, 0, x2, y1, 0, 0])
+                        vertices.extend([x2, 0, 0, 0, x2, y1, 0, 0])
                         indices.extend([v_index, v_index + 1])
                         v_index += 2
                     
@@ -364,17 +376,17 @@ class EditableAutomationGrid(Widget):
                                 ratio = interp_func(t)
                                 
                             real_val = p1.value + ratio * (p2.value - p1.value)
-                            curr_y = self.y + (normalize(real_val) * self.height)
-                            vertices.extend([curr_x, self.y, 0, 0, curr_x, curr_y, 0, 0])
+                            curr_y = (normalize(real_val) * self.height)
+                            vertices.extend([curr_x, 0, 0, 0, curr_x, curr_y, 0, 0])
                             indices.extend([v_index, v_index + 1])
                             v_index += 2
 
             last_p = sorted_points[-1]
-            last_x = self.x + last_p.start_time * self.pixels_per_beat
-            final_x = self.x + self.total_beats * self.pixels_per_beat
+            last_x = last_p.start_time * self.pixels_per_beat
+            final_x = self.total_beats * self.pixels_per_beat
             if last_x < final_x:
-                y_last = self.y + (normalize(last_p.value) * self.height)
-                vertices.extend([final_x, self.y, 0, 0, final_x, y_last, 0, 0])
+                y_last = (normalize(last_p.value) * self.height)
+                vertices.extend([final_x, 0, 0, 0, final_x, y_last, 0, 0])
                 indices.extend([v_index, v_index + 1])
 
             Mesh(vertices=vertices, indices=indices, mode='triangle_strip')
@@ -387,32 +399,31 @@ class EditableAutomationGrid(Widget):
             Color(0.8, 0.8, 1, 0.9)
             for i in range(len(sorted_points) - 1):
                 p1, p2 = sorted_points[i], sorted_points[i+1]
-                x1 = self.x + p1.start_time * self.pixels_per_beat
-                y1 = self.y + normalize(p1.value) * self.height
-                x2 = self.x + p2.start_time * self.pixels_per_beat
-                y2 = self.y + normalize(p2.value) * self.height
+                x1 = p1.start_time * self.pixels_per_beat
+                y1 = normalize(p1.value) * self.height
+                x2 = p2.start_time * self.pixels_per_beat
+                y2 = normalize(p2.value) * self.height
                 Line(points=[x1, y1, x2, y2], width=1.2)
 
             # 2. Dessiner les points normaux (on saute le sélectionné)
             for p in sorted_points:
                 if p == self.selected_point: continue
-                x = self.x + p.start_time * self.pixels_per_beat
-                y = self.y + normalize(p.value) * self.height
+                x = p.start_time * self.pixels_per_beat
+                y = normalize(p.value) * self.height
                 Color(0.8, 0.8, 1, 0.9)
                 Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
 
             # 3. Dessiner le point sélectionné en DERNIER (Orange et par-dessus)
             if self.selected_point:
                 p = self.selected_point
-                x = self.x + p.start_time * self.pixels_per_beat
-                y = self.y + normalize(p.value) * self.height
+                x = p.start_time * self.pixels_per_beat
+                y = normalize(p.value) * self.height
                 Color(1, 0.6, 0, 1) # Orange vif
                 Rectangle(pos=(x - selected_radius, y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
 
 Builder.load_string("""
 <AutomationEditor>:
     size_hint: 0.9, 0.9
-    auto_dismiss: False
 
     MDBoxLayout:
         orientation: 'vertical'
@@ -550,10 +561,11 @@ Builder.load_string("""
             sequencer_layout: root.sequencer_layout
             pixels_per_beat: root.pixels_per_beat
             total_beats: root.total_beats
+            end_pos_str: root.end_pos_str
+            beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             info_width: dp(60) 
             controls_width: 0
             keyboard_width: 0
-            # AJOUTER CES DEUX LIGNES :
             spacing: 0
             padding: [0, 0, 0, 0]
 
@@ -702,14 +714,16 @@ Builder.load_string("""
                 on_press: root.dismiss()
 """)
 
-class AutomationEditor(ModalView):
+class AutomationEditor(FloatingWindow):
+    min_width = NumericProperty(dp(750))
     sequencer_layout = ObjectProperty()
     track = ObjectProperty() # This will be the AutomationTrack
     original_track_index = NumericProperty(None)
     track_copy = ObjectProperty()
 
-    pixels_per_beat = NumericProperty(100)
+    pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
+    end_pos_str = StringProperty('')
 
     edit_mode = StringProperty('insert')
     is_dirty = BooleanProperty(False)
@@ -729,6 +743,8 @@ class AutomationEditor(ModalView):
         # On extrait track et sequencer_layout de kwargs avant le super s'ils y sont
         # ou on s'assure qu'ils sont passés par propriétés.        
         super(AutomationEditor, self).__init__(**kwargs)
+        self.source_track = self.track
+        self.title = f"Automation: {self.track.name}"
 
         self.track_copy = AutomationTrack(
             name=self.track.name,
@@ -736,6 +752,10 @@ class AutomationEditor(ModalView):
             points=copy.deepcopy(self.track.points)
         )
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
+
+        # Bind end_pos_str to sequencer
+        self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self.setter('end_pos_str'))
 
         # On stocke le paramètre souhaité
         self.selected_parameter = initial_param
@@ -803,12 +823,12 @@ class AutomationEditor(ModalView):
         ruler.pixels_per_beat = self.pixels_per_beat
         
         # Ré-alignement technique de la règle
-        ruler.info_width = dp(60) - self.pixels_per_beat
+        ruler.info_width = dp(60)
         ruler.spacing = 0
         ruler.padding = [0, 0, 0, 0]
         
         ruler.redraw()
-        self.ids.grid.draw_curve_and_points()
+        self.ids.grid.draw() # Calls draw_curve_and_points
 
         # Démarrage de la playhead
         if hasattr(self, '_playhead_event'):
@@ -1289,15 +1309,36 @@ class AutomationEditor(ModalView):
         self.ids.ruler.redraw()
         self.ids.grid.draw_curve_and_points()
 
-    def sync_horizontal_scroll(self, instance, value):
+    def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value):
         if self._is_scrolling: return
         self._is_scrolling = True
-        ruler_scroll = self.ids.ruler.scroll_view
-        timeline_scroll = self.ids.timeline_scroll
-        if instance == ruler_scroll:
-            timeline_scroll.scroll_x = value
-        else:
-            ruler_scroll.scroll_x = value
+
+        try:
+            # Calculate absolute pixel offset from source
+            content_width_source = source_scroll_view.children[0].width
+            viewport_width_source = source_scroll_view.width
+            max_scroll_source = max(0, content_width_source - viewport_width_source)
+            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
+
+            ruler_scroll = self.ids.ruler.scroll_view
+            timeline_scroll = self.ids.timeline_scroll
+
+            targets = [ruler_scroll, timeline_scroll]
+            for sv in targets:
+                if sv is not source_scroll_view:
+                    try:
+                        content_width = sv.children[0].width
+                        viewport_width = sv.width
+                        max_scroll = max(0, content_width - viewport_width)
+                        if max_scroll > 0:
+                            sv.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
+                        else:
+                            sv.scroll_x = 0
+                    except (IndexError, AttributeError):
+                        continue
+        except (IndexError, AttributeError):
+            pass
+
         self._is_scrolling = False
 
     def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play_pause")

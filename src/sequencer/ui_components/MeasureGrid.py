@@ -24,11 +24,8 @@ class MeasureGrid(Widget):
         
         with self.canvas:
             current_beat = 0
-            while current_beat < self.total_beats:
+            while current_beat <= self.total_beats:
                 x_pos = current_beat * self.pixels_per_beat
-                
-                if x_pos >= total_width:
-                    break 
 
                 # Style de la ligne
                 if current_beat % self.beat_per_measure == 0:
@@ -38,8 +35,8 @@ class MeasureGrid(Widget):
                     line_width = 0.5
                     Color(0.5, 0.5, 0.5, 0.4) # Temps intermédiaire (si vous implémentez l'affichage des temps)
 
-                # Dessin : self.x est l'origine du MeasureGrid dans le ScrollView
-                Line(points=[x_pos, self.y, x_pos, self.y + self.height], width=line_width)
+                # Dessin : local coordinates thanks to RelativeLayout
+                Line(points=[x_pos, 0, x_pos, self.height], width=line_width)
 
                 # Incrémenter par 1 beat pour afficher les temps
                 current_beat += 1

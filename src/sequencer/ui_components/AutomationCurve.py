@@ -80,12 +80,12 @@ class AutomationCurveWidget(Widget):
             # --- GESTION DU DÉBUT (0 vers premier point) ---
             first_p = sorted_points[0]
             first_x = first_p.start_time * self.pixels_per_beat
-            y_first = self.y + (normalize(first_p.value) * self.height)
+            y_first = (normalize(first_p.value) * self.height)
             
             if first_x > 0:
-                vertices.extend([0, self.y, 0, 0, 0, y_first, 0, 0])
+                vertices.extend([0, 0, 0, 0, 0, y_first, 0, 0])
                 indices.extend([v_index, v_index + 1]); v_index += 2
-                vertices.extend([first_x, self.y, 0, 0, first_x, y_first, 0, 0])
+                vertices.extend([first_x, 0, 0, 0, first_x, y_first, 0, 0])
                 indices.extend([v_index, v_index + 1]); v_index += 2
                 line_points.extend([0, y_first, first_x, y_first])
 
@@ -93,20 +93,20 @@ class AutomationCurveWidget(Widget):
             for i in range(len(sorted_points)):
                 p1 = sorted_points[i]
                 x1 = p1.start_time * self.pixels_per_beat
-                y1 = self.y + (normalize(p1.value) * self.height)
+                y1 = (normalize(p1.value) * self.height)
 
-                vertices.extend([x1, self.y, 0, 0, x1, y1, 0, 0])
+                vertices.extend([x1, 0, 0, 0, x1, y1, 0, 0])
                 indices.extend([v_index, v_index + 1]); v_index += 2
                 if i == 0 and first_x == 0: line_points.extend([x1, y1])
 
                 if i < len(sorted_points) - 1:
                     p2 = sorted_points[i+1]
                     x2 = p2.start_time * self.pixels_per_beat
-                    y2 = self.y + (normalize(p2.value) * self.height)
+                    y2 = (normalize(p2.value) * self.height)
 
                     # CAS ESCALIER (Program Change ou mode 'none')
                     if self.param_type == "prog" or p1.curve == "none":
-                        vertices.extend([x2, self.y, 0, 0, x2, y1, 0, 0])
+                        vertices.extend([x2, 0, 0, 0, x2, y1, 0, 0])
                         indices.extend([v_index, v_index + 1]); v_index += 2
                         line_points.extend([x1, y1, x2, y1, x2, y2])
                     
@@ -128,10 +128,10 @@ class AutomationCurveWidget(Widget):
                                 ratio = func(t) if func else t
                                 
                             curr_val = p1.value + ratio * (p2.value - p1.value)
-                            curr_y = self.y + (normalize(curr_val) * self.height)
+                            curr_y = (normalize(curr_val) * self.height)
                             
                             # On ajoute toujours la base (y=0 dans le widget) et le sommet (y=val)
-                            vertices.extend([curr_x, self.y, 0, 0, curr_x, curr_y, 0, 0])
+                            vertices.extend([curr_x, 0, 0, 0, curr_x, curr_y, 0, 0])
                             indices.extend([v_index, v_index + 1])
                             v_index += 2
                             line_points.extend([curr_x, curr_y])
@@ -140,8 +140,8 @@ class AutomationCurveWidget(Widget):
             last_p = sorted_points[-1]
             final_x = self.total_beats * self.pixels_per_beat
             if (last_x := last_p.start_time * self.pixels_per_beat) < final_x:
-                y_last = self.y + (normalize(last_p.value) * self.height)
-                vertices.extend([final_x, self.y, 0, 0, final_x, y_last, 0, 0])
+                y_last = (normalize(last_p.value) * self.height)
+                vertices.extend([final_x, 0, 0, 0, final_x, y_last, 0, 0])
                 indices.extend([v_index, v_index + 1]); v_index += 2
                 line_points.extend([final_x, y_last])
 

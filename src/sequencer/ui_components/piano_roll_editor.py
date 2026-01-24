@@ -1,5 +1,5 @@
 from turtle import position
-from kivy.uix.modalview import ModalView
+from .floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
@@ -534,7 +534,6 @@ class EditablePianoRollViewer(ScrollView):
 Builder.load_string("""
 <PianoRollEditor>:
     size_hint: 0.9, 0.9
-    auto_dismiss: False
 
     MDBoxLayout:
         orientation: 'vertical'
@@ -720,14 +719,17 @@ Builder.load_string("""
             end_pos_str: root.end_pos_str
             size_hint_y: None
             height: dp(30)
-            keyboard_width: -dp(138)
+            info_width: 0
+            controls_width: 0
             spacing: 0
-            padding: [0, dp(6), 0, dp(6)]
+            keyboard_width: dp(60)
+            padding: [0, 0, 0, 0]
             label_padding_x: 0
 
         BoxLayout:
             id: main_content
             orientation: 'horizontal'
+            spacing: 0
 
             BoundedScrollView:
                 id: keyboard_sv
@@ -744,17 +746,29 @@ Builder.load_string("""
             BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: False
-                bar_width: dp(20)
-                scroll_type: ['bars']
-                padding: [0, 0, 0, dp(20)]
+                do_scroll_x: True
+                bar_width: dp(15)
+                scroll_type: ['bars', 'content']
+                bar_pos_x: 'bottom'
+                bar_margin: dp(2)
 
-                EditablePianoRollViewer:
-                    id: grid_viewer
-                    editor: root
-                    track: root.track_copy
-                    total_beats: root.total_beats
-                    pixels_per_beat: root.pixels_per_beat
-                    note_height: root.note_height
+                BoxLayout:
+                    orientation: 'vertical'
+                    size_hint_x: None
+                    width: grid_viewer.width
+                    padding: [0, 0, 0, dp(15)]
+
+                    EditablePianoRollViewer:
+                        id: grid_viewer
+                        editor: root
+                        track: root.track_copy
+                        total_beats: root.total_beats
+                        pixels_per_beat: root.pixels_per_beat
+                        note_height: root.note_height
+
+                    Widget:
+                        size_hint_y: None
+                        height: dp(18)
 
         MDBoxLayout:
             size_hint_y: None
@@ -789,7 +803,8 @@ Builder.load_string("""
                 on_press: root.dismiss()
 """)
 
-class PianoRollEditor(ModalView):
+class PianoRollEditor(FloatingWindow):
+    min_width = NumericProperty(dp(750))
     sequencer_layout = ObjectProperty()
     track = ObjectProperty()
     original_track_index = NumericProperty(None)
@@ -814,6 +829,8 @@ class PianoRollEditor(ModalView):
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
         super(PianoRollEditor, self).__init__(**kwargs)
+        self.source_track = self.track
+        self.title = f"Piano Roll: {self.track.name}"
         self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
         self.track_copy = MidiTrack(
             name=self.track.name,
@@ -1596,12 +1613,36 @@ class PianoRollEditor(ModalView):
                 
             btn.canvas.ask_update()                
 
-    def sync_horizontal_scroll(self, instance, value) -> None:
+    def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value) -> None:
         if self._is_scrolling: return
         self._is_scrolling = True
-        ruler_scroll, timeline_scroll = self.ids.ruler.scroll_view, self.ids.timeline_scroll
-        if instance == ruler_scroll: timeline_scroll.scroll_x = value
-        else: ruler_scroll.scroll_x = value
+
+        try:
+            # Calculate absolute pixel offset from source
+            content_width_source = source_scroll_view.children[0].width
+            viewport_width_source = source_scroll_view.width
+            max_scroll_source = max(0, content_width_source - viewport_width_source)
+            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
+
+            ruler_scroll = self.ids.ruler.scroll_view
+            timeline_scroll = self.ids.timeline_scroll
+
+            targets = [ruler_scroll, timeline_scroll]
+            for sv in targets:
+                if sv is not source_scroll_view:
+                    try:
+                        content_width = sv.children[0].width
+                        viewport_width = sv.width
+                        max_scroll = max(0, content_width - viewport_width)
+                        if max_scroll > 0:
+                            sv.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
+                        else:
+                            sv.scroll_x = 0
+                    except (IndexError, AttributeError):
+                        continue
+        except (IndexError, AttributeError):
+            pass
+
         self._is_scrolling = False
 
     def _center_view_on_c4(self) -> None:

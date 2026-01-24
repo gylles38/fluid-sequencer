@@ -11,6 +11,7 @@ class HoverableSlider(MDSlider, HoverBehavior):
     pass
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
@@ -27,7 +28,7 @@ from kivy.graphics import Color, Rectangle
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.boxlayout import MDBoxLayout
 
-class AutomationGrid(Widget):
+class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
         self.track_widget: Any = track_widget
@@ -138,13 +139,14 @@ class TrackWidget(BoxLayout):
     """
     total_beats = NumericProperty(128.0) 
     pixels_per_beat = NumericProperty(dp(100))
+    beats_per_measure = NumericProperty(4)
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
+        self.spacing = dp(12)
         super(TrackWidget, self).__init__(**kwargs)
-        self._editor_opening = False
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
@@ -407,33 +409,33 @@ class TrackWidget(BoxLayout):
             self.controls_section.add_widget(Widget(size_hint_x=None, width=dp(50)))
 
         # --- Left Panel Container ---
-        left_panel = BoxLayout(
+        self.left_panel = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
             spacing=self.spacing
         )
-        left_panel.add_widget(self.info_section)
-        left_panel.add_widget(self.controls_section)
-        left_panel.width = self.info_width + self.controls_width + self.spacing
-        self.add_widget(left_panel)
+        self.left_panel.add_widget(self.info_section)
+        self.left_panel.add_widget(self.controls_section)
+        self.left_panel.width = self.info_width + self.controls_width + self.spacing
+        self.add_widget(self.left_panel)
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
             note_height = dp(12)
 
             # 1. Keyboard (fixed width)
-            keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
-            keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
+            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
+            self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
-            keyboard_sv.add_widget(self.piano_keyboard)
+            self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
             self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
 
-            # Content container (FloatLayout for overlaying playback line)
-            self.content = FloatLayout(size_hint=(None, None))
+            # Content container (RelativeLayout for local coordinate system)
+            self.content = RelativeLayout(size_hint=(None, None))
             self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
             self.timeline_container = self.content  # For compatibility with other methods
 
@@ -442,6 +444,7 @@ class TrackWidget(BoxLayout):
                 track=track,
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat,
+                beat_per_measure=self.beats_per_measure,
                 note_height=note_height,
                 size_hint=(None, None)
             )
@@ -465,8 +468,8 @@ class TrackWidget(BoxLayout):
             self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
 
             # Link vertical scrolling between keyboard and timeline
-            keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
-            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+            self.keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
+            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(self.keyboard_sv, 'scroll_y', v))
 
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
@@ -480,16 +483,16 @@ class TrackWidget(BoxLayout):
                     scroll_y = 1 - (desired_top_y / max_top_y)
                 else:
                     scroll_y = 0
-                keyboard_sv.scroll_y = scroll_y
+                self.keyboard_sv.scroll_y = scroll_y
             Clock.schedule_once(set_default_scroll)
 
             # Add to main layout
-            self.add_widget(keyboard_sv)
+            self.add_widget(self.keyboard_sv)
             self.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
             # Create a layout for the track type icon, replacing the old spacer
-            icon_layout = BoxLayout(
+            self.icon_layout = BoxLayout(
                 size_hint_x=None,
                 width=dp(40),
                 orientation='vertical'
@@ -513,18 +516,21 @@ class TrackWidget(BoxLayout):
                 valign='center'
             )
 
-            icon_layout.add_widget(Widget()) # Top spacer
-            icon_layout.add_widget(icon)
-            icon_layout.add_widget(Widget()) # Bottom spacer
+            self.icon_layout.add_widget(Widget()) # Top spacer
+            self.icon_layout.add_widget(icon)
+            self.icon_layout.add_widget(Widget()) # Bottom spacer
 
             self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
+            # Add to main layout
+            self.add_widget(self.icon_layout)
+            self.add_widget(self.timeline_scroll)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
 
             # A ScrollView must have a single child.
             self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1), # The grid itself can fill the container
-                beat_per_measure=4,
+                beat_per_measure=self.beats_per_measure,
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat
             )
@@ -564,19 +570,12 @@ class TrackWidget(BoxLayout):
                     # --- ÉTAPE 3 : BINDINGS DYNAMIQUES (Le secret du Zoom) ---
                     # On lie le widget aux propriétés du TrackWidget pour le zoom
                     self.bind(pixels_per_beat=curve_widget.setter('pixels_per_beat'))
-                    
-                    # On force la mise à jour si la durée du morceau change
-                    # (via une petite fonction pour appeler get_song_length_in_beats)
-                    self.bind(size=lambda *x: self._sync_curve_durations())
+                    self.bind(total_beats=curve_widget.setter('total_beats'))
 
                     self.automation_curves.append(curve_widget)
                     self.timeline_container.add_widget(curve_widget)
 
             self.timeline_scroll.add_widget(self.timeline_container)
-
-            # Add the icon and timeline directly to the main layout
-            self.add_widget(icon_layout)
-            self.add_widget(self.timeline_scroll)
 
             # --- Playback Line (Cursor) ---
             self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -599,13 +598,6 @@ class TrackWidget(BoxLayout):
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
 
-    def _sync_curve_durations(self, *args) -> None:
-        total = self.sequencer_layout.sequencer.get_song_length_in_beats()
-        for curve in self.automation_curves:
-            curve.total_beats = total
-            # Recalcul manuel du pixels_per_beat si nécessaire
-            if total > 0:
-                curve.pixels_per_beat = self.timeline_container.width / total
 
     def _get_target_track_name_for_tooltip(self) -> str:
         """Retourne le nom de la piste cible pour le tooltip."""
@@ -653,6 +645,7 @@ class TrackWidget(BoxLayout):
             # avant d'appeler draw()
             self.piano_roll.total_beats = self.total_beats
             self.piano_roll.pixels_per_beat = self.pixels_per_beat
+            self.piano_roll.beat_per_measure = self.beats_per_measure
             # ----------------------
             
             self.piano_roll.draw()
@@ -663,6 +656,7 @@ class TrackWidget(BoxLayout):
             # Vous le faisiez déjà ici pour measure_grid, mais pas pour piano_roll !
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
+            self.measure_grid.beat_per_measure = self.beats_per_measure
             # --- FIX: Propagate zoom changes to ALL automation curve widgets ---
             if hasattr(self, 'automation_curves'):
                 for curve in self.automation_curves:
@@ -791,22 +785,12 @@ class TrackWidget(BoxLayout):
 
         if hasattr(self, 'vert_separator'):
             # On cherche le point de séparation le plus fiable
-            split_x = None
-            
-            # 1. On tente via le clavier MIDI
-            if hasattr(self, 'keyboard_sv'):
-                split_x = self.keyboard_sv.x
-            # 2. On tente via le scroll de la timeline
-            elif hasattr(self, 'timeline_scroll'):
-                split_x = self.timeline_scroll.x
-            
-            # Si split_x a été trouvé, on dessine. Sinon, on calcule une valeur par défaut
-            # pour éviter que le trait disparaisse totalement sur les pistes suivantes
-            if split_x is None:
-                # Fallback basé sur les largeurs connues (ajustez les noms selon vos variables)
-                split_x = self.x + self.info_width + self.controls_width
-                if isinstance(self.track, MidiTrack):
-                    split_x += dp(40) # Largeur du clavier
+            # On utilise le bord droit du left_panel pour placer le séparateur
+            if hasattr(self, 'left_panel'):
+                split_x = self.left_panel.right + self.spacing / 2
+            else:
+                # Fallback basé sur les largeurs connues
+                split_x = self.x + self.info_width + self.controls_width + self.spacing / 2
 
             self.vert_separator.pos = (split_x - dp(1), self.y)
             self.vert_separator.size = (dp(2), self.height)
@@ -885,9 +869,21 @@ class TrackWidget(BoxLayout):
         """Callback for a potential future feature to set a track as the metronome source."""
         self.sequencer_layout.process_command_ui(f'setmetrotrack {self.track_index}')
 
+    def _find_existing_editor(self):
+        if self.sequencer_layout.window_manager:
+            for window in self.sequencer_layout.window_manager.children:
+                if hasattr(window, 'source_track') and window.source_track is self.track:
+                    return window
+        return None
+
     def open_piano_roll_editor(self, instance=None) -> None:
-        """Creates and opens the piano roll editor popup for the current track."""
+        """Creates and opens the piano roll editor for the current track."""
         if isinstance(self.track, MidiTrack):
+            existing = self._find_existing_editor()
+            if existing:
+                existing._bring_to_front()
+                return
+
             sequencer = self.sequencer_layout.sequencer
             
             # 1. Capturer la position actuelle AVANT d'arrêter
@@ -898,37 +894,43 @@ class TrackWidget(BoxLayout):
                 sequencer.stop()
 
             # 3. Restaurer la position dans le séquenceur
-            # (Car sequencer.stop() l'a probablement remise à 0)
             if captured_beat > 0:
                 sequencer.current_beat = captured_beat
 
-            editor = PianoRollEditor(track=self.track, sequencer_layout=self.sequencer_layout)
-            editor.open()
+            editor = PianoRollEditor(
+                track=self.track,
+                sequencer_layout=self.sequencer_layout,
+                size_hint=(0.9, 0.8),
+                pos_hint={'center_x': 0.5, 'center_y': 0.5}
+            )
+            if self.sequencer_layout.window_manager:
+                self.sequencer_layout.window_manager.add_widget(editor)
 
     def open_automation_editor(self):
-        if self._editor_opening:
-            return
-        
         if isinstance(self.track, AutomationTrack):
-            self._editor_opening = True
+            existing = self._find_existing_editor()
+            if existing:
+                existing._bring_to_front()
+                return
             
             # On demande à l'objet automation_controls quel paramètre est actif
             active_param = 'vol' # Valeur de sécurité
-            if hasattr(self, 'automation_controls'):
+            if hasattr(self, 'automation_controls') and self.automation_controls.selected_param:
                 active_param = self.automation_controls.selected_param            
 
             # On passe ce paramètre à l'initialisation de l'éditeur
             editor = AutomationEditor(
                 track=self.track,
                 sequencer_layout=self.sequencer_layout,
-                initial_param=active_param
+                initial_param=active_param,
+                pixels_per_beat=self.pixels_per_beat,
+                size_hint=(0.9, 0.8),
+                pos_hint={'center_x': 0.5, 'center_y': 0.5}
             )
             
-            editor.bind(on_dismiss=self._on_editor_dismiss)
-            editor.open()
+            if self.sequencer_layout.window_manager:
+                self.sequencer_layout.window_manager.add_widget(editor)
 
-    def _on_editor_dismiss(self, instance) -> None:
-        self._editor_opening = False
 
     def select_midi_port_popup(self, instance) -> None:
         """Opens a popup to select a MIDI output port for the track."""

@@ -8,6 +8,7 @@ Config.set('input', 'mouse', 'mouse,disable_multitouch')
 
 from kivymd.app import MDApp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
@@ -78,6 +79,7 @@ class HoverRippleMenuItem(
 
 class SequencerLayout(BoxLayout):
     sequencer = ObjectProperty(None)
+    window_manager = ObjectProperty(None)
 
     def __init__(self, **kwargs):
         super(SequencerLayout, self).__init__(**kwargs)
@@ -1780,6 +1782,12 @@ class SequencerLayout(BoxLayout):
 
 
     def update_track_list(self):
+        # Close floating windows of tracks that no longer exist
+        if self.window_manager:
+            for window in list(self.window_manager.children):
+                if hasattr(window, 'source_track') and window.source_track not in self.sequencer.song.tracks:
+                    window.dismiss()
+
         self.track_list_layout.clear_widgets()
         self.track_widgets.clear()
 
@@ -1795,6 +1803,8 @@ class SequencerLayout(BoxLayout):
 
             track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
             track_widget.total_beats = final_total_beats
+            track_widget.pixels_per_beat = self.pixels_per_beat
+            track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
             self.track_widgets.append(track_widget)
             # Force l'appel de la mise à jour graphique une fois que tout est rendu
             Clock.schedule_once(track_widget._update_graphics, 0) 
@@ -1822,9 +1832,14 @@ class SequencerLayout(BoxLayout):
             first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
 
         # --- Bind scroll views for synchronization ---
+        # First, unbind the persistent ruler scroll view to avoid duplicate bindings
+        self.ruler.scroll_view.funbind('scroll_x', self._synchronize_scroll)
+
         scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]
         for sv in scroll_views:
-            sv.fbind('scroll_x', lambda instance, value: self._synchronize_scroll(instance, value))
+            # We use funbind/fbind with the direct method reference to prevent accumulation
+            sv.funbind('scroll_x', self._synchronize_scroll)
+            sv.fbind('scroll_x', self._synchronize_scroll)
             sv.bind(on_scroll_stop=self._on_scroll_stop)
             
     def update_status_display(self):
@@ -1877,15 +1892,23 @@ class SequencerLayout(BoxLayout):
             self.sequencer._resync_all_at_beat(0.0)
 
     def on_end_position_validate(self, instance=None):
-        """Valide la position de fin"""
+        """Appelé quand l'utilisateur valide le champ 'End:'"""
         position = self.end_pos_input.text
+        
+        # 1. Mettre à jour la valeur dans le séquenceur
         self.sequencer.ui_end_pos_str = position
-        print(f"End position validated: {position}")
         self.end_pos_manual_override = True
-        # Ici vous pouvez ajouter la logique pour traiter la nouvelle position de fin
-        # Par exemple :
-        # self.process_command_ui(f'endpos "{position}"')
-
+        
+        # 2. Forcer le recalcul de la longueur (invalider le cache)
+        self.sequencer.invalidate_song_length_cache()
+        
+        # 3. Notifier l'UI que la structure a changé pour redessiner la grille
+        # Cela appellent update_track_list qui utilise la nouvelle valeur
+        # update_track_list se chargera de mettre à jour ruler.total_beats et d'appeler ruler.redraw()
+        self.sequencer.song_structure_changed += 1 
+        
+        print(f"Grid extended to: {position}")
+        
     def on_start_pos_text_change(self, instance, value):
         self.sequencer.ui_start_pos_str = value
 
@@ -2173,13 +2196,33 @@ class SequencerLayout(BoxLayout):
             return
         self._is_scrolling = True
 
-        scrollable_widgets = [self.ruler.scroll_view] + [
-            track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
-        ]
+        # Calculate the absolute pixel offset from the source.
+        # Use children[0] width as content width.
+        try:
+            content_width_source = source_scroll_view.children[0].width
+            viewport_width_source = source_scroll_view.width
+            # Robust max_scroll calculation
+            max_scroll_source = max(0, content_width_source - viewport_width_source)
+            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
 
-        for scroll_widget in scrollable_widgets:
-            if scroll_widget is not source_scroll_view:
-                scroll_widget.scroll_x = scroll_x_value
+            scrollable_widgets = [self.ruler.scroll_view] + [
+                track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
+            ]
+
+            for scroll_widget in scrollable_widgets:
+                if scroll_widget is not source_scroll_view:
+                    try:
+                        content_width = scroll_widget.children[0].width
+                        viewport_width = scroll_widget.width
+                        max_scroll = max(0, content_width - viewport_width)
+                        if max_scroll > 0:
+                            scroll_widget.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
+                        else:
+                            scroll_widget.scroll_x = 0
+                    except (IndexError, AttributeError):
+                        continue
+        except (IndexError, AttributeError):
+            pass
 
         self._is_scrolling = False
 
@@ -2277,18 +2320,25 @@ class SequencerApp(MDApp):
         self.theme_cls.theme_style = "Dark"
         self.theme_cls.primary_palette = "Blue"
         
-        layout = SequencerLayout()
+        root = FloatLayout()
+        self.sequencer_layout = SequencerLayout(size_hint=(1, 1))
+        self.window_manager = FloatLayout(size_hint=(1, 1))
+        self.sequencer_layout.window_manager = self.window_manager
+
+        root.add_widget(self.sequencer_layout)
+        root.add_widget(self.window_manager)
+
         # Start the Jack manager and Carla as soon as the app is built.
         # We schedule them to avoid blocking the main UI thread during startup.
         def startup(dt):
-            layout.sequencer.jack_manager.start()
-            layout.sequencer._start_carla_process()
+            self.sequencer_layout.sequencer.jack_manager.start()
+            self.sequencer_layout.sequencer._start_carla_process()
 
         Clock.schedule_once(startup, 0.1)
-        return layout
+        return root
 
     def on_stop(self):
-        layout = self.root
+        layout = self.sequencer_layout
         layout.sequencer.stop()
         layout.sequencer.close_virtual_ports()
 

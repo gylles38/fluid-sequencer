@@ -58,6 +58,7 @@ Builder.load_string("""
                 shorten_from: 'right'
 
             InternalIconButton:
+                id: maximize_button
                 icon: "window-maximize" if not root.is_maximized else "window-restore"
                 on_release: root.toggle_maximize()
                 theme_icon_color: "Custom"
@@ -99,9 +100,9 @@ class FloatingWindow(RelativeLayout):
         super().__init__(**kwargs)
         self._is_dragging = False
         self._is_resizing = False
-        self._drag_start_parent_pos = (0, 0)
+        self._drag_start_touch_pos = (0, 0)
         self._drag_start_widget_pos = (0, 0)
-        self._resize_start_parent_pos = (0, 0)
+        self._resize_start_touch_pos = (0, 0)
         self._resize_start_widget_size = (0, 0)
         self._resize_start_widget_pos = (0, 0)
         self._resize_start_top = 0
@@ -132,8 +133,10 @@ class FloatingWindow(RelativeLayout):
         if not self.collide_point(*touch.pos):
             return False
 
+        # Apply transformation to get local coordinates for collision checks
         touch.push()
         touch.apply_transform_2d(self.to_local)
+        local_pos = touch.pos
 
         if getattr(self, '_touch_lock', False):
             touch.pop()
@@ -142,21 +145,23 @@ class FloatingWindow(RelativeLayout):
         if self.parent:
             Clock.schedule_once(lambda dt: self._bring_to_front(), 0)
 
-        local_pos = touch.pos
-
         # 1. Check resize handle first (chrome priority)
         if 'resize_handle' in self.ids and self.ids.resize_handle.collide_point(*local_pos) and not self.is_maximized:
-            # Capture start state in parent coordinates
             if self.parent:
+                # Capture current absolute state
+                old_pos = self.pos[:]
+                old_size = self.size[:]
                 self.pos_hint = {}
                 self.size_hint = (None, None)
+                self.pos = old_pos
+                self.size = old_size
+
                 self._is_resizing = True
-                # Get touch position in parent coordinates
-                window_pos = self.to_window(*local_pos)
-                self._resize_start_parent_pos = self.parent.to_local(*window_pos)
+                self._resize_start_touch_pos = (touch.x, touch.y)
                 self._resize_start_widget_size = self.size[:]
-                self._resize_start_widget_pos = (self.x, self.y)
+                self._resize_start_widget_pos = self.pos[:]
                 self._resize_start_top = self.y + self.height
+
                 touch.grab(self)
                 touch.pop()
                 return True
@@ -169,13 +174,18 @@ class FloatingWindow(RelativeLayout):
         # 3. dragging logic (title bar)
         if 'title_bar' in self.ids and self.ids.title_bar.collide_point(*local_pos) and not self.is_maximized:
             if self.parent:
+                # Capture current absolute state
+                old_pos = self.pos[:]
+                old_size = self.size[:]
                 self.pos_hint = {}
                 self.size_hint = (None, None)
+                self.pos = old_pos
+                self.size = old_size
+
                 self._is_dragging = True
-                # Get touch position in parent coordinates
-                window_pos = self.to_window(*local_pos)
-                self._drag_start_parent_pos = self.parent.to_local(*window_pos)
-                self._drag_start_widget_pos = (self.x, self.y)
+                self._drag_start_touch_pos = (touch.x, touch.y)
+                self._drag_start_widget_pos = self.pos[:]
+
                 touch.grab(self)
                 touch.pop()
                 return True
@@ -196,14 +206,11 @@ class FloatingWindow(RelativeLayout):
 
         if self._is_dragging:
             if self.parent:
-                # Use current window position of touch to get parent coordinates
-                # touch.pos is local here because of grab
-                current_window_pos = self.to_window(*touch.pos)
-                current_parent_pos = self.parent.to_local(*current_window_pos)
+                # Calculate delta using window coordinates (touch.x, touch.y)
+                dx = touch.x - self._drag_start_touch_pos[0]
+                dy = touch.y - self._drag_start_touch_pos[1]
 
-                dx = current_parent_pos[0] - self._drag_start_parent_pos[0]
-                dy = current_parent_pos[1] - self._drag_start_parent_pos[1]
-
+                # Update position based on initial position + delta
                 self.x = self._drag_start_widget_pos[0] + dx
                 self.y = self._drag_start_widget_pos[1] + dy
 
@@ -214,11 +221,9 @@ class FloatingWindow(RelativeLayout):
 
         if self._is_resizing:
             if self.parent:
-                current_window_pos = self.to_window(*touch.pos)
-                current_parent_pos = self.parent.to_local(*current_window_pos)
-
-                dx = current_parent_pos[0] - self._resize_start_parent_pos[0]
-                dy = current_parent_pos[1] - self._resize_start_parent_pos[1]
+                # Calculate delta using window coordinates
+                dx = touch.x - self._resize_start_touch_pos[0]
+                dy = touch.y - self._resize_start_touch_pos[1]
 
                 # Resize handle is bottom-right.
                 # Right edge moves: width changes based on dx
@@ -255,7 +260,7 @@ class FloatingWindow(RelativeLayout):
             # Maximize
             self._restore_pos_hint = self.pos_hint.copy()
             self._restore_size_hint = self.size_hint[:] if self.size_hint else (None, None)
-            self._restore_pos = (self.x, self.y)
+            self._restore_pos = self.pos[:]
             self._restore_size = self.size[:]
 
             self.pos_hint = {'x': 0, 'y': 0}

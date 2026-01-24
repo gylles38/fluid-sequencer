@@ -228,15 +228,21 @@ class FloatingWindow(RelativeLayout):
                 # Resize handle is bottom-right.
                 # Right edge moves: width changes based on dx
                 new_width = max(dp(300), self._resize_start_widget_size[0] + dx)
+                # Clamp width to parent right edge
+                new_width = min(new_width, self.parent.width - self.x)
 
                 # Bottom edge moves: y changes, height changes to keep top fixed.
                 new_y = self._resize_start_widget_pos[1] + dy
+                # Clamp bottom edge to parent bottom (y=0)
+                new_y = max(0, new_y)
+
                 new_height = self._resize_start_top - new_y
 
                 if new_height >= dp(200):
                     self.y = new_y
                     self.height = new_height
                 else:
+                    # Anchor at minimum height from top
                     self.y = self._resize_start_top - dp(200)
                     self.height = dp(200)
 

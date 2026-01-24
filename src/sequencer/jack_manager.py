@@ -979,10 +979,9 @@ class JackManager:
                     return int(val)
         return None
 
-    def _handle_control_midi(self, data: bytes):
+    def _handle_control_midi(self, msg: mido.Message):
         """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""
         try:
-            msg = mido.Message.from_bytes(data)
             if msg.type == 'control_change':
                 # --- Handle Transport Controls ---
                 if msg.value == 127:
@@ -1000,10 +999,9 @@ class JackManager:
         except Exception:
             pass
 
-    def _record_midi_event(self, data: bytes, start_beat_of_block: float, offset: int):
+    def _record_midi_event(self, msg: mido.Message, start_beat_of_block: float, offset: int):
         """Records a MIDI event from the 'Clavier' port."""
         try:
-            msg = mido.Message.from_bytes(data)
             samplerate = self.jack_client.samplerate
             beats_per_second = self.sequencer.song.tempo / 60.0
             accurate_beat = start_beat_of_block + (offset / samplerate) * beats_per_second
@@ -1210,11 +1208,16 @@ class JackManager:
                 current_routing_idx = self._get_input_routing_value(start_beat_of_block)
 
                 for offset, data in self.clavier_port.incoming_midi_events():
-                    msg = mido.Message.from_bytes(data)
+                    try:
+                        # Convert to bytes and parse once
+                        data_bytes = bytes(data)
+                        msg = mido.Message.from_bytes(data_bytes)
+                    except Exception:
+                        continue # Skip invalid/incomplete MIDI messages
 
                     if msg.type == 'note_on' and msg.velocity > 0:
                         if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                            self.midi_out_ports[current_routing_idx].write_midi_event(offset, data)
+                            self.midi_out_ports[current_routing_idx].write_midi_event(offset, data_bytes)
                             self._live_forwarded_notes[msg.note] = current_routing_idx
 
                     elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
@@ -1222,22 +1225,22 @@ class JackManager:
                         if msg.note in self._live_forwarded_notes:
                             track_idx = self._live_forwarded_notes.pop(msg.note)
                             if track_idx in self.midi_out_ports:
-                                self.midi_out_ports[track_idx].write_midi_event(offset, data)
+                                self.midi_out_ports[track_idx].write_midi_event(offset, data_bytes)
                         else:
                             # If we don't know where it started, just send to current routing
                             if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                                self.midi_out_ports[current_routing_idx].write_midi_event(offset, data)
+                                self.midi_out_ports[current_routing_idx].write_midi_event(offset, data_bytes)
 
                     else:
                         # Forward other messages (CC, etc.) to current target
                         if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                            self.midi_out_ports[current_routing_idx].write_midi_event(offset, data)
+                            self.midi_out_ports[current_routing_idx].write_midi_event(offset, data_bytes)
 
                     # Also handle transport/control CCs
-                    self._handle_control_midi(data)
+                    self._handle_control_midi(msg)
 
                     if self.sequencer.is_recording:
-                        self._record_midi_event(data, start_beat_of_block, offset)
+                        self._record_midi_event(msg, start_beat_of_block, offset)
 
             # --- 2. Handle Transport State Changes ---
             current_transport_state = self.jack_client.transport_state

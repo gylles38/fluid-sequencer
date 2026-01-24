@@ -10,6 +10,18 @@ from kivymd.uix.label import MDLabel
 from kivymd.uix.button import MDIconButton
 from kivy.uix.widget import Widget
 
+class InternalBoxLayout(MDBoxLayout):
+    _is_internal_widget = BooleanProperty(True)
+
+class InternalWidget(Widget):
+    _is_internal_widget = BooleanProperty(True)
+
+class InternalLabel(MDLabel):
+    _is_internal_widget = BooleanProperty(True)
+
+class InternalIconButton(MDIconButton):
+    _is_internal_widget = BooleanProperty(True)
+
 Builder.load_string("""
 <FloatingWindow>:
     canvas.before:
@@ -24,14 +36,12 @@ Builder.load_string("""
             rectangle: (0, 0, self.width, self.height)
             width: dp(1)
 
-    MDBoxLayout:
-        _is_internal_widget: True
-        orientation: 'vertical'
+    InternalBoxLayout:
         id: main_container
+        orientation: 'vertical'
 
         # Title Bar
-        MDBoxLayout:
-            _is_internal_widget: True
+        InternalBoxLayout:
             id: title_bar
             size_hint_y: None
             height: dp(40)
@@ -39,8 +49,7 @@ Builder.load_string("""
             padding: [dp(10), 0, dp(5), 0]
             spacing: dp(5)
 
-            MDLabel:
-                _is_internal_widget: True
+            InternalLabel:
                 text: root.title
                 theme_text_color: "Custom"
                 text_color: 1, 1, 1, 1
@@ -48,47 +57,43 @@ Builder.load_string("""
                 shorten: True
                 shorten_from: 'right'
 
-            MDIconButton:
-                _is_internal_widget: True
+            InternalIconButton:
                 icon: "window-maximize" if not root.is_maximized else "window-restore"
                 on_release: root.toggle_maximize()
                 theme_icon_color: "Custom"
                 icon_color: 1, 1, 1, 1
 
-            MDIconButton:
-                _is_internal_widget: True
+            InternalIconButton:
                 icon: "close"
                 on_release: root.dismiss()
                 theme_icon_color: "Custom"
                 icon_color: 1, 0.3, 0.3, 1
 
         # Content Container
-        MDBoxLayout:
-            _is_internal_widget: True
+        InternalBoxLayout:
             id: content_container
             padding: dp(2)
 
     # Resize Handle (Bottom Right)
-    Widget:
-        _is_internal_widget: True
+    InternalWidget:
         id: resize_handle
         size_hint: None, None
-        size: dp(20), dp(20)
-        right: root.width
-        y: 0
+        size: dp(25), dp(25)
+        pos: root.width - self.width, 0
         canvas:
             Color:
-                rgba: 0.5, 0.5, 0.5, 0.5
-            Mesh:
-                mode: 'triangles'
-                vertices: [self.right, self.y, 0, 0, self.right, self.top, 0, 0, self.x, self.y, 0, 0]
-                indices: [0, 1, 2]
+                rgba: 0.7, 0.7, 0.7, 0.5
+            Line:
+                points: [self.x + self.width - dp(2), self.y + dp(2), self.x + self.width - dp(2), self.y + dp(15), self.x + self.width - dp(15), self.y + dp(2)]
+                close: True
+                width: dp(1.5)
 """)
 
 class FloatingWindow(RelativeLayout):
     title = StringProperty("Window")
     is_maximized = BooleanProperty(False)
     source_track = ObjectProperty(None)
+    _is_internal_widget = BooleanProperty(False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -104,27 +109,37 @@ class FloatingWindow(RelativeLayout):
         self._touch_lock = False
 
     def add_widget(self, widget, index=0, canvas=None):
+        if getattr(widget, '_is_internal_widget', False):
+            super().add_widget(widget, index, canvas)
+            return
+
         if not hasattr(self, 'ids') or 'content_container' not in self.ids:
             super().add_widget(widget, index, canvas)
             return
 
-        if getattr(widget, '_is_internal_widget', False):
-            super().add_widget(widget, index, canvas)
-        else:
-            self.ids.content_container.add_widget(widget, index, canvas)
+        self.ids.content_container.add_widget(widget, index, canvas)
 
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return False
 
+        touch.push()
+        touch.apply_transform_2d(self.to_local)
+
         if getattr(self, '_touch_lock', False):
+            touch.pop()
             return True
 
-        local_pos = self.to_local(*touch.pos)
-
-        # Bring to front
         if self.parent:
             Clock.schedule_once(lambda dt: self._bring_to_front(), 0)
+
+        # 1. Let children handle touch first
+        if super(RelativeLayout, self).on_touch_down(touch):
+            touch.pop()
+            return True
+
+        # 2. dragging/resizing logic
+        local_pos = touch.pos
 
         # Check resize handle
         if 'resize_handle' in self.ids and self.ids.resize_handle.collide_point(*local_pos) and not self.is_maximized:
@@ -132,6 +147,7 @@ class FloatingWindow(RelativeLayout):
             self.size_hint = (None, None)
             self._is_resizing = True
             touch.grab(self)
+            touch.pop()
             return True
 
         # Check title bar
@@ -141,9 +157,11 @@ class FloatingWindow(RelativeLayout):
             self._is_dragging = True
             self._drag_offset = local_pos
             touch.grab(self)
+            touch.pop()
             return True
 
-        return super().on_touch_down(touch)
+        touch.pop()
+        return True
 
     def _bring_to_front(self):
         parent = self.parent
@@ -167,19 +185,7 @@ class FloatingWindow(RelativeLayout):
             return True
 
         if self._is_resizing:
-            local_pos = self.to_local(*touch.pos)
-
-            # Keep top-left fixed? No, in Kivy (0,0) is bottom-left.
-            # Bottom-right resize means changing width (x) and height (y+height).
-            # If we want to keep top-left fixed:
-            # top = self.y + self.height
-            # left = self.x
-            # new_width = local_pos_in_parent[0] - left
-            # new_height = top - local_pos_in_parent[1]
-
-            # Since local_pos is relative to bottom-left of the window:
-            # new_width = local_pos[0]
-            # new_height = current_height - local_pos[1]
+            local_pos = touch.pos
 
             new_width = max(dp(300), local_pos[0])
             delta_y = local_pos[1]

@@ -552,6 +552,14 @@ class SequencerLayout(BoxLayout):
         )
         toolbar_card.add_widget(add_automation_track_button)
 
+        # Bouton pour ouvrir l'aiguillage MIDI (Routing)
+        routing_button = TooltipMDIconButton(
+            icon="lan",
+            tooltip_text="MIDI Input Routing",
+            on_release=lambda x: self.open_input_routing_editor()
+        )
+        toolbar_card.add_widget(routing_button)
+
         # Bouton pour supprimer une piste
         delete_track_button = TooltipMDIconButton(
             icon="playlist-minus",
@@ -1451,6 +1459,25 @@ class SequencerLayout(BoxLayout):
         self.delete_popup = popup # Store reference to dismiss it later
         popup.open()
 
+    def open_input_routing_editor(self):
+        """Ouvre l'éditeur d'aiguillage MIDI global."""
+        from sequencer.ui_components.input_routing_editor import InputRoutingEditor
+
+        # Vérifier si déjà ouvert
+        for child in self.window_manager.children:
+            if isinstance(child, InputRoutingEditor):
+                # Clock.schedule_once(lambda dt: child.bring_to_front())
+                return
+
+        routing_track = self.sequencer.get_input_routing_track()
+        editor = InputRoutingEditor(
+            track=routing_track,
+            sequencer_layout=self,
+            size_hint=(0.9, 0.8),
+            pos_hint={'center_x': 0.5, 'center_y': 0.5}
+        )
+        self.window_manager.add_widget(editor)
+
     def confirm_delete_track(self, track_index):
         """Affiche une confirmation avant de supprimer la piste."""
         if hasattr(self, 'delete_popup'):
@@ -2088,6 +2115,8 @@ class SequencerLayout(BoxLayout):
                     self.process_command_ui(full_command)
                 popup = LoopPopup(sequencer=self.sequencer, callback=loop_callback)
                 popup.open()
+            elif data.get("status") == "open_routing_editor":
+                self.open_input_routing_editor()
             elif data.get("status") == "prompt":
                 prompt_message = data["message"]
                 if "You have unsaved changes" in prompt_message:

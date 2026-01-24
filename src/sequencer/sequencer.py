@@ -69,6 +69,7 @@ class Sequencer(EventDispatcher):
         self.pause_beat = 0.0
         self.rewind_beat = 0.0
         self.recording_thread = None
+        self._recording_merge_event = None
         self._stop_event = threading.Event()
 
         self.loop_enabled = False
@@ -286,14 +287,17 @@ class Sequencer(EventDispatcher):
             self.default_record_port = port_name
             self.is_dirty = True
 
-            # Start the new listener thread
-            self._transport_control_stop_event.clear()
-            self._transport_control_thread = threading.Thread(
-                target=self._transport_control_listener_loop,
-                args=(port_name,),
-                daemon=True
-            )
-            self._transport_control_thread.start()
+            # Start the new listener thread (only if JACK is not running)
+            if not self.jack_manager.is_running:
+                self._transport_control_stop_event.clear()
+                self._transport_control_thread = threading.Thread(
+                    target=self._transport_control_listener_loop,
+                    args=(port_name,),
+                    daemon=True
+                )
+                self._transport_control_thread.start()
+            else:
+                print(f"Note: JACK is active. Controls should be connected to 'Clavier' port.")
 
             return f"Default record and transport control port set to: {port_name}"
         except Exception as e:
@@ -331,9 +335,67 @@ class Sequencer(EventDispatcher):
             inport_name=self.default_record_port
         )
 
+    def _merge_recorded_events(self, dt):
+        """Polls recorded events from JackManager and merges them into tracks."""
+        any_added = False
+        while True:
+            try:
+                event_data = self.jack_manager._recorded_events_to_merge.popleft()
+                track_idx = event_data['track_idx']
+                if not 0 <= track_idx < len(self.song.tracks):
+                    continue
+
+                track = self.song.tracks[track_idx]
+                if not isinstance(track, MidiTrack):
+                    continue
+
+                if event_data['type'] == 'note':
+                    note = Note(pitch=event_data['pitch'], velocity=event_data['velocity'], duration=event_data['duration'])
+                    event = Event(start_time=event_data['start_time'], notes=[note])
+                    track.add_event(event)
+                elif event_data['type'] == 'cc':
+                    cc = CCMessage(control=event_data['control'], value=event_data['value'])
+                    # Find or create event at this time
+                    existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
+                    if existing_event:
+                        existing_event.cc_messages.append(cc)
+                    else:
+                        event = Event(start_time=event_data['start_time'], cc_messages=[cc])
+                        track.add_event(event)
+
+                any_added = True
+            except IndexError:
+                break
+
+        if any_added:
+            self.is_dirty = True
+            self.invalidate_song_length_cache()
+            self.song_structure_changed += 1
+
     def get_default_record_port(self) -> Optional[str]:
         """Retourne le port d'enregistrement par défaut"""
         return self.default_record_port
+
+    def get_input_routing_track(self) -> AutomationTrack:
+        """Returns or creates the global MIDI input routing automation track."""
+        for track in self.song.tracks:
+            if isinstance(track, AutomationTrack) and any(p.parameter == 'input_routing' for p in track.points):
+                return track
+
+        # Create it if not found
+        track = AutomationTrack(name="Input Routing", target_track_index=-1) # -1 means Global
+
+        # Find first MIDI track index for default routing
+        first_midi_idx = 0
+        for i, t in enumerate(self.song.tracks):
+            if isinstance(t, MidiTrack):
+                first_midi_idx = i
+                break
+
+        track.add_point(AutomationPoint(start_time=0.0, value=float(first_midi_idx), parameter='input_routing', curve='none'))
+        self.song.add_track(track)
+        self.is_dirty = True
+        return track
 
     def invalidate_song_length_cache(self):
         """Invalidates the cached song length."""
@@ -1084,11 +1146,9 @@ class Sequencer(EventDispatcher):
                             self.jack_manager._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", volume * 100]})
                             break
         elif isinstance(track, MidiTrack):
-            if self.jack_manager.is_running and track.output_port_name:
-                port = self.jack_manager.open_ports.get(track.output_port_name)
-                if port:
-                    midi_volume = int(volume * 127)
-                    port.send(mido.Message("control_change", channel=track.channel, control=7, value=midi_volume))
+            if self.jack_manager.is_running:
+                midi_volume = int(volume * 127)
+                self.jack_manager.send_midi_to_track(track_index, mido.Message("control_change", channel=track.channel, control=7, value=midi_volume))
 
         return {"status": "success", "message": f"Volume for track '{track.name}' set to {volume:.2f}."}
 
@@ -1177,12 +1237,10 @@ class Sequencer(EventDispatcher):
                             break
         # === UPDATE PISTE MIDI (CC #10) ===
         elif isinstance(track, MidiTrack):
-            if self.jack_manager.is_running and track.output_port_name:
-                port = self.jack_manager.open_ports.get(track.output_port_name)
-                if port:
-                    # Conversion de pan (-1.0 à 1.0) en valeur MIDI (0 à 127)
-                    midi_pan = int((pan + 1.0) / 2.0 * 127)
-                    port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
+            if self.jack_manager.is_running:
+                # Conversion de pan (-1.0 à 1.0) en valeur MIDI (0 à 127)
+                midi_pan = int((pan + 1.0) / 2.0 * 127)
+                self.jack_manager.send_midi_to_track(track_index, mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
         
         return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
 
@@ -1240,15 +1298,13 @@ class Sequencer(EventDispatcher):
 
             # --- MIDI Track: Silence notes and conditionally resync ---
             elif isinstance(track, MidiTrack):
-                if track.output_port_name and track.output_port_name in self.jack_manager.open_ports:
-                    port = self.jack_manager.open_ports[track.output_port_name]
-                    if track.is_muted:
-                        # Silence all notes for this track
-                        for cc in (123, 120, 121):
-                            port.send(mido.Message('control_change', channel=track.channel, control=cc, value=0))
-                        keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == track_index]
-                        for key in keys_to_remove:
-                            del self.jack_manager._active_notes[key]
+                if track.is_muted:
+                    # Silence all notes for this track
+                    for cc in (123, 120, 121):
+                        self.jack_manager.send_midi_to_track(track_index, mido.Message('control_change', channel=track.channel, control=cc, value=0))
+                    keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == track_index]
+                    for key in keys_to_remove:
+                        del self.jack_manager._active_notes[key]
 
                 # MIDI tracks DO require a resync to prevent timing drift if muted/unmuted during playback
                 if is_rolling:
@@ -1296,12 +1352,10 @@ class Sequencer(EventDispatcher):
                 if isinstance(track, MidiTrack):
                     should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                     if not should_be_audible:
-                        if track.output_port_name and track.output_port_name in self.jack_manager.open_ports:
-                            port = self.jack_manager.open_ports[track.output_port_name]
-                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
-                            keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == i]
-                            for key in keys_to_remove:
-                                del self.jack_manager._active_notes[key]
+                        self.jack_manager.send_midi_to_track(i, mido.Message('control_change', channel=track.channel, control=123, value=0))
+                        keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == i]
+                        for key in keys_to_remove:
+                            del self.jack_manager._active_notes[key]
 
             # Regenerate automation events as their audibility may have changed
             self.jack_manager._prepare_automation_events()
@@ -1332,40 +1386,36 @@ class Sequencer(EventDispatcher):
             if self.is_recording and self.last_record_settings and i == self.last_record_settings.get('track_index'):
                 continue
 
-            if isinstance(track, MidiTrack) and track.output_port_name:
+            if isinstance(track, MidiTrack):
                 should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                port = self.jack_manager.open_ports.get(track.output_port_name)
 
-                if port:
-                    if should_be_audible:
-                        try:
-                            output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
-                            # Bank and Program changes are always sent, unless automation for them exists at the start.
-                            if track.bank_msb is not None and (i, 'cc0') not in primed_by_automation:
-                                port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
-                            if track.bank_lsb is not None and (i, 'cc32') not in primed_by_automation:
-                                port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
-                            if (i, 'prog') not in primed_by_automation:
-                                port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                if should_be_audible:
+                    try:
+                        output += f"  - Priming MIDI track '{track.name}' on Ch: {track.channel + 1}\n"
+                        # Bank and Program changes are always sent, unless automation for them exists at the start.
+                        if track.bank_msb is not None and (i, 'cc0') not in primed_by_automation:
+                            self.jack_manager.send_midi_to_track(i, mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                        if track.bank_lsb is not None and (i, 'cc32') not in primed_by_automation:
+                            self.jack_manager.send_midi_to_track(i, mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                        if (i, 'prog') not in primed_by_automation:
+                            self.jack_manager.send_midi_to_track(i, mido.Message('program_change', channel=track.channel, program=track.instrument))
 
-                            # Only send volume if not already handled by automation.
-                            if (i, 'vol') not in primed_by_automation:
-                                midi_volume = int(track.volume * 127)
-                                port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                        # Only send volume if not already handled by automation.
+                        if (i, 'vol') not in primed_by_automation:
+                            midi_volume = int(track.volume * 127)
+                            self.jack_manager.send_midi_to_track(i, mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
 
-                            # Only send pan if not already handled by automation.
-                            if (i, 'pan') not in primed_by_automation:
-                                midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                                port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                        # Only send pan if not already handled by automation.
+                        if (i, 'pan') not in primed_by_automation:
+                            midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                            self.jack_manager.send_midi_to_track(i, mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
 
-                        except Exception as e:
-                            output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
-                    else:
-                        # Silence the track if it's not supposed to be audible
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
-                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
+                    except Exception as e:
+                        output += f"  - Could not send state to track '{track.name}': {e}\n"
                 else:
-                    output += f"  - Skipping track '{track.name}', port '{track.output_port_name}' not open in JackManager.\n"
+                    # Silence the track if it's not supposed to be audible
+                    self.jack_manager.send_midi_to_track(i, mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
+                    self.jack_manager.send_midi_to_track(i, mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
         return output
 
     def set_control_port(self, port_name: str) -> str:
@@ -1373,11 +1423,15 @@ class Sequencer(EventDispatcher):
         if self.midi_listener_thread and self.midi_listener_thread.is_alive():
             return "A control port is already active. Please unset it first."
         self.control_port_name = port_name
-        self._midi_listener_stop_event.clear()
-        self.midi_listener_thread = threading.Thread(target=self._midi_listener_loop, args=(port_name,))
-        self.midi_listener_thread.daemon = True
-        self.midi_listener_thread.start()
-        return f"Listening for control messages on '{port_name}'."
+
+        if not self.jack_manager.is_running:
+            self._midi_listener_stop_event.clear()
+            self.midi_listener_thread = threading.Thread(target=self._midi_listener_loop, args=(port_name,))
+            self.midi_listener_thread.daemon = True
+            self.midi_listener_thread.start()
+            return f"Listening for control messages on '{port_name}'."
+        else:
+            return f"Note: JACK is active. Control messages should be sent to the 'Clavier' port."
 
     def unset_control_port(self) -> str:
         """Stops listening for control messages and closes the port."""
@@ -1774,145 +1828,6 @@ class Sequencer(EventDispatcher):
                 return 0.0
         return 0.0
 
-    def _recording_thread_main(self, target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state, enable_thru):
-            # Le dictionnaire stockera maintenant un tuple: (start_beat, velocity)
-            open_notes = {}
-            outport = None
-            first_note_detected = False
-            recording_start_beat = None
-
-            try:
-                if outport_name and enable_thru:
-                    try:
-                        outport = mido.open_output(outport_name)
-                        print(f"MIDI thru activé sur le port: {outport_name}")
-                    except Exception as e:
-                        print(f"Warning: Impossible d'ouvrir le port de sortie: {e}")
-
-                with mido.open_input(inport_name) as inport:
-                    print(f"Port d'entrée MIDI ouvert: {inport_name}")
-                    list(inport.iter_pending())
-                    print(f"En attente de la première note sur '{target_track.name}'...")
-                    
-                    wait_start_time = time.time()
-                    pending_first_note = None
-                    while not self._stop_event.is_set() and not first_note_detected:
-                        # Case 1: Recording is cancelled (e.g., by pressing stop or record again)
-                        if not self.is_recording:
-                             print("Recording armed state cancelled.")
-                             return
-
-                        # Case 2: User presses the main Play button
-                        if self.playback_state == 'playing':
-                            print("Transport started. Beginning recording.")
-                            first_note_detected = True
-                            recording_start_beat = self._get_current_beat()
-                            print(f"Enregistrement démarré à la position: {self._format_beats_to_position(recording_start_beat)}")
-                            break # Exit the wait loop
-
-                        # Case 3: User plays a note on the MIDI keyboard
-                        msg = inport.poll()
-                        if msg and msg.type == 'note_on' and msg.velocity > 0:
-                            print(f"Première note détectée: {msg.note} (vélocité: {msg.velocity})")
-                            first_note_detected = True
-                            pending_first_note = msg
-                            # This call starts the transport, which will be detected on the next loop,
-                            # or the recording will just proceed. Let's start it directly.
-                            self.play(start_beat=start_beat)
-                            time.sleep(0.05) # Give transport a moment to start
-                            recording_start_beat = self._get_current_beat()
-                            print(f"Enregistrement démarré à la position: {self._format_beats_to_position(recording_start_beat)}")
-                            break # Exit the wait loop
-
-                        time.sleep(0.01)
-
-                    if not first_note_detected:
-                        # This can happen if stop is pressed while waiting
-                        print("Recording start cancelled.")
-                        self.is_recording = False
-                        return
-
-                    print("Début de l'enregistrement en temps réel...")
-                    
-                    while not self._stop_event.is_set():
-                        current_beat = self._get_current_beat()
-                        
-                        # Traiter la première note qui a déclenché l'enregistrement
-                        if pending_first_note:
-                            msg = pending_first_note
-                            if msg.note not in open_notes:
-                                # Correction: Utiliser le temps de départ le plus précis possible
-                                note_start_time = recording_start_beat if recording_start_beat is not None else current_beat
-                                open_notes[msg.note] = (note_start_time, msg.velocity)
-                                print(f"Note ON: {msg.note} à {self._format_beats_to_position(note_start_time)}")
-                                if outport and enable_thru:
-                                    outport.send(msg.copy(channel=target_track.channel))
-                            pending_first_note = None
-
-                        for msg in inport.iter_pending():
-                            if outport and enable_thru and hasattr(msg, 'channel'):
-                                outport.send(msg.copy(channel=target_track.channel))
-
-                            if msg.type == 'note_on' and msg.velocity > 0:
-                                if msg.note not in open_notes:
-                                    open_notes[msg.note] = (current_beat, msg.velocity)
-                                    print(f"Note ON: {msg.note} à {self._format_beats_to_position(current_beat)}")
-                            
-                            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                                if msg.note in open_notes:
-                                    # Récupérer le temps ET la vélocité originale
-                                    note_start, original_velocity = open_notes.pop(msg.note)
-                                    duration = current_beat - note_start
-                                    
-                                    if duration > 0:
-                                        # Utiliser la vélocité originale du "note_on"
-                                        note = Note(pitch=msg.note, velocity=original_velocity, duration=duration)
-                                        event = Event(notes=[note], start_time=note_start)
-                                        
-                                        target_track.add_event(event)
-                                        self.is_dirty = True
-                                        self.invalidate_song_length_cache()
-                                        
-                                        print(f"Note OFF: {msg.note}, durée: {duration:.2f} beats")
-                        
-                        if (num_beats_to_record and recording_start_beat and
-                                current_beat >= (recording_start_beat + num_beats_to_record)):
-                            print("Fin de la durée d'enregistrement atteinte. Arrêt de la lecture.")
-                            # Schedule the transport stop on the main thread to avoid deadlocks
-                            Clock.schedule_once(lambda dt: self._stop_playback_transport())
-                            self._stop_event.set()
-                            break
-                        
-                        time.sleep(0.001)
-
-            except Exception as e:
-                print(f"Erreur lors de l'enregistrement: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            finally:
-                print("Nettoyage de l'enregistrement...")
-                
-                current_beat = self._get_current_beat()
-                # Gérer les notes orphelines
-                for note, (note_start, original_velocity) in open_notes.items():
-                    duration = current_beat - note_start
-                    if duration > 0:
-                        note_obj = Note(pitch=note, velocity=original_velocity, duration=duration)
-                        event = Event(notes=[note_obj], start_time=note_start)
-                        target_track.add_event(event)
-                        print(f"Note orpheline fermée: {note}, durée: {duration:.2f} beats")
-                
-                if outport:
-                    try: outport.close()
-                    except: pass
-                
-                target_track.is_muted = original_mute_state
-                self.is_recording = False
-                self._stop_event.clear()
-                
-                print(f"Enregistrement terminé. {len(target_track.events)} événements enregistrés.")
-
     def _start_recording_internal(self, track_index: int, start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: bool, enable_thru: bool):
             target_track = self.song.tracks[track_index]
             if not isinstance(target_track, MidiTrack):
@@ -1974,15 +1889,9 @@ class Sequencer(EventDispatcher):
                     end_pos_msg = self._format_beats_to_position(end_beat_for_deletion)
                     print(f"Notes existantes effacées/tronquées dans la plage {start_pos_msg} à {end_pos_msg}.")
 
-            outport_name = target_track.output_port_name
-            original_mute_state = target_track.is_muted
-            if replace_notes:
-                target_track.is_muted = True
-                
             self.is_recording = True
-            self.recording_thread = threading.Thread(target=self._recording_thread_main, args=(target_track, start_beat, inport_name, outport_name, num_beats_to_record, original_mute_state, enable_thru))
-            self.recording_thread.daemon = True
-            self.recording_thread.start()
+            self._recording_merge_event = Clock.schedule_interval(self._merge_recorded_events, 0.1)
+            print(f"Enregistrement démarré via JACK (track hopping activé).")
 
     def prepare_recording(self, track_idx: int, start_beat: float, inport_name: str):
         """Prépare l'enregistrement qui sera déclenché par la première note MIDI"""
@@ -2481,11 +2390,15 @@ class Sequencer(EventDispatcher):
 
     def stop(self):
         """Stops recording and/or playback."""
-        if self.is_recording and self.recording_thread:
+        if self.is_recording:
             print("Stopping recording...")
-            self._stop_event.set()
-            # Wait for the recording thread to finish its cleanup
-            self.recording_thread.join(timeout=1.0)
+            if self._recording_merge_event:
+                self._recording_merge_event.cancel()
+                self._recording_merge_event = None
+
+            # Final merge of recorded events
+            self._merge_recorded_events(0)
+
             self.is_recording = False
 
             # After recording, invalidate the cache so the new length is calculated
@@ -2493,8 +2406,6 @@ class Sequencer(EventDispatcher):
             # Trigger a UI refresh to redraw all tracks to the new length
             self.song_structure_changed += 1
 
-            # After the recording thread has stopped itself, we might not need to stop playback again
-            # as it might have already done so. However, calling it ensures a consistent state.
             if self.playback_state != "stopped":
                  self._stop_playback_transport()
         else:

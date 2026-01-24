@@ -1711,18 +1711,14 @@ class PianoRollEditor(FloatingWindow):
         if not sequencer or not sequencer.jack_manager.is_running:
             return
 
-        port_name = self.track_copy.output_port_name
-        if not port_name or port_name not in sequencer.jack_manager.open_ports:
-            return
-
-        port = sequencer.jack_manager.open_ports[port_name]
         channel = self.track_copy.channel
 
         try:
             note_on_msg = mido.Message('note_on', channel=channel, note=pitch, velocity=velocity)
             note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=velocity)
 
-            port.send(note_on_msg)
-            Clock.schedule_once(lambda dt: port.send(note_off_msg), duration)
+            # We use the original_track_index to identify which track's port to send to
+            self.sequencer_layout.sequencer.jack_manager.send_midi_to_track(self.original_track_index, note_on_msg)
+            Clock.schedule_once(lambda dt: self.sequencer_layout.sequencer.jack_manager.send_midi_to_track(self.original_track_index, note_off_msg), duration)
         except Exception as e:
             print(f"Error sending preview note: {e}")

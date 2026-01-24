@@ -153,7 +153,7 @@ class AutomationPoint:
                     raise ValueError("CC number must be between 0 and 127.")
             except (ValueError, IndexError):
                  raise ValueError(f"Invalid CC parameter format: {self.parameter}")
-        elif param_lower not in ["vol", "pan", "vel", "prog"]:
+        elif param_lower not in ["vol", "pan", "vel", "prog", "input_routing"]:
              raise ValueError(f"Invalid parameter name: {self.parameter}")
         self.parameter = param_lower
 

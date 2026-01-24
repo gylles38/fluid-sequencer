@@ -30,6 +30,7 @@ from .floating_window import FloatingWindow
 from .bounded_scroll_view import BoundedScrollView
 from .piano_roll_editor import PianoRollEditor
 from .automation_editor import AutomationEditor
+from .input_routing_editor import InputRoutingEditor
 from .AutomationControls import AutomationControls
 from .VportsPopup import VportsPopup
 from .editable_label import EditableLabel

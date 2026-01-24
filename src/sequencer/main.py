@@ -793,6 +793,11 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             return True, "Usage: saveproject <basename>"
     elif command == "prime":
         return True, seq.prime_all_tracks()
+    elif command == "routing":
+        if api_mode:
+            return True, json.dumps({"status": "open_routing_editor"})
+        else:
+            return True, "MIDI Input Routing editor is only available in GUI mode."
     elif command == "cc":
         if len(args) == 0:
             hardware_ports = mido.get_output_names()

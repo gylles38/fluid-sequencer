@@ -1,6 +1,6 @@
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.lang import Builder
-from kivy.properties import StringProperty, ObjectProperty, BooleanProperty, ListProperty
+from kivy.properties import StringProperty, ObjectProperty, BooleanProperty, ListProperty, NumericProperty
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -95,6 +95,9 @@ class FloatingWindow(RelativeLayout):
     is_maximized = BooleanProperty(False)
     source_track = ObjectProperty(None)
     _is_internal_widget = BooleanProperty(False)
+
+    min_width = NumericProperty(dp(400))
+    min_height = NumericProperty(dp(250))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -238,7 +241,7 @@ class FloatingWindow(RelativeLayout):
 
                 # 1. Width (Right edge)
                 new_width = self._resize_start_widget_size[0] + dx
-                new_width = max(dp(300), new_width)
+                new_width = max(self.min_width, new_width)
                 # Cap width so right edge doesn't go off-screen
                 if self.x + new_width > self.parent.width:
                     new_width = self.parent.width - self.x
@@ -249,8 +252,8 @@ class FloatingWindow(RelativeLayout):
                 new_y = self._resize_start_widget_pos[1] + dy
 
                 # Ensure minimum height
-                if start_top - new_y < dp(200):
-                    new_y = start_top - dp(200)
+                if start_top - new_y < self.min_height:
+                    new_y = start_top - self.min_height
 
                 # Clamp bottom edge to parent bottom
                 new_y = max(0, new_y)

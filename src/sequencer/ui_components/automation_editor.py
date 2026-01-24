@@ -715,6 +715,7 @@ Builder.load_string("""
 """)
 
 class AutomationEditor(FloatingWindow):
+    min_width = NumericProperty(dp(750))
     sequencer_layout = ObjectProperty()
     track = ObjectProperty() # This will be the AutomationTrack
     original_track_index = NumericProperty(None)

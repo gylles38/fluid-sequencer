@@ -160,8 +160,8 @@ class FloatingWindow(RelativeLayout):
                 self._resize_start_touch_pos = (touch.x, touch.y)
                 self._resize_start_widget_size = self.size[:]
                 self._resize_start_widget_pos = self.pos[:]
-                # Robustly capture top edge clamped to parent
-                self._resize_start_top = min(self.parent.height, self.y + self.height)
+                # Use real top as anchor to avoid jumps during move
+                self._resize_start_top = self.y + self.height
 
                 touch.grab(self)
                 touch.pop()
@@ -233,27 +233,30 @@ class FloatingWindow(RelativeLayout):
                 dx = touch.x - self._resize_start_touch_pos[0]
                 dy = touch.y - self._resize_start_touch_pos[1]
 
-                # Resize handle is bottom-right.
-                # Right edge moves: width changes based on dx
-                # Width is capped to fit in parent
-                new_width = max(dp(300), self._resize_start_widget_size[0] + dx)
-                new_width = min(new_width, self.parent.width - self.x)
+                # 1. Width (Right edge)
+                new_width = self._resize_start_widget_size[0] + dx
+                new_width = max(dp(300), new_width)
+                # Cap width so right edge doesn't go off-screen
+                if self.x + new_width > self.parent.width:
+                    new_width = self.parent.width - self.x
 
-                # Bottom edge moves: y changes, height changes to keep top fixed.
+                # 2. Height (Bottom edge)
+                # Anchor at the real top captured in on_touch_down
+                start_top = self._resize_start_top
                 new_y = self._resize_start_widget_pos[1] + dy
-                new_y = max(0, new_y) # Clamp to parent bottom
 
-                new_height = self._resize_start_top - new_y
+                # Ensure minimum height
+                if start_top - new_y < dp(200):
+                    new_y = start_top - dp(200)
 
-                if new_height >= dp(200):
-                    self.y = new_y
-                    self.height = new_height
-                else:
-                    # Anchor at minimum height from top
-                    self.y = self._resize_start_top - dp(200)
-                    self.height = dp(200)
+                # Clamp bottom edge to parent bottom
+                new_y = max(0, new_y)
+
+                new_height = start_top - new_y
 
                 self.width = new_width
+                self.y = new_y
+                self.height = new_height
             return True
 
         return super().on_touch_move(touch)

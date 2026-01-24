@@ -168,18 +168,26 @@ class JackManager:
 
     def open_midi_port(self, port_name: str):
         """Opens a MIDI port if it's not already open."""
-        if port_name in self.open_ports and not self.open_ports[port_name].closed:
-            return  # Port is already open
+        if port_name in self.open_ports:
+            port = self.open_ports[port_name]
+            if hasattr(port, 'closed') and not port.closed:
+                return  # Port is already open and valid
+            elif not hasattr(port, 'closed'):
+                return # It's a native JACK port object, always "open"
 
         vp = next((p for p in self.sequencer.virtual_ports if p.name == port_name), None)
         if vp:
             self.open_ports[port_name] = vp
         else:
             try:
+                # Avoid opening ALSA ports if we are in native JACK mode
+                # unless explicitly requested and mido is configured for it.
                 self.open_ports[port_name] = mido.open_output(port_name)
                 print(f"Successfully opened MIDI port '{port_name}'")
             except Exception as e:
-                print(f"Could not open MIDI port '{port_name}': {e}")
+                # Suppress error if JACK is running as we likely don't need ALSA
+                if not self.is_running:
+                    print(f"Could not open MIDI port '{port_name}': {e}")
 
     def close_midi_port(self, port_name: str):
         """Closes a MIDI port if it's open and not used by other tracks."""
@@ -643,6 +651,27 @@ class JackManager:
                 command = {"command": ["set_property", "pause", is_paused]}
                 self._send_ipc_command(ap.socket_path, command)
 
+    def ensure_track_ports(self):
+        """Registers JACK output ports for any tracks that don't have one yet."""
+        if not self.jack_client or not self.is_running:
+            return
+
+        tracks = self.sequencer.song.tracks
+        for i, track in enumerate(tracks):
+            if isinstance(track, MidiTrack) and i not in self.midi_out_ports:
+                # Use a safe name for the port
+                safe_name = track.name.replace(":", "_").replace("/", "_")
+                port_name = f"out_{i}_{safe_name}"
+                try:
+                    port = self.jack_client.midi_outports.register(port_name)
+                    self.midi_out_ports[i] = port
+                    # We also map the assigned port name to this port for compatibility with existing code
+                    if track.output_port_name:
+                        self.open_ports[track.output_port_name] = port
+                    print(f"Dynamically registered native JACK MIDI port: {port_name}")
+                except Exception as e:
+                    print(f"Error dynamically registering port for track {i}: {e}")
+
     def launch_player_for_track(self, track: AudioTrack, track_index: int):
         """Launches, waits for, and primes a player for a single audio track."""
         print(f"Dynamically launching player for new track '{track.name}'...")
@@ -872,8 +901,12 @@ class JackManager:
         for i, track in enumerate(tracks):
             # --- Live Preview Override ---
             # If a track is being edited, use the temporary version from the editor.
+            # EXCEPTION: If the track is currently recording, we bypass the override
+            # to ensure newly recorded notes (merged into the main track) are audible.
             if i in self.sequencer.track_overrides:
-                track = self.sequencer.track_overrides[i]
+                is_recording_this_track = self.sequencer.is_recording and self.sequencer.get_armed_track_index() == i
+                if not is_recording_this_track:
+                    track = self.sequencer.track_overrides[i]
 
             if not isinstance(track, MidiTrack) or i not in self.midi_out_ports:
                 continue
@@ -1252,9 +1285,15 @@ class JackManager:
                     accurate_event_beat = start_beat_of_block + (offset / samplerate) * beats_per_second if samplerate > 0 else start_beat_of_block
                     current_routing_idx = self._get_input_routing_value(accurate_event_beat)
 
+                    target_track = None
+                    if current_routing_idx is not None and 0 <= current_routing_idx < len(self.sequencer.song.tracks):
+                        target_track = self.sequencer.song.tracks[current_routing_idx]
+
                     if msg.type == 'note_on' and msg.velocity > 0:
-                        if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                            self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
+                        if target_track and current_routing_idx in self.midi_out_ports:
+                            # Force channel to match track settings for consistency
+                            msg.channel = getattr(target_track, 'channel', 0)
+                            self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, msg.bytes())
                             self._live_forwarded_notes[msg.note] = current_routing_idx
 
                     elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
@@ -1262,34 +1301,40 @@ class JackManager:
                         if msg.note in self._live_forwarded_notes:
                             track_idx = self._live_forwarded_notes.pop(msg.note)
                             if track_idx in self.midi_out_ports:
-                                self._write_midi_safe(self.midi_out_ports[track_idx], offset, data_bytes)
+                                msg.channel = getattr(self.sequencer.song.tracks[track_idx], 'channel', 0)
+                                self._write_midi_safe(self.midi_out_ports[track_idx], offset, msg.bytes())
                         else:
                             # If we don't know where it started, just send to current routing
-                            if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                                self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
+                            if target_track and current_routing_idx in self.midi_out_ports:
+                                msg.channel = getattr(target_track, 'channel', 0)
+                                self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, msg.bytes())
 
                     elif msg.type == 'control_change':
                         # Special handling for sustain pedal (CC 64)
                         if msg.control == 64:
                             if msg.value >= 64: # Sustain ON
-                                if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                                    self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
+                                if target_track and current_routing_idx in self.midi_out_ports:
+                                    msg.channel = getattr(target_track, 'channel', 0)
+                                    self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, msg.bytes())
                                     self._live_forwarded_ccs[64].add(current_routing_idx)
                             else: # Sustain OFF
                                 # Send to ALL tracks that received sustain ON
                                 for track_idx in list(self._live_forwarded_ccs[64]):
                                     if track_idx in self.midi_out_ports:
-                                        self._write_midi_safe(self.midi_out_ports[track_idx], offset, data_bytes)
+                                        msg.channel = getattr(self.sequencer.song.tracks[track_idx], 'channel', 0)
+                                        self._write_midi_safe(self.midi_out_ports[track_idx], offset, msg.bytes())
                                 self._live_forwarded_ccs[64].clear()
                         else:
                             # Forward other CCs to current target
-                            if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                                self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
+                            if target_track and current_routing_idx in self.midi_out_ports:
+                                msg.channel = getattr(target_track, 'channel', 0)
+                                self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, msg.bytes())
 
                     elif msg.type in ['pitchwheel', 'aftertouch', 'polytouch', 'program_change']:
                         # Forward expressive messages to current target
-                        if current_routing_idx is not None and current_routing_idx in self.midi_out_ports:
-                            self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, data_bytes)
+                        if target_track and current_routing_idx in self.midi_out_ports:
+                            msg.channel = getattr(target_track, 'channel', 0)
+                            self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, msg.bytes())
 
                     # Also handle transport/control CCs
                     self._handle_control_midi(msg)

@@ -559,6 +559,11 @@ class Sequencer(EventDispatcher):
             self.song.add_track(track)
             self.is_dirty = True
             self.invalidate_song_length_cache()
+
+            # Ensure the new MIDI track has a native JACK port if JACK is running
+            if self.jack_manager.is_running:
+                self.jack_manager.ensure_track_ports()
+
             return {"status": "success", "message": f"MIDI track '{name}' added."}
         elif track_type == 'audio':
             if not filepath:

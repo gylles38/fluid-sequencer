@@ -393,7 +393,7 @@ class Sequencer(EventDispatcher):
     def get_armed_track_index(self) -> Optional[int]:
         """Returns the index of the currently armed MIDI track, or None if no track is armed."""
         for i, track in enumerate(self.song.tracks):
-            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+            if getattr(track, 'is_midi', False) and track.record_mode != 'OFF':
                 return i
         return None
 
@@ -408,7 +408,7 @@ class Sequencer(EventDispatcher):
         # Find first MIDI track index for default routing
         first_midi_idx = 0
         for i, t in enumerate(self.song.tracks):
-            if isinstance(t, MidiTrack):
+            if getattr(t, 'is_midi', False):
                 first_midi_idx = i
                 break
 
@@ -463,14 +463,14 @@ class Sequencer(EventDispatcher):
         # 2. Calculer la longueur "naturelle" (basée sur les notes/audio)
         max_beat = 0.0
         for track in self.song.tracks:
-            if isinstance(track, AudioTrack):
+            if getattr(track, 'is_audio', False):
                 duration = self._get_audio_duration_in_beats(track)
                 max_beat = max(max_beat, track.start_time + duration)
-            elif isinstance(track, MidiTrack):
+            elif getattr(track, 'is_midi', False):
                 for event in getattr(track, 'events', []):
                     for note in event.notes:
                         max_beat = max(max_beat, event.start_time + note.duration)
-            elif isinstance(track, AutomationTrack):
+            elif getattr(track, 'is_automation', False):
                 if track.points:
                     max_beat = max(max_beat, max(p.start_time for p in track.points))
 
@@ -1984,6 +1984,11 @@ class Sequencer(EventDispatcher):
             
             if self.playback_state != "stopped":
                 return "Error: Please stop playback before starting a new recording."
+
+            if not self.jack_manager.is_running or not self.jack_manager.jack_client:
+                print("Starting JACK manager for recording...")
+                self.jack_manager.start()
+                time.sleep(0.2)
 
             
             # This is a new recording session initiated from the UI or command line

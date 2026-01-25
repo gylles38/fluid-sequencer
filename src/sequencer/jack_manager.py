@@ -339,7 +339,7 @@ class JackManager:
         tracks = self.sequencer.song.tracks
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
         for track in tracks:
-            if isinstance(track, AutomationTrack):
+            if getattr(track, 'is_automation', False):
 
                 # Only process automation for tracks that should be audible
                 target_track_index = track.target_track_index
@@ -361,12 +361,29 @@ class JackManager:
         self.automation_events.sort(key=lambda e: e['time'])
 
     def start(self):
+            self._log_rt(f"Starting JackManager. current is_running={self.is_running}")
             if self.is_running:
                 print("JACK client is already running.")
                 return
 
             try:
-                self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
+                # Ensure client name is safe for JACK (no spaces)
+                client_name = f"{self.sequencer.song.name}-sequencer".replace(" ", "_").replace(":", "_")
+                self._log_rt(f"Creating JACK client: {client_name}")
+
+                # Retry logic for client creation (in case previous client is still shutting down)
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        self.jack_client = jack.Client(client_name)
+                        break
+                    except jack.JackError as e:
+                        if attempt < max_retries - 1:
+                            print(f"JACK client creation attempt {attempt+1} failed, retrying in 0.5s...")
+                            time.sleep(0.5)
+                        else:
+                            raise e
+
                 tracks = self.sequencer.song.tracks
 
                 # --- Native JACK MIDI Port Setup ---
@@ -375,7 +392,7 @@ class JackManager:
                 self.clavier_port = self.jack_client.midi_inports.register("Clavier")
 
                 for i, track in enumerate(tracks):
-                    if isinstance(track, MidiTrack):
+                    if getattr(track, 'is_midi', False):
                         # Use a safe name for the port
                         safe_name = track.name.replace(":", "_").replace("/", "_")
                         port_name = f"out_{i}_{safe_name}"
@@ -394,7 +411,7 @@ class JackManager:
                 with self.process_lock:
                     self.active_audio_processes.clear()
                     for i, track in enumerate(tracks):
-                        if isinstance(track, AudioTrack):
+                        if getattr(track, 'is_audio', False):
                             self._launch_audio_track_player(track, i)
 
                 # --- Automation Setup ---
@@ -431,7 +448,7 @@ class JackManager:
                 with self.process_lock:
                     for ap in self.active_audio_processes:
                         track = tracks[ap.track_index]
-                        if isinstance(track, AudioTrack):
+                        if getattr(track, 'is_audio', False):
                             print(f"  - Priming Audio track '{track.name}'")
                             # Ajout de vérifications pour voir si les commandes réussissent
                             if not self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]}):
@@ -447,6 +464,7 @@ class JackManager:
                 self.jack_client.set_timebase_callback(self._time_callback)
                 self.jack_client.activate()
                 self.is_running = True
+                self._log_rt("JackManager started successfully.")
 
                 # --- Initial Transport Sync ---
                 state, pos_struct = self.jack_client.transport_query_struct()
@@ -477,6 +495,7 @@ class JackManager:
 
                 print("JACK client started and activated.")
             except jack.JackError as e:
+                self._log_rt(f"Error starting JACK client: {e}")
                 print(f"Error starting JACK client: {e}")
                 if self.jack_client:
                     self.jack_client.close()
@@ -554,6 +573,14 @@ class JackManager:
         else:
             # If JACK is not running, we might still have mido ports open in self.open_ports
             # but usually this is called when JACK is active.
+            pass
+
+    def _log_rt(self, message: str):
+        """Minimal thread-safe logging for the real-time thread."""
+        try:
+            with open("/tmp/sequencer_rt.log", "a") as f:
+                f.write(f"{time.time():.4f} [RT] {message}\n")
+        except:
             pass
 
     def _write_midi_safe(self, port, offset: int, data: bytes):
@@ -666,7 +693,7 @@ class JackManager:
 
         tracks = self.sequencer.song.tracks
         for i, track in enumerate(tracks):
-            if isinstance(track, MidiTrack) and i not in self.midi_out_ports:
+            if getattr(track, 'is_midi', False) and i not in self.midi_out_ports:
                 # Use a safe name for the port
                 safe_name = track.name.replace(":", "_").replace("/", "_")
                 port_name = f"out_{i}_{safe_name}"
@@ -916,7 +943,7 @@ class JackManager:
                 if not is_recording_this_track:
                     track = self.sequencer.track_overrides[i]
 
-            if not isinstance(track, MidiTrack) or i not in self.midi_out_ports:
+            if not getattr(track, 'is_midi', False) or i not in self.midi_out_ports:
                 continue
 
             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
@@ -963,7 +990,7 @@ class JackManager:
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
         for track in self.sequencer.song.tracks:
-            if not isinstance(track, AutomationTrack):
+            if not getattr(track, 'is_automation', False):
                 continue
 
             # This logic only works if the target track is valid
@@ -1040,10 +1067,23 @@ class JackManager:
             if has_routing_points:
                 val = self._routing_track.get_value_at(beat, 'input_routing')
                 if val is not None:
-                    return int(val)
+                    idx = int(round(val))
+                    # Validate that the index corresponds to a MIDI track
+                    if 0 <= idx < len(self.sequencer.song.tracks):
+                        target = self.sequencer.song.tracks[idx]
+                        if getattr(target, 'is_midi', False):
+                            return idx
 
         # Fallback to armed track
-        return self.sequencer.get_armed_track_index()
+        armed_idx = self.sequencer.get_armed_track_index()
+        if armed_idx is not None:
+            return armed_idx
+
+        # Final fallback: first MIDI track
+        for i, t in enumerate(self.sequencer.song.tracks):
+            if getattr(t, 'is_midi', False):
+                return i
+        return None
 
     def _handle_control_midi(self, msg: mido.Message):
         """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""
@@ -1120,7 +1160,7 @@ class JackManager:
         param_name = event['parameter'].lower()
 
         # Branch by Track Type first for clarity and correctness
-        if isinstance(target_track, MidiTrack):
+        if getattr(target_track, 'is_midi', False):
             if param_config.get('type') == 'midi_cc':
                 midi_value = 0
                 if param_name == 'vol':
@@ -1148,7 +1188,7 @@ class JackManager:
             elif param_config.get('type') == 'velocity_multiplier':
                 target_track.velocity = float(value)
 
-        elif isinstance(target_track, AudioTrack):
+        elif getattr(target_track, 'is_audio', False):
             ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)
             if not ap:
                 return
@@ -1277,7 +1317,8 @@ class JackManager:
 
             # --- 1.5 Handle Clavier Input Routing & Pass-through ---
             if self.clavier_port:
-                for offset, data in self.clavier_port.incoming_midi_events():
+                incoming = self.clavier_port.incoming_midi_events()
+                for offset, data in incoming:
                     try:
                         # Convert to bytes and parse once
                         data_bytes = bytes(data)
@@ -1286,7 +1327,9 @@ class JackManager:
                             continue
 
                         msg = mido.Message.from_bytes(data_bytes)
-                    except Exception:
+                        self._log_rt(f"Clavier input: {msg} at offset {offset}")
+                    except Exception as e:
+                        self._log_rt(f"Error parsing Clavier input: {e}")
                         continue # Skip invalid/incomplete MIDI messages
 
                     # Determine target track for THIS specific event's timing
@@ -1297,13 +1340,18 @@ class JackManager:
                     if current_routing_idx is not None and 0 <= current_routing_idx < len(self.sequencer.song.tracks):
                         target_track = self.sequencer.song.tracks[current_routing_idx]
 
+                    self._log_rt(f"Routing index: {current_routing_idx}, Target: {target_track.name if target_track else 'None'}")
+
                     if msg.type == 'note_on' and msg.velocity > 0:
                         if target_track and current_routing_idx in self.midi_out_ports:
                             # Force channel to match track settings for consistency
                             msg.channel = getattr(target_track, 'channel', 0)
+                            self._log_rt(f"Forwarding Note On {msg.note} to port for track {current_routing_idx}")
                             self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, bytes(msg.bytes()))
                             self._live_forwarded_notes[msg.note] = current_routing_idx
                             self._live_activity[current_routing_idx].add(msg.note)
+                        else:
+                            self._log_rt(f"FAILED Note On forward: track_idx_in_ports={current_routing_idx in self.midi_out_ports}")
 
                     elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                         # Ensure note_off goes to the same track as its note_on
@@ -1403,7 +1451,7 @@ class JackManager:
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     track = self.sequencer.song.tracks[ap.track_index]
-                    if isinstance(track, AudioTrack):
+                    if getattr(track, 'is_audio', False):
                         duration_beats = self.sequencer._get_audio_duration_in_beats(track)
                         end_beat = track.start_time + duration_beats
                         if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:

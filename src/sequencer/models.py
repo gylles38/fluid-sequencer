@@ -56,6 +56,7 @@ from kivy.event import EventDispatcher
 # The @dataclass decorator was removed as it is not compatible with this pattern.
 class MidiTrack(BaseTrack, EventDispatcher):
     """Represents a MIDI track, which is a sequence of musical events."""
+    is_midi = True
     volume = NumericProperty(0.8)
     is_solo = BooleanProperty(False)
     velocity = NumericProperty(1.0)
@@ -97,6 +98,7 @@ class MidiTrack(BaseTrack, EventDispatcher):
 # The @dataclass decorator was removed as it is not compatible with this pattern.
 class AudioTrack(BaseTrack, EventDispatcher):
     """Represents an audio track, which is a single audio file."""
+    is_audio = True
     volume = NumericProperty(0.5)
     is_solo = BooleanProperty(False)
 
@@ -159,6 +161,7 @@ class AutomationPoint:
 
 class AutomationTrack(BaseTrack, EventDispatcher):
     """A track that contains automation data for another track."""
+    is_automation = True
     is_muted = BooleanProperty(False)
     is_solo = BooleanProperty(False)
 

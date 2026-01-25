@@ -1486,13 +1486,7 @@ class SequencerLayout(BoxLayout):
                 # Clock.schedule_once(lambda dt: child.bring_to_front())
                 return
 
-        # Vérifier s'il y a des pistes MIDI
-        has_midi = any(isinstance(t, MidiTrack) for t in self.sequencer.song.tracks)
-        if not has_midi:
-            self.show_info_popup("Routing impossible", "Veuillez d'abord ajouter au moins une piste MIDI.")
-            return
-
-        routing_track = self.sequencer.get_input_routing_track(add_to_song=False)
+        routing_track = self.sequencer.get_input_routing_track()
         editor = InputRoutingEditor(
             track=routing_track,
             sequencer_layout=self,

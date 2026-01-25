@@ -71,6 +71,8 @@ class RoutingValueAxis(Widget):
             Line(points=[self.right, self.y, self.right, self.top], width=1)
 
         if not self.midi_tracks:
+            label = Label(text="No MIDI tracks", pos=self.pos, size=self.size, color=(1, 0, 0, 1))
+            self.add_widget(label)
             return
 
         num_tracks = len(self.midi_tracks)
@@ -608,12 +610,6 @@ class InputRoutingEditor(FloatingWindow):
 
     def dismiss(self, action=None, *args):
         if action == 'save_and_close':
-            # Add to song if not already present
-            seq = self.sequencer_layout.sequencer
-            if self.track not in seq.song.tracks:
-                seq.song.add_track(self.track)
-                seq.song_structure_changed += 1
-
             self.track.points = copy.deepcopy(self.track_copy.points)
             self.is_dirty = False
             super(InputRoutingEditor, self).dismiss(*args)
@@ -626,12 +622,6 @@ class InputRoutingEditor(FloatingWindow):
 
     def _handle_save_dialog(self, answer):
         if answer == 's':
-            # Add to song if not already present
-            seq = self.sequencer_layout.sequencer
-            if self.track not in seq.song.tracks:
-                seq.song.add_track(self.track)
-                seq.song_structure_changed += 1
-
             self.track.points = copy.deepcopy(self.track_copy.points)
             super(InputRoutingEditor, self).dismiss()
         elif answer == 'd':

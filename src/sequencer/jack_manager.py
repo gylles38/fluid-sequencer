@@ -331,18 +331,13 @@ class JackManager:
     def _prepare_automation_events(self):
         """Generates and sorts all automation events for the song."""
         self.automation_events.clear()
-        self._routing_track = None
+
+        # Use direct reference from song if available
+        self._routing_track = self.sequencer.song.input_routing
+
         tracks = self.sequencer.song.tracks
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
         for track in tracks:
-            # Check for routing track (Global target or containing routing points or specific name)
-            is_routing = getattr(track, 'target_track_index', None) == -1 or \
-                         getattr(track, 'name', '') == "Input Routing" or \
-                         (hasattr(track, 'points') and any(getattr(p, 'parameter', '') == 'input_routing' for p in track.points))
-
-            if is_routing:
-                self._routing_track = track
-
             if isinstance(track, AutomationTrack):
 
                 # Only process automation for tracks that should be audible

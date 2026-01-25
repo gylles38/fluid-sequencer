@@ -395,13 +395,10 @@ class Sequencer(EventDispatcher):
                 return i
         return None
 
-    def get_input_routing_track(self, add_to_song: bool = False) -> AutomationTrack:
-        """Returns or creates the global MIDI input routing automation track."""
-        for track in self.song.tracks:
-            # Robust identification: check for target_track_index == -1 OR name "Input Routing"
-            # This is safer than strict class check (isinstance) which can fail with multiple imports.
-            if getattr(track, 'target_track_index', None) == -1 or getattr(track, 'name', '') == "Input Routing":
-                return track
+    def get_input_routing_track(self) -> AutomationTrack:
+        """Returns or creates the global MIDI input routing automation track (stored in song.input_routing)."""
+        if self.song.input_routing:
+            return self.song.input_routing
 
         # Create it if not found
         track = AutomationTrack(name="Input Routing", target_track_index=-1) # -1 means Global
@@ -415,11 +412,8 @@ class Sequencer(EventDispatcher):
 
         track.add_point(AutomationPoint(start_time=0.0, value=float(first_midi_idx), parameter='input_routing', curve='none'))
 
-        if add_to_song:
-            self.song.add_track(track)
-            self.is_dirty = True
-            self.song_structure_changed += 1
-
+        self.song.input_routing = track
+        self.is_dirty = True
         return track
 
     def invalidate_song_length_cache(self):
@@ -1576,6 +1570,16 @@ class Sequencer(EventDispatcher):
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
             self.song = project_data.get("song", Song(name="New Song"))
+
+            # --- Backward Compatibility: Move Input Routing track from tracks list to input_routing field ---
+            routing_track = None
+            for i, track in enumerate(self.song.tracks):
+                if getattr(track, 'target_track_index', None) == -1 or getattr(track, 'name', '') == "Input Routing":
+                    routing_track = self.song.tracks.pop(i)
+                    break
+
+            if routing_track and not self.song.input_routing:
+                self.song.input_routing = routing_track
 
 
             self.audio_player_command = project_data.get("audio_player_command", self.DEFAULT_AUDIO_PLAYER_COMMAND)

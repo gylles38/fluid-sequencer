@@ -398,8 +398,9 @@ class Sequencer(EventDispatcher):
     def get_input_routing_track(self) -> AutomationTrack:
         """Returns or creates the global MIDI input routing automation track."""
         for track in self.song.tracks:
-            # We identify the routing track by target_track_index == -1 (Global)
-            if isinstance(track, AutomationTrack) and track.target_track_index == -1:
+            # Robust identification: check for target_track_index == -1 OR name "Input Routing"
+            # This is safer than strict class check (isinstance) which can fail with multiple imports.
+            if getattr(track, 'target_track_index', None) == -1 or getattr(track, 'name', '') == "Input Routing":
                 return track
 
         # Create it if not found

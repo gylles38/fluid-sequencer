@@ -335,12 +335,15 @@ class JackManager:
         tracks = self.sequencer.song.tracks
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
         for track in tracks:
+            # Check for routing track (Global target or containing routing points or specific name)
+            is_routing = getattr(track, 'target_track_index', None) == -1 or \
+                         getattr(track, 'name', '') == "Input Routing" or \
+                         (hasattr(track, 'points') and any(getattr(p, 'parameter', '') == 'input_routing' for p in track.points))
+
+            if is_routing:
+                self._routing_track = track
+
             if isinstance(track, AutomationTrack):
-                # Check for routing track (Global target or containing routing points)
-                if track.target_track_index == -1:
-                    self._routing_track = track
-                elif any(p.parameter == 'input_routing' for p in track.points):
-                    self._routing_track = track
 
                 # Only process automation for tracks that should be audible
                 target_track_index = track.target_track_index

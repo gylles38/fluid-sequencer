@@ -266,4 +266,5 @@ class Song:
                 track.channel = midi_track_count
             else:
                 track.channel = 15 # Default to last channel if more than 16 tracks
+
         self.tracks.append(track)

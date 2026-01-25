@@ -41,10 +41,10 @@ class Event:
         if self.start_time < 0:
             raise ValueError("Start time cannot be negative.")
 
-@dataclass
 class BaseTrack:
     """Base class for tracks. Cannot be instantiated directly."""
-    name: str
+    def __init__(self, name: str):
+        self.name = name
     # is_muted and is_solo moved to child classes to solve non-default argument error
 
 from kivy.properties import NumericProperty

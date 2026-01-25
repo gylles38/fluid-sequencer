@@ -243,8 +243,12 @@ class TrackWidget(BoxLayout):
             self.controls_section.add_widget(self.solo_button)
         elif isinstance(track, AutomationTrack):
             # On récupère le type (midi/audio) de la piste cible
-            target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
-            automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
+            if track.target_track_index == -1:
+                # Global routing track is treated as 'midi' for UI purposes
+                automation_type = 'midi'
+            else:
+                target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
+                automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
 
             # On crée les contrôles d'automation à la place du bouton Record
             self.automation_controls = AutomationControls(
@@ -610,7 +614,9 @@ class TrackWidget(BoxLayout):
         sequencer = self.sequencer_layout.sequencer
         target_idx = self.track.target_track_index
 
-        if 0 <= target_idx < len(sequencer.song.tracks):
+        if target_idx == -1:
+            return "Cible: Global (Entrée Clavier)"
+        elif 0 <= target_idx < len(sequencer.song.tracks):
             target_track = sequencer.song.tracks[target_idx]
             return f"Cible: Piste {target_idx}: {target_track.name}"
         else:

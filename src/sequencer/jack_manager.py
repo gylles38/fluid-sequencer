@@ -336,11 +336,11 @@ class JackManager:
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
         for track in tracks:
             if isinstance(track, AutomationTrack):
-                # Check for routing track
-                for p in track.points:
-                    if p.parameter == 'input_routing':
-                        self._routing_track = track
-                        break
+                # Check for routing track (Global target or containing routing points)
+                if track.target_track_index == -1:
+                    self._routing_track = track
+                elif any(p.parameter == 'input_routing' for p in track.points):
+                    self._routing_track = track
 
                 # Only process automation for tracks that should be audible
                 target_track_index = track.target_track_index

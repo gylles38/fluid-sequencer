@@ -2,7 +2,9 @@ from .midi_export import export_to_midi
 from .midi_import import import_song
 from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
-from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
+from .models import (AnyTrack, AudioTrack, AutomationTrack, AutomationPoint,
+                    CCMessage, Event, MidiTrack, Note, Song, MidiMapping,
+                    is_midi_track, is_audio_track, is_automation_track)
 from .config import MidiConfig
 from .config_manager import ConfigManager
 from .terminal_input import cancellable_input, UserInputCancelled
@@ -321,13 +323,19 @@ class Sequencer(EventDispatcher):
         """
         Starts a recording from a MIDI command. Finds the armed track and starts recording.
         """
+        # If JACK is not running, try to start it (as it's our primary MIDI bridge)
+        if not self.jack_manager.is_running:
+            print("Starting JACK manager for recording...")
+            self.jack_manager.start()
+            time.sleep(0.2)
+
         if not self.default_record_port and not self.jack_manager.is_running:
-            print("Error: No MIDI input port selected for recording.")
+            print("Error: No MIDI input port selected for recording and JACK is not running.")
             return
 
         armed_track_index = None
         for i, track in enumerate(self.song.tracks):
-            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+            if is_midi_track(track) and getattr(track, 'record_mode', 'OFF') != 'OFF':
                 if armed_track_index is not None:
                     print("Error: Multiple tracks are armed for recording. Please arm only one.")
                     return
@@ -360,7 +368,7 @@ class Sequencer(EventDispatcher):
                     continue
 
                 track = self.song.tracks[track_idx]
-                if not isinstance(track, MidiTrack):
+                if not is_midi_track(track):
                     continue
 
                 if event_data['type'] == 'note':
@@ -393,7 +401,7 @@ class Sequencer(EventDispatcher):
     def get_armed_track_index(self) -> Optional[int]:
         """Returns the index of the currently armed MIDI track, or None if no track is armed."""
         for i, track in enumerate(self.song.tracks):
-            if getattr(track, 'is_midi', False) and track.record_mode != 'OFF':
+            if is_midi_track(track) and getattr(track, 'record_mode', 'OFF') != 'OFF':
                 return i
         return None
 
@@ -463,14 +471,14 @@ class Sequencer(EventDispatcher):
         # 2. Calculer la longueur "naturelle" (basée sur les notes/audio)
         max_beat = 0.0
         for track in self.song.tracks:
-            if getattr(track, 'is_audio', False):
+            if is_audio_track(track):
                 duration = self._get_audio_duration_in_beats(track)
                 max_beat = max(max_beat, track.start_time + duration)
-            elif getattr(track, 'is_midi', False):
+            elif is_midi_track(track):
                 for event in getattr(track, 'events', []):
                     for note in event.notes:
                         max_beat = max(max_beat, event.start_time + note.duration)
-            elif getattr(track, 'is_automation', False):
+            elif is_automation_track(track):
                 if track.points:
                     max_beat = max(max_beat, max(p.start_time for p in track.points))
 
@@ -2149,17 +2157,17 @@ class Sequencer(EventDispatcher):
         is_any_track_soloed = any(t.is_solo for t in tracks)
 
         for track in tracks:
-            should_play = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+            should_play = (getattr(track, 'is_solo', False) or not is_any_track_soloed) and not getattr(track, 'is_muted', False)
             if not should_play:
                 continue
 
-            if isinstance(track, MidiTrack):
+            if is_midi_track(track):
                 for event in track.events:
                     for note in event.notes:
                         event_end_beat = event.start_time + note.duration
                         if event_end_beat > max_beats:
                             max_beats = event_end_beat
-            elif isinstance(track, AudioTrack):
+            elif is_audio_track(track):
                 try:
                     duration_ms = self.audio_track_duration_ms.get(track.filepath)
                     if duration_ms is None:

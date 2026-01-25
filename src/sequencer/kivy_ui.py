@@ -1889,7 +1889,10 @@ class SequencerLayout(BoxLayout):
             sv.bind(on_scroll_stop=self._on_scroll_stop)
             
     def update_bridge_label(self, instance, value):
-        if value == -1:
+        if not self.sequencer.jack_manager.is_running:
+            self.bridge_label.text = "Bridge: NO JACK"
+            self.bridge_label.text_color = [0.8, 0.2, 0.2, 1]
+        elif value == -1:
             self.bridge_label.text = "Bridge: OFF"
             self.bridge_label.text_color = [0.5, 0.5, 0.5, 1]
         else:

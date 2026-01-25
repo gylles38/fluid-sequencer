@@ -57,6 +57,8 @@ from kivy.event import EventDispatcher
 class MidiTrack(BaseTrack, EventDispatcher):
     """Represents a MIDI track, which is a sequence of musical events."""
     is_midi = True
+    is_audio = False
+    is_automation = False
     volume = NumericProperty(0.8)
     is_solo = BooleanProperty(False)
     velocity = NumericProperty(1.0)
@@ -98,7 +100,9 @@ class MidiTrack(BaseTrack, EventDispatcher):
 # The @dataclass decorator was removed as it is not compatible with this pattern.
 class AudioTrack(BaseTrack, EventDispatcher):
     """Represents an audio track, which is a single audio file."""
+    is_midi = False
     is_audio = True
+    is_automation = False
     volume = NumericProperty(0.5)
     is_solo = BooleanProperty(False)
 
@@ -161,6 +165,8 @@ class AutomationPoint:
 
 class AutomationTrack(BaseTrack, EventDispatcher):
     """A track that contains automation data for another track."""
+    is_midi = False
+    is_audio = False
     is_automation = True
     is_muted = BooleanProperty(False)
     is_solo = BooleanProperty(False)
@@ -233,6 +239,29 @@ class AutomationTrack(BaseTrack, EventDispatcher):
 
 # Using Union to allow the list to contain both MidiTrack and AudioTrack objects
 AnyTrack = Union[MidiTrack, AudioTrack, AutomationTrack]
+
+def is_midi_track(track) -> bool:
+    """Robustly checks if a track is a MIDI track."""
+    if track is None: return False
+    # Note: Avoid checking just 'hasattr(track, "events")' because Kivy's EventDispatcher
+    # has an internal 'events()' method.
+    return (getattr(track, 'is_midi', False) is True or
+            track.__class__.__name__ == 'MidiTrack' or
+            (hasattr(track, 'events') and isinstance(getattr(track, 'events'), list)))
+
+def is_audio_track(track) -> bool:
+    """Robustly checks if a track is an audio track."""
+    if track is None: return False
+    return (getattr(track, 'is_audio', False) is True or
+            track.__class__.__name__ == 'AudioTrack' or
+            (hasattr(track, 'filepath') and isinstance(getattr(track, 'filepath'), str)))
+
+def is_automation_track(track) -> bool:
+    """Robustly checks if a track is an automation track."""
+    if track is None: return False
+    return (getattr(track, 'is_automation', False) is True or
+            track.__class__.__name__ == 'AutomationTrack' or
+            (hasattr(track, 'points') and isinstance(getattr(track, 'points'), list)))
 
 @dataclass
 class MidiMapping:

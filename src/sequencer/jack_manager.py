@@ -21,7 +21,8 @@ from kivy.clock import Clock
 if TYPE_CHECKING:
     from .sequencer import Sequencer
 
-from .models import AudioTrack, MidiTrack, AutomationTrack, AutomationPoint
+from .models import (AudioTrack, MidiTrack, AutomationTrack, AutomationPoint,
+                    is_midi_track, is_audio_track, is_automation_track)
 
 @dataclass
 class ActiveAudioProcess:
@@ -38,8 +39,8 @@ class JackManager:
         self.is_running = False
         self.last_beat = 0.0
         self.last_transport_state = jack.STOPPED
-        self.open_ports = {} # Still used for tracking some state, but will hold JACK ports
-        self.midi_out_ports = {} # track_index -> jack.Port
+        self.open_ports = {} # track_name -> port (for ALSA compatibility)
+        self.midi_out_ports = {} # track_index -> jack.Port (Native JACK)
         self.clavier_port = None
         self.metronome_port = None
         self._out_event_queue = collections.deque() # For UI-initiated MIDI (track_idx, mido_msg)
@@ -169,26 +170,18 @@ class JackManager:
 
     def open_midi_port(self, port_name: str):
         """Opens a MIDI port if it's not already open."""
-        if port_name in self.open_ports:
-            port = self.open_ports[port_name]
-            if hasattr(port, 'closed') and not port.closed:
-                return  # Port is already open and valid
-            elif not hasattr(port, 'closed'):
-                return # It's a native JACK port object, always "open"
+        if port_name in self.open_ports and not self.open_ports[port_name].closed:
+            return  # Port is already open
 
         vp = next((p for p in self.sequencer.virtual_ports if p.name == port_name), None)
         if vp:
             self.open_ports[port_name] = vp
         else:
             try:
-                # Avoid opening ALSA ports if we are in native JACK mode
-                # unless explicitly requested and mido is configured for it.
                 self.open_ports[port_name] = mido.open_output(port_name)
                 print(f"Successfully opened MIDI port '{port_name}'")
             except Exception as e:
-                # Suppress error if JACK is running as we likely don't need ALSA
-                if not self.is_running:
-                    print(f"Could not open MIDI port '{port_name}': {e}")
+                print(f"Could not open MIDI port '{port_name}': {e}")
 
     def close_midi_port(self, port_name: str):
         """Closes a MIDI port if it's open and not used by other tracks."""
@@ -333,14 +326,13 @@ class JackManager:
         """Generates and sorts all automation events for the song."""
         self.automation_events.clear()
 
-        # Use direct reference from song if available
+        # Link the global routing track from the song
         self._routing_track = self.sequencer.song.input_routing
 
         tracks = self.sequencer.song.tracks
-        is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
+        is_any_track_soloed = any(getattr(t, 'is_solo', False) for t in tracks)
         for track in tracks:
-            if getattr(track, 'is_automation', False):
-
+            if is_automation_track(track):
                 # Only process automation for tracks that should be audible
                 target_track_index = track.target_track_index
                 if 0 <= target_track_index < len(tracks):
@@ -367,11 +359,14 @@ class JackManager:
                 return
 
             try:
-                # Ensure client name is safe for JACK (no spaces)
-                client_name = f"{self.sequencer.song.name}-sequencer".replace(" ", "_").replace(":", "_")
+                # Ensure client name is safe for JACK and unique
+                base_name = self.sequencer.song.name or "NewSong"
+                sanitized_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in base_name)
+                client_name = f"{sanitized_name}-{os.getpid()}"
+
                 self._log_rt(f"Creating JACK client: {client_name}")
 
-                # Retry logic for client creation (in case previous client is still shutting down)
+                # Retry logic for client creation
                 max_retries = 3
                 for attempt in range(max_retries):
                     try:
@@ -392,15 +387,18 @@ class JackManager:
                 self.clavier_port = self.jack_client.midi_inports.register("Clavier")
 
                 for i, track in enumerate(tracks):
-                    if getattr(track, 'is_midi', False):
+                    if is_midi_track(track):
                         # Use a safe name for the port
-                        safe_name = track.name.replace(":", "_").replace("/", "_")
+                        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in track.name)
                         port_name = f"out_{i}_{safe_name}"
-                        port = self.jack_client.midi_outports.register(port_name)
-                        self.midi_out_ports[i] = port
-                        # We also map the assigned port name to this port for compatibility with existing code
-                        if track.output_port_name:
-                            self.open_ports[track.output_port_name] = port
+                        try:
+                            port = self.jack_client.midi_outports.register(port_name)
+                            self.midi_out_ports[i] = port
+                            # Compatibility mapping
+                            if getattr(track, 'output_port_name', None):
+                                self.open_ports[track.output_port_name] = port
+                        except Exception as e:
+                            print(f"Error registering port for track {i}: {e}")
 
                 # Metronome port
                 self.metronome_port = self.jack_client.midi_outports.register("Metronome")
@@ -411,7 +409,7 @@ class JackManager:
                 with self.process_lock:
                     self.active_audio_processes.clear()
                     for i, track in enumerate(tracks):
-                        if getattr(track, 'is_audio', False):
+                        if is_audio_track(track):
                             self._launch_audio_track_player(track, i)
 
                 # --- Automation Setup ---
@@ -448,7 +446,7 @@ class JackManager:
                 with self.process_lock:
                     for ap in self.active_audio_processes:
                         track = tracks[ap.track_index]
-                        if getattr(track, 'is_audio', False):
+                        if isinstance(track, AudioTrack):
                             print(f"  - Priming Audio track '{track.name}'")
                             # Ajout de vérifications pour voir si les commandes réussissent
                             if not self._send_ipc_command(ap.socket_path, {"command": ["set_property", "volume", track.volume * 100]}):
@@ -494,11 +492,12 @@ class JackManager:
                 self._correction_thread.start()
 
                 print("JACK client started and activated.")
-            except jack.JackError as e:
+            except Exception as e:
                 self._log_rt(f"Error starting JACK client: {e}")
                 print(f"Error starting JACK client: {e}")
                 if self.jack_client:
-                    self.jack_client.close()
+                    try: self.jack_client.close()
+                    except: pass
                 self.jack_client = None
 
     def stop(self):
@@ -533,17 +532,14 @@ class JackManager:
         self._shutdown_audio_processes()
         print("Audio processes terminated.")
 
-        # Close all open MIDI ports (if any mido ports remain)
+        # Close all open MIDI ports
         for name, port in self.open_ports.items():
             try:
-                if hasattr(port, 'closed') and not port.closed:
+                if not port.closed:
                     port.close()
             except Exception as e:
                 print(f"Error closing MIDI port '{name}': {e}", file=sys.stderr)
         self.open_ports.clear()
-        self.midi_out_ports.clear()
-        self.clavier_port = None
-        self.metronome_port = None
 
         # Reset the state
         self.is_running = False
@@ -572,7 +568,6 @@ class JackManager:
             self._queue_midi_message(track_index, msg)
         else:
             # If JACK is not running, we might still have mido ports open in self.open_ports
-            # but usually this is called when JACK is active.
             pass
 
     def _log_rt(self, message: str):
@@ -586,16 +581,12 @@ class JackManager:
     def _write_midi_safe(self, port, offset: int, data: bytes):
         """Safely writes MIDI data to a JACK port, catching buffer overflows."""
         try:
+            # Native JACK MIDI events must be written as bytes
             port.write_midi_event(offset, data)
         except Exception as e:
             # Error -105 is typically ENOBUFS (buffer overflow)
-            # We catch it to prevent the entire process callback from failing.
-            if "-105" in str(e):
-                # We don't print to avoid flooding the console/stderr in the realtime thread
-                pass
-            else:
-                # Still log other unexpected errors, but sparingly
-                pass
+            if "-105" not in str(e):
+                self._log_rt(f"Write error: {e}")
 
     def silence_all_midi_notes(self):
         """Sends note_off messages for all currently playing MIDI notes."""
@@ -605,8 +596,11 @@ class JackManager:
         for (track_idx, pitch), end_beat in list(self._active_notes.items()):
             if 0 <= track_idx < len(self.sequencer.song.tracks):
                 track = self.sequencer.song.tracks[track_idx]
-                note_off_msg = mido.Message('note_off', channel=track.channel, note=pitch, velocity=0)
-                self._queue_midi_message(track_idx, note_off_msg)
+                if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                    port = self.open_ports[track.output_port_name]
+                    if port and not port.closed:
+                        note_off_msg = mido.Message('note_off', channel=track.channel, note=pitch, velocity=0)
+                        port.send(note_off_msg)
 
         self._active_notes.clear()
 
@@ -693,15 +687,15 @@ class JackManager:
 
         tracks = self.sequencer.song.tracks
         for i, track in enumerate(tracks):
-            if getattr(track, 'is_midi', False) and i not in self.midi_out_ports:
+            if is_midi_track(track) and i not in self.midi_out_ports:
                 # Use a safe name for the port
-                safe_name = track.name.replace(":", "_").replace("/", "_")
+                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in track.name)
                 port_name = f"out_{i}_{safe_name}"
                 try:
                     port = self.jack_client.midi_outports.register(port_name)
                     self.midi_out_ports[i] = port
-                    # We also map the assigned port name to this port for compatibility with existing code
-                    if track.output_port_name:
+                    # Compatibility mapping
+                    if getattr(track, 'output_port_name', None):
                         self.open_ports[track.output_port_name] = port
                     print(f"Dynamically registered native JACK MIDI port: {port_name}")
                 except Exception as e:
@@ -889,6 +883,95 @@ class JackManager:
                     command = {"command": ["set_property", "speed", speed_factor]}
                     self._send_ipc_command(ap.socket_path, command)
 
+    def _get_input_routing_value(self, beat: float) -> Optional[int]:
+        """Returns the target track index for MIDI input routing at the given beat."""
+        if self._routing_track:
+            # Check if this track has any 'input_routing' points defined
+            has_routing_points = any(p.parameter == 'input_routing' for p in self._routing_track.points)
+            if has_routing_points:
+                val = self._routing_track.get_value_at(beat, 'input_routing')
+                if val is not None:
+                    idx = int(round(val))
+                    # Validate that the index corresponds to a MIDI track
+                    if 0 <= idx < len(self.sequencer.song.tracks):
+                        target = self.sequencer.song.tracks[idx]
+                        if is_midi_track(target):
+                            return idx
+
+        # Fallback to armed track
+        armed_idx = self.sequencer.get_armed_track_index()
+        if armed_idx is not None:
+            return armed_idx
+
+        # Final fallback: first MIDI track
+        for i, t in enumerate(self.sequencer.song.tracks):
+            if is_midi_track(t):
+                return i
+        return None
+
+    def _handle_control_midi(self, msg: mido.Message):
+        """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""
+        try:
+            if msg.type == 'control_change':
+                # --- Handle Transport Controls ---
+                if msg.value == 127:
+                    if msg.control == self.sequencer.midi_config.get_transport_cc("play_pause"):
+                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("play_pause"))
+                    elif msg.control == self.sequencer.midi_config.get_transport_cc("stop"):
+                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("stop"))
+                    elif msg.control == self.sequencer.midi_config.get_transport_cc("record_arm"):
+                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("record"))
+
+                # --- Handle Custom MIDI Mappings (Volume, Pan, etc.) ---
+                for mapping in self.sequencer.song.midi_mappings:
+                    if mapping.channel == msg.channel and mapping.control == msg.control:
+                        Clock.schedule_once(lambda dt, m=mapping, v=msg.value: self.sequencer._apply_midi_mapping_action(m, v))
+        except Exception:
+            pass
+
+    def _record_midi_event(self, msg: mido.Message, start_beat_of_block: float, offset: int):
+        """Records a MIDI event from the 'Clavier' port."""
+        try:
+            samplerate = self.jack_client.samplerate
+            beats_per_second = self.sequencer.song.tempo / 60.0
+            accurate_beat = start_beat_of_block + (offset / samplerate) * beats_per_second
+
+            if msg.type == 'note_on' and msg.velocity > 0:
+                # Auto-start transport if recording and stopped
+                if self.sequencer.playback_state == 'stopped':
+                    Clock.schedule_once(lambda dt: self.sequencer.play())
+
+                track_idx = self._get_input_routing_value(accurate_beat)
+                if track_idx is not None:
+                    self._recorded_notes[msg.note] = (accurate_beat, track_idx, msg.velocity)
+
+            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                if msg.note in self._recorded_notes:
+                    start_beat, track_idx, velocity = self._recorded_notes.pop(msg.note)
+                    duration = accurate_beat - start_beat
+                    if duration > 0:
+                        self._recorded_events_to_merge.append({
+                            'type': 'note',
+                            'track_idx': track_idx,
+                            'start_time': start_beat,
+                            'pitch': msg.note,
+                            'velocity': velocity,
+                            'duration': duration
+                        })
+
+            elif msg.type == 'control_change':
+                track_idx = self._get_input_routing_value(accurate_beat)
+                if track_idx is not None:
+                    self._recorded_events_to_merge.append({
+                        'type': 'cc',
+                        'track_idx': track_idx,
+                        'start_time': accurate_beat,
+                        'control': msg.control,
+                        'value': msg.value
+                    })
+        except Exception:
+            pass
+
     def _sync_playhead_to_beat(self, beat_pos: float):
         self.last_beat = beat_pos
         tracks = self.sequencer.song.tracks
@@ -931,22 +1014,19 @@ class JackManager:
 
     def _process_midi_events(self, start_beat_of_block, end_beat_of_block):
         tracks = self.sequencer.song.tracks
-        is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
+        is_any_track_soloed = any(getattr(t, 'is_solo', False) for t in tracks)
 
         for i, track in enumerate(tracks):
             # --- Live Preview Override ---
-            # If a track is being edited, use the temporary version from the editor.
-            # EXCEPTION: If the track is currently recording, we bypass the override
-            # to ensure newly recorded notes (merged into the main track) are audible.
             if i in self.sequencer.track_overrides:
                 is_recording_this_track = self.sequencer.is_recording and self.sequencer.get_armed_track_index() == i
                 if not is_recording_this_track:
                     track = self.sequencer.track_overrides[i]
 
-            if not getattr(track, 'is_midi', False) or i not in self.midi_out_ports:
+            if not is_midi_track(track) or i not in self.midi_out_ports:
                 continue
 
-            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+            should_be_audible = (getattr(track, 'is_solo', False) or not is_any_track_soloed) and not getattr(track, 'is_muted', False)
             port = self.midi_out_ports[i]
 
             if i >= len(self.next_event_indices):
@@ -990,7 +1070,7 @@ class JackManager:
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
         for track in self.sequencer.song.tracks:
-            if not getattr(track, 'is_automation', False):
+            if not isinstance(track, AutomationTrack):
                 continue
 
             # This logic only works if the target track is valid
@@ -1059,95 +1139,6 @@ class JackManager:
 
         return primed_params
 
-    def _get_input_routing_value(self, beat: float) -> Optional[int]:
-        """Returns the target track index for MIDI input routing at the given beat."""
-        if self._routing_track:
-            # Check if this track has any 'input_routing' points defined
-            has_routing_points = any(p.parameter == 'input_routing' for p in self._routing_track.points)
-            if has_routing_points:
-                val = self._routing_track.get_value_at(beat, 'input_routing')
-                if val is not None:
-                    idx = int(round(val))
-                    # Validate that the index corresponds to a MIDI track
-                    if 0 <= idx < len(self.sequencer.song.tracks):
-                        target = self.sequencer.song.tracks[idx]
-                        if getattr(target, 'is_midi', False):
-                            return idx
-
-        # Fallback to armed track
-        armed_idx = self.sequencer.get_armed_track_index()
-        if armed_idx is not None:
-            return armed_idx
-
-        # Final fallback: first MIDI track
-        for i, t in enumerate(self.sequencer.song.tracks):
-            if getattr(t, 'is_midi', False):
-                return i
-        return None
-
-    def _handle_control_midi(self, msg: mido.Message):
-        """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""
-        try:
-            if msg.type == 'control_change':
-                # --- Handle Transport Controls ---
-                if msg.value == 127:
-                    if msg.control == self.sequencer.midi_config.get_transport_cc("play_pause"):
-                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("play_pause"))
-                    elif msg.control == self.sequencer.midi_config.get_transport_cc("stop"):
-                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("stop"))
-                    elif msg.control == self.sequencer.midi_config.get_transport_cc("record_arm"):
-                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("record"))
-
-                # --- Handle Custom MIDI Mappings (Volume, Pan, etc.) ---
-                for mapping in self.sequencer.song.midi_mappings:
-                    if mapping.channel == msg.channel and mapping.control == msg.control:
-                        Clock.schedule_once(lambda dt, m=mapping, v=msg.value: self.sequencer._apply_midi_mapping_action(m, v))
-        except Exception:
-            pass
-
-    def _record_midi_event(self, msg: mido.Message, start_beat_of_block: float, offset: int):
-        """Records a MIDI event from the 'Clavier' port."""
-        try:
-            samplerate = self.jack_client.samplerate
-            beats_per_second = self.sequencer.song.tempo / 60.0
-            accurate_beat = start_beat_of_block + (offset / samplerate) * beats_per_second
-
-            if msg.type == 'note_on' and msg.velocity > 0:
-                # Auto-start transport if recording and stopped
-                if self.sequencer.playback_state == 'stopped':
-                    Clock.schedule_once(lambda dt: self.sequencer.play())
-
-                track_idx = self._get_input_routing_value(accurate_beat)
-                if track_idx is not None:
-                    self._recorded_notes[msg.note] = (accurate_beat, track_idx, msg.velocity)
-
-            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                if msg.note in self._recorded_notes:
-                    start_beat, track_idx, velocity = self._recorded_notes.pop(msg.note)
-                    duration = accurate_beat - start_beat
-                    if duration > 0:
-                        self._recorded_events_to_merge.append({
-                            'type': 'note',
-                            'track_idx': track_idx,
-                            'start_time': start_beat,
-                            'pitch': msg.note,
-                            'velocity': velocity,
-                            'duration': duration
-                        })
-
-            elif msg.type == 'control_change':
-                track_idx = self._get_input_routing_value(accurate_beat)
-                if track_idx is not None:
-                    self._recorded_events_to_merge.append({
-                        'type': 'cc',
-                        'track_idx': track_idx,
-                        'start_time': accurate_beat,
-                        'control': msg.control,
-                        'value': msg.value
-                    })
-        except Exception:
-            pass
-
     def _apply_automation_event(self, event: dict, offset: int = 0):
         """Applies a single automation event."""
         target_track_index = event['target_track_index']
@@ -1160,7 +1151,7 @@ class JackManager:
         param_name = event['parameter'].lower()
 
         # Branch by Track Type first for clarity and correctness
-        if getattr(target_track, 'is_midi', False):
+        if is_midi_track(target_track):
             if param_config.get('type') == 'midi_cc':
                 midi_value = 0
                 if param_name == 'vol':
@@ -1188,7 +1179,7 @@ class JackManager:
             elif param_config.get('type') == 'velocity_multiplier':
                 target_track.velocity = float(value)
 
-        elif getattr(target_track, 'is_audio', False):
+        elif is_audio_track(target_track):
             ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)
             if not ap:
                 return
@@ -1233,7 +1224,7 @@ class JackManager:
 
                 midi_pan = int((self.sequencer.song.metronome_pan + 1.0) / 2.0 * 127)
                 pan_msg = mido.Message('control_change', channel=self.sequencer.metronome_channel, control=10, value=midi_pan)
-                self._write_midi_safe(port, offset, pan_msg.bytes())
+                self._write_midi_safe(port, offset, bytes(pan_msg.bytes()))
 
             # Safeguard: don't generate more than 16 metronome ticks in one block
             ticks_this_block = 0
@@ -1283,7 +1274,7 @@ class JackManager:
         self._in_process_callback = True
         self._current_block_frames = frames
         try:
-            # --- 0. Calculate Current Beat & Timing (Needed for routing and recording) ---
+            # --- 0. Calculate Current Beat & Timing ---
             samplerate = self.jack_client.samplerate
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0
@@ -1301,7 +1292,6 @@ class JackManager:
             end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second if samplerate > 0 else authoritative_beat_now
 
             # --- 1. Handle UI-queued MIDI events ---
-            # Limit the number of events per block to avoid overflow
             events_processed = 0
             while events_processed < 64:
                 try:
@@ -1320,19 +1310,16 @@ class JackManager:
                 incoming = self.clavier_port.incoming_midi_events()
                 for offset, data in incoming:
                     try:
-                        # Convert to bytes and parse once
                         data_bytes = bytes(data)
-                        # Quick filter: skip high-rate real-time messages (Clock, Active Sensing)
-                        if data_bytes[0] >= 0xF8:
-                            continue
+                        if data_bytes[0] >= 0xF8: continue # Skip real-time sync
 
                         msg = mido.Message.from_bytes(data_bytes)
-                        self._log_rt(f"Clavier input: {msg} at offset {offset}")
+                        self._log_rt(f"Clavier: {msg}")
                     except Exception as e:
-                        self._log_rt(f"Error parsing Clavier input: {e}")
-                        continue # Skip invalid/incomplete MIDI messages
+                        self._log_rt(f"Parse error: {e}")
+                        continue
 
-                    # Determine target track for THIS specific event's timing
+                    # Accurate timing for this event
                     accurate_event_beat = start_beat_of_block + (offset / samplerate) * beats_per_second if samplerate > 0 else start_beat_of_block
                     current_routing_idx = self._get_input_routing_value(accurate_event_beat)
 
@@ -1344,55 +1331,29 @@ class JackManager:
 
                     if msg.type == 'note_on' and msg.velocity > 0:
                         if target_track and current_routing_idx in self.midi_out_ports:
-                            # Force channel to match track settings for consistency
                             msg.channel = getattr(target_track, 'channel', 0)
-                            self._log_rt(f"Forwarding Note On {msg.note} to port for track {current_routing_idx}")
                             self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, bytes(msg.bytes()))
                             self._live_forwarded_notes[msg.note] = current_routing_idx
-                            self._live_activity[current_routing_idx].add(msg.note)
-                        else:
-                            self._log_rt(f"FAILED Note On forward: track_idx_in_ports={current_routing_idx in self.midi_out_ports}")
+                            with self.sync_lock: self._live_activity[current_routing_idx].add(msg.note)
 
                     elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                        # Ensure note_off goes to the same track as its note_on
                         if msg.note in self._live_forwarded_notes:
                             track_idx = self._live_forwarded_notes.pop(msg.note)
                             if track_idx in self.midi_out_ports:
                                 msg.channel = getattr(self.sequencer.song.tracks[track_idx], 'channel', 0)
                                 self._write_midi_safe(self.midi_out_ports[track_idx], offset, bytes(msg.bytes()))
-                                if msg.note in self._live_activity[track_idx]:
-                                    self._live_activity[track_idx].remove(msg.note)
+                                with self.sync_lock:
+                                    if msg.note in self._live_activity[track_idx]:
+                                        self._live_activity[track_idx].remove(msg.note)
                         else:
-                            # If we don't know where it started, just send to current routing
                             if target_track and current_routing_idx in self.midi_out_ports:
                                 msg.channel = getattr(target_track, 'channel', 0)
                                 self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, bytes(msg.bytes()))
-                                if msg.note in self._live_activity[current_routing_idx]:
-                                    self._live_activity[current_routing_idx].remove(msg.note)
+                                with self.sync_lock:
+                                    if msg.note in self._live_activity[current_routing_idx]:
+                                        self._live_activity[current_routing_idx].remove(msg.note)
 
                     elif msg.type == 'control_change':
-                        # Special handling for sustain pedal (CC 64)
-                        if msg.control == 64:
-                            if msg.value >= 64: # Sustain ON
-                                if target_track and current_routing_idx in self.midi_out_ports:
-                                    msg.channel = getattr(target_track, 'channel', 0)
-                                    self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, bytes(msg.bytes()))
-                                    self._live_forwarded_ccs[64].add(current_routing_idx)
-                            else: # Sustain OFF
-                                # Send to ALL tracks that received sustain ON
-                                for track_idx in list(self._live_forwarded_ccs[64]):
-                                    if track_idx in self.midi_out_ports:
-                                        msg.channel = getattr(self.sequencer.song.tracks[track_idx], 'channel', 0)
-                                        self._write_midi_safe(self.midi_out_ports[track_idx], offset, bytes(msg.bytes()))
-                                self._live_forwarded_ccs[64].clear()
-                        else:
-                            # Forward other CCs to current target
-                            if target_track and current_routing_idx in self.midi_out_ports:
-                                msg.channel = getattr(target_track, 'channel', 0)
-                                self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, bytes(msg.bytes()))
-
-                    elif msg.type in ['pitchwheel', 'aftertouch', 'polytouch', 'program_change']:
-                        # Forward expressive messages to current target
                         if target_track and current_routing_idx in self.midi_out_ports:
                             msg.channel = getattr(target_track, 'channel', 0)
                             self._write_midi_safe(self.midi_out_ports[current_routing_idx], offset, bytes(msg.bytes()))
@@ -1406,42 +1367,31 @@ class JackManager:
             # --- 2. Handle Transport State Changes ---
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
-                if current_transport_state == jack.ROLLING:
-                    self.set_all_audio_pause_state(False)
-                else: # STOPPED or other state
-                    self.set_all_audio_pause_state(True)
+                self.set_all_audio_pause_state(current_transport_state != jack.ROLLING)
                 self.last_transport_state = current_transport_state
 
             with self.sync_lock:
-                if self.sequencer.song.metronome_enabled and self.metronome_port:
-                    port = self.metronome_port
+                if self.metronome_port:
                     for note_off_msg, offset in self._metronome_notes_to_turn_off:
-                        self._write_midi_safe(port, offset, bytes(note_off_msg.bytes()))
+                        self._write_midi_safe(self.metronome_port, offset, bytes(note_off_msg.bytes()))
                     self._metronome_notes_to_turn_off.clear()
 
                 if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
                     if self._active_notes:
                         for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                             if track_idx in self.midi_out_ports:
-                                port = self.midi_out_ports[track_idx]
                                 track = self.sequencer.song.tracks[track_idx]
-                                self._write_midi_safe(port, 0, bytes(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes()))
+                                self._write_midi_safe(self.midi_out_ports[track_idx], 0, bytes(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes()))
                         self._active_notes.clear()
                     return
-
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                 if start_beat_of_block <= end_beat < end_beat_of_block:
                     if track_idx in self.midi_out_ports:
-                        port = self.midi_out_ports[track_idx]
                         track = self.sequencer.song.tracks[track_idx]
-
-                        offset = 0
-                        if end_beat_of_block > start_beat_of_block:
-                            offset = int((end_beat - start_beat_of_block) / (end_beat_of_block - start_beat_of_block) * self._current_block_frames)
-                            offset = max(0, min(self._current_block_frames - 1, offset))
-
-                        self._write_midi_safe(port, offset, bytes(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes()))
+                        offset = int((end_beat - start_beat_of_block) / (end_beat_of_block - start_beat_of_block) * self._current_block_frames) if end_beat_of_block > start_beat_of_block else 0
+                        offset = max(0, min(self._current_block_frames - 1, offset))
+                        self._write_midi_safe(self.midi_out_ports[track_idx], offset, bytes(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes()))
                     del self._active_notes[(track_idx, pitch)]
 
             self._process_midi_events(start_beat_of_block, end_beat_of_block)
@@ -1451,12 +1401,10 @@ class JackManager:
             with self.process_lock:
                 for ap in self.active_audio_processes:
                     track = self.sequencer.song.tracks[ap.track_index]
-                    if getattr(track, 'is_audio', False):
+                    if is_audio_track(track):
                         duration_beats = self.sequencer._get_audio_duration_in_beats(track)
-                        end_beat = track.start_time + duration_beats
-                        if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
-                            command = {"command": ["set_property", "pause", True]}
-                            self._send_ipc_command(ap.socket_path, command)
+                        if end_beat_of_block >= track.start_time + duration_beats > start_beat_of_block:
+                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
 
             self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
@@ -1465,6 +1413,6 @@ class JackManager:
                 self.sequencer.current_beat = start_beat_of_block
                 self.sequencer.last_beat_update_time = time.perf_counter()
         except Exception as e:
-            print(f"\nError in JACK process callback: {e}")
+            self._log_rt(f"Callback error: {e}")
         finally:
             self._in_process_callback = False

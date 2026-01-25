@@ -1,31 +1,37 @@
+
 import os
 import time
+from kivy.config import Config
+Config.set('graphics', 'width', '1024')
+Config.set('graphics', 'height', '768')
+from kivymd.app import MDApp
 from kivy.clock import Clock
-from kivy.core.window import Window
-from sequencer.kivy_ui import SequencerApp
+from sequencer.kivy_ui import SequencerLayout
+from sequencer.sequencer import Sequencer
+from sequencer.models import MidiTrack
 
-def run_verification():
-    app = SequencerApp()
+class ScreenshotApp(MDApp):
+    def build(self):
+        self.sequencer = Sequencer(gui_mode=True)
+        # Add a couple of tracks
+        self.sequencer.add_track("Lead Synth", "midi")
+        self.sequencer.add_track("Bass Synth", "midi")
 
-    def on_app_started(dt):
-        # 1. Add some tracks
-        app.sequencer_layout.process_command_ui('add "Track 1"')
-        app.sequencer_layout.process_command_ui('add "Track 2"')
+        # Arm the first track to show the bridge routing
+        self.sequencer.set_record_mode(0, "KEEP")
 
-        # 2. Open Input Routing Editor
-        app.sequencer_layout.open_input_routing_editor()
+        self.layout = SequencerLayout(sequencer=self.sequencer)
+        return self.layout
 
-        # 3. Wait for UI to settle and take screenshot
-        def take_screenshot(dt):
-            Window.screenshot("/home/jules/verification/bridge_ui.png")
-            app.stop()
+    def on_start(self):
+        Clock.schedule_once(self.take_screenshot, 2)
 
-        Clock.schedule_once(take_screenshot, 2.0)
-
-    Clock.schedule_once(on_app_started, 1.0)
-    app.run()
+    def take_screenshot(self, dt):
+        filename = "screenshots/bridge_verification.png"
+        os.makedirs("screenshots", exist_ok=True)
+        self.layout.export_to_png(filename)
+        print(f"Screenshot saved to {filename}")
+        self.stop()
 
 if __name__ == "__main__":
-    if not os.path.exists("/home/jules/verification"):
-        os.makedirs("/home/jules/verification")
-    run_verification()
+    ScreenshotApp().run()

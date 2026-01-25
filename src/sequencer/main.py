@@ -1068,6 +1068,17 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             output += f"  Ch:{m.channel+1} CC:{m.control} -> Track {m.track_index} {m.action.capitalize()}\n"
         return True, output
 
+    elif command == "diag":
+        d = seq.jack_manager.get_diagnostics()
+        output = "Engine Diagnostics:\n"
+        output += f"  JACK Running    : {d['is_running']}\n"
+        output += f"  Process Cycles  : {d['cb_count']}\n"
+        output += f"  Clavier Input   : {d['clavier_in']} events\n"
+        output += f"  Clavier Routed  : {d['clavier_routed']} events\n"
+        output += f"  Last Target Idx : {d['last_target_idx']}\n"
+        output += f"  MIDI Out Ports  : {d['out_ports_count']}\n"
+        return True, output
+
     else:
         return True, f"Unknown command: '{command}'. Type 'help' for a list of commands."
     return True, ""

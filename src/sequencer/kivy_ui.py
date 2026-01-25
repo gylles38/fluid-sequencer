@@ -366,13 +366,13 @@ class SequencerLayout(BoxLayout):
         self.bridge_label = MDLabel(
             text="Bridge: -",
             size_hint_x=None,
-            width=dp(120),
+            width=dp(180),
             size_hint_y=None,
             height=common_height,
             pos_hint={'center_y': 0.5},
             theme_text_color="Custom",
             text_color=[0.2, 0.6, 0.8, 1],
-            font_size="11sp",
+            font_size="12sp",
             halign='left',
             valign='middle'
         )
@@ -1898,7 +1898,9 @@ class SequencerLayout(BoxLayout):
         else:
             try:
                 track_name = self.sequencer.song.tracks[value].name
-                self.bridge_label.text = f"Bridge -> [{value}]"
+                # Display both index and a shortened name
+                short_name = (track_name[:12] + '..') if len(track_name) > 12 else track_name
+                self.bridge_label.text = f"Bridge -> [{value}] {short_name}"
                 self.bridge_label.text_color = [0.2, 0.8, 1.0, 1]
             except (IndexError, AttributeError):
                 self.bridge_label.text = "Bridge: ?"

@@ -508,6 +508,10 @@ class Sequencer(EventDispatcher):
         self.song_structure_changed += 1
 
     def _all_notes_off(self):
+        if self.jack_manager.is_running:
+            self.jack_manager.silence_all_midi_notes()
+            return
+
         for port in self.open_ports.values():
             if port and not port.closed:
                 for channel in range(16):
@@ -1795,6 +1799,17 @@ class Sequencer(EventDispatcher):
             return f"Error getting MIDI ports: {e}"
 
     def create_virtual_port(self, name: str) -> str:
+        if self.jack_manager.is_running:
+            try:
+                # Register a native JACK port instead
+                port = self.jack_manager.jack_client.midi_outports.register(name)
+                # Store it in open_ports for reference
+                self.jack_manager.open_ports[name] = port
+                self.is_dirty = True
+                return f"Created native JACK MIDI port: '{name}'"
+            except Exception as e:
+                return f"Error creating JACK port: {e}"
+
         try:
             port = open_output(name, virtual=True)
             self.virtual_ports.append(port)
@@ -2566,6 +2581,9 @@ class Sequencer(EventDispatcher):
             self.jack_manager._sync_playhead_to_beat(new_beat)
             self.jack_manager.seek_audio_to_beat(new_beat)
 
+            if self.gui_mode:
+                self.current_beat = new_beat
+
             return f"Seeked to position {self._format_beats_to_position(new_beat)}."
 
         except (ValueError, IndexError):
@@ -2573,6 +2591,37 @@ class Sequencer(EventDispatcher):
 
     def send_cc_message(self, port_name: str, channel: int, control: int, value: int) -> str:
         """Sends a single CC message to a specified port."""
+        if not 0 <= channel <= 15:
+            return "Error: Channel must be between 1 and 16."
+        if not 0 <= control <= 127:
+            return "Error: CC number must be between 0 and 127."
+        if not 0 <= value <= 127:
+            return "Error: CC value must be between 0 and 127."
+
+        msg = mido.Message('control_change', channel=channel, control=control, value=value)
+
+        # If JACK is running, we use the JackManager to queue the message
+        if self.jack_manager.is_running:
+            # Try to find which track or virtual port this name refers to
+            target = None
+            if port_name == self.song.metronome_port_name:
+                target = -1
+            else:
+                for i, track in enumerate(self.song.tracks):
+                    if is_midi_track(track) and track.output_port_name == port_name:
+                        target = track
+                        break
+
+            if target is not None:
+                self.jack_manager._queue_midi_message(target, msg)
+                return f"Queued CC message to {port_name} (JACK): Ch={channel+1}, CC={control}, Val={value}"
+            else:
+                # If no matching track found, it might be an external port name.
+                # In native JACK mode, we don't support sending to random external ports
+                # easily without registering a temporary port.
+                return f"Error: Port '{port_name}' not found or not registered in JACK mode."
+
+        # Fallback to mido (ALSA) mode
         port = self.open_ports.get(port_name)
         if not port:
             vp = next((p for p in self.virtual_ports if p.name == port_name), None)
@@ -2587,13 +2636,6 @@ class Sequencer(EventDispatcher):
                 return f"Error: Could not open MIDI port '{port_name}': {e}"
         if port:
             try:
-                if not 0 <= channel <= 15:
-                    return "Error: Channel must be between 0 and 15."
-                if not 0 <= control <= 127:
-                    return "Error: CC number must be between 0 and 127."
-                if not 0 <= value <= 127:
-                    return "Error: CC value must be between 0 and 127."
-                msg = mido.Message('control_change', channel=channel, control=control, value=value)
                 port.send(msg)
                 time.sleep(0.01)
                 return f"Sent CC message to {port_name}: Ch={channel+1}, CC={control}, Val={value}"
@@ -2602,4 +2644,4 @@ class Sequencer(EventDispatcher):
             finally:
                 if is_temp_port and port:
                     port.close()
-        return ""
+        return f"Error: Could not find or open port '{port_name}'"

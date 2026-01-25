@@ -685,7 +685,7 @@ class TrackWidget(BoxLayout):
 
     def _update_bg_color(self, *args):
         if self.is_active_routing:
-            self.bg_color.rgba = [0.2, 0.25, 0.3, 1] # Slightly blue highlight for active routing
+            self.bg_color.rgba = [0.1, 0.3, 0.5, 1] # More visible blue highlight for active routing
         elif self.track_index % 2 == 0:
             self.bg_color.rgba = [0.1, 0.1, 0.1, 1]
         else:

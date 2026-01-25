@@ -31,7 +31,7 @@ from typing import List, Optional, Any, Dict
 from functools import wraps
 from contextlib import contextmanager
 
-from kivy.properties import NumericProperty, StringProperty, BooleanProperty
+from kivy.properties import NumericProperty, StringProperty, BooleanProperty, ObjectProperty
 from kivy.event import EventDispatcher
 from kivy.clock import Clock
 
@@ -43,6 +43,7 @@ class Sequencer(EventDispatcher):
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
     song_structure_changed = NumericProperty(0)
+    live_notes = ObjectProperty({}) # Dict[int, List[int]] track_idx -> list of notes
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
@@ -103,6 +104,7 @@ class Sequencer(EventDispatcher):
         self.last_play_start_beat: Optional[float] = None
 
         self.bind(current_beat=self._update_current_routing)
+        self.bind(song_structure_changed=self._update_current_routing)
 
     def _update_current_routing(self, *args):
         """Updates the current_routing_index property based on the current beat."""
@@ -319,7 +321,7 @@ class Sequencer(EventDispatcher):
         """
         Starts a recording from a MIDI command. Finds the armed track and starts recording.
         """
-        if not self.default_record_port:
+        if not self.default_record_port and not self.jack_manager.is_running:
             print("Error: No MIDI input port selected for recording.")
             return
 
@@ -563,7 +565,9 @@ class Sequencer(EventDispatcher):
             # Ensure the new MIDI track has a native JACK port if JACK is running
             if self.jack_manager.is_running:
                 self.jack_manager.ensure_track_ports()
+                self.jack_manager.refresh_automation()
 
+            self.song_structure_changed += 1
             return {"status": "success", "message": f"MIDI track '{name}' added."}
         elif track_type == 'audio':
             if not filepath:
@@ -641,6 +645,11 @@ class Sequencer(EventDispatcher):
         self.song.tracks.pop(track_index)
         self.is_dirty = True
         self.invalidate_song_length_cache()
+
+        if self.jack_manager.is_running:
+            self.jack_manager.refresh_automation()
+
+        self.song_structure_changed += 1
         return {"status": "success", "message": f"Track '{track_name}' deleted."}
 
     def add_cc_event(self, track_index: int, position_str: str, control: int, value: int) -> str:
@@ -2091,6 +2100,11 @@ class Sequencer(EventDispatcher):
         track.record_mode = mode
         self.is_dirty = True
         
+        if self.jack_manager.is_running:
+            self.jack_manager.refresh_automation()
+
+        self.song_structure_changed += 1
+
         mode_descriptions = {
             'OFF': 'Piste désactivée',
             'OVERWRITE': 'Écrase les notes existantes', 

@@ -612,6 +612,9 @@ class InputRoutingEditor(FloatingWindow):
         if action == 'save_and_close':
             self.track.points = copy.deepcopy(self.track_copy.points)
             self.is_dirty = False
+            if self.sequencer_layout.sequencer.jack_manager.is_running:
+                self.sequencer_layout.sequencer.jack_manager.refresh_automation()
+            self.sequencer_layout.sequencer.song_structure_changed += 1
             super(InputRoutingEditor, self).dismiss(*args)
         elif action == 'discard_and_close':
             super(InputRoutingEditor, self).dismiss(*args)
@@ -623,6 +626,9 @@ class InputRoutingEditor(FloatingWindow):
     def _handle_save_dialog(self, answer):
         if answer == 's':
             self.track.points = copy.deepcopy(self.track_copy.points)
+            if self.sequencer_layout.sequencer.jack_manager.is_running:
+                self.sequencer_layout.sequencer.jack_manager.refresh_automation()
+            self.sequencer_layout.sequencer.song_structure_changed += 1
             super(InputRoutingEditor, self).dismiss()
         elif answer == 'd':
             super(InputRoutingEditor, self).dismiss()

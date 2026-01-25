@@ -1,5 +1,5 @@
 from kivy.uix.floatlayout import FloatLayout
-from kivy.properties import NumericProperty
+from kivy.properties import NumericProperty, ListProperty
 from kivy.graphics import Color, Rectangle, Line
 from kivy.uix.label import Label
 from kivy.metrics import dp
@@ -10,7 +10,7 @@ class PianoKeyboard(FloatLayout):
     A widget that draws a vertical piano keyboard.
     """
     note_height = NumericProperty(dp(14))
-    highlighted_note = NumericProperty(-1)  # -1 means no note is highlighted
+    highlighted_notes = ListProperty([]) # List of MIDI note numbers to highlight
 
     def __init__(self, **kwargs):
         super(PianoKeyboard, self).__init__(**kwargs)
@@ -19,7 +19,7 @@ class PianoKeyboard(FloatLayout):
         self.width = dp(40)
 
         self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule,
-                  highlighted_note=self._redraw_on_schedule)
+                  highlighted_notes=self._redraw_on_schedule)
         self._redraw_on_schedule()
 
     def _redraw_on_schedule(self, *args):
@@ -36,7 +36,7 @@ class PianoKeyboard(FloatLayout):
             # Draw white keys
             for i in range(128):
                 if (i % 12) not in [1, 3, 6, 8, 10]:
-                    if i == self.highlighted_note:
+                    if i in self.highlighted_notes:
                         Color(*highlight_color)
                     else:
                         Color(0.95, 0.95, 0.95, 1)
@@ -54,7 +54,7 @@ class PianoKeyboard(FloatLayout):
             # Draw black keys
             for i in range(128):
                  if (i % 12) in [1, 3, 6, 8, 10]:
-                    if i == self.highlighted_note:
+                    if i in self.highlighted_notes:
                         Color(*highlight_color)
                     else:
                         Color(0.1, 0.1, 0.1, 1)

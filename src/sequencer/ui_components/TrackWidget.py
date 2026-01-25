@@ -599,7 +599,8 @@ class TrackWidget(BoxLayout):
         # Liaison avec le séquenceur pour la mise à jour en temps réel
         self.sequencer_layout.sequencer.bind(
             current_beat=lambda instance, val: self.update_sliders_from_automation(val),
-            current_routing_index=self._sync_routing_status
+            current_routing_index=self._sync_routing_status,
+            live_notes=self._update_live_notes
         )
         
         # Appel initial pour régler les sliders au chargement du projet
@@ -989,6 +990,15 @@ class TrackWidget(BoxLayout):
         """Opens a popup to select a MIDI input port for the track."""
         popup: MidiInputSelectorPopup = MidiInputSelectorPopup(track_widget=self)
         popup.open()
+
+    def _update_live_notes(self, instance, value):
+        if not hasattr(self, 'piano_keyboard'):
+            return
+
+        # Get notes for this specific track
+        notes = value.get(self.track_index, [])
+        if self.piano_keyboard.highlighted_notes != notes:
+            self.piano_keyboard.highlighted_notes = notes
 
     def update_sliders_from_automation(self, current_beat) -> None:
         if isinstance(self.track, AutomationTrack):

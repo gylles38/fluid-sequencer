@@ -658,6 +658,7 @@ class SequencerLayout(BoxLayout):
 
         # Re-introducing a clock for smooth UI updates, but at a more reasonable rate
         Clock.schedule_interval(self.update_playhead, 1/30.0)
+        Clock.schedule_interval(self.poll_live_activity, 1/15.0)
 
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
@@ -1733,6 +1734,13 @@ class SequencerLayout(BoxLayout):
             for i, track_widget in enumerate(self.track_list_layout.children):
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
+
+    def poll_live_activity(self, dt):
+        """Polls the JackManager for live MIDI activity and updates the sequencer property."""
+        if self.sequencer and self.sequencer.jack_manager and self.sequencer.jack_manager.is_running:
+            activity = self.sequencer.jack_manager.get_live_activity()
+            if activity != self.sequencer.live_notes:
+                self.sequencer.live_notes = activity
 
     def update_playhead(self, dt):
         """

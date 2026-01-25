@@ -105,17 +105,33 @@ class Sequencer(EventDispatcher):
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
 
-        self.bind(current_beat=self._update_current_routing)
         self.bind(song_structure_changed=self._update_current_routing)
+
+        if self.gui_mode:
+            Clock.schedule_interval(self._poll_engine_state, 1/30.0)
+
+    def _poll_engine_state(self, dt):
+        """Polls the JACK engine for state changes and updates Kivy properties."""
+        if not self.jack_manager or not self.jack_manager.is_running:
+            return
+
+        # 1. Update current beat
+        new_beat = self.jack_manager._last_beat_rt
+        if not math.isclose(self.current_beat, new_beat, abs_tol=0.001):
+            self.current_beat = new_beat
+            self.last_beat_update_time = time.perf_counter()
+            self._update_current_routing()
 
     def _update_current_routing(self, *args):
         """Updates the current_routing_index property based on the current beat."""
         if self.jack_manager:
             idx = self.jack_manager._get_input_routing_value(self.current_beat)
             if idx is not None:
-                self.current_routing_index = idx
+                if self.current_routing_index != idx:
+                    self.current_routing_index = idx
             else:
-                self.current_routing_index = -1
+                if self.current_routing_index != -1:
+                    self.current_routing_index = -1
 
     def _start_carla_process(self, carla_project_path: Optional[str] = None):
         """
@@ -574,8 +590,10 @@ class Sequencer(EventDispatcher):
             self.is_dirty = True
             self.invalidate_song_length_cache()
 
-            # Ensure the new MIDI track has a native JACK port if JACK is running
-            if self.jack_manager.is_running:
+            # Ensure the JACK engine is running and ports are registered
+            if not self.jack_manager.is_running:
+                self.jack_manager.start()
+            else:
                 self.jack_manager.ensure_track_ports()
                 self.jack_manager.refresh_automation()
 

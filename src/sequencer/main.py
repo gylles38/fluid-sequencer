@@ -1073,8 +1073,12 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
         output = "Engine Diagnostics:\n"
         output += f"  JACK Running    : {d['is_running']}\n"
         output += f"  Process Cycles  : {d['cb_count']}\n"
+        output += f"  Monitor Thread  : {'ALIVE' if d['monitor_alive'] else 'DEAD'}\n"
         output += f"  Clavier Input   : {d['clavier_in']} events\n"
         output += f"  Clavier Routed  : {d['clavier_routed']} events\n"
+        output += f"  Clavier Connect : {'YES' if d['clavier_connected'] else 'NO'}\n"
+        if d['clavier_connections']:
+            output += f"    Connections   : {', '.join([str(c) for c in d['clavier_connections']])}\n"
         output += f"  Last Target Idx : {d['last_target_idx']}\n"
         output += f"  MIDI Out Ports  : {d['out_ports_count']}\n"
         return True, output

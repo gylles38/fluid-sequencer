@@ -2364,6 +2364,9 @@ class Sequencer(EventDispatcher):
             return
 
         try:
+            # Ensure caches are hot before resyncing
+            self.jack_manager.refresh_automation()
+
             # 1. Mémoriser si le transport était en cours de lecture
             was_rolling = self.jack_manager.jack_client.transport_state == jack.ROLLING
             print(f"[DIAGNOSTIC] was_rolling: {was_rolling}")
@@ -2579,6 +2582,9 @@ class Sequencer(EventDispatcher):
         """Seeks the JACK transport by a relative amount of measures or beats."""
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             return "Error: JACK is not running. Cannot seek."
+
+        # Ensure caches are up to date
+        self.jack_manager.refresh_automation()
 
         try:
             if not amount_str.startswith(('+', '-')):

@@ -1080,6 +1080,8 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
         if d['clavier_connections']:
             output += f"    Connections   : {', '.join([str(c) for c in d['clavier_connections']])}\n"
         output += f"  Last Target Idx : {d['last_target_idx']}\n"
+        output += f"  Cached Armed Idx: {d['cached_armed_idx']}\n"
+        output += f"  Cached First Idx: {d['cached_first_midi_idx']}\n"
         output += f"  MIDI Out Ports  : {d['out_ports_count']}\n"
         return True, output
 

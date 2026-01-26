@@ -83,11 +83,13 @@ class JackManager:
         self._correction_stop_event = threading.Event()
         self.last_applied_speeds = {}
 
-    def find_port_by_name(self, pattern):
+    def find_port_by_name(self, pattern: str | None):
         """
         Cherche un port JACK complet qui contient le 'pattern' donné.
         Retourne le nom complet du premier port trouvé, ou None.
         """
+        if not pattern:
+            return None
         try:
             # On demande à JACK/PipeWire la liste de tous les ports
             result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
@@ -428,10 +430,15 @@ class JackManager:
                             port = self.jack_client.midi_outports.register(port_name)
                             self.midi_out_ports[track] = port
                             self._midi_out_ports_by_idx[i] = port
+
+                            # Update the track's output port name to match the registered JACK port
+                            # This allows auto_connect_dynamic to work reliably.
+                            short_port_name = port.name.split(':')[-1]
+                            track.output_port_name = short_port_name
+
                             self._log_rt(f"Registered output port for track '{track.name}': {port.name}")
                             # Compatibility mapping
-                            if getattr(track, 'output_port_name', None):
-                                self.open_ports[track.output_port_name] = port
+                            self.open_ports[short_port_name] = port
                         except Exception as e:
                             self._log_rt(f"Error registering port for track {i}: {e}")
 
@@ -593,6 +600,16 @@ class JackManager:
     def refresh_automation(self):
         """Forces a refresh of automation events and routing track from the project."""
         self._prepare_automation_events()
+        # Cache armed index for RT safety
+        self._cached_armed_idx = self.sequencer.get_armed_track_index()
+        # Cache first MIDI track and channels for RT safety
+        self._cached_first_midi_idx = None
+        self._cached_channels = {}
+        for i, t in enumerate(self.sequencer.song.tracks):
+            if is_midi_track(t):
+                if self._cached_first_midi_idx is None:
+                    self._cached_first_midi_idx = i
+                self._cached_channels[i] = getattr(t, 'channel', 0)
 
     def get_live_activity(self) -> Dict[int, List[int]]:
         """Returns a copy of the current live MIDI activity."""
@@ -619,7 +636,9 @@ class JackManager:
             "out_ports_count": len(self.midi_out_ports),
             "is_running": self.is_running,
             "cb_count": getattr(self, '_cb_count', 0),
-            "monitor_alive": self._log_worker_thread and self._log_worker_thread.is_alive()
+            "monitor_alive": self._log_worker_thread and self._log_worker_thread.is_alive(),
+            "cached_armed_idx": getattr(self, '_cached_armed_idx', None),
+            "cached_first_midi_idx": getattr(self, '_cached_first_midi_idx', None)
         }
 
     def _queue_midi_message(self, track_index: int, msg: mido.Message):
@@ -815,9 +834,12 @@ class JackManager:
                         self._midi_out_ports_by_idx = {}
                     self._midi_out_ports_by_idx[i] = port
 
+                    # Update the track's output port name to match the registered JACK port
+                    short_port_name = port.name.split(':')[-1]
+                    track.output_port_name = short_port_name
+
                     # Compatibility mapping
-                    if getattr(track, 'output_port_name', None):
-                        self.open_ports[track.output_port_name] = port
+                    self.open_ports[short_port_name] = port
 
                     msg = f"Dynamically registered native JACK MIDI port: {port_name}"
                     print(msg)
@@ -1022,33 +1044,24 @@ class JackManager:
         Returns the target track index for MIDI input routing at the given beat.
         Prioritization:
         1. Automation points on the routing track.
-        2. Armed track index (red record icon).
-        3. First available MIDI track.
+        2. Armed track index (cached).
+        3. Final Fallback: First MIDI track (cached).
         """
         # 1. Automation Priority
         if self._routing_track and self._routing_track.points:
-            # Only use if there are points actually defining routing
             routing_points = [p for p in self._routing_track.points if p.parameter == 'input_routing']
             if routing_points:
                 val = self._routing_track.get_value_at(beat, 'input_routing')
                 if val is not None:
-                    idx = int(round(val))
-                    # Validate that the index corresponds to a MIDI track
-                    if 0 <= idx < len(self.sequencer.song.tracks):
-                        target = self.sequencer.song.tracks[idx]
-                        if is_midi_track(target):
-                            return idx
+                    return int(round(val))
 
-        # 2. Armed Track Priority
-        armed_idx = self.sequencer.get_armed_track_index()
+        # 2. Armed Track Priority (RT safe)
+        armed_idx = getattr(self, '_cached_armed_idx', None)
         if armed_idx is not None:
             return armed_idx
 
-        # 3. Final Fallback: First MIDI track
-        for i, t in enumerate(self.sequencer.song.tracks):
-            if is_midi_track(t):
-                return i
-        return None
+        # 3. Final Fallback (RT safe)
+        return getattr(self, '_cached_first_midi_idx', None)
 
     def _handle_control_midi(self, msg: mido.Message):
         """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""
@@ -1487,36 +1500,35 @@ class JackManager:
                     if not port and target_track:
                         port = self.midi_out_ports.get(target_track)
 
-                    if msg.type == 'note_on' and msg.velocity > 0:
-                        if port:
-                            msg.channel = getattr(target_track, 'channel', 0) if target_track else 0
+                    if port:
+                        # Channel Remapping (for non-system messages)
+                        if msg.type not in ['sysex', 'reset'] and hasattr(msg, 'channel'):
+                            msg.channel = self._cached_channels.get(current_routing_idx, 0)
+
+                        if msg.type == 'note_on' and msg.velocity > 0:
                             self._write_midi_safe(port, offset, bytes(msg.bytes()))
                             self._live_forwarded_notes[msg.note] = (port, msg.channel, current_routing_idx)
                             if current_routing_idx is not None:
                                 with self.sync_lock: self._live_activity[current_routing_idx].add(msg.note)
 
-                    elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                        if msg.note in self._live_forwarded_notes:
-                            f_port, f_channel, f_routing_idx = self._live_forwarded_notes.pop(msg.note)
-                            msg.channel = f_channel
-                            self._write_midi_safe(f_port, offset, bytes(msg.bytes()))
-                            # Update UI activity using the ORIGINAL routing index
-                            if f_routing_idx is not None:
-                                with self.sync_lock:
-                                    if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
-                                        self._live_activity[f_routing_idx].remove(msg.note)
-                        else:
-                            if port:
-                                msg.channel = getattr(target_track, 'channel', 0) if target_track else 0
+                        elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                            if msg.note in self._live_forwarded_notes:
+                                f_port, f_channel, f_routing_idx = self._live_forwarded_notes.pop(msg.note)
+                                msg.channel = f_channel
+                                self._write_midi_safe(f_port, offset, bytes(msg.bytes()))
+                                # Update UI activity using the ORIGINAL routing index
+                                if f_routing_idx is not None:
+                                    with self.sync_lock:
+                                        if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
+                                            self._live_activity[f_routing_idx].remove(msg.note)
+                            else:
                                 self._write_midi_safe(port, offset, bytes(msg.bytes()))
                                 if current_routing_idx is not None:
                                     with self.sync_lock:
                                         if msg.note in self._live_activity[current_routing_idx]:
                                             self._live_activity[current_routing_idx].remove(msg.note)
-
-                    elif msg.type == 'control_change':
-                        if port:
-                            msg.channel = getattr(target_track, 'channel', 0) if target_track else 0
+                        else:
+                            # Forward CC, Pitch Bend, Program Change, etc.
                             self._write_midi_safe(port, offset, bytes(msg.bytes()))
 
                     # Also handle transport/control CCs

@@ -113,15 +113,19 @@ class MidiInputSelectorPopup(Popup):
     def select_port(self, port_name) -> None:
         track = self.track_widget.track
 
+        # Determine the source port keyword for the connection.
+        # Prioritize the explicitly stored output_port_name, then fallback to a pattern.
+        sop_keyword = track.output_port_name or f"out_{self.track_widget.track_index}_"
+
         # Disconnect existing connection if a new port is chosen or disconnect is clicked
-        if track.input_port_name and track.output_port_name:
-            self.sequencer.jack_manager.disconnect_dynamic(track.output_port_name, track.input_port_name)
+        if track.input_port_name:
+            self.sequencer.jack_manager.disconnect_dynamic(sop_keyword, track.input_port_name)
 
         track.input_port_name = port_name
 
         if port_name:
             # Connect to the new port
-            self.sequencer.jack_manager.auto_connect_dynamic(track.output_port_name, port_name)
+            self.sequencer.jack_manager.auto_connect_dynamic(sop_keyword, port_name)
             self.track_widget.input_button_text_button_text.text = f"Dest: {port_name.split(':')[0]}"
         else:
             # No new port, just disconnected
@@ -326,7 +330,7 @@ class TrackWidget(BoxLayout):
 
             # Port Selector Button below
             port_name = track.output_port_name if track.output_port_name else "None"
-            self.port_button_text = MDButtonText(text=f"In: {port_name}")
+            self.port_button_text = MDButtonText(text=f"Port: {port_name}")
             self.port_selector_button = HoverableMDButton(
                 self.port_button_text,
                 on_press=self.select_midi_port_popup,

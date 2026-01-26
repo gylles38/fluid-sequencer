@@ -1185,18 +1185,25 @@ class JackManager:
         # 3. Final Fallback (RT safe)
         return getattr(self, '_cached_first_midi_idx', None)
 
-    def _handle_control_midi(self, msg: mido.Message):
-        """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""
+    def _handle_control_midi(self, msg: mido.Message) -> bool:
+        """
+        Handles MIDI control messages (transport, mappings) from the 'Clavier' port.
+        Returns True if the message was a transport command and should be consumed.
+        """
+        is_transport = False
         try:
             if msg.type == 'control_change':
                 # --- Handle Transport Controls (RT Safe: No Clock.schedule_once) ---
                 if msg.value == 127:
                     if msg.control == self._cached_transport_ccs.get('play_pause'):
                         self._pending_play_pause = True
+                        is_transport = True
                     elif msg.control == self._cached_transport_ccs.get('stop'):
                         self._pending_stop = True
+                        is_transport = True
                     elif msg.control == self._cached_transport_ccs.get('record_arm'):
                         self._pending_record = True
+                        is_transport = True
 
                 # --- Handle Custom MIDI Mappings (Volume, Pan, etc.) ---
                 for mapping in self._cached_midi_mappings:
@@ -1205,6 +1212,7 @@ class JackManager:
                         self._pending_mappings.append((mapping, msg.value))
         except Exception:
             pass
+        return is_transport
 
     def _record_midi_event(self, msg: mido.Message, start_beat_of_block: float, offset: int):
         """Records a MIDI event from the 'Clavier' port."""
@@ -1214,10 +1222,6 @@ class JackManager:
             accurate_beat = start_beat_of_block + (offset / samplerate) * beats_per_second
 
             if msg.type == 'note_on' and msg.velocity > 0:
-                # Auto-start transport if recording and stopped (RT Safe flag)
-                if self._last_transport_state_rt == jack.STOPPED:
-                    self._pending_play_pause = True
-
                 track_idx = self._get_input_routing_value(accurate_beat)
                 if track_idx is not None:
                     self._recorded_notes[msg.note] = (accurate_beat, track_idx, msg.velocity)
@@ -1576,7 +1580,7 @@ class JackManager:
                 self._log_rt("First process callback triggered!")
             # Log every ~5 seconds (assuming ~48kHz and 1024 block size)
             if self._cb_count % 500 == 0:
-                self._log_rt(f"Heartbeat #{self._cb_count//500} (status={self.jack_client.transport_state}, beat={self.last_beat:.2f})")
+                self._log_rt(f"Heartbeat #{self._cb_count//500} (status={self.jack_client.transport_state}, last_beat={self.last_beat:.2f})")
 
             # --- 0. Timing (Needed for Bridge) ---
             samplerate = self.jack_client.samplerate
@@ -1636,21 +1640,21 @@ class JackManager:
                         port = self.midi_out_ports.get(target_track)
 
                     if port:
+                        # --- Control Filter ---
+                        # Consume transport CCs so they are not forwarded to plugins
+                        is_transport_cc = self._handle_control_midi(msg)
+                        if is_transport_cc:
+                            continue
+
                         # Channel Remapping (for non-system messages)
                         if msg.type not in ['sysex', 'reset'] and hasattr(msg, 'channel'):
                             msg.channel = self._cached_channels.get(current_routing_idx, 0)
 
                         if msg.type == 'note_on' and msg.velocity > 0:
-                            # Protection against redundant notes (stuck note prevention)
+                            # BREAK MIDI LOOPS: Ignore Note ON if the pitch is already active.
+                            # In a loopback scenario, forwarding a redundant ON triggers an infinite storm.
                             if msg.note in self._live_forwarded_notes:
-                                f_port, f_channel, f_routing_idx = self._live_forwarded_notes.pop(msg.note)
-                                self._log_rt(f"Stuck note prevention: pitch={msg.note} on track={f_routing_idx}")
-                                off_msg = mido.Message('note_off', channel=f_channel, note=msg.note, velocity=0)
-                                self._write_midi_safe(f_port, offset, bytes(off_msg.bytes()))
-                                if f_routing_idx is not None:
-                                    with self.sync_lock:
-                                        if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
-                                            self._live_activity[f_routing_idx].remove(msg.note)
+                                continue
 
                             self._write_midi_safe(port, offset, bytes(msg.bytes()))
                             self._live_forwarded_notes[msg.note] = (port, msg.channel, current_routing_idx)
@@ -1658,6 +1662,8 @@ class JackManager:
                                 with self.sync_lock: self._live_activity[current_routing_idx].add(msg.note)
 
                         elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                            # BREAK MIDI LOOPS: Only forward Note OFF if we are tracking this pitch.
+                            # If we don't check, a loopback of Note OFF creates an infinite storm.
                             if msg.note in self._live_forwarded_notes:
                                 f_port, f_channel, f_routing_idx = self._live_forwarded_notes.pop(msg.note)
                                 msg.channel = f_channel
@@ -1667,11 +1673,8 @@ class JackManager:
                                         if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
                                             self._live_activity[f_routing_idx].remove(msg.note)
                             else:
-                                self._write_midi_safe(port, offset, bytes(msg.bytes()))
-                                if current_routing_idx is not None:
-                                    with self.sync_lock:
-                                        if msg.note in self._live_activity[current_routing_idx]:
-                                            self._live_activity[current_routing_idx].remove(msg.note)
+                                # Note was not being tracked (either already off or from a loop)
+                                continue
                         else:
                             # Forward CC, Pitch Bend, Program Change, etc.
                             self._write_midi_safe(port, offset, bytes(msg.bytes()))
@@ -1689,8 +1692,9 @@ class JackManager:
                                             self._write_midi_safe(target_port, offset, bytes(msg.bytes()))
                                     self._live_forwarded_ccs[64].clear()
 
-                    # Also handle transport/control CCs
-                    self._handle_control_midi(msg)
+                    # Handle Mappings (Volume/Pan) even if no port found for forwarding
+                    if not port:
+                        self._handle_control_midi(msg)
 
                     # Update diagnostics
                     self._diag_clavier_in += 1
@@ -1707,7 +1711,8 @@ class JackManager:
 
             # --- 3. Sequencing Logic ---
             # --- 3.1 Detect External Jumps ---
-            if not self._repositioning_pending:
+            # Only detect jumps when ROLLING. When STOPPED, use current_beat as authoritative.
+            if not self._repositioning_pending and state == jack.ROLLING:
                 beat_delta = abs(authoritative_beat_now - self.last_beat)
                 # If jump > 1/4 beat (arbitrary threshold for "jump" vs "normal playback")
                 if beat_delta > 0.25:

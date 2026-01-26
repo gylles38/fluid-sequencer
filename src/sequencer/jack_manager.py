@@ -529,6 +529,7 @@ class JackManager:
                                 print(f"    - Warning: Failed to set mute state for track '{track.name}'.", file=sys.stderr)
 
                 self.jack_client.set_process_callback(self._process_callback)
+                self.jack_client.set_shutdown_callback(self._shutdown_callback)
                 self.jack_client.activate()
                 self.is_running = True
                 self._log_rt("JackManager started successfully.")
@@ -806,30 +807,33 @@ class JackManager:
 
     def silence_all_midi_notes(self):
         """Sends note_off messages for all currently playing MIDI notes and clears live activity."""
-        # 1. Clear scheduled notes
-        if self._active_notes:
-            for (track_idx, pitch), end_beat in list(self._active_notes.items()):
-                try:
-                    track = self.sequencer.song.tracks[track_idx]
-                    if is_midi_track(track):
-                        note_off_msg = mido.Message('note_off', channel=track.channel, note=pitch, velocity=0)
-                        self._queue_midi_message(track, note_off_msg)
-                except (IndexError, AttributeError, ValueError):
-                    pass
-            self._active_notes.clear()
-
-        # 2. Clear live forwarded notes
-        if self._live_forwarded_notes:
-            for pitch, track in list(self._live_forwarded_notes.items()):
-                try:
-                    note_off_msg = mido.Message('note_off', channel=getattr(track, 'channel', 0), note=pitch, velocity=0)
-                    self._queue_midi_message(track, note_off_msg)
-                except Exception:
-                    pass
-            self._live_forwarded_notes.clear()
-
-        # 3. Clear UI activity
         with self.sync_lock:
+            # 1. Clear scheduled notes
+            if self._active_notes:
+                for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                    try:
+                        track = self.sequencer.song.tracks[track_idx]
+                        if is_midi_track(track):
+                            note_off_msg = mido.Message('note_off', channel=track.channel, note=pitch, velocity=0)
+                            self._queue_midi_message(track, note_off_msg)
+                    except (IndexError, AttributeError, ValueError):
+                        pass
+                self._active_notes.clear()
+
+            # 2. Clear live forwarded notes
+            if self._live_forwarded_notes:
+                for pitch, info in list(self._live_forwarded_notes.items()):
+                    try:
+                        port, channel, _ = info
+                        note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=0)
+                        # Write directly if possible, or queue
+                        if self.jack_client:
+                             port.write_midi_event(0, bytes(note_off_msg.bytes()))
+                    except Exception:
+                        pass
+                self._live_forwarded_notes.clear()
+
+            # 3. Clear UI activity
             self._live_activity.clear()
 
     def _send_ipc_command(self, socket_path, command_data) -> bool:
@@ -1377,7 +1381,7 @@ class JackManager:
         return primed_params
 
     def _apply_automation_event(self, event: dict, offset: int = 0):
-        """Applies a single automation event."""
+        """Applies a single automation event. RT Safe if self._in_process_callback is True."""
         target_track_index = event['target_track_index']
         if not 0 <= target_track_index < len(self._cached_tracks):
             return
@@ -1425,14 +1429,20 @@ class JackManager:
                 # mpv expects volume from 0 to 100
                 mpv_volume = value * 100
                 command = {"command": ["set_property", "volume", mpv_volume]}
-                self._send_ipc_command(ap.socket_path, command)
+                if self._in_process_callback:
+                    self._queue_ipc_command(ap.socket_path, command)
+                else:
+                    self._send_ipc_command(ap.socket_path, command)
             elif param_name == 'pan':
                 # CORRECT: Use the lavfi filter for audio track panning, not 'balance'
                 gain_l = min(1.0, 1.0 - value)
                 gain_r = min(1.0, 1.0 + value)
                 pan_filter = f"lavfi=[pan=stereo|c0={gain_l:.2f}*c0|c1={gain_r:.2f}*c1]"
                 command = {"command": ["set_property", "af", pan_filter]}
-                self._send_ipc_command(ap.socket_path, command)
+                if self._in_process_callback:
+                    self._queue_ipc_command(ap.socket_path, command)
+                else:
+                    self._send_ipc_command(ap.socket_path, command)
 
     def _process_automation_events(self, start_beat_of_block, end_beat_of_block):
         while self.next_automation_event_index < len(self.automation_events):
@@ -1530,20 +1540,25 @@ class JackManager:
                         self._log_rt(f"Already past end of song: start_beat={start_beat_of_block:.4f}, length={song_length:.4f}")
                         self.jack_client.transport_stop()
 
+    def _shutdown_callback(self, status, reason):
+        """Called when the JACK server shuts down or kicks out the client."""
+        self._log_rt(f"JACK SHUTDOWN: status={status}, reason={reason}")
+        self.is_running = False
+
     def _process_callback(self, frames: int):
         self._in_process_callback = True
         self._current_block_frames = frames
 
-        # --- Heartbeat Logging ---
-        if not hasattr(self, '_cb_count'): self._cb_count = 0
-        self._cb_count += 1
-        if self._cb_count == 1:
-            self._log_rt("First process callback triggered!")
-        # Log every ~5 seconds (assuming ~48kHz and 1024 block size)
-        if self._cb_count % 250 == 0:
-            self._log_rt(f"Heartbeat #{self._cb_count//250} (block={self._cb_count}, frames={frames})")
-
         try:
+            # --- Heartbeat Logging ---
+            if not hasattr(self, '_cb_count'): self._cb_count = 0
+            self._cb_count += 1
+            if self._cb_count == 1:
+                self._log_rt("First process callback triggered!")
+            # Log every ~5 seconds (assuming ~48kHz and 1024 block size)
+            if self._cb_count % 250 == 0:
+                self._log_rt(f"Heartbeat #{self._cb_count//250} (block={self._cb_count}, frames={frames})")
+
             # --- 0. Calculate Current Beat & Timing ---
             samplerate = self.jack_client.samplerate
             tempo = self._cached_tempo
@@ -1659,6 +1674,9 @@ class JackManager:
             # --- 2. Handle Transport State Changes ---
             current_transport_state = self.jack_client.transport_state
             self._last_transport_state_rt = current_transport_state # Update for UI polling
+
+            if current_transport_state == jack.ROLLING and self.last_transport_state == jack.STOPPED:
+                self._log_rt("Transport started rolling (detected in callback)")
 
             if current_transport_state != self.last_transport_state:
                 # Move to background:

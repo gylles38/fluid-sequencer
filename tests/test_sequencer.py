@@ -301,27 +301,22 @@ class TestSequencer(unittest.TestCase):
         # Assert that set_control_port was called with the correct name
         mock_set_control_port.assert_called_with("MyTestControlPort")
 
-    @patch('kivy.clock.Clock.schedule_once')
-    def test_play_range_stops_audio(self, mock_schedule):
-        """Test that reaching the end of a play range schedules a stop command."""
+    def test_play_range_stops_audio(self):
+        """Test that reaching the end of a play range stops the JACK transport."""
         # Setup
         sequencer = self.sequencer
+        sequencer.jack_manager.jack_client = MagicMock()
+
+        # We must refresh automation to populate RT caches
         sequencer.play_range_enabled = True
         sequencer.play_range_end_beat = 4.0
-        sequencer.stop = MagicMock()
+        sequencer.jack_manager.refresh_automation()
 
         # Simulate the callback hitting the end of the range.
-        # This logic is now in JackManager, so we call it on the real instance.
         sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1)
 
-        # The method should schedule sequencer.stop() to be called.
-        mock_schedule.assert_called_once()
-        # Simulate the clock tick to execute the scheduled function.
-        scheduled_function = mock_schedule.call_args[0][0]
-        scheduled_function(0) # The argument is dt (delta-time), 0 is fine.
-
-        sequencer.stop.assert_called_once()
-        self.assertFalse(sequencer.play_range_enabled)
+        # The method should call transport_stop() on the jack client.
+        sequencer.jack_manager.jack_client.transport_stop.assert_called_once()
 
     def test_automation_ease_in_to_none_curve(self):
         """
@@ -373,6 +368,9 @@ class TestSequencer(unittest.TestCase):
         # 1. Setup
         mock_from_file.return_value = MagicMock()
         self.sequencer.add_track(name="Audio", track_type='audio', filepath="test.wav")
+
+        # IMPORTANT: Refresh automation to populate _cached_tracks
+        self.sequencer.jack_manager.refresh_automation()
 
         # Mock an active audio process for this track
         self.sequencer.jack_manager.active_audio_processes = [

@@ -126,12 +126,12 @@ class Sequencer(EventDispatcher):
         # Use authoritative engine state to drive UI
         engine_state = self.jack_manager._last_transport_state_rt
 
-        # Grace period: ignore STOPPED engine state for 2.0s after clicking Play
+        # Grace period: ignore STOPPED engine state for 5.0s after clicking Play
         # to allow the process callback time to update _last_transport_state_rt
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
 
         if engine_state == jack.STOPPED and self.playback_state != "stopped":
-            if time_since_play > 2.0:
+            if time_since_play > 5.0:
                 print(f"[UI] Engine STOP detected. time_since_play={time_since_play:.2f}s")
                 self.playback_state = "stopped"
                 # Silence notes if engine stopped unexpectedly

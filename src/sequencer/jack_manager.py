@@ -88,6 +88,8 @@ class JackManager:
         self._cached_tempo = 120.0
         self._cached_tracks = []
         self._repositioning_pending = False
+        self._target_beat = 0.0
+        self._reposition_frames = 0
 
         # --- UI Command Flags (from MIDI) ---
         self._pending_play_pause = False
@@ -391,6 +393,8 @@ class JackManager:
                 print("JACK client is already running.")
                 return
 
+            self._cb_count = 0 # Reset heartbeat counter
+
             try:
                 # Ensure client name is safe for JACK and unique
                 base_name = self.sequencer.song.name or "NewSong"
@@ -616,6 +620,30 @@ class JackManager:
         """Retourne la position actuelle du transport en beats."""
         return self.last_beat
 
+    def reposition_to_beat(self, beat: float):
+        """Repositions the JACK transport to a specific beat and sets up the grace period."""
+        if not self.jack_client:
+            return
+
+        try:
+            # 1. Update internal RT target
+            self._target_beat = float(beat)
+            self._repositioning_pending = True
+            if hasattr(self, '_reposition_frames'):
+                self._reposition_frames = 0
+
+            # 2. Command JACK transport
+            beats_per_second = self.sequencer.song.tempo / 60.0
+            samplerate = self.jack_client.samplerate
+            if beats_per_second > 0 and samplerate > 0:
+                target_frame = int((beat / beats_per_second) * samplerate)
+                _ , pos = self.jack_client.transport_query_struct()
+                pos.frame = target_frame
+                self.jack_client.transport_reposition_struct(pos)
+                self._log_rt(f"JACK repositioning to beat {beat:.4f} (frame {target_frame})")
+        except Exception as e:
+            print(f"Error during reposition: {e}", file=sys.stderr)
+
     def refresh_automation(self):
         """Forces a refresh of automation events and routing track from the project."""
         self._prepare_automation_events()
@@ -636,7 +664,7 @@ class JackManager:
                 self._cached_channels[i] = getattr(t, 'channel', 0)
 
         # Cache song length and loop points for RT safety
-        self._cached_song_length = self.sequencer.get_song_length_in_beats()
+        self._cached_song_length = max(1.0, self.sequencer.get_song_length_in_beats())
         self._cached_loop_enabled = self.sequencer.loop_enabled
         self._cached_loop_start = self.sequencer.loop_start_beat
         self._cached_loop_end = self.sequencer.loop_end_beat
@@ -1657,12 +1685,27 @@ class JackManager:
                 self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
             if self._repositioning_pending:
-                 # When repositioning, authoritative_beat_now SHOULD be the new position.
-                 # We update last_beat to this new position to avoid large deltas in the next callback.
-                 self.last_beat = authoritative_beat_now
-                 self._repositioning_pending = False
-                 # Skip logic checks for this frame
-            else:
+                 # Wait for the engine to actually reach the target position
+                 self._reposition_frames += frames
+
+                 # Tolerance of 0.5 beats or 1 second timeout
+                 reached = math.isclose(authoritative_beat_now, self._target_beat, abs_tol=0.5)
+                 timeout = self._reposition_frames > (samplerate if samplerate > 0 else 48000)
+
+                 if reached or timeout:
+                      if timeout and not reached:
+                          self._log_rt(f"Repositioning TIMEOUT: target={self._target_beat:.4f}, current={authoritative_beat_now:.4f}")
+                      else:
+                          self._log_rt(f"Repositioning confirmed: authoritative_beat={authoritative_beat_now:.4f}")
+
+                      self.last_beat = authoritative_beat_now
+                      self._repositioning_pending = False
+                      self._reposition_frames = 0
+                 else:
+                      # Still waiting for jump to take effect
+                      return # Skip logic until jump is visible
+
+            if not self._repositioning_pending:
                  self.last_beat = end_beat_of_block
                  self._last_beat_rt = authoritative_beat_now # Use authoritative for RT sync
         except Exception as e:

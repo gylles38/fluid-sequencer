@@ -126,12 +126,13 @@ class Sequencer(EventDispatcher):
         # Use authoritative engine state to drive UI
         engine_state = self.jack_manager._last_transport_state_rt
 
-        # Grace period: ignore STOPPED engine state for 0.5s after clicking Play
+        # Grace period: ignore STOPPED engine state for 2.0s after clicking Play
         # to allow the process callback time to update _last_transport_state_rt
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
 
         if engine_state == jack.STOPPED and self.playback_state != "stopped":
-            if time_since_play > 0.5:
+            if time_since_play > 2.0:
+                print(f"[UI] Engine STOP detected. time_since_play={time_since_play:.2f}s")
                 self.playback_state = "stopped"
                 # Silence notes if engine stopped unexpectedly
                 self.jack_manager.silence_all_midi_notes()
@@ -2380,15 +2381,7 @@ class Sequencer(EventDispatcher):
             # -------------------------
 
             # 3. Repositionner le transport JACK à la position exacte du beat
-            beats_per_second = self.song.tempo / 60.0
-            samplerate = self.jack_manager.jack_client.samplerate
-            if beats_per_second > 0 and samplerate > 0:
-                target_frame = int((beat / beats_per_second) * samplerate)
-                _ , pos = self.jack_manager.jack_client.transport_query_struct()
-                original_frame = pos.frame
-                pos.frame = target_frame
-                self.jack_manager.jack_client.transport_reposition_struct(pos)
-                print(f"[DIAGNOSTIC] Repositioning JACK transport from frame {original_frame} to {target_frame} (beat {beat:.6f})")
+            self.jack_manager.reposition_to_beat(beat)
 
             # 4. Synchroniser les lecteurs externes avec la nouvelle position (l'état interne est déjà à jour)
             print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
@@ -2446,14 +2439,7 @@ class Sequencer(EventDispatcher):
 
         # If a start beat is provided, reposition the transport
         if start_beat is not None:
-            beats_per_second = self.song.tempo / 60.0
-            samplerate = self.jack_manager.jack_client.samplerate
-            if beats_per_second > 0 and samplerate > 0:
-                target_frame = int((start_beat / beats_per_second) * samplerate)
-                _ , pos = self.jack_manager.jack_client.transport_query_struct()
-                pos.frame = target_frame
-                self.jack_manager.jack_client.transport_reposition_struct(pos)
-                self.jack_manager._repositioning_pending = True
+            self.jack_manager.reposition_to_beat(start_beat)
 
         # Prime automation first and get the set of parameters it handled.
         primed_by_automation = self.jack_manager._prime_automation_at_beat(effective_start_beat)
@@ -2504,16 +2490,10 @@ class Sequencer(EventDispatcher):
                 self.jack_manager.jack_client.transport_stop()
                 print("JACK transport stopped.")
 
-            beats_per_second = self.song.tempo / 60.0
-            samplerate = self.jack_manager.jack_client.samplerate
-            if beats_per_second > 0 and samplerate > 0:
-                target_frame = int((self.rewind_beat / beats_per_second) * samplerate)
-                _, pos = self.jack_manager.jack_client.transport_query_struct()
-                pos.frame = target_frame
-                self.jack_manager.jack_client.transport_reposition_struct(pos)
-                self.jack_manager._sync_playhead_to_beat(self.rewind_beat)
-                self.jack_manager.seek_audio_to_beat(self.rewind_beat)
-                self.jack_manager.set_all_audio_pause_state(True)
+            self.jack_manager.reposition_to_beat(self.rewind_beat)
+            self.jack_manager._sync_playhead_to_beat(self.rewind_beat)
+            self.jack_manager.seek_audio_to_beat(self.rewind_beat)
+            self.jack_manager.set_all_audio_pause_state(True)
         except jack.JackError as e:
             print(f"Error controlling JACK transport: {e}")
 
@@ -2634,9 +2614,7 @@ class Sequencer(EventDispatcher):
                 new_beat = 0.0
 
             # Reposition JACK transport
-            target_frame = int((new_beat / beats_per_second) * samplerate)
-            pos_struct.frame = target_frame
-            self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
+            self.jack_manager.reposition_to_beat(new_beat)
 
             # Manually sync sequencer and audio players because transport_reposition does not trigger the timebase callback
             self.jack_manager._sync_playhead_to_beat(new_beat)

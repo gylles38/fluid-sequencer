@@ -75,6 +75,25 @@ class JackManager:
         self._diag_clavier_routed = 0
         self._diag_last_target_idx = -1
         self._last_beat_rt = 0.0 # Atomic float for UI sync
+        self._last_transport_state_rt = jack.STOPPED
+
+        # --- RT Caches ---
+        self._cached_song_length = 16.0
+        self._cached_loop_enabled = False
+        self._cached_loop_start = 0.0
+        self._cached_loop_end = 16.0
+        self._cached_play_range_enabled = False
+        self._cached_play_range_end = 16.0
+        self._cached_is_recording = False
+        self._cached_tempo = 120.0
+        self._cached_tracks = []
+        self._repositioning_pending = False
+
+        # --- UI Command Flags (from MIDI) ---
+        self._pending_play_pause = False
+        self._pending_stop = False
+        self._pending_record = False
+        self._pending_mappings = collections.deque() # (mapping_obj, value)
 
         # --- Dynamic Audio Correction ---
         self.CORRECTION_GAIN = 0.02
@@ -600,16 +619,30 @@ class JackManager:
     def refresh_automation(self):
         """Forces a refresh of automation events and routing track from the project."""
         self._prepare_automation_events()
+
+        # Snapshot the track list and tempo
+        self._cached_tracks = list(self.sequencer.song.tracks)
+        self._cached_tempo = float(self.sequencer.song.tempo)
+
         # Cache armed index for RT safety
         self._cached_armed_idx = self.sequencer.get_armed_track_index()
         # Cache first MIDI track and channels for RT safety
         self._cached_first_midi_idx = None
         self._cached_channels = {}
-        for i, t in enumerate(self.sequencer.song.tracks):
+        for i, t in enumerate(self._cached_tracks):
             if is_midi_track(t):
                 if self._cached_first_midi_idx is None:
                     self._cached_first_midi_idx = i
                 self._cached_channels[i] = getattr(t, 'channel', 0)
+
+        # Cache song length and loop points for RT safety
+        self._cached_song_length = self.sequencer.get_song_length_in_beats()
+        self._cached_loop_enabled = self.sequencer.loop_enabled
+        self._cached_loop_start = self.sequencer.loop_start_beat
+        self._cached_loop_end = self.sequencer.loop_end_beat
+        self._cached_play_range_enabled = self.sequencer.play_range_enabled
+        self._cached_play_range_end = self.sequencer.play_range_end_beat
+        self._cached_is_recording = self.sequencer.is_recording
 
     def get_live_activity(self) -> Dict[int, List[int]]:
         """Returns a copy of the current live MIDI activity."""
@@ -1067,19 +1100,20 @@ class JackManager:
         """Handles MIDI control messages (transport, mappings) from the 'Clavier' port."""
         try:
             if msg.type == 'control_change':
-                # --- Handle Transport Controls ---
+                # --- Handle Transport Controls (RT Safe: No Clock.schedule_once) ---
                 if msg.value == 127:
                     if msg.control == self.sequencer.midi_config.get_transport_cc("play_pause"):
-                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("play_pause"))
+                        self._pending_play_pause = True
                     elif msg.control == self.sequencer.midi_config.get_transport_cc("stop"):
-                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("stop"))
+                        self._pending_stop = True
                     elif msg.control == self.sequencer.midi_config.get_transport_cc("record_arm"):
-                        Clock.schedule_once(lambda dt: self.sequencer.process_transport_command("record"))
+                        self._pending_record = True
 
                 # --- Handle Custom MIDI Mappings (Volume, Pan, etc.) ---
                 for mapping in self.sequencer.song.midi_mappings:
                     if mapping.channel == msg.channel and mapping.control == msg.control:
-                        Clock.schedule_once(lambda dt, m=mapping, v=msg.value: self.sequencer._apply_midi_mapping_action(m, v))
+                        # Queue for UI thread processing
+                        self._pending_mappings.append((mapping, msg.value))
         except Exception:
             pass
 
@@ -1091,9 +1125,9 @@ class JackManager:
             accurate_beat = start_beat_of_block + (offset / samplerate) * beats_per_second
 
             if msg.type == 'note_on' and msg.velocity > 0:
-                # Auto-start transport if recording and stopped
-                if self.sequencer.playback_state == 'stopped':
-                    Clock.schedule_once(lambda dt: self.sequencer.play())
+                # Auto-start transport if recording and stopped (RT Safe flag)
+                if self._last_transport_state_rt == jack.STOPPED:
+                    self._pending_play_pause = True
 
                 track_idx = self._get_input_routing_value(accurate_beat)
                 if track_idx is not None:
@@ -1169,13 +1203,13 @@ class JackManager:
             self._last_beat_rt = current_beat
 
     def _process_midi_events(self, start_beat_of_block, end_beat_of_block):
-        tracks = self.sequencer.song.tracks
+        tracks = self._cached_tracks
         is_any_track_soloed = any(getattr(t, 'is_solo', False) for t in tracks)
 
         for i, track in enumerate(tracks):
             # --- Live Preview Override ---
             if i in self.sequencer.track_overrides:
-                is_recording_this_track = self.sequencer.is_recording and self.sequencer.get_armed_track_index() == i
+                is_recording_this_track = self._cached_is_recording and self._cached_armed_idx == i
                 if not is_recording_this_track:
                     track = self.sequencer.track_overrides[i]
 
@@ -1225,12 +1259,13 @@ class JackManager:
         primed_params = set()
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
-        for track in self.sequencer.song.tracks:
+        tracks = self._cached_tracks
+        for track in tracks:
             if not isinstance(track, AutomationTrack):
                 continue
 
             # This logic only works if the target track is valid
-            if not 0 <= track.target_track_index < len(self.sequencer.song.tracks):
+            if not 0 <= track.target_track_index < len(tracks):
                 continue
 
             points_by_parameter: Dict[str, List[AutomationPoint]] = {}
@@ -1298,10 +1333,10 @@ class JackManager:
     def _apply_automation_event(self, event: dict, offset: int = 0):
         """Applies a single automation event."""
         target_track_index = event['target_track_index']
-        if not 0 <= target_track_index < len(self.sequencer.song.tracks):
+        if not 0 <= target_track_index < len(self._cached_tracks):
             return
 
-        target_track = self.sequencer.song.tracks[target_track_index]
+        target_track = self._cached_tracks[target_track_index]
         param_config = event['param_config']
         value = event['value']
         param_name = event['parameter'].lower()
@@ -1401,30 +1436,39 @@ class JackManager:
                 ticks_this_block += 1
 
     def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
-        if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
-            if start_beat_of_block < self.sequencer.play_range_end_beat:
-                # Schedule the stop command to be executed on the main thread
-                Clock.schedule_once(lambda dt: self.sequencer.stop())
-                self.sequencer.play_range_enabled = False # Prevent re-triggering
+        # 0. Play Range Handling (One-shot)
+        if self._cached_play_range_enabled and end_beat_of_block >= self._cached_play_range_end:
+            if start_beat_of_block < self._cached_play_range_end:
+                self._log_rt(f"Stopping at play range end: {end_beat_of_block} >= {self._cached_play_range_end}")
+                self.jack_client.transport_stop()
+                return
 
-        if self.sequencer.loop_enabled and end_beat_of_block >= self.sequencer.loop_end_beat:
-            if start_beat_of_block < self.sequencer.loop_end_beat:
+        # 1. Loop Handling (RT Safe)
+        if self._cached_loop_enabled and end_beat_of_block >= self._cached_loop_end:
+            if start_beat_of_block < self._cached_loop_end:
                 # When looping, re-prime automation to the loop start point
-                self._prime_automation_at_beat(self.sequencer.loop_start_beat)
+                self._prime_automation_at_beat(self._cached_loop_start)
 
                 beats_per_second = self.sequencer.song.tempo / 60.0
                 samplerate = self.jack_client.samplerate
                 if beats_per_second > 0 and samplerate > 0:
-                    target_frame = int((self.sequencer.loop_start_beat / beats_per_second) * samplerate)
+                    target_frame = int((self._cached_loop_start / beats_per_second) * samplerate)
                     _ , pos = self.jack_client.transport_query_struct()
                     pos.frame = target_frame
                     self.jack_client.transport_reposition_struct(pos)
+                    self._repositioning_pending = True
+                    self.last_beat = self._cached_loop_start
+                    return
 
-        song_length_beats = self.sequencer.get_song_length_in_beats()
-        if not self.sequencer.loop_enabled and not self.sequencer.is_recording and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
-            if start_beat_of_block < song_length_beats:
-                self.jack_client.transport_stop()
-                self.sequencer.playback_state = "stopped"
+        # 2. End of Song Handling (RT Safe)
+        # Only stop automatically if not recording and loop is off
+        if not self._cached_loop_enabled and not self._cached_is_recording:
+            song_length = self._cached_song_length
+            if song_length > 0 and end_beat_of_block >= song_length:
+                if start_beat_of_block < song_length:
+                    if not self._repositioning_pending:
+                        self._log_rt(f"Stopping at end of song: {end_beat_of_block} >= {song_length}")
+                        self.jack_client.transport_stop()
 
     def _process_callback(self, frames: int):
         self._in_process_callback = True
@@ -1442,7 +1486,7 @@ class JackManager:
         try:
             # --- 0. Calculate Current Beat & Timing ---
             samplerate = self.jack_client.samplerate
-            tempo = self.sequencer.song.tempo
+            tempo = self._cached_tempo
             beats_per_second = tempo / 60.0
             start_beat_of_block = self.last_beat
 
@@ -1488,8 +1532,8 @@ class JackManager:
                     current_routing_idx = self._get_input_routing_value(accurate_event_beat)
 
                     target_track = None
-                    if current_routing_idx is not None and 0 <= current_routing_idx < len(self.sequencer.song.tracks):
-                        target_track = self.sequencer.song.tracks[current_routing_idx]
+                    if current_routing_idx is not None and 0 <= current_routing_idx < len(self._cached_tracks):
+                        target_track = self._cached_tracks[current_routing_idx]
 
                     # Port lookup (Fast path: use index directly)
                     port = None
@@ -1545,6 +1589,8 @@ class JackManager:
 
             # --- 2. Handle Transport State Changes ---
             current_transport_state = self.jack_client.transport_state
+            self._last_transport_state_rt = current_transport_state # Update for UI polling
+
             if current_transport_state != self.last_transport_state:
                 # Move to background:
                 is_paused = (current_transport_state != jack.ROLLING)
@@ -1564,7 +1610,7 @@ class JackManager:
                     if self._active_notes:
                         for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                             try:
-                                track = self.sequencer.song.tracks[track_idx]
+                                track = self._cached_tracks[track_idx]
                                 if track in self.midi_out_ports:
                                     self._write_midi_safe(self.midi_out_ports[track], 0, bytes(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0).bytes()))
                             except IndexError: pass
@@ -1574,7 +1620,7 @@ class JackManager:
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                 if start_beat_of_block <= end_beat < end_beat_of_block:
                     try:
-                        track = self.sequencer.song.tracks[track_idx]
+                        track = self._cached_tracks[track_idx]
                         if track in self.midi_out_ports:
                             offset = int((end_beat - start_beat_of_block) / (end_beat_of_block - start_beat_of_block) * self._current_block_frames) if end_beat_of_block > start_beat_of_block else 0
                             offset = max(0, min(self._current_block_frames - 1, offset))
@@ -1588,16 +1634,26 @@ class JackManager:
 
             with self.process_lock:
                 for ap in self.active_audio_processes:
-                    track = self.sequencer.song.tracks[ap.track_index]
+                    if ap.track_index < len(self._cached_tracks):
+                         track = self._cached_tracks[ap.track_index]
+                    else:
+                         continue
                     if is_audio_track(track):
                         duration_beats = self.sequencer._get_audio_duration_in_beats(track)
                         if end_beat_of_block >= track.start_time + duration_beats > start_beat_of_block:
                             self._queue_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
 
-            self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
+            if not self._repositioning_pending:
+                self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
-            self.last_beat = end_beat_of_block
-            self._last_beat_rt = start_beat_of_block
+            if self._repositioning_pending:
+                 # Skip updating last_beat from end_beat_of_block if we just jumped
+                 self._repositioning_pending = False
+                 # The repositioning will take effect in the NEXT callback usually,
+                 # but for now we trust the jump we just made.
+            else:
+                 self.last_beat = end_beat_of_block
+                 self._last_beat_rt = start_beat_of_block
         except Exception as e:
             self._log_rt(f"Callback error: {e}")
         finally:

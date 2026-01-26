@@ -122,6 +122,36 @@ class Sequencer(EventDispatcher):
             self.last_beat_update_time = time.perf_counter()
             self._update_current_routing()
 
+        # 2. Update playback state from engine
+        # Use authoritative engine state to drive UI
+        engine_state = self.jack_manager._last_transport_state_rt
+        if engine_state == jack.STOPPED and self.playback_state != "stopped":
+            self.playback_state = "stopped"
+            # Silence notes if engine stopped unexpectedly
+            self.jack_manager.silence_all_midi_notes()
+        elif engine_state == jack.ROLLING and self.playback_state == "stopped":
+            # Engine started elsewhere or slaved?
+            self.playback_state = "playing"
+
+        # 3. Process Pending Commands from RT (MIDI controller)
+        if self.jack_manager._pending_play_pause:
+            self.jack_manager._pending_play_pause = False
+            self.process_transport_command("play_pause")
+
+        if self.jack_manager._pending_stop:
+            self.jack_manager._pending_stop = False
+            self.process_transport_command("stop")
+
+        if self.jack_manager._pending_record:
+            self.jack_manager._pending_record = False
+            self.process_transport_command("record")
+
+        while self.jack_manager._pending_mappings:
+            try:
+                mapping, value = self.jack_manager._pending_mappings.popleft()
+                self._apply_midi_mapping_action(mapping, value)
+            except IndexError: break
+
     def _update_current_routing(self, *args):
         """Updates the current_routing_index property based on the current beat."""
         if self.jack_manager:
@@ -2402,6 +2432,9 @@ class Sequencer(EventDispatcher):
         self.last_play_start_beat = effective_start_beat
 
 
+        # Ensure engine cache is up to date before starting
+        self.jack_manager.refresh_automation()
+
         # If a start beat is provided, reposition the transport
         if start_beat is not None:
             beats_per_second = self.song.tempo / 60.0
@@ -2411,6 +2444,7 @@ class Sequencer(EventDispatcher):
                 _ , pos = self.jack_manager.jack_client.transport_query_struct()
                 pos.frame = target_frame
                 self.jack_manager.jack_client.transport_reposition_struct(pos)
+                self.jack_manager._repositioning_pending = True
 
         # Prime automation first and get the set of parameters it handled.
         primed_by_automation = self.jack_manager._prime_automation_at_beat(effective_start_beat)

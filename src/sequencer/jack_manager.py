@@ -1437,11 +1437,17 @@ class JackManager:
 
     def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
         # 0. Play Range Handling (One-shot)
-        if self._cached_play_range_enabled and end_beat_of_block >= self._cached_play_range_end:
-            if start_beat_of_block < self._cached_play_range_end:
-                self._log_rt(f"Stopping at play range end: {end_beat_of_block} >= {self._cached_play_range_end}")
-                self.jack_client.transport_stop()
-                return
+        if self._cached_play_range_enabled and self._cached_play_range_end > 0.1:
+            if end_beat_of_block >= self._cached_play_range_end:
+                if start_beat_of_block < self._cached_play_range_end:
+                    self._log_rt(f"Stopping at play range end: end_beat={end_beat_of_block:.4f}, start_beat={start_beat_of_block:.4f}, range_end={self._cached_play_range_end:.4f}")
+                    self.jack_client.transport_stop()
+                    return
+                elif start_beat_of_block >= self._cached_play_range_end:
+                    # We are ALREADY past the end of the play range
+                    self._log_rt(f"Already past play range end: start_beat={start_beat_of_block:.4f}, range_end={self._cached_play_range_end:.4f}")
+                    self.jack_client.transport_stop()
+                    return
 
         # 1. Loop Handling (RT Safe)
         if self._cached_loop_enabled and end_beat_of_block >= self._cached_loop_end:
@@ -1464,10 +1470,14 @@ class JackManager:
         # Only stop automatically if not recording and loop is off
         if not self._cached_loop_enabled and not self._cached_is_recording:
             song_length = self._cached_song_length
-            if song_length > 0 and end_beat_of_block >= song_length:
+            if song_length > 0.1 and end_beat_of_block >= song_length:
                 if start_beat_of_block < song_length:
                     if not self._repositioning_pending:
-                        self._log_rt(f"Stopping at end of song: {end_beat_of_block} >= {song_length}")
+                        self._log_rt(f"Stopping at end of song: end_beat={end_beat_of_block:.4f}, start_beat={start_beat_of_block:.4f}, length={song_length:.4f}")
+                        self.jack_client.transport_stop()
+                elif start_beat_of_block >= song_length:
+                    if not self._repositioning_pending:
+                        self._log_rt(f"Already past end of song: start_beat={start_beat_of_block:.4f}, length={song_length:.4f}")
                         self.jack_client.transport_stop()
 
     def _process_callback(self, frames: int):
@@ -1647,13 +1657,14 @@ class JackManager:
                 self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
             if self._repositioning_pending:
-                 # Skip updating last_beat from end_beat_of_block if we just jumped
+                 # When repositioning, authoritative_beat_now SHOULD be the new position.
+                 # We update last_beat to this new position to avoid large deltas in the next callback.
+                 self.last_beat = authoritative_beat_now
                  self._repositioning_pending = False
-                 # The repositioning will take effect in the NEXT callback usually,
-                 # but for now we trust the jump we just made.
+                 # Skip logic checks for this frame
             else:
                  self.last_beat = end_beat_of_block
-                 self._last_beat_rt = start_beat_of_block
+                 self._last_beat_rt = authoritative_beat_now # Use authoritative for RT sync
         except Exception as e:
             self._log_rt(f"Callback error: {e}")
         finally:

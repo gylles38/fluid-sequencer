@@ -125,10 +125,16 @@ class Sequencer(EventDispatcher):
         # 2. Update playback state from engine
         # Use authoritative engine state to drive UI
         engine_state = self.jack_manager._last_transport_state_rt
+
+        # Grace period: ignore STOPPED engine state for 0.5s after clicking Play
+        # to allow the process callback time to update _last_transport_state_rt
+        time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
+
         if engine_state == jack.STOPPED and self.playback_state != "stopped":
-            self.playback_state = "stopped"
-            # Silence notes if engine stopped unexpectedly
-            self.jack_manager.silence_all_midi_notes()
+            if time_since_play > 0.5:
+                self.playback_state = "stopped"
+                # Silence notes if engine stopped unexpectedly
+                self.jack_manager.silence_all_midi_notes()
         elif engine_state == jack.ROLLING and self.playback_state == "stopped":
             # Engine started elsewhere or slaved?
             self.playback_state = "playing"
@@ -2426,6 +2432,9 @@ class Sequencer(EventDispatcher):
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             print("Error: Could not start JACK client.")
             return
+
+        # Set play click timestamp for UI grace period
+        self._last_play_click_time = time.perf_counter()
 
         # Store the beat from which playback is starting
         effective_start_beat = start_beat if start_beat is not None else self.rewind_beat

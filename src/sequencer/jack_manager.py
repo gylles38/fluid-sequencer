@@ -49,9 +49,12 @@ class JackManager:
         self._current_block_frames = 0
         self._recorded_notes = {} # pitch -> (start_beat, target_track_idx, velocity)
         self._recorded_events_to_merge = collections.deque()
-        self._live_forwarded_notes = {} # pitch -> target_track_idx
+        self._live_forwarded_notes = {} # pitch -> (port, channel, routing_idx)
         self._live_forwarded_ccs = collections.defaultdict(set) # cc_num -> set(target_track_idx)
         self._live_activity = collections.defaultdict(set) # track_idx -> set(pitch)
+        self._bridge_last_ccs = {} # (track_idx, cc_num) -> last_val
+        self._bridge_last_pb = {} # track_idx -> last_val
+        self._bridge_last_msg_time = 0.0 # To break extremely tight loops
         self.next_event_indices = []
         self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
         self._metronome_notes_to_turn_off = []
@@ -1253,12 +1256,17 @@ class JackManager:
         except Exception:
             pass
 
-    def _sync_playhead_to_beat(self, beat_pos: float):
+    def _sync_playhead_to_beat(self, beat_pos: float, clear_notes: bool = True):
+        """Resyncs event indices to a new beat position. RT Safe."""
         self.last_beat = beat_pos
         tracks = self._cached_tracks
         num_tracks = len(tracks)
         self.next_event_indices = [0] * num_tracks
-        self._active_notes.clear()
+
+        # When clear_notes is False (e.g. minor transport jitter), we keep scheduled Note OFFs.
+        # When True (e.g. seeking or stopping), we clear everything.
+        if clear_notes:
+            self._active_notes.clear()
 
         for i, track in enumerate(tracks):
             if isinstance(track, MidiTrack):
@@ -1612,8 +1620,16 @@ class JackManager:
             # --- 1. MIDI BRIDGE (Clavier Input Routing) ---
             # MUST BE BEFORE ANY EARLY RETURNS to ensure live playing works ALWAYS.
             if self.clavier_port:
+                # Tight Loop Safety
+                now_rt = authoritative_beat_now / beats_per_second if beats_per_second > 0 else time.time()
+
                 incoming = self.clavier_port.incoming_midi_events()
+                events_in_block = 0
                 for offset, data in incoming:
+                    if events_in_block > 128:
+                        self._log_rt("ERROR: MIDI Storm detected on Clavier! Blocking block.")
+                        break
+                    events_in_block += 1
                     try:
                         data_bytes = bytes(data)
                         # Filter out real-time messages (0xF8 and above: Clock, Start, Continue, Stop, Active Sensing, Reset)
@@ -1651,8 +1667,7 @@ class JackManager:
                             msg.channel = self._cached_channels.get(current_routing_idx, 0)
 
                         if msg.type == 'note_on' and msg.velocity > 0:
-                            # BREAK MIDI LOOPS: Ignore Note ON if the pitch is already active.
-                            # In a loopback scenario, forwarding a redundant ON triggers an infinite storm.
+                            # LOOP PROTECTION: Ignore if already ON
                             if msg.note in self._live_forwarded_notes:
                                 continue
 
@@ -1662,8 +1677,7 @@ class JackManager:
                                 with self.sync_lock: self._live_activity[current_routing_idx].add(msg.note)
 
                         elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                            # BREAK MIDI LOOPS: Only forward Note OFF if we are tracking this pitch.
-                            # If we don't check, a loopback of Note OFF creates an infinite storm.
+                            # LOOP PROTECTION: Only forward if we sent the corresponding ON
                             if msg.note in self._live_forwarded_notes:
                                 f_port, f_channel, f_routing_idx = self._live_forwarded_notes.pop(msg.note)
                                 msg.channel = f_channel
@@ -1673,24 +1687,49 @@ class JackManager:
                                         if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
                                             self._live_activity[f_routing_idx].remove(msg.note)
                             else:
-                                # Note was not being tracked (either already off or from a loop)
                                 continue
-                        else:
-                            # Forward CC, Pitch Bend, Program Change, etc.
-                            self._write_midi_safe(port, offset, bytes(msg.bytes()))
 
-                            # Special handling for Sustain Pedal (CC 64) to prevent stuck notes on routing change
-                            if msg.type == 'control_change' and msg.control == 64:
+                        elif msg.type == 'control_change':
+                            # Special handling for Sustain Pedal (CC 64)
+                            if msg.control == 64:
                                 if msg.value >= 64: # Sustain ON
                                     self._live_forwarded_ccs[64].add(current_routing_idx)
+                                    self._write_midi_safe(port, offset, bytes(msg.bytes()))
                                 else: # Sustain OFF
-                                    # Send Sustain OFF to ALL ports that previously received a Sustain ON
+                                    # Forward OFF to current and all historical tracks that had it ON
+                                    self._write_midi_safe(port, offset, bytes(msg.bytes()))
                                     for idx in list(self._live_forwarded_ccs[64]):
                                         target_port = self._midi_out_ports_by_idx.get(idx)
                                         if target_port and target_port != port:
-                                            self._log_rt(f"Forwarding Sustain OFF to previous track={idx}")
                                             self._write_midi_safe(target_port, offset, bytes(msg.bytes()))
                                     self._live_forwarded_ccs[64].clear()
+                            elif msg.control == 123: # All Notes Off (Panic)
+                                self._log_rt("PANIC received on Clavier - resetting bridge state")
+                                self._live_forwarded_notes.clear()
+                                self._live_forwarded_ccs.clear()
+                                with self.sync_lock: self._live_activity.clear()
+                                self._write_midi_safe(port, offset, bytes(msg.bytes()))
+                            else:
+                                # Standard CC Loop Protection: only forward if value changed
+                                cc_key = (current_routing_idx, msg.control)
+                                if self._bridge_last_ccs.get(cc_key) == msg.value:
+                                    continue
+                                self._bridge_last_ccs[cc_key] = msg.value
+                                self._write_midi_safe(port, offset, bytes(msg.bytes()))
+
+                        elif msg.type == 'pitchwheel':
+                            # Pitch Bend Loop Protection
+                            if self._bridge_last_pb.get(current_routing_idx) == msg.pitch:
+                                continue
+                            self._bridge_last_pb[current_routing_idx] = msg.pitch
+                            self._write_midi_safe(port, offset, bytes(msg.bytes()))
+
+                        elif msg.type == 'program_change':
+                            # Forward Program Change without specific protection (usually low traffic)
+                            self._write_midi_safe(port, offset, bytes(msg.bytes()))
+
+                        # Update last activity time
+                        self._bridge_last_msg_time = now_rt
 
                     # Handle Mappings (Volume/Pan) even if no port found for forwarding
                     if not port:
@@ -1714,10 +1753,11 @@ class JackManager:
             # Only detect jumps when ROLLING. When STOPPED, use current_beat as authoritative.
             if not self._repositioning_pending and state == jack.ROLLING:
                 beat_delta = abs(authoritative_beat_now - self.last_beat)
-                # If jump > 1/4 beat (arbitrary threshold for "jump" vs "normal playback")
-                if beat_delta > 0.25:
+                # Increase threshold to 2.0 beats for stability.
+                if beat_delta > 2.0:
                     self._log_rt(f"External jump detected: {self.last_beat:.4f} -> {authoritative_beat_now:.4f}")
-                    self._sync_playhead_to_beat(authoritative_beat_now)
+                    # CRITICAL: Don't clear notes on external jump to prevent stuck notes.
+                    self._sync_playhead_to_beat(authoritative_beat_now, clear_notes=False)
                     self._pending_seek_beat = authoritative_beat_now
 
             # --- 3.2 Handle UI-queued MIDI events ---
@@ -1812,7 +1852,8 @@ class JackManager:
                       else:
                           self._log_rt(f"Repositioning confirmed: authoritative_beat={authoritative_beat_now:.4f}")
 
-                      self.last_beat = authoritative_beat_now
+                      # CRITICAL: Resync indices when repositioning is finalized.
+                      self._sync_playhead_to_beat(authoritative_beat_now, clear_notes=True)
                       self._repositioning_pending = False
                       self._reposition_frames = 0
                  else:

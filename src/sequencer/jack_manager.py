@@ -809,6 +809,10 @@ class JackManager:
 
     def _write_midi_safe(self, port, offset: int, data: bytes):
         """Safely writes MIDI data to a JACK port, catching buffer overflows."""
+        if not self._in_process_callback:
+            # Safety check: never write to JACK buffers outside the process thread.
+            return
+
         try:
             # Native JACK MIDI events must be written as bytes
             port.write_midi_event(offset, data)
@@ -836,13 +840,18 @@ class JackManager:
             if self._live_forwarded_notes:
                 for pitch, info in list(self._live_forwarded_notes.items()):
                     try:
-                        port, channel, _ = info
+                        port, channel, routing_idx = info
                         note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=0)
-                        # Write directly if possible, or queue
-                        if self.jack_client:
-                             port.write_midi_event(0, bytes(note_off_msg.bytes()))
-                    except Exception:
-                        pass
+
+                        # RT SAFE: Queue the message for the next callback instead of writing directly
+                        if routing_idx is not None and routing_idx < len(self.sequencer.song.tracks):
+                            target_track = self.sequencer.song.tracks[routing_idx]
+                            self._queue_midi_message(target_track, note_off_msg)
+                        else:
+                            # Fallback if track is gone: queue to port object if handled by queue
+                            self._queue_midi_message(port, note_off_msg)
+                    except Exception as e:
+                        print(f"Error silencing note {pitch}: {e}")
                 self._live_forwarded_notes.clear()
 
             # 3. Clear UI activity
@@ -1632,6 +1641,17 @@ class JackManager:
                             msg.channel = self._cached_channels.get(current_routing_idx, 0)
 
                         if msg.type == 'note_on' and msg.velocity > 0:
+                            # Protection against redundant notes (stuck note prevention)
+                            if msg.note in self._live_forwarded_notes:
+                                f_port, f_channel, f_routing_idx = self._live_forwarded_notes.pop(msg.note)
+                                self._log_rt(f"Stuck note prevention: pitch={msg.note} on track={f_routing_idx}")
+                                off_msg = mido.Message('note_off', channel=f_channel, note=msg.note, velocity=0)
+                                self._write_midi_safe(f_port, offset, bytes(off_msg.bytes()))
+                                if f_routing_idx is not None:
+                                    with self.sync_lock:
+                                        if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
+                                            self._live_activity[f_routing_idx].remove(msg.note)
+
                             self._write_midi_safe(port, offset, bytes(msg.bytes()))
                             self._live_forwarded_notes[msg.note] = (port, msg.channel, current_routing_idx)
                             if current_routing_idx is not None:
@@ -1655,6 +1675,19 @@ class JackManager:
                         else:
                             # Forward CC, Pitch Bend, Program Change, etc.
                             self._write_midi_safe(port, offset, bytes(msg.bytes()))
+
+                            # Special handling for Sustain Pedal (CC 64) to prevent stuck notes on routing change
+                            if msg.type == 'control_change' and msg.control == 64:
+                                if msg.value >= 64: # Sustain ON
+                                    self._live_forwarded_ccs[64].add(current_routing_idx)
+                                else: # Sustain OFF
+                                    # Send Sustain OFF to ALL ports that previously received a Sustain ON
+                                    for idx in list(self._live_forwarded_ccs[64]):
+                                        target_port = self._midi_out_ports_by_idx.get(idx)
+                                        if target_port and target_port != port:
+                                            self._log_rt(f"Forwarding Sustain OFF to previous track={idx}")
+                                            self._write_midi_safe(target_port, offset, bytes(msg.bytes()))
+                                    self._live_forwarded_ccs[64].clear()
 
                     # Also handle transport/control CCs
                     self._handle_control_midi(msg)
@@ -1692,6 +1725,8 @@ class JackManager:
                             self._write_midi_safe(self.metronome_port, 0, bytes(msg.bytes()))
                     elif target in self.midi_out_ports:
                         self._write_midi_safe(self.midi_out_ports[target], 0, bytes(msg.bytes()))
+                    elif hasattr(target, 'write_midi_event'): # Direct port object
+                        self._write_midi_safe(target, 0, bytes(msg.bytes()))
                     events_processed += 1
                 except IndexError:
                     break

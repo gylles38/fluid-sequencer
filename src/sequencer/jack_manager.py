@@ -55,6 +55,8 @@ class JackManager:
         self._bridge_last_ccs = {} # (track_idx, cc_num) -> last_val
         self._bridge_last_pb = {} # track_idx -> last_val
         self._bridge_last_msg_time = 0.0 # To break extremely tight loops
+        self._bridge_cooldowns = {} # pitch -> (last_off_time, count)
+        self._panic_requested = False # RT safe flag
         self.next_event_indices = []
         self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
         self._metronome_notes_to_turn_off = []
@@ -825,9 +827,12 @@ class JackManager:
                 self._log_rt(f"Write error: {e}")
 
     def silence_all_midi_notes(self):
-        """Sends note_off messages for all currently playing MIDI notes and clears live activity."""
+        """
+        Sends note_off messages for all currently playing MIDI notes.
+        RT SAFE: Does not touch bridge tracking state directly.
+        """
         with self.sync_lock:
-            # 1. Clear scheduled notes
+            # 1. Clear scheduled sequencer notes
             if self._active_notes:
                 for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                     try:
@@ -839,23 +844,10 @@ class JackManager:
                         pass
                 self._active_notes.clear()
 
-            # 2. Clear live forwarded notes
-            if self._live_forwarded_notes:
-                for pitch, info in list(self._live_forwarded_notes.items()):
-                    try:
-                        port, channel, routing_idx = info
-                        note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=0)
-
-                        # RT SAFE: Queue the message for the next callback instead of writing directly
-                        if routing_idx is not None and routing_idx < len(self.sequencer.song.tracks):
-                            target_track = self.sequencer.song.tracks[routing_idx]
-                            self._queue_midi_message(target_track, note_off_msg)
-                        else:
-                            # Fallback if track is gone: queue to port object if handled by queue
-                            self._queue_midi_message(port, note_off_msg)
-                    except Exception as e:
-                        print(f"Error silencing note {pitch}: {e}")
-                self._live_forwarded_notes.clear()
+            # 2. Clear live forwarded notes (Request Panic)
+            # This allows the Audio Thread to safely send OFFs and clear tracking
+            # without race conditions that cause loops.
+            self._panic_requested = True
 
             # 3. Clear UI activity
             self._live_activity.clear()
@@ -1610,8 +1602,9 @@ class JackManager:
                         beat = pos.get('beat', 1)
                         tick = pos.get('tick', 0)
                         tpb = pos.get('ticks_per_beat', 480)
-                        bpm = self.sequencer.song.time_signature_numerator
-                        authoritative_beat_now = (bar - 1) * bpm + (beat - 1) + (tick / tpb)
+                        # Use JACK's beats_per_bar if available, fallback to sequencer TS
+                        bpb = pos.get('beats_per_bar', self.sequencer.song.time_signature_numerator)
+                        authoritative_beat_now = (bar - 1) * bpb + (beat - 1) + (tick / tpb)
                     except Exception:
                         authoritative_beat_now = (current_frame / samplerate) * beats_per_second
             else:
@@ -1620,8 +1613,22 @@ class JackManager:
             # --- 1. MIDI BRIDGE (Clavier Input Routing) ---
             # MUST BE BEFORE ANY EARLY RETURNS to ensure live playing works ALWAYS.
             if self.clavier_port:
-                # Tight Loop Safety
                 now_rt = authoritative_beat_now / beats_per_second if beats_per_second > 0 else time.time()
+
+                # --- 1.1 Handle Panic Request ---
+                if self._panic_requested:
+                    self._log_rt("PANIC: Clearing bridge tracking state and sending Note OFFs")
+                    for pitch, info in list(self._live_forwarded_notes.items()):
+                        try:
+                            f_port, f_channel, _ = info
+                            off_msg = mido.Message('note_off', channel=f_channel, note=pitch, velocity=0)
+                            self._write_midi_safe(f_port, 0, bytes(off_msg.bytes()))
+                        except Exception: pass
+                    self._live_forwarded_notes.clear()
+                    self._live_forwarded_ccs.clear()
+                    self._bridge_last_ccs.clear()
+                    self._bridge_last_pb.clear()
+                    self._panic_requested = False
 
                 incoming = self.clavier_port.incoming_midi_events()
                 events_in_block = 0
@@ -1667,9 +1674,23 @@ class JackManager:
                             msg.channel = self._cached_channels.get(current_routing_idx, 0)
 
                         if msg.type == 'note_on' and msg.velocity > 0:
-                            # LOOP PROTECTION: Ignore if already ON
+                            # LOOP PROTECTION 1: Ignore if already ON
                             if msg.note in self._live_forwarded_notes:
                                 continue
+
+                            # LOOP PROTECTION 2: Cooldown (50ms) to break echo oscillations
+                            cooldown_info = self._bridge_cooldowns.get(msg.note)
+                            if cooldown_info:
+                                last_off, count = cooldown_info
+                                if now_rt - last_off < 0.050:
+                                    if count > 5: # Repeated echo detected
+                                        if count == 6: self._log_rt(f"STORM SHIELD: Pitch {msg.note} blocked (echo oscillation)")
+                                        self._bridge_cooldowns[msg.note] = (last_off, count + 1)
+                                        continue
+                                    self._bridge_cooldowns[msg.note] = (last_off, count + 1)
+                                else:
+                                    # Reset cooldown after healthy gap
+                                    del self._bridge_cooldowns[msg.note]
 
                             self._write_midi_safe(port, offset, bytes(msg.bytes()))
                             self._live_forwarded_notes[msg.note] = (port, msg.channel, current_routing_idx)
@@ -1686,6 +1707,9 @@ class JackManager:
                                     with self.sync_lock:
                                         if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
                                             self._live_activity[f_routing_idx].remove(msg.note)
+
+                                # Set cooldown to block immediate echo ON
+                                self._bridge_cooldowns[msg.note] = (now_rt, 1)
                             else:
                                 continue
 
@@ -1750,7 +1774,7 @@ class JackManager:
 
             # --- 3. Sequencing Logic ---
             # --- 3.1 Detect External Jumps ---
-            # Only detect jumps when ROLLING. When STOPPED, use current_beat as authoritative.
+            # ONLY detect jumps when ROLLING. Timing jitter when stopped is normal and should be ignored.
             if not self._repositioning_pending and state == jack.ROLLING:
                 beat_delta = abs(authoritative_beat_now - self.last_beat)
                 # Increase threshold to 2.0 beats for stability.

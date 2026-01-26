@@ -2452,6 +2452,7 @@ class Sequencer(EventDispatcher):
 
         # Simply tell JACK to start rolling
         if self.jack_manager.jack_client.transport_state != jack.ROLLING:
+            print("UI: Starting JACK transport...")
             self.jack_manager.jack_client.transport_start()
             self.playback_state = "playing"
 

@@ -565,6 +565,19 @@ class JackManager:
                 self._correction_thread.daemon = True
                 self._correction_thread.start()
 
+                # --- Finalize engine state ---
+                self.refresh_automation()
+
+                # --- Attempt auto-connect physical keyboard ---
+                # Search for ports with common keyboard names
+                kb_keywords = ["MPK", "Midi", "Keyboard", "USB", "Key", "Piano", "Arturia", "Launchkey"]
+                for keyword in kb_keywords:
+                    kb_port = self.find_port_by_name(keyword)
+                    if kb_port and ":events-out" in kb_port:
+                        self.auto_connect_dynamic(kb_port, self.clavier_port.name)
+                        self._log_rt(f"Auto-connected physical keyboard: {kb_port}")
+                        break
+
                 print("JACK client started and activated.")
             except Exception as e:
                 self._log_rt(f"Error starting JACK client: {e}")
@@ -1556,14 +1569,13 @@ class JackManager:
             if self._cb_count == 1:
                 self._log_rt("First process callback triggered!")
             # Log every ~5 seconds (assuming ~48kHz and 1024 block size)
-            if self._cb_count % 250 == 0:
-                self._log_rt(f"Heartbeat #{self._cb_count//250} (block={self._cb_count}, frames={frames})")
+            if self._cb_count % 500 == 0:
+                self._log_rt(f"Heartbeat #{self._cb_count//500} (status={self.jack_client.transport_state}, beat={self.last_beat:.2f})")
 
-            # --- 0. Calculate Current Beat & Timing ---
+            # --- 0. Timing (Needed for Bridge) ---
             samplerate = self.jack_client.samplerate
             tempo = self._cached_tempo
             beats_per_second = tempo / 60.0
-            start_beat_of_block = self.last_beat
 
             state, pos_struct = self.jack_client.transport_query_struct()
             pos = jack.position2dict(pos_struct)
@@ -1574,32 +1586,8 @@ class JackManager:
             else:
                 authoritative_beat_now = self.last_beat
 
-            end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second if samplerate > 0 else authoritative_beat_now
-
-            # --- 0.5 Detect External Jumps ---
-            if not self._repositioning_pending:
-                beat_delta = abs(authoritative_beat_now - self.last_beat)
-                # If jump > 1/4 beat (arbitrary threshold for "jump" vs "normal playback")
-                if beat_delta > 0.25:
-                    self._log_rt(f"External jump detected: {self.last_beat:.4f} -> {authoritative_beat_now:.4f}")
-                    self._sync_playhead_to_beat(authoritative_beat_now)
-                    self._pending_seek_beat = authoritative_beat_now
-
-            # --- 1. Handle UI-queued MIDI events ---
-            events_processed = 0
-            while events_processed < 64:
-                try:
-                    target, msg = self._out_event_queue.popleft()
-                    if target == -1: # Metronome
-                        if self.metronome_port:
-                            self._write_midi_safe(self.metronome_port, 0, bytes(msg.bytes()))
-                    elif target in self.midi_out_ports:
-                        self._write_midi_safe(self.midi_out_ports[target], 0, bytes(msg.bytes()))
-                    events_processed += 1
-                except IndexError:
-                    break
-
-            # --- 1.5 Handle Clavier Input Routing & Pass-through ---
+            # --- 1. MIDI BRIDGE (Clavier Input Routing) ---
+            # MUST BE BEFORE ANY EARLY RETURNS to ensure live playing works ALWAYS.
             if self.clavier_port:
                 incoming = self.clavier_port.incoming_midi_events()
                 for offset, data in incoming:
@@ -1612,7 +1600,7 @@ class JackManager:
                         continue
 
                     # Accurate timing for this event
-                    accurate_event_beat = start_beat_of_block + (offset / samplerate) * beats_per_second if samplerate > 0 else start_beat_of_block
+                    accurate_event_beat = authoritative_beat_now + (offset / samplerate) * beats_per_second if samplerate > 0 else authoritative_beat_now
                     current_routing_idx = self._get_input_routing_value(accurate_event_beat)
 
                     target_track = None
@@ -1620,9 +1608,7 @@ class JackManager:
                         target_track = self._cached_tracks[current_routing_idx]
 
                     # Port lookup (Fast path: use index directly)
-                    port = None
-                    if current_routing_idx is not None:
-                        port = self._midi_out_ports_by_idx.get(current_routing_idx)
+                    port = self._midi_out_ports_by_idx.get(current_routing_idx) if current_routing_idx is not None else None
 
                     # Robust fallback: use object
                     if not port and target_track:
@@ -1644,7 +1630,6 @@ class JackManager:
                                 f_port, f_channel, f_routing_idx = self._live_forwarded_notes.pop(msg.note)
                                 msg.channel = f_channel
                                 self._write_midi_safe(f_port, offset, bytes(msg.bytes()))
-                                # Update UI activity using the ORIGINAL routing index
                                 if f_routing_idx is not None:
                                     with self.sync_lock:
                                         if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
@@ -1669,9 +1654,37 @@ class JackManager:
                         self._diag_last_target_idx = current_routing_idx
 
                     if self._cached_is_recording:
-                        self._record_midi_event(msg, start_beat_of_block, offset)
+                        self._record_midi_event(msg, authoritative_beat_now, offset)
 
-            # --- 2. Handle Transport State Changes ---
+            # --- 2. Calculate Block Range (For Sequencing) ---
+            start_beat_of_block = self.last_beat
+            end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second if samplerate > 0 else authoritative_beat_now
+
+            # --- 3. Sequencing Logic ---
+            # --- 3.1 Detect External Jumps ---
+            if not self._repositioning_pending:
+                beat_delta = abs(authoritative_beat_now - self.last_beat)
+                # If jump > 1/4 beat (arbitrary threshold for "jump" vs "normal playback")
+                if beat_delta > 0.25:
+                    self._log_rt(f"External jump detected: {self.last_beat:.4f} -> {authoritative_beat_now:.4f}")
+                    self._sync_playhead_to_beat(authoritative_beat_now)
+                    self._pending_seek_beat = authoritative_beat_now
+
+            # --- 3.2 Handle UI-queued MIDI events ---
+            events_processed = 0
+            while events_processed < 64:
+                try:
+                    target, msg = self._out_event_queue.popleft()
+                    if target == -1: # Metronome
+                        if self.metronome_port:
+                            self._write_midi_safe(self.metronome_port, 0, bytes(msg.bytes()))
+                    elif target in self.midi_out_ports:
+                        self._write_midi_safe(self.midi_out_ports[target], 0, bytes(msg.bytes()))
+                    events_processed += 1
+                except IndexError:
+                    break
+
+            # --- 4. Handle Transport State Changes ---
             current_transport_state = self.jack_client.transport_state
             self._last_transport_state_rt = current_transport_state # Update for UI polling
 
@@ -1751,12 +1764,15 @@ class JackManager:
                       self._repositioning_pending = False
                       self._reposition_frames = 0
                  else:
-                      # Still waiting for jump to take effect
-                      return # Skip logic until jump is visible
+                      # Still waiting for jump to take effect.
+                      # We ONLY return early if the transport is ROLLING.
+                      # If it's stopped, we want to allow UI updates to stay synced to the target.
+                      if self.jack_client.transport_state == jack.ROLLING:
+                          return
 
-            if not self._repositioning_pending:
-                 self.last_beat = end_beat_of_block
-                 self._last_beat_rt = authoritative_beat_now # Use authoritative for RT sync
+            # Always update these if we didn't return early
+            self.last_beat = end_beat_of_block
+            self._last_beat_rt = authoritative_beat_now # Use authoritative for RT sync
         except Exception as e:
             import traceback
             tb = traceback.format_exc()

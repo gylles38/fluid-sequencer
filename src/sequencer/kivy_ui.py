@@ -1738,9 +1738,10 @@ class SequencerLayout(BoxLayout):
     def poll_live_activity(self, dt):
         """Polls the JackManager for live MIDI activity and updates the sequencer property."""
         if self.sequencer and self.sequencer.jack_manager and self.sequencer.jack_manager.is_running:
+            # Force update to ensure Kivy's binding system catches the change
             activity = self.sequencer.jack_manager.get_live_activity()
-            if activity != self.sequencer.live_notes:
-                self.sequencer.live_notes = activity
+            self.sequencer.live_notes = {} # Reset to force 'on_live_notes' if contents are same
+            self.sequencer.live_notes = activity
 
     def update_playhead(self, dt):
         """

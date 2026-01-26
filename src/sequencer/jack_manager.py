@@ -406,10 +406,8 @@ class JackManager:
             self._cb_count = 0 # Reset heartbeat counter
 
             try:
-                # Ensure client name is safe for JACK and unique
-                base_name = self.sequencer.song.name or "NewSong"
-                sanitized_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in base_name)
-                client_name = f"{sanitized_name}-{os.getpid()}"
+                # FIXED: Constant client name to allow persistent connections in Carla/Patchbay
+                client_name = "Sequencer-DAW"
 
                 self._log_rt(f"Creating JACK client: {client_name}")
 
@@ -723,7 +721,8 @@ class JackManager:
     def get_live_activity(self) -> Dict[int, List[int]]:
         """Returns a copy of the current live MIDI activity."""
         with self.sync_lock:
-            return {idx: list(notes) for idx, notes in self._live_activity.items()}
+            # Only return tracks that actually have active notes
+            return {idx: list(notes) for idx, notes in self._live_activity.items() if notes}
 
     def get_diagnostics(self) -> dict:
         """Returns engine diagnostics for UI/CLI display."""
@@ -1513,19 +1512,18 @@ class JackManager:
         if self._cached_play_range_enabled and self._cached_play_range_end > 0.1:
             if end_beat_of_block >= self._cached_play_range_end:
                 if start_beat_of_block < self._cached_play_range_end:
-                    self._log_rt(f"Stopping at play range end: end_beat={end_beat_of_block:.4f}, start_beat={start_beat_of_block:.4f}, range_end={self._cached_play_range_end:.4f}")
+                    self._log_rt(f"STOP: Play range end (target={self._cached_play_range_end:.2f}, end_block={end_beat_of_block:.2f})")
                     self.jack_client.transport_stop()
                     return
                 elif start_beat_of_block >= self._cached_play_range_end:
-                    # We are ALREADY past the end of the play range
-                    self._log_rt(f"Already past play range end: start_beat={start_beat_of_block:.4f}, range_end={self._cached_play_range_end:.4f}")
+                    self._log_rt(f"STOP: Already past play range end (start_block={start_beat_of_block:.2f})")
                     self.jack_client.transport_stop()
                     return
 
         # 1. Loop Handling (RT Safe)
         if self._cached_loop_enabled and end_beat_of_block >= self._cached_loop_end:
             if start_beat_of_block < self._cached_loop_end:
-                # When looping, re-prime automation to the loop start point
+                self._log_rt(f"LOOPING: {self._cached_loop_end:.2f} -> {self._cached_loop_start:.2f}")
                 self._prime_automation_at_beat(self._cached_loop_start)
 
                 beats_per_second = self.sequencer.song.tempo / 60.0
@@ -1540,17 +1538,16 @@ class JackManager:
                     return
 
         # 2. End of Song Handling (RT Safe)
-        # Only stop automatically if not recording and loop is off
         if not self._cached_loop_enabled and not self._cached_is_recording:
             song_length = self._cached_song_length
             if song_length > 0.1 and end_beat_of_block >= song_length:
                 if start_beat_of_block < song_length:
                     if not self._repositioning_pending:
-                        self._log_rt(f"Stopping at end of song: end_beat={end_beat_of_block:.4f}, start_beat={start_beat_of_block:.4f}, length={song_length:.4f}")
+                        self._log_rt(f"STOP: End of song (length={song_length:.2f}, end_block={end_beat_of_block:.2f})")
                         self.jack_client.transport_stop()
                 elif start_beat_of_block >= song_length:
                     if not self._repositioning_pending:
-                        self._log_rt(f"Already past end of song: start_beat={start_beat_of_block:.4f}, length={song_length:.4f}")
+                        self._log_rt(f"STOP: Already past end of song (start_block={start_beat_of_block:.2f})")
                         self.jack_client.transport_stop()
 
     def _shutdown_callback(self, status, reason):
@@ -1582,7 +1579,20 @@ class JackManager:
             current_frame = pos.get('frame', 0)
 
             if samplerate > 0 and beats_per_second > 0:
-                authoritative_beat_now = (current_frame / samplerate) * beats_per_second
+                # Use current_frame if rolling, otherwise rely on transport_query bar/beat if available
+                if state == jack.ROLLING:
+                    authoritative_beat_now = (current_frame / samplerate) * beats_per_second
+                else:
+                    # When stopped/starting, try to get position from structure
+                    try:
+                        bar = pos.get('bar', 1)
+                        beat = pos.get('beat', 1)
+                        tick = pos.get('tick', 0)
+                        tpb = pos.get('ticks_per_beat', 480)
+                        bpm = self.sequencer.song.time_signature_numerator
+                        authoritative_beat_now = (bar - 1) * bpm + (beat - 1) + (tick / tpb)
+                    except Exception:
+                        authoritative_beat_now = (current_frame / samplerate) * beats_per_second
             else:
                 authoritative_beat_now = self.last_beat
 
@@ -1593,7 +1603,9 @@ class JackManager:
                 for offset, data in incoming:
                     try:
                         data_bytes = bytes(data)
-                        if data_bytes[0] >= 0xF8: continue # Skip real-time sync
+                        # Filter out real-time messages (0xF8 and above: Clock, Start, Continue, Stop, Active Sensing, Reset)
+                        if data_bytes[0] >= 0xF8:
+                            continue
 
                         msg = mido.Message.from_bytes(data_bytes)
                     except Exception:

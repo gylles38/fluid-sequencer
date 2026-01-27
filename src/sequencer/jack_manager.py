@@ -198,7 +198,7 @@ class JackManager:
 
     def get_midi_input_ports(self):
         """
-        Retourne une liste de tous les ports de sortie MIDI (capture) disponibles.
+        Retourne une liste de tous les ports de sortie MIDI (capture) disponibles sur le système.
         Note: Dans Carla, ce sont les ports rouges 'capture'.
         On cherche les ports qui ont jack.IS_OUTPUT (ils produisent du MIDI qu'on peut lire).
         """
@@ -210,7 +210,27 @@ class JackManager:
             ports = self.jack_client.get_ports(is_midi=True, is_output=True)
             return [p.name for p in ports]
         except Exception as e:
-            print(f"Error listing MIDI ports: {e}", file=sys.stderr)
+            print(f"Error listing MIDI input ports: {e}", file=sys.stderr)
+            return []
+
+    def get_midi_destination_ports(self):
+        """
+        Retourne une liste de tous les ports d'entrée MIDI (playback) disponibles sur le système.
+        Note: Dans Carla, ce sont les ports bleus 'playback'.
+        Ce sont les ports auxquels on peut envoyer du MIDI (ex: Helm:events-in).
+        """
+        if not self.jack_client:
+            return []
+
+        try:
+            # On cherche les ports MIDI qui sont des ENTRÉES (donc des destinations pour nous)
+            ports = self.jack_client.get_ports(is_midi=True, is_input=True)
+
+            # On filtre nos propres ports d'entrée pour éviter de se connecter à soi-même
+            my_name = self.jack_client.name
+            return [p.name for p in ports if not p.name.startswith(my_name)]
+        except Exception as e:
+            print(f"Error listing MIDI destination ports: {e}", file=sys.stderr)
             return []
 
     def open_midi_port(self, port_name: str):
@@ -568,7 +588,7 @@ class JackManager:
 
                 # --- Attempt auto-connect physical keyboard ---
                 # Search for ports with common keyboard names
-                kb_keywords = ["MPK", "Midi", "Keyboard", "USB", "Key", "Piano", "Arturia", "Launchkey"]
+                kb_keywords = ["MPK", "Akai", "Midi", "Keyboard", "USB", "Key", "Piano", "Arturia", "Launchkey"]
                 for keyword in kb_keywords:
                     kb_port = self.find_port_by_name(keyword)
                     if kb_port and ":events-out" in kb_port:

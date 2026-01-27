@@ -672,11 +672,26 @@ class SequencerLayout(BoxLayout):
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
 
-        # Show MIDI input selection on startup if not already set (only if not in JACK mode)
-        if not self.sequencer.default_record_port and not self.sequencer.jack_manager.is_running:
-            Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
+        # Show MIDI input selection on startup if not already set or connected
+        Clock.schedule_once(self._check_startup_midi, 1.0)
 
         Window.bind(on_key_down=self._on_keyboard_down)
+
+    def _check_startup_midi(self, dt):
+        """Checks if a MIDI input is connected on startup, otherwise prompts the user."""
+        is_jack = self.sequencer.jack_manager.is_running
+
+        if is_jack:
+            # In JACK mode, we check if the 'Clavier' bridge has any connections
+            diag = self.sequencer.jack_manager.get_diagnostics()
+            if not diag.get("clavier_connected", False):
+                Logger.info("UI: No MIDI keyboard connected to the bridge. Prompting user.")
+                self.show_midi_settings()
+        else:
+            # In ALSA mode, check if a default port is set
+            if not self.sequencer.default_record_port:
+                Logger.info("UI: No default MIDI port set in ALSA mode. Prompting user.")
+                self.show_midi_settings()
 
     def on_song_structure_changed(self, *args):
         """
@@ -795,6 +810,7 @@ class SequencerLayout(BoxLayout):
     def show_midi_settings(self):
         """Affiche les paramètres MIDI (JACK natif si actif)"""
 
+        # We re-evaluate is_jack here because the user might have started/stopped the engine
         is_jack = self.sequencer.jack_manager.is_running
         
         def apply_settings(port_name):
@@ -802,8 +818,8 @@ class SequencerLayout(BoxLayout):
 
             if is_jack:
                 # En mode JACK, on connecte le port sélectionné à notre entrée 'Clavier'
-                self.sequencer.set_default_record_port(port_name)
-                self.show_info_popup("JACK MIDI Bridge", f"Source Clavier connectée:\n{port_name}")
+                res = self.sequencer.set_default_record_port(port_name)
+                self.show_info_popup("JACK MIDI Bridge", f"Source Clavier connectée:\n{port_name}\n\n{res}")
             else:
                 # Mode ALSA classique (legacy)
                 try:

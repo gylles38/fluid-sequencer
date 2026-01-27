@@ -25,6 +25,8 @@ class CustomSongEncoder(json.JSONEncoder):
                 'metronome_pan': o.metronome_pan,
                 'carla_project_path': o.carla_project_path,
                 'aj_snapshot_path': o.aj_snapshot_path,
+                'keyboard_source_port': o.keyboard_source_port,
+                'input_routing': o.input_routing,
             }
         if isinstance(o, MidiTrack):
             return {

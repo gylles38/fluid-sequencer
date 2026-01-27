@@ -767,8 +767,11 @@ class AutomationEditor(FloatingWindow):
 
     def _post_kv_init(self, dt):
         """Final UI setup after the kv string is loaded."""
-        target_track = self.sequencer_layout.sequencer.song.tracks[self.track.target_track_index]
-        track_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
+        if self.track.target_track_index == -1:
+            track_type = 'routing'
+        else:
+            target_track = self.sequencer_layout.sequencer.song.tracks[self.track.target_track_index]
+            track_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
 
         automation_controls = self.ids.automation_controls
         automation_controls.track_type = track_type
@@ -998,7 +1001,10 @@ class AutomationEditor(FloatingWindow):
     def on_automation_selection_change(self, instance, param):
         self.selected_parameter = param
 
-        if param in ["prog", "vel"]:
+        if param == "input_routing":
+            self.min_val = 0.0
+            self.max_val = float(max(1, len(self.sequencer_layout.sequencer.song.tracks) - 1))
+        elif param in ["prog", "vel"]:
             self.min_val, self.max_val = 0.0, 127.0
         elif param == "pan":
             self.min_val, self.max_val = -1.0, 1.0

@@ -335,6 +335,21 @@ class Sequencer(EventDispatcher):
         """Retourne le port d'enregistrement par défaut"""
         return self.default_record_port
 
+    def get_input_routing_track(self) -> AutomationTrack:
+        """Returns the dedicated automation track for MIDI input routing."""
+        if self.song.input_routing is None:
+            self.song.input_routing = AutomationTrack(
+                name="Input Routing",
+                target_track_index=-1  # Special index for routing
+            )
+        return self.song.input_routing
+
+    def set_keyboard_port(self, port_name: str) -> str:
+        """Sets the JACK MIDI port to be used as the keyboard source."""
+        self.song.keyboard_source_port = port_name
+        self.is_dirty = True
+        return f"Keyboard source port set to: {port_name}"
+
     def invalidate_song_length_cache(self):
         """Invalidates the cached song length."""
         self._cached_song_length_beats = None

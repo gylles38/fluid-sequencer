@@ -57,6 +57,10 @@ class JackManager:
         self._correction_stop_event = threading.Event()
         self.last_applied_speeds = {}
 
+        # --- Dynamic Keyboard Routing ---
+        self._routing_thread = None
+        self._routing_stop_event = threading.Event()
+
     def find_port_by_name(self, pattern):
         """
         Cherche un port JACK complet qui contient le 'pattern' donné.
@@ -143,12 +147,21 @@ class JackManager:
 
     def get_midi_input_ports(self):
         """
-        Retourne une liste de tous les ports d'entrée MIDI JACK disponibles (se terminant par :events-in).
+        Retourne une liste de tous les ports d'entrée MIDI JACK disponibles.
+        (Ports de type 'output' du point de vue de JACK, car ils émettent du MIDI).
         """
+        if self.jack_client:
+            try:
+                ports = self.jack_client.get_ports(is_midi=True, is_output=True)
+                return [p.name for p in ports]
+            except jack.JackError:
+                pass
+
         try:
             result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
             all_ports = result.stdout.splitlines()
-            midi_input_ports = [port.strip() for port in all_ports if port.strip().endswith(':events-in')]
+            # On cherche les ports qui sont des sorties (capture)
+            midi_input_ports = [port.strip() for port in all_ports if 'capture' in port.lower() or port.strip().endswith(':out')]
             return midi_input_ports
         except FileNotFoundError:
             print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
@@ -444,6 +457,12 @@ class JackManager:
                 self._correction_thread.daemon = True
                 self._correction_thread.start()
 
+                # --- Start the routing thread ---
+                self._routing_stop_event.clear()
+                self._routing_thread = threading.Thread(target=self._routing_worker_loop)
+                self._routing_thread.daemon = True
+                self._routing_thread.start()
+
                 print("JACK client started and activated.")
             except jack.JackError as e:
                 print(f"Error starting JACK client: {e}")
@@ -467,6 +486,12 @@ class JackManager:
             self._correction_stop_event.set()
             self._correction_thread.join(timeout=1.0)
             self._correction_thread = None
+
+        # Stop the routing thread
+        if self._routing_thread and self._routing_thread.is_alive():
+            self._routing_stop_event.set()
+            self._routing_thread.join(timeout=1.0)
+            self._routing_thread = None
 
         # Deactivate and close the JACK client
         if self.jack_client:
@@ -499,6 +524,119 @@ class JackManager:
     def get_current_beat(self) -> float:
         """Retourne la position actuelle du transport en beats."""
         return self.last_beat
+
+    def _get_input_routing_value(self, beat: float) -> Optional[int]:
+        """
+        Returns the target track index for MIDI input routing at the given beat.
+        Prioritization:
+        1. Automation points on the routing track.
+        2. Armed track index.
+        3. Final Fallback: First MIDI track.
+        """
+        # 1. Automation Priority
+        routing_track = self.sequencer.song.input_routing
+        if routing_track and routing_track.points:
+            # We filter points for 'input_routing' parameter
+            routing_points = [p for p in routing_track.points if p.parameter == 'input_routing']
+            if routing_points:
+                val = routing_track.get_value_at(beat, 'input_routing')
+                if val is not None:
+                    return int(round(val))
+
+        # 2. Armed Track Priority
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
+                return i
+
+        # 3. Final Fallback
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if isinstance(track, MidiTrack):
+                return i
+
+        return None
+
+    def _routing_worker_loop(self):
+        """
+        Background loop that manages JACK connections between the keyboard and
+        the target instrument based on the input_routing automation.
+        """
+        last_target_idx = -1
+        last_kb_port_name = None
+
+        while not self._routing_stop_event.is_set():
+            try:
+                if not self.jack_client or not self.is_running:
+                    time.sleep(0.5)
+                    continue
+
+                kb_port_pattern = self.sequencer.song.keyboard_source_port
+                if not kb_port_pattern:
+                    time.sleep(0.5)
+                    continue
+
+                kb_port_name = self.find_port_by_name(kb_port_pattern)
+                if not kb_port_name:
+                    # Occasional retry if port is missing
+                    time.sleep(1.0)
+                    continue
+
+                if self.jack_client.transport_state != jack.ROLLING:
+                    # When stopped, disconnect to avoid unintended sounds
+                    if last_target_idx != -1:
+                        self._disconnect_keyboard(kb_port_name)
+                        last_target_idx = -1
+                    time.sleep(0.1)
+                    continue
+
+                current_beat = self.last_beat
+                target_idx = self._get_input_routing_value(current_beat)
+
+                if target_idx != last_target_idx or kb_port_name != last_kb_port_name:
+                    self._update_routing_connections(kb_port_name, target_idx, last_target_idx)
+                    last_target_idx = target_idx
+                    last_kb_port_name = kb_port_name
+
+            except jack.JackError:
+                # Likely disconnected during shutdown
+                break
+            except Exception as e:
+                print(f"Error in routing worker loop: {e}", file=sys.stderr)
+
+            time.sleep(0.05)
+
+    def _update_routing_connections(self, kb_port_name, target_idx, last_target_idx):
+        # 1. Disconnect from previous target
+        if last_target_idx != -1 and last_target_idx < len(self.sequencer.song.tracks):
+            old_track = self.sequencer.song.tracks[last_target_idx]
+            if isinstance(old_track, MidiTrack) and old_track.output_port_name:
+                dest_port = self.find_port_by_name(old_track.output_port_name)
+                if dest_port:
+                    try:
+                        self.jack_client.disconnect(kb_port_name, dest_port)
+                    except jack.JackError: pass
+
+        # 2. Connect to new target
+        if target_idx is not None and target_idx < len(self.sequencer.song.tracks):
+            new_track = self.sequencer.song.tracks[target_idx]
+            if isinstance(new_track, MidiTrack) and new_track.output_port_name:
+                dest_port = self.find_port_by_name(new_track.output_port_name)
+                if dest_port:
+                    try:
+                        self.jack_client.connect(kb_port_name, dest_port)
+                        print(f"JACK Conductor: Routed keyboard to track {target_idx} ('{new_track.name}') -> {dest_port}")
+                    except jack.JackError:
+                        # Might already be connected
+                        pass
+
+    def _disconnect_keyboard(self, kb_port_name):
+        """Disconnects the keyboard from all MIDI track destination ports."""
+        for track in self.sequencer.song.tracks:
+            if isinstance(track, MidiTrack) and track.output_port_name:
+                dest_port = self.find_port_by_name(track.output_port_name)
+                if dest_port:
+                    try:
+                        self.jack_client.disconnect(kb_port_name, dest_port)
+                    except jack.JackError: pass
 
     def silence_all_midi_notes(self):
         """Sends note_off messages for all currently playing MIDI notes."""

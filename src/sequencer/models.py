@@ -153,7 +153,7 @@ class AutomationPoint:
                     raise ValueError("CC number must be between 0 and 127.")
             except (ValueError, IndexError):
                  raise ValueError(f"Invalid CC parameter format: {self.parameter}")
-        elif param_lower not in ["vol", "pan", "vel", "prog"]:
+        elif param_lower not in ["vol", "pan", "vel", "prog", "input_routing"]:
              raise ValueError(f"Invalid parameter name: {self.parameter}")
         self.parameter = param_lower
 
@@ -256,6 +256,8 @@ class Song:
     metronome_pan: float = 0.0
     carla_project_path: Optional[str] = None
     aj_snapshot_path: Optional[str] = None
+    keyboard_source_port: Optional[str] = None
+    input_routing: Optional[AutomationTrack] = None
 
     def add_track(self, track: AnyTrack):
         """Adds a track to the song, assigning a default channel if it's a MIDI track."""

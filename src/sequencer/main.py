@@ -591,6 +591,12 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             print(result)
         else:
             print("Usage: setrecordport <port_name>")           
+    elif command == "setkbport":
+        if len(args) == 1:
+            result = seq.set_keyboard_port(args[0])
+            print(result)
+        else:
+            print("Usage: setkbport <port_name>")
 ###
     elif command.startswith("recordmode"):
         # Commande pour changer le mode d'enregistrement d'une piste

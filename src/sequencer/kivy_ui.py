@@ -48,6 +48,7 @@ from sequencer.ui_components.VportsPopup import VportsPopup
 from sequencer.ui_components.PreferencesPopup import PreferencesPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.ui_components.Ruler import Ruler
+from sequencer.ui_components.automation_editor import AutomationEditor
 # ============================================
 
 from sequencer.sequencer import Sequencer
@@ -552,6 +553,14 @@ class SequencerLayout(BoxLayout):
         )
         toolbar_card.add_widget(add_automation_track_button)
 
+        # Bouton pour l'aiguillage MIDI (Routing)
+        routing_button = TooltipMDIconButton(
+            icon="lan",
+            tooltip_text="MIDI Input Routing (Conductor)",
+            on_release=lambda x: self.open_input_routing_editor()
+        )
+        toolbar_card.add_widget(routing_button)
+
         # Bouton pour supprimer une piste
         delete_track_button = TooltipMDIconButton(
             icon="playlist-minus",
@@ -759,44 +768,49 @@ class SequencerLayout(BoxLayout):
 
     def show_midi_settings(self):
         """Affiche les paramètres MIDI"""
-        # Le menu est déjà fermé par menu_action()
         
-        def apply_settings(port_name):
-            if port_name:
-                try:
-                    import mido
-                    input_ports = mido.get_input_names()
-                    if port_name not in input_ports:
-                        self.show_error_popup("Invalid Port", 
-                                            f"Port '{port_name}' is not available.")
-                        return
-                    
-                    self.process_command_ui(f'setrecordport "{port_name}"')
-                    self.show_info_popup("Success", f"MIDI input port set to:\n{port_name}")
-                    
-                except Exception as e:
-                    self.show_error_popup("Error", f"Failed to set MIDI port:\n{str(e)}")
-        
-        try:
-            import mido
-            input_ports = mido.get_input_names()
-            
-            if not input_ports:
-                self.show_error_popup("No MIDI Input Ports", 
-                                    "No MIDI input ports found.")
+        def set_record_port_choice(instance):
+            popup_main.dismiss()
+            try:
+                import mido
+                input_ports = mido.get_input_names()
+                if not input_ports:
+                    self.show_error_popup("No MIDI Ports", "No ALSA MIDI input ports found.")
+                    return
+                current_port = getattr(self.sequencer, 'default_record_port', None)
+                self.show_port_selection_popup("Select Recording Port (ALSA)", input_ports,
+                                            lambda p: self.process_command_ui(f'setrecordport "{p}"'),
+                                            current_port)
+            except Exception as e:
+                self.show_error_popup("Error", str(e))
+
+        def set_keyboard_port_choice(instance):
+            popup_main.dismiss()
+            if not self.sequencer.jack_manager.is_running:
+                self.show_error_popup("JACK Not Running", "JACK must be running to select a keyboard port.")
                 return
-                
-            current_port = getattr(self.sequencer, 'default_record_port', None)
-            
-            self.show_port_selection_popup(
-                title="Select MIDI Input Port",
-                ports=input_ports,
-                callback=apply_settings,
-                current_port=current_port
-            )
-            
-        except Exception as e:
-            self.show_error_popup("MIDI Error", f"Cannot access MIDI system:\n\n{str(e)}")
+            ports = self.sequencer.jack_manager.get_midi_input_ports()
+            if not ports:
+                self.show_error_popup("No JACK Ports", "No JACK MIDI input ports found.")
+                return
+            current_port = self.sequencer.song.keyboard_source_port
+            self.show_port_selection_popup("Select Keyboard Port (JACK)", ports,
+                                        lambda p: self.process_command_ui(f'setkbport "{p}"'),
+                                        current_port)
+
+        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(15))
+        content.add_widget(MDLabel(text="Configure MIDI inputs:", halign="center", size_hint_y=None, height=dp(30)))
+
+        btn_record = MDButton(MDButtonText(text="ALSA Recording Port"), pos_hint={'center_x': 0.5})
+        btn_record.bind(on_release=set_record_port_choice)
+        content.add_widget(btn_record)
+
+        btn_kb = MDButton(MDButtonText(text="JACK Keyboard Port"), pos_hint={'center_x': 0.5})
+        btn_kb.bind(on_release=set_keyboard_port_choice)
+        content.add_widget(btn_kb)
+
+        popup_main = Popup(title="MIDI Settings", content=content, size_hint=(0.4, None), height=dp(250))
+        popup_main.open()
 
     def show_port_selection_popup(self, title, ports, callback, current_port=None):
         """Affiche un popup de sélection de port avec ListView scrollable"""
@@ -1467,6 +1481,23 @@ class SequencerLayout(BoxLayout):
             callback=on_confirm
         )
         popup.open()
+
+    def open_input_routing_editor(self):
+        """Ouvre l'éditeur d'aiguillage MIDI (Conductor)."""
+        routing_track = self.sequencer.get_input_routing_track()
+
+        # Check if already open
+        for child in self.window_manager.children:
+            if getattr(child, 'track', None) == routing_track:
+                # Bring to front logic could be added here
+                return
+
+        editor = AutomationEditor(
+            track=routing_track,
+            sequencer_layout=self,
+            initial_param='input_routing'
+        )
+        self.window_manager.add_widget(editor)
 
     def toggle_record_button_color(self, dt):
         """Alternates the record button color for blinking effect."""

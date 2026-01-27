@@ -25,10 +25,14 @@ class AutomationControls(BoxLayout, EventDispatcher):
         self.width = 0
 
         param_map = {
-            'Volume': 'vol', 'Pan': 'pan', 'Velocity': 'vel', 'Program Change': 'prog'
+            'Volume': 'vol', 'Pan': 'pan', 'Velocity': 'vel', 'Program Change': 'prog', 'Input Routing': 'input_routing'
         }
 
-        if self.track_type == 'midi':
+        if self.track_type == 'routing':
+            automation_types = [
+                ("lan", "Input Routing", "input_routing")
+            ]
+        elif self.track_type == 'midi':
             automation_types = [
                 ("volume-high", "Volume", "vol"),
                 ("swap-horizontal", "Pan", "pan"),

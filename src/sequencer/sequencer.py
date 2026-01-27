@@ -517,7 +517,8 @@ class Sequencer(EventDispatcher):
             return
 
         for port in self.open_ports.values():
-            if port and not port.closed:
+            is_closed = getattr(port, 'closed', False)
+            if port and not is_closed and hasattr(port, 'send'):
                 for channel in range(16):
                     port.send(mido.Message('control_change', channel=channel, control=123, value=0))
 
@@ -1841,7 +1842,8 @@ class Sequencer(EventDispatcher):
 
     def close_virtual_ports(self):
         for port in self.virtual_ports:
-            if not port.closed:
+            is_closed = getattr(port, 'closed', False)
+            if not is_closed and hasattr(port, 'close'):
                 port.close()
         print("Virtual ports closed.")
         self._stop_carla_process()

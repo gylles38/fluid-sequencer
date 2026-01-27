@@ -255,10 +255,13 @@ class JackManager:
         if port_name in self.open_ports:
             port = self.open_ports[port_name]
             # Don't close virtual ports managed elsewhere
-            if not port.closed and port not in self.sequencer.virtual_ports:
+            # Native JACK ports (python-jack) don't have a 'closed' attribute.
+            is_closed = getattr(port, 'closed', False)
+            if not is_closed and port not in self.sequencer.virtual_ports:
                 try:
-                    port.close()
-                    print(f"Successfully closed MIDI port '{port_name}'")
+                    if hasattr(port, 'close'):
+                        port.close()
+                        print(f"Successfully closed MIDI port '{port_name}'")
                 except Exception as e:
                     print(f"Error closing MIDI port '{port_name}': {e}")
             # Remove from the dictionary regardless
@@ -647,7 +650,8 @@ class JackManager:
         # Close all open MIDI ports
         for name, port in self.open_ports.items():
             try:
-                if not port.closed:
+                is_closed = getattr(port, 'closed', False)
+                if not is_closed and hasattr(port, 'close'):
                     port.close()
             except Exception as e:
                 print(f"Error closing MIDI port '{name}': {e}", file=sys.stderr)

@@ -959,6 +959,10 @@ class TrackWidget(BoxLayout):
 
     def select_midi_port_popup(self, instance) -> None:
         """Opens a popup to select a MIDI output port for the track."""
+        if self.sequencer_layout.sequencer.jack_manager.is_running:
+            self.sequencer_layout.show_info_popup("Port Info", "In JACK mode, each track has its own dedicated native output port.\n\nTo connect this track to an instrument, use the 'Dest:' button.")
+            return
+
         standard_ports = mido.get_output_names()
         virtual_port_names = [p.name for p in self.sequencer_layout.sequencer.virtual_ports]
         available_ports = sorted(list(set(standard_ports + virtual_port_names)))

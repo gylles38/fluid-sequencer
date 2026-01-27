@@ -363,6 +363,13 @@ class SequencerLayout(BoxLayout):
         transport_card.add_widget(self.playhead_label)
 
         # Bridge Status
+        self.bridge_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(5))
+        self.bridge_activity_dot = Widget(size_hint=(None, None), size=(dp(8), dp(8)), pos_hint={'center_y': 0.5})
+        with self.bridge_activity_dot.canvas:
+            self.bridge_dot_color = Color(0, 1, 0, 0) # Hidden by default
+            self.bridge_dot_rect = Rectangle(pos=self.bridge_activity_dot.pos, size=self.bridge_activity_dot.size)
+        self.bridge_activity_dot.bind(pos=lambda *a: setattr(self.bridge_dot_rect, 'pos', self.bridge_activity_dot.pos))
+
         self.bridge_label = MDLabel(
             text="Bridge: -",
             size_hint_x=None,
@@ -376,7 +383,9 @@ class SequencerLayout(BoxLayout):
             halign='left',
             valign='middle'
         )
-        transport_card.add_widget(self.bridge_label)
+        self.bridge_layout.add_widget(self.bridge_activity_dot)
+        self.bridge_layout.add_widget(self.bridge_label)
+        transport_card.add_widget(self.bridge_layout)
 
         # Start/End avec hauteur synchronisée
         start_label = Label(
@@ -663,8 +672,8 @@ class SequencerLayout(BoxLayout):
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
 
-        # Show MIDI input selection on startup if not already set
-        if not self.sequencer.default_record_port:
+        # Show MIDI input selection on startup if not already set (only if not in JACK mode)
+        if not self.sequencer.default_record_port and not self.sequencer.jack_manager.is_running:
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
 
         Window.bind(on_key_down=self._on_keyboard_down)
@@ -784,45 +793,54 @@ class SequencerLayout(BoxLayout):
         self.show_info_popup("Audio Settings", "Audio settings configuration will be available in a future version.")
 
     def show_midi_settings(self):
-        """Affiche les paramètres MIDI"""
-        # Le menu est déjà fermé par menu_action()
+        """Affiche les paramètres MIDI (JACK natif si actif)"""
+
+        is_jack = self.sequencer.jack_manager.is_running
         
         def apply_settings(port_name):
-            if port_name:
+            if not port_name: return
+
+            if is_jack:
+                # En mode JACK, on connecte le port sélectionné à notre entrée 'Clavier'
+                self.sequencer.set_default_record_port(port_name)
+                self.show_info_popup("JACK MIDI Bridge", f"Source Clavier connectée:\n{port_name}")
+            else:
+                # Mode ALSA classique (legacy)
                 try:
                     import mido
-                    input_ports = mido.get_input_names()
-                    if port_name not in input_ports:
-                        self.show_error_popup("Invalid Port", 
-                                            f"Port '{port_name}' is not available.")
+                    if port_name not in mido.get_input_names():
+                        self.show_error_popup("Invalid Port", f"Port '{port_name}' is not available.")
                         return
-                    
                     self.process_command_ui(f'setrecordport "{port_name}"')
-                    self.show_info_popup("Success", f"MIDI input port set to:\n{port_name}")
-                    
+                    self.show_info_popup("Success", f"MIDI input port set to:\n{port_name} (ALSA)")
                 except Exception as e:
                     self.show_error_popup("Error", f"Failed to set MIDI port:\n{str(e)}")
         
         try:
-            import mido
-            input_ports = mido.get_input_names()
+            if is_jack:
+                # Lister les ports de sortie JACK (qui sont nos sources d'entrée)
+                input_ports = self.sequencer.jack_manager.get_midi_input_ports()
+                title = "Select JACK MIDI Source (Keyboard)"
+            else:
+                import mido
+                input_ports = mido.get_input_names()
+                title = "Select MIDI Input Port (ALSA Legacy)"
             
             if not input_ports:
-                self.show_error_popup("No MIDI Input Ports", 
-                                    "No MIDI input ports found.")
+                self.show_error_popup("No MIDI Ports", "Aucun port d'entrée MIDI détecté.")
                 return
                 
-            current_port = getattr(self.sequencer, 'default_record_port', None)
+            current_port = self.sequencer.default_record_port
             
             self.show_port_selection_popup(
-                title="Select MIDI Input Port",
+                title=title,
                 ports=input_ports,
                 callback=apply_settings,
                 current_port=current_port
             )
             
         except Exception as e:
-            self.show_error_popup("MIDI Error", f"Cannot access MIDI system:\n\n{str(e)}")
+            self.show_error_popup("MIDI Error", f"Erreur système MIDI:\n\n{str(e)}")
 
     def show_port_selection_popup(self, title, ports, callback, current_port=None):
         """Affiche un popup de sélection de port avec ListView scrollable"""
@@ -1890,11 +1908,23 @@ class SequencerLayout(BoxLayout):
             sv.bind(on_scroll_stop=self._on_scroll_stop)
             
     def update_bridge_label(self, instance, value):
+        # Activity blink if there was recent activity
+        diag = self.sequencer.jack_manager.get_diagnostics()
+        if diag.get("clavier_in", 0) > getattr(self, "_last_clavier_in", 0):
+            self.bridge_dot_color.a = 1.0
+            Clock.schedule_once(lambda dt: setattr(self.bridge_dot_color, 'a', 0), 0.1)
+        self._last_clavier_in = diag.get("clavier_in", 0)
+
         if not self.sequencer.jack_manager.is_running:
             self.bridge_label.text = "Bridge: NO JACK"
             self.bridge_label.text_color = [0.8, 0.2, 0.2, 1]
         elif value == -1:
-            self.bridge_label.text = "Bridge: OFF"
+            # Vérifier si c'est parce qu'il n'y a aucune piste MIDI
+            has_midi = any(isinstance(t, MidiTrack) for t in self.sequencer.song.tracks)
+            if not has_midi:
+                self.bridge_label.text = "Bridge: No MIDI Tracks"
+            else:
+                self.bridge_label.text = "Bridge: OFF (No Route)"
             self.bridge_label.text_color = [0.5, 0.5, 0.5, 1]
         else:
             try:

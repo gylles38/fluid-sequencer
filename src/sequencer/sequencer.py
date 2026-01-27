@@ -286,46 +286,8 @@ class Sequencer(EventDispatcher):
             # N'oubliez pas d'appeler cette fonction chaque fois que le tempo, le chemin d'un fichier audio, 
             # ou un événement de piste est modifié (ajout/suppression).
 
-    def _transport_control_listener_loop(self, port_name: str):
-        """
-        A dedicated thread that listens for transport control MIDI messages based on the loaded configuration.
-        """
-        try:
-            with mido.open_input(port_name) as inport:
-                while not self._transport_control_stop_event.is_set():
-                    for msg in inport.iter_pending():
-                        if msg.type == 'control_change':
-                            control = msg.control
-                            value = msg.value
-
-                            # --- Handle Transport Controls ---
-                            if value == 127:
-                                if control == self.midi_config.get_transport_cc("play_pause"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
-                                elif control == self.midi_config.get_transport_cc("stop"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
-                                elif control == self.midi_config.get_transport_cc("record_arm"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("record"))
-
-                            # --- Handle Volume Sliders & Solo Buttons ---
-                            for i in range(len(self.song.tracks)):
-                                # Volume
-                                if control == self.midi_config.get_volume_slider_cc(i):
-                                    volume_value = value / 127.0
-                                    Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
-                                    break # Found a match, no need to check other tracks for this CC
-
-                                # Solo
-                                if control == self.midi_config.get_track_solo_button_cc(i):
-                                    track = self.song.tracks[i]
-                                    is_solo = getattr(track, 'is_solo', False)
-                                    if (value == 127 and not is_solo) or (value == 0 and is_solo):
-                                        Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
-                                    break # Found a match
-
-                    time.sleep(0.01)
-        except Exception as e:
-            print(f"\nError in transport control listener for port '{port_name}': {e}")
+    # _transport_control_listener_loop removed. Transport control is now handled
+    # directly in the JACK process callback for better timing and zero ALSA overhead.
 
     def reload_midi_mappings(self, filepath: str) -> str:
         """Loads a new MIDI mapping file and restarts the listener if necessary."""
@@ -340,35 +302,24 @@ class Sequencer(EventDispatcher):
 
     def set_default_record_port(self, port_name: str) -> str:
         """
-        Sets the default MIDI input port for recording and transport controls.
-        Manages the lifecycle of the transport control listener thread.
+        Sets the default MIDI input port.
+        When JACK is running, this port will be auto-connected to the 'Clavier' bridge.
         """
         try:
-            input_ports = get_input_names()
-            if port_name not in input_ports:
-                return f"Error: MIDI input port '{port_name}' not found."
-
-            # Stop any existing listener before starting a new one
-            if self._transport_control_thread and self._transport_control_thread.is_alive():
-                self._transport_control_stop_event.set()
-                self._transport_control_thread.join(timeout=1.0)
-
             self.default_record_port = port_name
             self.is_dirty = True
 
-            # Start the new listener thread (only if JACK is not running)
-            if not self.jack_manager.is_running:
-                self._transport_control_stop_event.clear()
-                self._transport_control_thread = threading.Thread(
-                    target=self._transport_control_listener_loop,
-                    args=(port_name,),
-                    daemon=True
-                )
-                self._transport_control_thread.start()
+            if self.jack_manager.is_running:
+                # Attempt to auto-connect this port to the bridge
+                self.jack_manager.auto_connect_dynamic(port_name, "Clavier")
+                return f"JACK MIDI Source set and connected: {port_name}"
             else:
-                print(f"Note: JACK is active. Controls should be connected to 'Clavier' port.")
+                # Fallback or legacy ALSA mode (discouraged)
+                input_ports = get_input_names()
+                if port_name not in input_ports:
+                    return f"Warning: MIDI input port '{port_name}' not found in ALSA."
+                return f"Default record port set to: {port_name} (ALSA)"
 
-            return f"Default record and transport control port set to: {port_name}"
         except Exception as e:
             return f"Error setting record port: {e}"
 
@@ -1582,6 +1533,11 @@ class Sequencer(EventDispatcher):
             self.set_track_pan(mapping.track_index, param_value)
         elif mapping.action == 'program':
             self.set_program(mapping.track_index, int(param_value))
+        elif mapping.action == 'solo':
+            self.toggle_solo(mapping.track_index)
+        elif mapping.action == 'mute':
+            self.toggle_mute(mapping.track_index)
+
         print(f"\rCC -> Track {mapping.track_index} {mapping.action.capitalize()}: {value}   ", end="")
         sys.stdout.flush()
 
@@ -1835,20 +1791,30 @@ class Sequencer(EventDispatcher):
     def list_ports(self) -> str:
         lines = []
         try:
-            lines.append("Available MIDI Input Ports:")
-            input_ports = get_input_names()
-            if input_ports:
-                for i, port in enumerate(input_ports): lines.append(f"  [{i}] {port}")
+            if self.jack_manager.is_running:
+                lines.append("JACK MIDI Input Sources (connect to 'Clavier'):")
+                ports = self.jack_manager.get_midi_input_ports()
+                if ports:
+                    for i, port in enumerate(ports): lines.append(f"  [{i}] {port}")
+                else: lines.append("  (None found)")
+
+                lines.append("\nJACK MIDI Output Ports (registered by Sequencer):")
+                for i, t in enumerate(self.song.tracks):
+                    if is_midi_track(t):
+                        lines.append(f"  [{i}] {t.name} -> {t.output_port_name}")
             else:
-                lines.append("  (None found)")
-            lines.append("\nAvailable MIDI Output Ports:")
-            output_ports = get_output_names()
-            virtual_port_names = [vp.name for vp in self.virtual_ports]
-            all_outputs = output_ports + virtual_port_names
-            if all_outputs:
-                for i, port in enumerate(all_outputs): lines.append(f"  [{i}] {port}")
-            else:
-                lines.append("  (None found)")
+                lines.append("Available MIDI Input Ports (ALSA):")
+                input_ports = get_input_names()
+                if input_ports:
+                    for i, port in enumerate(input_ports): lines.append(f"  [{i}] {port}")
+                else: lines.append("  (None found)")
+
+                lines.append("\nAvailable MIDI Output Ports (ALSA):")
+                output_ports = get_output_names()
+                if output_ports:
+                    for i, port in enumerate(output_ports): lines.append(f"  [{i}] {port}")
+                else: lines.append("  (None found)")
+
             return "\n".join(lines)
         except Exception as e:
             return f"Error getting MIDI ports: {e}"

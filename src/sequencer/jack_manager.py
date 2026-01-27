@@ -123,28 +123,31 @@ class JackManager:
         """
         Cherche un port JACK complet qui contient le 'pattern' donné.
         Retourne le nom complet du premier port trouvé, ou None.
+        Utilise l'API native python-jack pour plus de robustesse.
         """
-        if not pattern:
+        if not pattern or not self.jack_client:
             return None
+
         try:
-            # On demande à JACK/PipeWire la liste de tous les ports
-            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
-            all_ports = result.stdout.splitlines()
-
+            # On demande à JACK la liste de tous les ports
+            all_ports = self.jack_client.get_ports()
             for port in all_ports:
-                # On cherche une correspondance partielle (ex: "RtMidiOut" dans le nom complet)
-                if pattern in port:
-                    return port.strip() # On nettoie les espaces/sauts de ligne
-
+                # On cherche une correspondance partielle
+                if pattern in port.name:
+                    return port.name
             return None
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
+        except Exception as e:
+            print(f"Error finding port '{pattern}': {e}", file=sys.stderr)
             return None
 
     def auto_connect_dynamic(self, src_keyword, dest_keyword):
         """
         Connecte deux ports en utilisant des mots-clés partiels.
+        Utilise l'API native python-jack.
         """
+        if not self.jack_client:
+            return
+
         print(f"--- Attempting auto-connect: '{src_keyword}' -> '{dest_keyword}' ---")
 
         # 1. Recherche des noms complets
@@ -160,33 +163,25 @@ class JackManager:
 
         print(f"Ports identified:\n   Source: {full_source}\n   Dest  : {full_dest}")
 
-        # 2. Tentative de connexion via jack_connect
+        # 2. Tentative de connexion via jack.Client.connect
         try:
-            res = subprocess.run(
-                ["jack_connect", full_source, full_dest],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-
-            if res.returncode == 0:
-                print("Connection successful!")
+            self.jack_client.connect(full_source, full_dest)
+            print("Connection successful!")
+        except jack.JackError as e:
+            # Souvent parce que déjà connecté, on ignore le warning "exists"
+            if "exists" in str(e).lower() or "already" in str(e).lower():
+                 print("Already connected.")
             else:
-                # If error (often because already connected), we display the message
-                # PipeWire often returns an error if it's already connected, it's not serious.
-                if "exists" in res.stderr:
-                     print("Already connected.")
-                else:
-                     print(f"Connection warning: {res.stderr.strip()}")
-
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_connect' introuvable.", file=sys.stderr)
+                 print(f"Connection warning: {e}")
+        except Exception as e:
+            print(f"Connection error: {e}")
 
     def disconnect_dynamic(self, src_keyword, dest_keyword):
         """
-        Disconnects two ports using partial keywords.
+        Déconnecte deux ports en utilisant des mots-clés partiels.
+        Utilise l'API native python-jack.
         """
-        if not src_keyword or not dest_keyword:
+        if not self.jack_client or not src_keyword or not dest_keyword:
             return
 
         full_source = self.find_port_by_name(src_keyword)
@@ -196,42 +191,38 @@ class JackManager:
             return
 
         try:
-            subprocess.run(
-                ["jack_disconnect", full_source, full_dest],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_disconnect' introuvable.", file=sys.stderr)
+            self.jack_client.disconnect(full_source, full_dest)
+        except Exception as e:
+            print(f"Error disconnecting: {e}", file=sys.stderr)
 
     def get_midi_input_ports(self):
         """
-        Retourne une liste de tous les ports d'entrée MIDI JACK disponibles (se terminant par :events-in).
+        Retourne une liste de tous les ports de sortie MIDI (capture) disponibles.
+        Note: Dans Carla, ce sont les ports rouges 'capture'.
+        On cherche les ports qui ont jack.IS_OUTPUT (ils produisent du MIDI qu'on peut lire).
         """
+        if not self.jack_client:
+            return []
+
         try:
-            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
-            all_ports = result.stdout.splitlines()
-            midi_input_ports = [port.strip() for port in all_ports if port.strip().endswith(':events-in')]
-            return midi_input_ports
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
+            # On cherche les ports MIDI qui sont des SORTIES (donc des entrées pour nous)
+            ports = self.jack_client.get_ports(is_midi=True, is_output=True)
+            return [p.name for p in ports]
+        except Exception as e:
+            print(f"Error listing MIDI ports: {e}", file=sys.stderr)
             return []
 
     def open_midi_port(self, port_name: str):
-        """Opens a MIDI port if it's not already open."""
-        if port_name in self.open_ports and not self.open_ports[port_name].closed:
-            return  # Port is already open
+        """
+        In Native JACK mode, this just checks if a native port is already registered
+        or attempts to find it.
+        """
+        if port_name in self.open_ports:
+            return
 
-        vp = next((p for p in self.sequencer.virtual_ports if p.name == port_name), None)
-        if vp:
-            self.open_ports[port_name] = vp
-        else:
-            try:
-                self.open_ports[port_name] = mido.open_output(port_name)
-                print(f"Successfully opened MIDI port '{port_name}'")
-            except Exception as e:
-                print(f"Could not open MIDI port '{port_name}': {e}")
+        # If JACK is running, we don't open ALSA ports.
+        # We only support ports already managed/registered by JackManager.
+        print(f"Note: open_midi_port('{port_name}') called. In JACK mode, only internal native ports are supported.")
 
     def close_midi_port(self, port_name: str):
         """Closes a MIDI port if it's open and not used by other tracks."""
@@ -411,6 +402,9 @@ class JackManager:
             self._cb_count = 0 # Reset heartbeat counter
 
             try:
+                # Ensure routing track exists
+                self.sequencer.get_input_routing_track()
+
                 # FIXED: Constant client name to allow persistent connections in Carla/Patchbay
                 client_name = "Sequencer-DAW"
 
@@ -440,10 +434,10 @@ class JackManager:
                 try:
                     self.clavier_port = self.jack_client.midi_inports.register("Clavier")
                     self._log_rt(f"Registered input port: {self.clavier_port.name}")
+                    print(f"JACK MIDI Bridge input port registered: {self.clavier_port.name}")
                 except Exception as e:
                     self._log_rt(f"FAILED to register Clavier port: {e}")
-                    # If we can't register the main input, the bridge won't work.
-                    # We might want to raise here, but let's try to continue.
+                    print(f"ERROR: Failed to register JACK MIDI Bridge input: {e}")
 
                 # Metronome port
                 try:
@@ -671,11 +665,53 @@ class JackManager:
             print(f"Error during reposition: {e}", file=sys.stderr)
 
     def refresh_automation(self):
-        """Forces a refresh of automation events and routing track from the project."""
+        """
+        Forces a refresh of automation events and routing track from the project.
+        Uses local variables to prepare the state, then updates attributes atomically
+        to prevent race conditions with the audio thread.
+        """
         self._prepare_automation_events()
 
-        # 1. Snapshot simple properties
-        self._cached_tracks = list(self.sequencer.song.tracks)
+        # 1. Prepare local snapshots
+        tracks = list(self.sequencer.song.tracks)
+        midi_count = sum(1 for t in tracks if is_midi_track(t))
+
+        mc = self.sequencer.midi_config
+        transport_ccs = {
+            'play_pause': mc.get_transport_cc('play_pause'),
+            'stop': mc.get_transport_cc('stop'),
+            'record_arm': mc.get_transport_cc('record_arm')
+        }
+
+        armed_idx = self.sequencer.get_armed_track_index()
+
+        first_midi_idx = None
+        channels = {}
+        audio_ends = {}
+        out_ports_by_idx = {} # Rebuild index-based mapping
+
+        for i, t in enumerate(tracks):
+            if is_midi_track(t):
+                # Never route bridge to metronome
+                if first_midi_idx is None and not getattr(t, 'is_metronome', False):
+                    first_midi_idx = i
+                channels[i] = getattr(t, 'channel', 0)
+
+                # Update index-based port lookup from object-based port registry
+                port = self.midi_out_ports.get(t)
+                if port:
+                    out_ports_by_idx[i] = port
+
+            elif is_audio_track(t):
+                # Warm up duration cache (HEAVY - call from UI thread)
+                duration = self.sequencer._get_audio_duration_in_beats(t)
+                audio_ends[i] = t.start_time + duration
+
+        song_length = max(1.0, self.sequencer.get_song_length_in_beats())
+
+        # 2. Atomic update to class attributes
+        # Note: dict and list assignments are atomic in CPython
+        self._cached_tracks = tracks
         self._cached_tempo = float(self.sequencer.song.tempo)
         self._cached_is_recording = self.sequencer.is_recording
         self._cached_metronome_enabled = self.sequencer.song.metronome_enabled
@@ -686,42 +722,20 @@ class JackManager:
         self._cached_metronome_pitch_beat = self.sequencer.metronome_pitch_beat
         self._cached_midi_mappings = list(self.sequencer.song.midi_mappings)
         self._cached_track_overrides = dict(self.sequencer.track_overrides)
-
-        # Cache transport CCs
-        mc = self.sequencer.midi_config
-        self._cached_transport_ccs = {
-            'play_pause': mc.get_transport_cc('play_pause'),
-            'stop': mc.get_transport_cc('stop'),
-            'record_arm': mc.get_transport_cc('record_arm')
-        }
-
-        # 2. Cache armed index for RT safety
-        self._cached_armed_idx = self.sequencer.get_armed_track_index()
-
-        # 3. Cache channels and warm up audio durations
-        self._cached_first_midi_idx = None
-        self._cached_channels = {}
-        self._cached_audio_ends = {}
-
-        for i, t in enumerate(self._cached_tracks):
-            if is_midi_track(t):
-                if self._cached_first_midi_idx is None:
-                    self._cached_first_midi_idx = i
-                self._cached_channels[i] = getattr(t, 'channel', 0)
-            elif is_audio_track(t):
-                # Warm up duration cache (HEAVY - call from UI thread)
-                duration = self.sequencer._get_audio_duration_in_beats(t)
-                self._cached_audio_ends[i] = t.start_time + duration
-
-        # 4. Cache song length and loop points
-        self._cached_song_length = max(1.0, self.sequencer.get_song_length_in_beats())
+        self._cached_transport_ccs = transport_ccs
+        self._cached_armed_idx = armed_idx
+        self._cached_first_midi_idx = first_midi_idx
+        self._cached_channels = channels
+        self._cached_audio_ends = audio_ends
+        self._midi_out_ports_by_idx = out_ports_by_idx
+        self._cached_song_length = song_length
         self._cached_loop_enabled = self.sequencer.loop_enabled
         self._cached_loop_start = self.sequencer.loop_start_beat
         self._cached_loop_end = self.sequencer.loop_end_beat
         self._cached_play_range_enabled = self.sequencer.play_range_enabled
         self._cached_play_range_end = self.sequencer.play_range_end_beat
 
-        self._log_rt(f"Refreshed automation: tracks={len(self._cached_tracks)}, length={self._cached_song_length:.2f}, loop={self._cached_loop_enabled}")
+        self._log_rt(f"Refreshed automation: {len(tracks)} tracks ({midi_count} MIDI), length={song_length:.2f}, first_midi={first_midi_idx}, ports_mapped={len(out_ports_by_idx)}")
 
     def get_live_activity(self) -> Dict[int, List[int]]:
         """Returns a copy of the current live MIDI activity."""
@@ -1178,36 +1192,63 @@ class JackManager:
             return armed_idx
 
         # 3. Final Fallback (RT safe)
-        return getattr(self, '_cached_first_midi_idx', None)
+        fallback_idx = getattr(self, '_cached_first_midi_idx', None)
+        return fallback_idx
 
     def _handle_control_midi(self, msg: mido.Message) -> bool:
         """
         Handles MIDI control messages (transport, mappings) from the 'Clavier' port.
-        Returns True if the message was a transport command and should be consumed.
+        RT SAFE: Queues commands for the UI thread.
+        Returns True if the message was a control command and should be consumed.
         """
-        is_transport = False
+        is_consumed = False
         try:
             if msg.type == 'control_change':
-                # --- Handle Transport Controls (RT Safe: No Clock.schedule_once) ---
+                # --- 1. Handle Hardcoded Transport Controls ---
                 if msg.value == 127:
                     if msg.control == self._cached_transport_ccs.get('play_pause'):
                         self._pending_play_pause = True
-                        is_transport = True
+                        is_consumed = True
                     elif msg.control == self._cached_transport_ccs.get('stop'):
                         self._pending_stop = True
-                        is_transport = True
+                        is_consumed = True
                     elif msg.control == self._cached_transport_ccs.get('record_arm'):
                         self._pending_record = True
-                        is_transport = True
+                        is_consumed = True
 
-                # --- Handle Custom MIDI Mappings (Volume, Pan, etc.) ---
+                if is_consumed: return True
+
+                # --- 2. Handle Indexed Volume Sliders & Solo Buttons (from Config) ---
+                mc = self.sequencer.midi_config
+                for i in range(len(self._cached_tracks)):
+                    # Volume
+                    if msg.control == mc.get_volume_slider_cc(i):
+                        # Use internal mapping logic but queue it
+                        from .models import MidiMapping
+                        mapping = MidiMapping(channel=msg.channel, control=msg.control, action='volume', track_index=i)
+                        self._pending_mappings.append((mapping, msg.value))
+                        return True
+
+                    # Solo
+                    if msg.control == mc.get_track_solo_button_cc(i):
+                        # For solo, we treat it as a special mapping if value is 127
+                        if msg.value == 127:
+                            from .models import MidiMapping
+                            mapping = MidiMapping(channel=msg.channel, control=msg.control, action='solo', track_index=i)
+                            self._pending_mappings.append((mapping, msg.value))
+                        return True
+
+                # --- 3. Handle Generic Custom MIDI Mappings (from Song) ---
                 for mapping in self._cached_midi_mappings:
                     if mapping.channel == msg.channel and mapping.control == msg.control:
                         # Queue for UI thread processing
                         self._pending_mappings.append((mapping, msg.value))
-        except Exception:
-            pass
-        return is_transport
+                        is_consumed = True
+
+        except Exception as e:
+            self._log_rt(f"Control MIDI Error: {e}")
+
+        return is_consumed
 
     def _record_midi_event(self, msg: mido.Message, start_beat_of_block: float, offset: int):
         """Records a MIDI event from the 'Clavier' port."""
@@ -1615,6 +1656,14 @@ class JackManager:
             if self.clavier_port:
                 now_rt = authoritative_beat_now / beats_per_second if beats_per_second > 0 else time.time()
 
+                # Heartbeat for Clavier activity (debug)
+                if self._cb_count % 500 == 0:
+                    try:
+                        conns = self.jack_client.get_all_connections(self.clavier_port)
+                        if not conns:
+                            self._log_rt("WARNING: Clavier port has NO connections!")
+                    except Exception: pass
+
                 # --- 1.1 Handle Panic Request ---
                 if self._panic_requested:
                     self._log_rt("PANIC: Clearing bridge tracking state and sending Note OFFs")
@@ -1630,8 +1679,14 @@ class JackManager:
                     self._bridge_last_pb.clear()
                     self._panic_requested = False
 
-                incoming = self.clavier_port.incoming_midi_events()
+                incoming = list(self.clavier_port.incoming_midi_events())
                 events_in_block = 0
+
+                if incoming:
+                    # Log every event during startup or every 100th block if active
+                    if self._cb_count < 1000 or self._cb_count % 100 == 0:
+                        self._log_rt(f"Bridge activity: {len(incoming)} events. First byte: {incoming[0][1][0]:02X}")
+
                 for offset, data in incoming:
                     if events_in_block > 128:
                         self._log_rt("ERROR: MIDI Storm detected on Clavier! Blocking block.")
@@ -1661,6 +1716,9 @@ class JackManager:
                     # Robust fallback: use object
                     if not port and target_track:
                         port = self.midi_out_ports.get(target_track)
+
+                    if not port and self._cb_count % 100 == 0:
+                        self._log_rt(f"Bridge routing FAILED: beat={accurate_event_beat:.2f}, target_idx={current_routing_idx}, port_found={port is not None}")
 
                     if port:
                         # --- Control Filter ---

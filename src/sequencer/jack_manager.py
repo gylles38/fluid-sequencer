@@ -56,6 +56,7 @@ class JackManager:
         self._bridge_last_pb = {} # track_idx -> last_val
         self._bridge_last_msg_time = 0.0 # To break extremely tight loops
         self._bridge_cooldowns = {} # pitch -> (last_off_time, count)
+        self._bridge_storm_locked = {} # pitch -> lock_end_time
         self._panic_requested = False # RT safe flag
         self.next_event_indices = []
         self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
@@ -1252,6 +1253,13 @@ class JackManager:
 
     def _record_midi_event(self, msg: mido.Message, start_beat_of_block: float, offset: int):
         """Records a MIDI event from the 'Clavier' port."""
+        # RECORDING BUFFER PROTECTION
+        if len(self._recorded_events_to_merge) > 500:
+            # We don't log every drop to avoid storming the log too
+            if len(self._recorded_events_to_merge) == 501:
+                self._log_rt("ERROR: Recording merge queue overflow! Dropping events.")
+            return
+
         try:
             samplerate = self.jack_client.samplerate
             beats_per_second = self.sequencer.song.tempo / 60.0
@@ -1654,7 +1662,13 @@ class JackManager:
             # --- 1. MIDI BRIDGE (Clavier Input Routing) ---
             # MUST BE BEFORE ANY EARLY RETURNS to ensure live playing works ALWAYS.
             if self.clavier_port:
-                now_rt = authoritative_beat_now / beats_per_second if beats_per_second > 0 else time.time()
+                # now_rt must be monotonic: use frame_time
+                now_rt = self.jack_client.frame_time / samplerate if samplerate > 0 else time.time()
+
+                # Heartbeat for Bridge status (debug)
+                if self._cb_count % 1000 == 0:
+                    active_bridge_notes = len(self._live_forwarded_notes)
+                    self._log_rt(f"Bridge Heartbeat: {active_bridge_notes} active notes, {len(self._bridge_storm_locked)} pitches locked.")
 
                 # Heartbeat for Clavier activity (debug)
                 if self._cb_count % 500 == 0:
@@ -1671,25 +1685,28 @@ class JackManager:
                         try:
                             f_port, f_channel, _ = info
                             off_msg = mido.Message('note_off', channel=f_channel, note=pitch, velocity=0)
+                            # Panic Note OFFs use offset 0
                             self._write_midi_safe(f_port, 0, bytes(off_msg.bytes()))
                         except Exception: pass
                     self._live_forwarded_notes.clear()
                     self._live_forwarded_ccs.clear()
                     self._bridge_last_ccs.clear()
                     self._bridge_last_pb.clear()
+                    self._bridge_storm_locked.clear()
                     self._panic_requested = False
 
                 incoming = list(self.clavier_port.incoming_midi_events())
                 events_in_block = 0
 
                 if incoming:
-                    # Log every event during startup or every 100th block if active
-                    if self._cb_count < 1000 or self._cb_count % 100 == 0:
-                        self._log_rt(f"Bridge activity: {len(incoming)} events. First byte: {incoming[0][1][0]:02X}")
+                    # Log activity periodically
+                    if self._cb_count % 200 == 0:
+                        self._log_rt(f"Bridge activity: {len(incoming)} events in block. First byte: {incoming[0][1][0]:02X}")
 
                 for offset, data in incoming:
-                    if events_in_block > 128:
-                        self._log_rt("ERROR: MIDI Storm detected on Clavier! Blocking block.")
+                    # BLOCK-LEVEL STORM PROTECTION (Reduced limit)
+                    if events_in_block > 64:
+                        if events_in_block == 65: self._log_rt("ERROR: MIDI Storm detected on Clavier! Blocking rest of block.")
                         break
                     events_in_block += 1
                     try:
@@ -1706,25 +1723,14 @@ class JackManager:
                     accurate_event_beat = authoritative_beat_now + (offset / samplerate) * beats_per_second if samplerate > 0 else authoritative_beat_now
                     current_routing_idx = self._get_input_routing_value(accurate_event_beat)
 
-                    target_track = None
-                    if current_routing_idx is not None and 0 <= current_routing_idx < len(self._cached_tracks):
-                        target_track = self._cached_tracks[current_routing_idx]
-
-                    # Port lookup (Fast path: use index directly)
+                    # Port lookup (STRICTLY use cached mapping to avoid race conditions)
                     port = self._midi_out_ports_by_idx.get(current_routing_idx) if current_routing_idx is not None else None
-
-                    # Robust fallback: use object
-                    if not port and target_track:
-                        port = self.midi_out_ports.get(target_track)
-
-                    if not port and self._cb_count % 100 == 0:
-                        self._log_rt(f"Bridge routing FAILED: beat={accurate_event_beat:.2f}, target_idx={current_routing_idx}, port_found={port is not None}")
 
                     if port:
                         # --- Control Filter ---
                         # Consume transport CCs so they are not forwarded to plugins
-                        is_transport_cc = self._handle_control_midi(msg)
-                        if is_transport_cc:
+                        is_control = self._handle_control_midi(msg)
+                        if is_control:
                             continue
 
                         # Channel Remapping (for non-system messages)
@@ -1732,18 +1738,27 @@ class JackManager:
                             msg.channel = self._cached_channels.get(current_routing_idx, 0)
 
                         if msg.type == 'note_on' and msg.velocity > 0:
-                            # LOOP PROTECTION 1: Ignore if already ON
-                            if msg.note in self._live_forwarded_notes:
+                            # 1. PITCH STORM LOCK (1 second silence for oscillating notes)
+                            lock_end = self._bridge_storm_locked.get(msg.note, 0)
+                            if now_rt < lock_end:
                                 continue
 
-                            # LOOP PROTECTION 2: Cooldown (50ms) to break echo oscillations
+                            # 2. LOOP PROTECTION (Ignore if already ON)
+                            if msg.note in self._live_forwarded_notes:
+                                # Logic: If we get a Note ON for a note that is already ON, it's either an echo
+                                # or a hardware re-trigger. We ignore it to prevent doubling/loops.
+                                if self._cb_count % 1000 == 0:
+                                    self._log_rt(f"LOOP BLOCKED: Pitch {msg.note} already ON")
+                                continue
+
+                            # 3. ECHO COOLDOWN (50ms)
                             cooldown_info = self._bridge_cooldowns.get(msg.note)
                             if cooldown_info:
                                 last_off, count = cooldown_info
                                 if now_rt - last_off < 0.050:
-                                    if count > 5: # Repeated echo detected
-                                        if count == 6: self._log_rt(f"STORM SHIELD: Pitch {msg.note} blocked (echo oscillation)")
-                                        self._bridge_cooldowns[msg.note] = (last_off, count + 1)
+                                    if count > 4: # Repeated echo detected
+                                        self._log_rt(f"STORM LOCK: Pitch {msg.note} locked for 1s (oscillation)")
+                                        self._bridge_storm_locked[msg.note] = now_rt + 1.0
                                         continue
                                     self._bridge_cooldowns[msg.note] = (last_off, count + 1)
                                 else:
@@ -1766,9 +1781,10 @@ class JackManager:
                                         if f_routing_idx in self._live_activity and msg.note in self._live_activity[f_routing_idx]:
                                             self._live_activity[f_routing_idx].remove(msg.note)
 
-                                # Set cooldown to block immediate echo ON
+                                # Set cooldown to block immediate echo Note ON
                                 self._bridge_cooldowns[msg.note] = (now_rt, 1)
                             else:
+                                # Logic: ignore redundant Note OFFs to break infinite OFF loops
                                 continue
 
                         elif msg.type == 'control_change':

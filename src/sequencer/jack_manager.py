@@ -1719,21 +1719,22 @@ class JackManager:
                 events_in_block = 0
 
                 if incoming:
-                    # Log activity periodically
+                    # Log activity periodically (every ~2 seconds)
                     if self._cb_count % 200 == 0:
-                        self._log_rt(f"Bridge activity: {len(incoming)} events in block. First byte: {incoming[0][1][0]:02X}")
+                        self._log_rt(f"Bridge activity: {len(incoming)} events from hardware.")
 
                 for offset, data in incoming:
-                    # BLOCK-LEVEL STORM PROTECTION (Reduced limit)
-                    if events_in_block > 64:
-                        if events_in_block == 65: self._log_rt("ERROR: MIDI Storm detected on Clavier! Blocking rest of block.")
-                        break
-                    events_in_block += 1
                     try:
                         data_bytes = bytes(data)
                         # Filter out real-time messages (0xF8 and above: Clock, Start, Continue, Stop, Active Sensing, Reset)
                         if data_bytes[0] >= 0xF8:
                             continue
+
+                        # BLOCK-LEVEL STORM PROTECTION (Increased limit, count only non-RT messages)
+                        if events_in_block > 256:
+                            if events_in_block == 257: self._log_rt("ERROR: MIDI Storm detected on Clavier! Blocking rest of block.")
+                            break
+                        events_in_block += 1
 
                         msg = mido.Message.from_bytes(data_bytes)
                     except Exception:
@@ -1855,9 +1856,12 @@ class JackManager:
 
                     # Update diagnostics
                     self._diag_clavier_in += 1
-                    if target_track:
+                    if port:
                         self._diag_clavier_routed += 1
                         self._diag_last_target_idx = current_routing_idx
+                        # Occasional routing log for troubleshooting
+                        if self._cb_count % 1000 == 0:
+                            self._log_rt(f"Bridge routed {msg.type} to Track {current_routing_idx} ({port.name})")
 
                     if self._cached_is_recording:
                         self._record_midi_event(msg, authoritative_beat_now, offset)

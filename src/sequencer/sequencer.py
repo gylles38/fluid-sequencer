@@ -109,50 +109,44 @@ class Sequencer(EventDispatcher):
             Clock.schedule_interval(self._poll_engine_state, 1/60.0)        
 
     def _poll_engine_state(self, dt):
-        """Polls the JACK engine for state changes and updates Kivy properties."""
         if not self.jack_manager or not self.jack_manager.is_running:
             return
 
-        # 1. Update current beat
-        #new_beat = self.jack_manager._last_beat_rt
-        # Get current position
-        _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
+        # 1. Obtenir l'état directement depuis JACK (Source de vérité absolue)
+        state_code, pos_struct = self.jack_manager.jack_client.transport_query_struct()
+        
+        # state_code ici est directement jack.ROLLING ou jack.STOPPED
+        # C'est beaucoup plus fiable que _last_transport_state_rt
+        engine_is_rolling = (state_code == jack.ROLLING)
+
+        # 2. Update current beat (Votre code actuel qui fonctionne)
         pos_dict = jack.position2dict(pos_struct)
         current_frame = pos_dict.get('frame', 0)
-
         samplerate = self.jack_manager.jack_client.samplerate
         beats_per_second = self.song.tempo / 60.0        
-        if samplerate <= 0 or beats_per_second <= 0:
-            return "Error: Cannot determine current position (invalid transport state)."
-
-        new_beat = (current_frame / samplerate) * beats_per_second
-        if new_beat < 0:
-            new_beat = 0.0
         
-        if not math.isclose(self.current_beat, new_beat, abs_tol=0.001):
-            print(f"[UI] Updating current beat: {new_beat:.3f}")
-            self.current_beat = new_beat
-            self.last_beat_update_time = time.perf_counter()
-            self._update_current_routing()
+        if samplerate > 0 and beats_per_second > 0:
+            new_beat = (current_frame / samplerate) * beats_per_second
+            if new_beat < 0: new_beat = 0.0
+            
+            if not math.isclose(self.current_beat, new_beat, abs_tol=0.001):
+                self.current_beat = new_beat
+                self.last_beat_update_time = time.perf_counter()
+                self._update_current_routing()
 
-        # 2. Update playback state from engine
-        # Use authoritative engine state to drive UI
-        engine_state = self.jack_manager._last_transport_state_rt
-
-        # Grace period: ignore STOPPED engine state for 10.0s after clicking Play
-        # to allow the process callback time to update _last_transport_state_rt
+        # 3. Synchronisation de l'état Playback
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
 
-        if engine_state == jack.STOPPED and self.playback_state != "stopped":
-            if time_since_play > 10.0:
-                print(f"[UI] Engine STOP detected. time_since_play={time_since_play:.2f}s")
+        if not engine_is_rolling: # Si JACK est à l'arrêt
+            if self.playback_state != "stopped" and time_since_play > 1.0:
+                print(f"[UI] Engine STOP detected par transport_query.")
                 self.playback_state = "stopped"
-                # Silence notes if engine stopped unexpectedly
                 self.jack_manager.silence_all_midi_notes()
-        elif engine_state == jack.ROLLING and self.playback_state == "stopped":
-            # Engine started elsewhere or slaved?
-            self.playback_state = "playing"
-
+        else: # Si JACK tourne
+            if self.playback_state == "stopped":
+                print(f"[UI] Engine ROLL detected par transport_query.")
+                self.playback_state = "playing"
+                
         # 3. Process Pending Commands from RT (MIDI controller)
         if self.jack_manager._pending_play_pause:
             self.jack_manager._pending_play_pause = False
@@ -2560,6 +2554,10 @@ class Sequencer(EventDispatcher):
             print(f"[DIAGNOSTIC] === _resync_all_at_beat END (With JACK) ===\n")
 
     def play(self, start_beat: Optional[float] = None):
+    # 1. On change l'état IMMÉDIATEMENT (Optimisme)
+        self.playback_state = "playing"
+        self._last_play_click_time = time.perf_counter() # Pour le poll_engine_state
+        
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             self.jack_manager.start()
             time.sleep(0.2) # Give JACK time to start and connect
@@ -2571,7 +2569,6 @@ class Sequencer(EventDispatcher):
         # Store the beat from which playback is starting
         effective_start_beat = start_beat if start_beat is not None else self.rewind_beat
         self.last_play_start_beat = effective_start_beat
-
 
         # If a start beat is provided, reposition the transport
         if start_beat is not None:
@@ -2590,9 +2587,11 @@ class Sequencer(EventDispatcher):
         self.prime_all_tracks(primed_by_automation=primed_by_automation)
 
         # Simply tell JACK to start rolling
-        if self.jack_manager.jack_client.transport_state != jack.ROLLING:
-            self.jack_manager.jack_client.transport_start()
-            self.playback_state = "playing"
+#        if self.jack_manager.jack_client.transport_state != jack.ROLLING:
+#            self.jack_manager.jack_client.transport_start()
+#            self.playback_state = "playing"
+        if self.jack_manager:
+                self.jack_manager.jack_client.transport_start()            
 
         self.current_routing_index = -1
         self._update_current_routing()

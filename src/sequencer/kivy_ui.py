@@ -638,9 +638,24 @@ class SequencerLayout(BoxLayout):
         track_area_card.add_widget(self.ruler)
 
         # Conteneur pour la liste des pistes avec défilement
-        self.scroll_view = ScrollView(size_hint=(1, 1))
-        self.track_list_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(6))
+        #self.scroll_view = ScrollView(size_hint=(1, 1))
+        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=True)        
+        # 2. Le Layout qui contient les pistes
+        # On met size_hint_x à None pour pouvoir définir une largeur fixe en pixels
+        self.track_list_layout = BoxLayout(
+            orientation='vertical', 
+            size_hint_y=None, 
+            size_hint_x=None, # <--- CRUCIAL
+            spacing=dp(6)
+        )
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
+        
+        # Modifiez cette ligne dans kivy_ui.py :
+        # On ne se lie plus à self.ruler (le parent bridé) 
+        # mais à self.ruler.ruler_content (le vrai contenu large)
+        self.ruler.ruler_content.bind(width=self._sync_track_width)
+        self.track_list_layout.width = self.ruler.ruler_content.width
+                
         self.scroll_view.add_widget(self.track_list_layout)
 
         track_area_card.add_widget(self.scroll_view)
@@ -1797,6 +1812,36 @@ class SequencerLayout(BoxLayout):
                 if track_widget.total_beats != new_total_beats:
                     track_widget.total_beats = new_total_beats
 
+        #print(self.sequencer.playback_state, self.track_widgets, self.display_beat)
+# --- ÉTAPE 6 : LE SCROLL CORRIGÉ ---
+        if self.sequencer.playback_state == "playing" and self.track_widgets:
+            container = self.scroll_view.children[0]
+            content_w = container.width
+            view_w = self.scroll_view.width
+            max_scroll = content_w - view_w
+            
+            if max_scroll > 0:
+                #print(f"max_scroll: {max_scroll} content_w: {content_w} view_w: {view_w}")
+                print(f"DEBUG: Track 0 width = {self.track_widgets[0].width}")                
+                # 1. Calculer la position de la tête en pixels
+                ppb = self.track_widgets[0].pixels_per_beat
+                playhead_pixel = self.display_beat * ppb
+                
+                # 2. On ne commence à scroller que si la tête dépasse le milieu de l'écran
+                half_view = view_w / 2
+                
+                if playhead_pixel > half_view:
+                    # On essaie de garder la tête au centre
+                    target_pixel = playhead_pixel - half_view
+                    target_x = max(0.0, min(1.0, target_pixel / max_scroll))
+                    
+                    if abs(self.scroll_view.scroll_x - target_x) > 0.001:
+                        self._synchronize_scroll(self.scroll_view, target_x)
+                else:
+                    # Avant le milieu, on reste au début
+                    if self.scroll_view.scroll_x != 0:
+                        self._synchronize_scroll(self.scroll_view, 0.0)
+
     def snap_ui_to_jack(self):
         """
         Force l'UI à se caler immédiatement sur la dernière position 
@@ -2236,6 +2281,9 @@ class SequencerLayout(BoxLayout):
             self.play_button.width = self.original_width
             self.play_button.height = self.original_height
 
+    def _sync_track_width(self, instance, value):
+            self.track_list_layout.width = value
+        
     def _beat_pulse_glow(self, dt):
         """Animation de pulse avec effet glow"""
         # Vérifier que l'animation est toujours valide
@@ -2275,7 +2323,6 @@ class SequencerLayout(BoxLayout):
         if self._is_scrolling:
             return
         self._is_scrolling = True
-
         # Calculate the absolute pixel offset from the source.
         # Use children[0] width as content width.
         try:

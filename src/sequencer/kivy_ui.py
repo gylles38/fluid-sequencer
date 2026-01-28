@@ -362,6 +362,31 @@ class SequencerLayout(BoxLayout):
         )
         transport_card.add_widget(self.playhead_label)
 
+        # Bridge Status
+        self.bridge_layout = BoxLayout(size_hint_x=None, width=dp(200), spacing=dp(5))
+        self.bridge_activity_dot = Widget(size_hint=(None, None), size=(dp(8), dp(8)), pos_hint={'center_y': 0.5})
+        with self.bridge_activity_dot.canvas:
+            self.bridge_dot_color = Color(0, 1, 0, 0) # Hidden by default
+            self.bridge_dot_rect = Rectangle(pos=self.bridge_activity_dot.pos, size=self.bridge_activity_dot.size)
+        self.bridge_activity_dot.bind(pos=lambda *a: setattr(self.bridge_dot_rect, 'pos', self.bridge_activity_dot.pos))
+
+        self.bridge_label = MDLabel(
+            text="Bridge: -",
+            size_hint_x=None,
+            width=dp(180),
+            size_hint_y=None,
+            height=common_height,
+            pos_hint={'center_y': 0.5},
+            theme_text_color="Custom",
+            text_color=[0.2, 0.6, 0.8, 1],
+            font_size="12sp",
+            halign='left',
+            valign='middle'
+        )
+        self.bridge_layout.add_widget(self.bridge_activity_dot)
+        self.bridge_layout.add_widget(self.bridge_label)
+        transport_card.add_widget(self.bridge_layout)
+
         # Start/End avec hauteur synchronisée
         start_label = Label(
             text='Start:', 
@@ -552,6 +577,14 @@ class SequencerLayout(BoxLayout):
         )
         toolbar_card.add_widget(add_automation_track_button)
 
+        # Bouton pour ouvrir l'aiguillage MIDI (Routing)
+        routing_button = TooltipMDIconButton(
+            icon="lan",
+            tooltip_text="MIDI Input Routing",
+            on_release=lambda x: self.open_input_routing_editor()
+        )
+        toolbar_card.add_widget(routing_button)
+
         # Bouton pour supprimer une piste
         delete_track_button = TooltipMDIconButton(
             icon="playlist-minus",
@@ -630,6 +663,8 @@ class SequencerLayout(BoxLayout):
         # update_status_display() appelle update_track_list() qui utilise self.track_list_layout
         # donc il DOIT être appelé APRÈS la création de track_list_layout
         self.update_status_display()
+        
+        self.sequencer.bind(current_routing_index=self.update_bridge_label)
 
         # Re-introducing a clock for smooth UI updates, but at a more reasonable rate
         Clock.schedule_interval(self.update_playhead, 1/30.0)
@@ -1451,6 +1486,25 @@ class SequencerLayout(BoxLayout):
         self.delete_popup = popup # Store reference to dismiss it later
         popup.open()
 
+    def open_input_routing_editor(self):
+        """Ouvre l'éditeur d'aiguillage MIDI global."""
+        from sequencer.ui_components.input_routing_editor import InputRoutingEditor
+
+        # Vérifier si déjà ouvert
+        for child in self.window_manager.children:
+            if isinstance(child, InputRoutingEditor):
+                # Clock.schedule_once(lambda dt: child.bring_to_front())
+                return
+
+        routing_track = self.sequencer.get_input_routing_track()
+        editor = InputRoutingEditor(
+            track=routing_track,
+            sequencer_layout=self,
+            size_hint=(0.9, 0.8),
+            pos_hint={'center_x': 0.5, 'center_y': 0.5}
+        )
+        self.window_manager.add_widget(editor)
+
     def confirm_delete_track(self, track_index):
         """Affiche une confirmation avant de supprimer la piste."""
         if hasattr(self, 'delete_popup'):
@@ -1842,6 +1896,29 @@ class SequencerLayout(BoxLayout):
             sv.fbind('scroll_x', self._synchronize_scroll)
             sv.bind(on_scroll_stop=self._on_scroll_stop)
             
+    def update_bridge_label(self, instance, value):
+        if not self.sequencer.jack_manager.is_running:
+            self.bridge_label.text = "Bridge: NO JACK"
+            self.bridge_label.text_color = [0.8, 0.2, 0.2, 1]
+        elif value == -1:
+            # Vérifier si c'est parce qu'il n'y a aucune piste MIDI
+            has_midi = any(isinstance(t, MidiTrack) for t in self.sequencer.song.tracks)
+            if not has_midi:
+                self.bridge_label.text = "Bridge: No MIDI Tracks"
+            else:
+                self.bridge_label.text = "Bridge: OFF (No Route)"
+            self.bridge_label.text_color = [0.5, 0.5, 0.5, 1]
+        else:
+            try:
+                track_name = self.sequencer.song.tracks[value].name
+                # Display both index and a shortened name
+                short_name = (track_name[:12] + '..') if len(track_name) > 12 else track_name
+                self.bridge_label.text = f"Bridge -> [{value}] {short_name}"
+                self.bridge_label.text_color = [0.2, 0.8, 1.0, 1]
+            except (IndexError, AttributeError):
+                self.bridge_label.text = "Bridge: ?"
+                self.bridge_label.text_color = [1, 0.5, 0, 1]
+
     def update_status_display(self):
         song = self.sequencer.song
         self.song_name_label.text = f"Song: {song.name}"
@@ -1857,6 +1934,7 @@ class SequencerLayout(BoxLayout):
         self.sequencer.ui_start_pos_str = self.start_pos_input.text
         self.sequencer.ui_end_pos_str = self.end_pos_input.text
 
+        self.update_bridge_label(None, self.sequencer.current_routing_index)
         self.update_track_list()
         
 ####
@@ -2088,6 +2166,8 @@ class SequencerLayout(BoxLayout):
                     self.process_command_ui(full_command)
                 popup = LoopPopup(sequencer=self.sequencer, callback=loop_callback)
                 popup.open()
+            elif data.get("status") == "open_routing_editor":
+                self.open_input_routing_editor()
             elif data.get("status") == "prompt":
                 prompt_message = data["message"]
                 if "You have unsaved changes" in prompt_message:

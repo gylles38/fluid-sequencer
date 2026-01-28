@@ -15,7 +15,7 @@ from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
-from kivy.properties import NumericProperty, ObjectProperty
+from kivy.properties import NumericProperty, ObjectProperty, BooleanProperty
 from kivy.uix.label import Label 
 from kivy.metrics import dp
 from sequencer.ui_components.MeasureGrid import MeasureGrid
@@ -143,6 +143,7 @@ class TrackWidget(BoxLayout):
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
+    is_active_routing = BooleanProperty(False)    
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         self.spacing = dp(12)
@@ -165,10 +166,8 @@ class TrackWidget(BoxLayout):
         self.padding = [0, 0, 0, 0] # REMISE À ZÉRO POUR TESTS          
         
         with self.canvas.before:
-            if track_index % 2 == 0:
-                Color(0.1, 0.1, 0.1, 1)
-            else:
-                Color(0.12, 0.12, 0.12, 1)
+            self.bg_color = Color(0, 0, 0, 1)
+            self._update_bg_color()
             # BIEN ASSIGNER À SELF ICI
             self.background_rect = Rectangle(pos=self.pos, size=self.size)
 
@@ -593,7 +592,10 @@ class TrackWidget(BoxLayout):
         self.track.bind(is_solo=self.on_solo_changed)
         
         # Liaison avec le séquenceur pour la mise à jour en temps réel
-        self.sequencer_layout.sequencer.bind(current_beat=lambda instance, val: self.update_sliders_from_automation(val))
+        self.sequencer_layout.sequencer.bind(
+            current_beat=lambda instance, val: self.update_sliders_from_automation(val),
+            current_routing_index=lambda inst, val: self._sync_routing_status(inst, val)
+        )
         
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
@@ -669,6 +671,30 @@ class TrackWidget(BoxLayout):
 
     def on_solo_changed(self, instance, value) -> None:
         self.update_mute_solo_appearance()
+
+    def _sync_routing_status(self, instance, value):
+        # On met à jour l'état et on force la couleur IMMEDIATEMENT
+        is_active = (self.track_index == value)
+        if is_active != self.is_active_routing:
+            self.is_active_routing = is_active
+            self._update_bg_color() # Appel direct sans passer par un bind supplémentaire
+
+    def _update_bg_color(self, *args):
+        """
+        Update the background color of the track widget based on its state.
+        
+        Sets the background color to a blue highlight if the track is actively being routed,
+        otherwise alternates between two dark gray shades based on the track's index position.
+        
+        Args:
+            *args: Variable length argument list (typically used for Kivy event callbacks).
+        """
+        if self.is_active_routing:
+            self.bg_color.rgba = [0.1, 0.3, 0.5, 1] # More visible blue highlight for active routing
+        elif self.track_index % 2 == 0:
+            self.bg_color.rgba = [0.1, 0.1, 0.1, 1]
+        else:
+            self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
 
     def on_automation_selection_change(self, selected_param) -> None:
         """
@@ -1011,3 +1037,14 @@ class TrackWidget(BoxLayout):
         # Optionnel : baisser légèrement l'opacité pour indiquer qu'une automation "pilote" le slider
         vol_slider.opacity = 0.7 if found_vol else 1.0
         pan_slider.opacity = 0.7 if found_pan else 1.0
+        
+    '''
+    def _update_live_notes(self, instance, value):
+        if not hasattr(self, 'piano_keyboard'):
+            return
+
+        # Get notes for this specific track
+        notes = value.get(self.track_index, [])
+        if self.piano_keyboard.highlighted_notes != notes:
+            self.piano_keyboard.highlighted_notes = notes
+    '''                    

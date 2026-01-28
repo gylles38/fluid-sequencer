@@ -434,7 +434,7 @@ class TrackWidget(BoxLayout):
             #self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
             self.timeline_scroll = ScrollView(
                 size_hint=(1, 1),
-                do_scroll_x=False, # Désactive le contrôle manuel/interne
+                do_scroll_x=True,
                 do_scroll_y=False,
                 effect_cls='ScrollEffect', # Désactive les rebonds (overscroll)
                 bar_width=0

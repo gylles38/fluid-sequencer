@@ -638,24 +638,18 @@ class SequencerLayout(BoxLayout):
         track_area_card.add_widget(self.ruler)
 
         # Conteneur pour la liste des pistes avec défilement
-        #self.scroll_view = ScrollView(size_hint=(1, 1))
-        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=True)        
+        # On désactive do_scroll_x pour garder les panneaux de gauche fixes.
+        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False)
         # 2. Le Layout qui contient les pistes
-        # On met size_hint_x à None pour pouvoir définir une largeur fixe en pixels
+        # On le laisse à size_hint_x=1 pour qu'il s'adapte à la largeur de l'écran.
         self.track_list_layout = BoxLayout(
             orientation='vertical', 
             size_hint_y=None, 
-            size_hint_x=None, # <--- CRUCIAL
+            size_hint_x=1,
             spacing=dp(6)
         )
         self.track_list_layout.bind(minimum_height=self.track_list_layout.setter('height'))
         
-        # Modifiez cette ligne dans kivy_ui.py :
-        # On ne se lie plus à self.ruler (le parent bridé) 
-        # mais à self.ruler.ruler_content (le vrai contenu large)
-        self.ruler.ruler_content.bind(width=self._sync_track_width)
-        self.track_list_layout.width = self.ruler.ruler_content.width
-                
         self.scroll_view.add_widget(self.track_list_layout)
 
         track_area_card.add_widget(self.scroll_view)
@@ -708,40 +702,6 @@ class SequencerLayout(BoxLayout):
             self.zoom(1.2)
         elif keyboard in (45, 269): # Keycode for '-' and 'numpadsubtract'
             self.zoom(0.8)
-
-    def handle_ruler_click(self, touch):
-        if not self.track_widgets:
-            return
-
-        ruler_content = self.ruler.ruler_content
-        track_widget = self.track_widgets[0]
-
-        # Use the direct reference to the ScrollView
-        scroll_view = self.scroll_view
-
-        # Calculate the scroll offset in pixels
-        scroll_offset_x = scroll_view.scroll_x * (track_widget.timeline_container.width - scroll_view.width)
-
-        # Calculate the click position relative to the start of the ruler content area
-        relative_click_x = touch.x - ruler_content.x
-
-        # Calculate the absolute position in the scrolling content
-        absolute_click_x = relative_click_x + scroll_offset_x
-
-        # Convert the absolute pixel position to a beat
-        pixels_per_beat = ruler_content.width / track_widget.total_beats
-        if pixels_per_beat == 0:
-            return
-
-        clicked_beat = absolute_click_x / pixels_per_beat
-
-        # Snap to the beginning of the clicked measure
-        beats_per_measure = self.sequencer.song.time_signature_numerator
-        measure = int(clicked_beat / beats_per_measure) + 1
-
-        # Format and send seek command
-        seek_position = f"{measure}:1"
-        self.process_command_ui(f"seek {seek_position}")
 
     def on_playback_state_change(self, instance, value):
         """Callback for sequencer's playback_state changes."""
@@ -1814,15 +1774,15 @@ class SequencerLayout(BoxLayout):
 
         #print(self.sequencer.playback_state, self.track_widgets, self.display_beat)
 # --- ÉTAPE 6 : LE SCROLL CORRIGÉ ---
+        # On pilote désormais le défilement horizontal via le ScrollView de la règle (ruler.scroll_view)
+        # qui synchronisera automatiquement toutes les grilles de pistes.
         if self.sequencer.playback_state == "playing" and self.track_widgets:
-            container = self.scroll_view.children[0]
-            content_w = container.width
-            view_w = self.scroll_view.width
+            source_sv = self.ruler.scroll_view
+            content_w = source_sv.children[0].width
+            view_w = source_sv.width
             max_scroll = content_w - view_w
             
             if max_scroll > 0:
-                #print(f"max_scroll: {max_scroll} content_w: {content_w} view_w: {view_w}")
-                print(f"DEBUG: Track 0 width = {self.track_widgets[0].width}")                
                 # 1. Calculer la position de la tête en pixels
                 ppb = self.track_widgets[0].pixels_per_beat
                 playhead_pixel = self.display_beat * ppb
@@ -1835,12 +1795,13 @@ class SequencerLayout(BoxLayout):
                     target_pixel = playhead_pixel - half_view
                     target_x = max(0.0, min(1.0, target_pixel / max_scroll))
                     
-                    if abs(self.scroll_view.scroll_x - target_x) > 0.001:
-                        self._synchronize_scroll(self.scroll_view, target_x)
+                    if abs(source_sv.scroll_x - target_x) > 0.001:
+                        # Cela déclenchera _synchronize_scroll et déplacera toutes les pistes
+                        source_sv.scroll_x = target_x
                 else:
                     # Avant le milieu, on reste au début
-                    if self.scroll_view.scroll_x != 0:
-                        self._synchronize_scroll(self.scroll_view, 0.0)
+                    if source_sv.scroll_x != 0:
+                        source_sv.scroll_x = 0.0
 
     def snap_ui_to_jack(self):
         """
@@ -1931,6 +1892,9 @@ class SequencerLayout(BoxLayout):
             first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
 
         # --- Bind scroll views for synchronization ---
+        # Horizontal scrolling is now managed by individual scroll views (grids and ruler)
+        # to keep the left panels fixed while maintaining perfect alignment.
+
         # First, unbind the persistent ruler scroll view to avoid duplicate bindings
         self.ruler.scroll_view.funbind('scroll_x', self._synchronize_scroll)
 
@@ -2281,9 +2245,6 @@ class SequencerLayout(BoxLayout):
             self.play_button.width = self.original_width
             self.play_button.height = self.original_height
 
-    def _sync_track_width(self, instance, value):
-            self.track_list_layout.width = value
-        
     def _beat_pulse_glow(self, dt):
         """Animation de pulse avec effet glow"""
         # Vérifier que l'animation est toujours valide
@@ -2439,7 +2400,8 @@ class SequencerLayout(BoxLayout):
 
         # --- 5. Apply the new scroll position to all ScrollViews ---
         # Use the synchronization method to update all timelines at once
-        self._synchronize_scroll(self.scroll_view, final_scroll_x)
+        # Note: We use the ruler's scroll view as the source now that the main scroll view is vertical-only.
+        self._synchronize_scroll(self.ruler.scroll_view, final_scroll_x)
 
 
 class SequencerApp(MDApp):

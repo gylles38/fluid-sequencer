@@ -951,6 +951,12 @@ class TrackWidget(BoxLayout):
         if isinstance(self.track, AutomationTrack):
             return
 
+        # Optimization: Only update if transport is active or just stopped
+        if self.sequencer_layout.sequencer.playback_state == 'stopped' and current_beat > 0:
+            pass # Allow one last update on stop
+        elif self.sequencer_layout.sequencer.playback_state == 'stopped':
+            return
+
         vol_slider = getattr(self, 'volume_slider', None)
         pan_slider = getattr(self, 'pan_slider', None)
         if not vol_slider or not pan_slider:

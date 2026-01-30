@@ -24,7 +24,7 @@ class PianoRoll(Widget):
         self.height = 128 * self.note_height
 
         self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width,
-                  track=self.draw, pos=self.draw, size=self.draw)
+                  track=self.draw, size=self.draw) # Removed 'pos' binding
         self._update_width()
 
     def _update_width(self, *args):
@@ -40,38 +40,50 @@ class PianoRoll(Widget):
         return (red, green, blue, 0.9)
 
     def draw(self, *args):
+        if not self.canvas: return
         self.canvas.before.clear()
         self.canvas.clear()
 
         with self.canvas.before:
             Color(0.1, 0.1, 0.12, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0,0), size=self.size)
 
-            # --- Grid ---
+            # --- Grid Horizontal ---
+            # Grouping by color to minimize context changes
+            # 1. White keys rows
+            Color(0.2, 0.2, 0.22, 1)
             for i in range(128):
-                # Y-coordinate is now proportional to pitch (bottom-up)
-                note_y = i * self.note_height
-                if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1) # Black keys
-                else: Color(0.2, 0.2, 0.22, 1) # White keys
+                if (i % 12) not in [1, 3, 6, 8, 10]:
+                    Rectangle(pos=(0, i * self.note_height), size=(self.width, self.note_height))
 
-                # Draw horizontal lines for note separation
-                Line(points=[0, note_y, self.width, note_y], width=0.6)
+            # 2. Black keys rows
+            Color(0.15, 0.15, 0.17, 1)
+            for i in range(128):
+                if (i % 12) in [1, 3, 6, 8, 10]:
+                    Rectangle(pos=(0, i * self.note_height), size=(self.width, self.note_height))
 
-                # Draw thicker lines to mark octaves (after B notes)
-                if (i % 12) == 11:
-                    Color(0.8, 0.8, 0.8, 0.6)
-                    # Draw octave line at the TOP of the B key row, to separate from C
-                    octave_line_y = note_y + self.note_height
-                    Line(points=[0, octave_line_y, self.width, octave_line_y], width=1.2)
+            # 3. Octave lines
+            Color(0.8, 0.8, 0.8, 0.6)
+            for i in range(11, 128, 12):
+                octave_line_y = (i + 1) * self.note_height
+                Line(points=[0, octave_line_y, self.width, octave_line_y], width=1.2)
 
+            # --- Grid Vertical ---
+            # 1. Measure lines
+            Color(0.8, 0.8, 0.8, 0.8)
             current_beat = 0
             while current_beat <= self.total_beats:
-                x_pos = current_beat * self.pixels_per_beat
                 if current_beat % self.beat_per_measure == 0:
-                    Color(0.8, 0.8, 0.8, 0.8)
+                    x_pos = current_beat * self.pixels_per_beat
                     Line(points=[x_pos, 0, x_pos, self.height], width=1.5)
-                else:
-                    Color(0.5, 0.5, 0.5, 0.4)
+                current_beat += 1
+
+            # 2. Beat lines
+            Color(0.5, 0.5, 0.5, 0.4)
+            current_beat = 0
+            while current_beat <= self.total_beats:
+                if current_beat % self.beat_per_measure != 0:
+                    x_pos = current_beat * self.pixels_per_beat
                     Line(points=[x_pos, 0, x_pos, self.height], width=0.5)
                 current_beat += 1
 

@@ -12,6 +12,7 @@ import socket
 import threading
 import time
 import collections
+import queue
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import List, Optional, TYPE_CHECKING, Dict, Any
@@ -73,7 +74,7 @@ class JackManager:
         self._track_snapshots: List[TrackSnapshot] = []
 
         # --- RT-safe IPC Command Queue ---
-        self._ipc_queue = collections.deque(maxlen=100)
+        self._ipc_queue = queue.Queue(maxsize=100)
         self._ipc_worker_thread = None
         self._ipc_worker_stop_event = threading.Event()
 
@@ -384,20 +385,25 @@ class JackManager:
         """Background thread to process mpv IPC commands without blocking RT thread."""
         while not self._ipc_worker_stop_event.is_set():
             try:
-                if self._ipc_queue:
-                    socket_path, command_data = self._ipc_queue.popleft()
+                # Use blocking get with timeout to release GIL and avoid busy loop
+                try:
+                    socket_path, command_data = self._ipc_queue.get(timeout=0.1)
                     self._send_ipc_command(socket_path, command_data)
-                else:
-                    time.sleep(0.01)
-            except IndexError:
-                time.sleep(0.01)
+                    self._ipc_queue.task_done()
+                except queue.Empty:
+                    continue
             except Exception as e:
                 print(f"Error in IPC worker loop: {e}", file=sys.stderr)
 
     def _queue_ipc_command(self, socket_path: str, command_data: dict):
         """Queues an IPC command to be sent by the background worker."""
         if socket_path:
-            self._ipc_queue.append((socket_path, command_data))
+            try:
+                self._ipc_queue.put_nowait((socket_path, command_data))
+            except queue.Full:
+                # If the queue is full, we drop the command to avoid blocking the caller (RT or UI)
+                # This usually only happens if mpv is totally frozen.
+                pass
 
     def refresh_automation(self):
         """Updates the cached automation events and track snapshots for the audio thread."""

@@ -1763,16 +1763,8 @@ class SequencerLayout(BoxLayout):
         self.playhead_label.text = f"Pos: {current_position}"
         self._detect_beat_one_for_animation(current_position)
 
-        # 5. Check if song length has changed and update widgets if needed
-        new_total_beats = self.sequencer.get_song_length_in_beats()
-        if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
-            self.ruler.total_beats = new_total_beats
-            self.ruler.redraw()
-            for track_widget in self.track_widgets:
-                if track_widget.total_beats != new_total_beats:
-                    track_widget.total_beats = new_total_beats
-
-        #print(self.sequencer.playback_state, self.track_widgets, self.display_beat)
+        # 5. Song length changes are now handled by song_structure_changed binding
+        # which triggers update_status_display(). No need to check every frame.
 # --- ÉTAPE 6 : LE SCROLL CORRIGÉ ---
         # On pilote désormais le défilement horizontal via le ScrollView de la règle (ruler.scroll_view)
         # qui synchronisera automatiquement toutes les grilles de pistes.
@@ -2246,36 +2238,25 @@ class SequencerLayout(BoxLayout):
             self.play_button.height = self.original_height
 
     def _beat_pulse_glow(self, dt):
-        """Animation de pulse avec effet glow"""
+        """Animation de pulse avec effet glow (couleur seulement pour performance)"""
         # Vérifier que l'animation est toujours valide
         if not hasattr(self, 'beat_pulse_animation') or self.beat_pulse_animation is None:
             return
 
         self.pulse_phase += 1
 
-        if self.pulse_phase <= 5:  # Phase d'expansion (0.5 seconde)
+        if self.pulse_phase <= 5:  # Phase d'expansion
             # Effet de glow progressif
             intensity = 0.3 + (self.pulse_phase * 0.14)  # 0.3 → 1.0
             glow_color = [intensity, 0.3 + intensity * 0.7, 0.1 + intensity * 0.3, 1]
-
             self.play_button.icon_color = glow_color
 
-            # Effet d'agrandissement subtil
-            scale = 1.0 + (self.pulse_phase * 0.03)
-            self.play_button.width = self.original_width * scale
-            self.play_button.height = self.original_height * scale
-
         else:
-            # Phase de contraction (0.5 seconde)
+            # Phase de contraction
             if self.pulse_phase <= 10:
                 intensity = 1.0 - ((self.pulse_phase - 5) * 0.14)  # 1.0 → 0.3
                 glow_color = [intensity, 0.3 + intensity * 0.7, 0.1 + intensity * 0.3, 1]
-
                 self.play_button.icon_color = glow_color
-
-                scale = 1.15 - ((self.pulse_phase - 5) * 0.03)
-                self.play_button.width = self.original_width * scale
-                self.play_button.height = self.original_height * scale
             else:
                 # Fin de l'animation
                 self.stop_beat_pulse_animation()

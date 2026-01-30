@@ -1198,9 +1198,11 @@ class JackManager:
                 # (but better to use Clock.schedule_once if we want to be 100% strict,
                 # however Sequencer._poll_engine_state will handle it anyway)
 
-    def _process_callback(self, frames: int, pos_struct: Any):
+    def _process_callback(self, frames: int):
         try:
-            current_transport_state = self.jack_client.transport_state
+            # Re-read position info inside callback as it's not passed as argument in python-jack
+            current_transport_state, pos_struct = self.jack_client.transport_query_struct()
+
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
                     self.set_all_audio_pause_state(False, rt_safe=True)
@@ -1230,7 +1232,6 @@ class JackManager:
                         self._active_notes.clear()
                     return
 
-            # RT Safe: Use the provided pos_struct instead of transport_query_struct()
             pos = jack.position2dict(pos_struct)
             samplerate = self.jack_client.samplerate
             tempo = getattr(self, '_rt_tempo', 120)

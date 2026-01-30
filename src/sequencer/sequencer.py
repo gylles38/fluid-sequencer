@@ -104,6 +104,7 @@ class Sequencer(EventDispatcher):
         self.last_play_start_beat: Optional[float] = None
 
         self.bind(song_structure_changed=self._update_current_routing)
+        self.bind(song_structure_changed=lambda *a: self.jack_manager.refresh_automation())
         
         if self.gui_mode:
             Clock.schedule_interval(self._poll_engine_state, 1/60.0)        
@@ -2569,6 +2570,9 @@ class Sequencer(EventDispatcher):
         # Store the beat from which playback is starting
         effective_start_beat = start_beat if start_beat is not None else self.rewind_beat
         self.last_play_start_beat = effective_start_beat
+
+        # Ensure audio thread has up-to-date snapshots before starting
+        self.jack_manager.refresh_automation()
 
         # If a start beat is provided, reposition the transport
         if start_beat is not None:

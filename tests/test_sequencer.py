@@ -312,7 +312,8 @@ class TestSequencer(unittest.TestCase):
 
         # Simulate the callback hitting the end of the range.
         # This logic is now in JackManager, so we call it on the real instance.
-        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1)
+        mock_pos = MagicMock()
+        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1, pos_struct=mock_pos)
 
         # The method should schedule sequencer.stop() to be called.
         mock_schedule.assert_called_once()
@@ -364,8 +365,8 @@ class TestSequencer(unittest.TestCase):
         self.assertAlmostEqual(end_event['value'], 1.0)
 
     @patch('pydub.AudioSegment.from_file')
-    @patch('sequencer.sequencer.JackManager._send_ipc_command')
-    def test_audio_track_automation_sends_ipc_commands(self, mock_send_ipc, mock_from_file):
+    @patch('sequencer.sequencer.JackManager._queue_ipc_command')
+    def test_audio_track_automation_sends_ipc_commands(self, mock_queue_ipc, mock_from_file):
         """
         Verify that automation events for audio tracks are correctly translated
         into IPC commands for mpv.
@@ -374,10 +375,11 @@ class TestSequencer(unittest.TestCase):
         mock_from_file.return_value = MagicMock()
         self.sequencer.add_track(name="Audio", track_type='audio', filepath="test.wav")
 
-        # Mock an active audio process for this track
+        # Create snapshots so the RT-safe code can find the track
         self.sequencer.jack_manager.active_audio_processes = [
             MagicMock(track_index=0, socket_path="/tmp/mpv-socket")
         ]
+        self.sequencer.jack_manager.refresh_automation()
 
         # 2. Test Volume Automation
         vol_event = {
@@ -388,9 +390,9 @@ class TestSequencer(unittest.TestCase):
         }
         self.sequencer.jack_manager._apply_automation_event(vol_event)
 
-        # Assert that the correct volume command was sent (0.75 -> 75.0)
+        # Assert that the correct volume command was queued (0.75 -> 75.0)
         expected_vol_command = {"command": ["set_property", "volume", 75.0]}
-        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_vol_command)
+        mock_queue_ipc.assert_called_with("/tmp/mpv-socket", expected_vol_command)
 
         # 3. Test Pan Automation
         pan_event = {
@@ -401,11 +403,11 @@ class TestSequencer(unittest.TestCase):
         }
         self.sequencer.jack_manager._apply_automation_event(pan_event)
 
-        # Assert that the correct pan command was sent
+        # Assert that the correct pan command was queued
         expected_pan_filter = "lavfi=[pan=stereo|c0=1.00*c0|c1=0.50*c1]"
         expected_pan_command = {"command": ["set_property", "af", expected_pan_filter]}
         # The mock was already called for volume, so we check the last call
-        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_pan_command)
+        mock_queue_ipc.assert_called_with("/tmp/mpv-socket", expected_pan_command)
 
 
 if __name__ == '__main__':

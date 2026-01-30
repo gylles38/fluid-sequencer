@@ -13,8 +13,8 @@ import threading
 import time
 import collections
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import List, Optional, TYPE_CHECKING, Dict
+from dataclasses import dataclass, field
+from typing import List, Optional, TYPE_CHECKING, Dict, Any
 
 from kivy.clock import Clock
 
@@ -31,6 +31,25 @@ class ActiveAudioProcess:
     track_index: int
     temp_filepath: Optional[str] = None # No longer mixing to a temp file
 
+@dataclass
+class TrackSnapshot:
+    index: int
+    name: str
+    is_midi: bool = False
+    is_audio: bool = False
+    is_automation: bool = False
+    target_track_index: int = -1
+    points: List[Any] = field(default_factory=list)
+    start_time: float = 0.0
+    duration_beats: float = 0.0
+    channel: int = 0
+    output_port_name: Optional[str] = None
+    socket_path: Optional[str] = None
+    is_muted: bool = False
+    is_solo: bool = False
+    velocity: float = 1.0
+    instrument: int = 0
+    events: List[Any] = field(default_factory=list)
 
 class JackManager:
     def __init__(self, sequencer: 'Sequencer'):
@@ -52,6 +71,12 @@ class JackManager:
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
         self._routing_track: Optional[AutomationTrack] = None        
+        self._track_snapshots: List[TrackSnapshot] = []
+
+        # --- RT-safe IPC Command Queue ---
+        self._ipc_queue = collections.deque(maxlen=100)
+        self._ipc_worker_thread = None
+        self._ipc_worker_stop_event = threading.Event()
 
         # --- UI Command Flags (from MIDI) ---
         self._pending_play_pause = False
@@ -283,8 +308,9 @@ class JackManager:
 
                     if last_speed is None or not math.isclose(last_speed, new_speed, rel_tol=1e-4):
                         command = {"command": ["set_property", "speed", new_speed]}
-                        if self._send_ipc_command(ap.socket_path, command):
-                            self.last_applied_speeds[ap.track_index] = new_speed
+                        # Use the queue for speed changes too to keep things uniform
+                        self._queue_ipc_command(ap.socket_path, command)
+                        self.last_applied_speeds[ap.track_index] = new_speed
 
             except jack.JackError:
                 # This can happen during shutdown, it's safe to just exit the loop
@@ -353,6 +379,82 @@ class JackManager:
                         self.automation_events.extend(generated)
 
         self.automation_events.sort(key=lambda e: e['time'])
+
+    def _ipc_worker_loop(self):
+        """Background thread to process mpv IPC commands without blocking RT thread."""
+        while not self._ipc_worker_stop_event.is_set():
+            try:
+                if self._ipc_queue:
+                    socket_path, command_data = self._ipc_queue.popleft()
+                    self._send_ipc_command(socket_path, command_data)
+                else:
+                    time.sleep(0.01)
+            except IndexError:
+                time.sleep(0.01)
+            except Exception as e:
+                print(f"Error in IPC worker loop: {e}", file=sys.stderr)
+
+    def _queue_ipc_command(self, socket_path: str, command_data: dict):
+        """Queues an IPC command to be sent by the background worker."""
+        if socket_path:
+            self._ipc_queue.append((socket_path, command_data))
+
+    def refresh_automation(self):
+        """Updates the cached automation events and track snapshots for the audio thread."""
+        self._prepare_automation_events()
+
+        # Take a snapshot of song global properties
+        self._rt_tempo = self.sequencer.song.tempo
+        self._rt_beats_per_measure = self.sequencer.song.time_signature_numerator
+
+        # Take a snapshot of metronome state
+        self._rt_metronome_enabled = self.sequencer.song.metronome_enabled
+        self._rt_metronome_port_name = self.sequencer.song.metronome_port_name
+        self._rt_metronome_channel = self.sequencer.metronome_channel
+        self._rt_metronome_pitch_downbeat = self.sequencer.metronome_pitch_downbeat
+        self._rt_metronome_pitch_beat = self.sequencer.metronome_pitch_beat
+        self._rt_metronome_volume = self.sequencer.song.metronome_volume
+        self._rt_metronome_pan = self.sequencer.song.metronome_pan
+
+        # Take a snapshot of tracks for RT-safe access
+        new_snapshots = []
+        tracks = self.sequencer.song.tracks
+
+        # Pre-calculate audio durations if needed
+        for i, track in enumerate(tracks):
+            if isinstance(track, AudioTrack):
+                self.sequencer._get_audio_duration_in_beats(track)
+
+        for i, track in enumerate(tracks):
+            # --- Live Preview Override ---
+            if i in self.sequencer.track_overrides:
+                track = self.sequencer.track_overrides[i]
+
+            snap = TrackSnapshot(index=i, name=track.name)
+            if isinstance(track, MidiTrack):
+                snap.is_midi = True
+                snap.channel = track.channel
+                snap.output_port_name = track.output_port_name
+                snap.events = track.events
+                snap.velocity = track.velocity
+                snap.instrument = track.instrument
+            elif isinstance(track, AudioTrack):
+                snap.is_audio = True
+                snap.start_time = track.start_time
+                snap.duration_beats = track.duration_beats or 0.0
+                ap = next((p for p in self.active_audio_processes if p.track_index == i), None)
+                if ap:
+                    snap.socket_path = ap.socket_path
+            elif isinstance(track, AutomationTrack):
+                snap.is_automation = True
+                snap.target_track_index = track.target_track_index
+                snap.points = track.points # Shared list
+
+            snap.is_muted = getattr(track, 'is_muted', False)
+            snap.is_solo = getattr(track, 'is_solo', False)
+            new_snapshots.append(snap)
+
+        self._track_snapshots = new_snapshots
 
     def start(self):
             if self.is_running:
@@ -437,8 +539,17 @@ class JackManager:
 
                 self.jack_client.set_process_callback(self._process_callback)
                 self.jack_client.set_timebase_callback(self._time_callback)
+
+                # --- Start IPC worker thread ---
+                self._ipc_worker_stop_event.clear()
+                self._ipc_worker_thread = threading.Thread(target=self._ipc_worker_loop)
+                self._ipc_worker_thread.daemon = True
+                self._ipc_worker_thread.start()
+
                 self.jack_client.activate()
                 self.is_running = True
+
+                self.refresh_automation()
 
                 # --- Initial Transport Sync ---
                 state, pos_struct = self.jack_client.transport_query_struct()
@@ -478,6 +589,12 @@ class JackManager:
         """Stops the JACK client, its threads, and all related processes."""
         if not self.is_running:
             return
+
+        # Stop the IPC worker thread
+        if self._ipc_worker_thread and self._ipc_worker_thread.is_alive():
+            self._ipc_worker_stop_event.set()
+            self._ipc_worker_thread.join(timeout=1.0)
+            self._ipc_worker_thread = None
 
         # Stop the display thread if it's running
         if self._display_thread and self._display_thread.is_alive():
@@ -609,11 +726,19 @@ class JackManager:
         except (socket.timeout, ConnectionRefusedError, FileNotFoundError):
             return False
 
-    def set_all_audio_pause_state(self, is_paused: bool):
-        with self.process_lock:
-            for ap in self.active_audio_processes:
-                command = {"command": ["set_property", "pause", is_paused]}
-                self._send_ipc_command(ap.socket_path, command)
+    def set_all_audio_pause_state(self, is_paused: bool, rt_safe=False):
+        """Sets the pause state for all audio tracks. If rt_safe is True, it uses the async queue."""
+        if rt_safe:
+            snapshots = self._track_snapshots
+            for snap in snapshots:
+                if snap.is_audio:
+                    command = {"command": ["set_property", "pause", is_paused]}
+                    self._queue_ipc_command(snap.socket_path, command)
+        else:
+            with self.process_lock:
+                for ap in self.active_audio_processes:
+                    command = {"command": ["set_property", "pause", is_paused]}
+                    self._send_ipc_command(ap.socket_path, command)
 
     def launch_player_for_track(self, track: AudioTrack, track_index: int):
         """Launches, waits for, and primes a player for a single audio track."""
@@ -838,38 +963,34 @@ class JackManager:
                 self.sequencer.last_beat_update_time = time.perf_counter()
 
     def _process_midi_events(self, start_beat_of_block, end_beat_of_block):
-        tracks = self.sequencer.song.tracks
-        is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
+        snapshots = self._track_snapshots
+        is_any_track_soloed = any(s.is_solo for s in snapshots)
 
-        for i, track in enumerate(tracks):
-            # --- Live Preview Override ---
-            # If a track is being edited, use the temporary version from the editor.
-            if i in self.sequencer.track_overrides:
-                track = self.sequencer.track_overrides[i]
-
-            if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
+        for i, snap in enumerate(snapshots):
+            if not snap.is_midi or not snap.output_port_name in self.open_ports:
                 continue
 
-            should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-            port = self.open_ports[track.output_port_name]
+            should_be_audible = (snap.is_solo or not is_any_track_soloed) and not snap.is_muted
+            port = self.open_ports[snap.output_port_name]
 
             if i >= len(self.next_event_indices):
                 self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
 
-            while self.next_event_indices[i] < len(track.events):
-                event = track.events[self.next_event_indices[i]]
+            events = snap.events
+            while self.next_event_indices[i] < len(events):
+                event = events[self.next_event_indices[i]]
 
                 if start_beat_of_block <= event.start_time < end_beat_of_block:
                     if should_be_audible:
                         for note in event.notes:
-                            final_velocity = int(note.velocity * track.velocity)
+                            final_velocity = int(note.velocity * snap.velocity)
                             final_velocity = max(0, min(127, final_velocity))
-                            note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=final_velocity)
+                            note_on_msg = mido.Message('note_on', channel=snap.channel, note=note.pitch, velocity=final_velocity)
                             port.send(note_on_msg)
                             note_end_beat = event.start_time + note.duration
                             self._active_notes[(i, note.pitch)] = note_end_beat
                         for cc in event.cc_messages:
-                            cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
+                            cc_msg = mido.Message('control_change', channel=snap.channel, control=cc.control, value=cc.value)
                             port.send(cc_msg)
                     self.next_event_indices[i] += 1
                 elif event.start_time >= end_beat_of_block:
@@ -887,16 +1008,18 @@ class JackManager:
         primed_params = set()
         param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
-        for track in self.sequencer.song.tracks:
-            if not isinstance(track, AutomationTrack):
+        snapshots = self._track_snapshots
+
+        for snap in snapshots:
+            if not snap.is_automation:
                 continue
 
             # This logic only works if the target track is valid
-            if not 0 <= track.target_track_index < len(self.sequencer.song.tracks):
+            if not 0 <= snap.target_track_index < len(snapshots):
                 continue
 
             points_by_parameter: Dict[str, List[AutomationPoint]] = {}
-            for p in track.points:
+            for p in snap.points:
                 points_by_parameter.setdefault(p.parameter, []).append(p)
 
             for parameter, points in points_by_parameter.items():
@@ -947,32 +1070,33 @@ class JackManager:
                 param_config = param_map.get(parameter.lower())
                 if param_config:
                     event_dict = {
-                        "target_track_index": track.target_track_index,
+                        "target_track_index": snap.target_track_index,
                         "parameter": parameter,
                         "param_config": param_config,
                         "value": value_to_apply
                     }
                     self._apply_automation_event(event_dict)
-                    primed_params.add((track.target_track_index, parameter))
+                    primed_params.add((snap.target_track_index, parameter))
 
         return primed_params
 
     def _apply_automation_event(self, event: dict):
         """Applies a single automation event."""
         target_track_index = event['target_track_index']
-        if not 0 <= target_track_index < len(self.sequencer.song.tracks):
+        snapshots = self._track_snapshots
+        if not 0 <= target_track_index < len(snapshots):
             return
 
-        target_track = self.sequencer.song.tracks[target_track_index]
+        snap = snapshots[target_track_index]
         param_config = event['param_config']
         value = event['value']
         param_name = event['parameter'].lower()
 
         # Branch by Track Type first for clarity and correctness
-        if isinstance(target_track, MidiTrack):
+        if snap.is_midi:
             if param_config.get('type') == 'midi_cc':
-                if target_track.output_port_name in self.open_ports:
-                    port = self.open_ports[target_track.output_port_name]
+                if snap.output_port_name in self.open_ports:
+                    port = self.open_ports[snap.output_port_name]
                     midi_value = 0
                     if param_name == 'vol':
                         midi_value = int(value * 127)
@@ -984,34 +1108,34 @@ class JackManager:
                     # --- FIX: Clamp the final value to the valid MIDI range ---
                     midi_value = max(0, min(127, midi_value))
 
-                    msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
+                    msg = mido.Message('control_change', channel=snap.channel, control=param_config['control'], value=midi_value)
                     port.send(msg)
             elif param_config.get('type') == 'program_change':
-                if target_track.output_port_name in self.open_ports:
-                    port = self.open_ports[target_track.output_port_name]
+                if snap.output_port_name in self.open_ports:
+                    port = self.open_ports[snap.output_port_name]
                     program_value = max(0, min(127, int(value)))
-                    msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
+                    msg = mido.Message('program_change', channel=snap.channel, program=program_value)
                     port.send(msg)
             elif param_config.get('type') == 'velocity_multiplier':
-                target_track.velocity = float(value)
+                snap.velocity = float(value)
 
-        elif isinstance(target_track, AudioTrack):
-            ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)
-            if not ap:
+        elif snap.is_audio:
+            socket_path = snap.socket_path
+            if not socket_path:
                 return
 
             if param_name == 'vol':
                 # mpv expects volume from 0 to 100
                 mpv_volume = value * 100
                 command = {"command": ["set_property", "volume", mpv_volume]}
-                self._send_ipc_command(ap.socket_path, command)
+                self._queue_ipc_command(socket_path, command)
             elif param_name == 'pan':
                 # CORRECT: Use the lavfi filter for audio track panning, not 'balance'
                 gain_l = min(1.0, 1.0 - value)
                 gain_r = min(1.0, 1.0 + value)
                 pan_filter = f"lavfi=[pan=stereo|c0={gain_l:.2f}*c0|c1={gain_r:.2f}*c1]"
                 command = {"command": ["set_property", "af", pan_filter]}
-                self._send_ipc_command(ap.socket_path, command)
+                self._queue_ipc_command(socket_path, command)
 
     def _process_automation_events(self, start_beat_of_block, end_beat_of_block):
         while self.next_automation_event_index < len(self.automation_events):
@@ -1025,26 +1149,26 @@ class JackManager:
                 self.next_automation_event_index += 1
 
     def _process_metronome(self, start_beat_of_block, end_beat_of_block):
-        if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
-            port = self.open_ports[self.sequencer.song.metronome_port_name]
+        if getattr(self, '_rt_metronome_enabled', False) and self._rt_metronome_port_name in self.open_ports:
+            port = self.open_ports[self._rt_metronome_port_name]
             beat_to_check = math.ceil(start_beat_of_block)
 
             if beat_to_check < end_beat_of_block:
-                midi_pan = int((self.sequencer.song.metronome_pan + 1.0) / 2.0 * 127)
-                port.send(mido.Message('control_change', channel=self.sequencer.metronome_channel, control=10, value=midi_pan))
+                midi_pan = int((self._rt_metronome_pan + 1.0) / 2.0 * 127)
+                port.send(mido.Message('control_change', channel=self._rt_metronome_channel, control=10, value=midi_pan))
 
             while beat_to_check < end_beat_of_block:
-                beats_per_measure = self.sequencer.song.time_signature_numerator
+                beats_per_measure = getattr(self, '_rt_beats_per_measure', 4)
                 is_downbeat = (int(beat_to_check) % beats_per_measure) == 0 if beats_per_measure > 0 else beat_to_check == 0
-                pitch = self.sequencer.metronome_pitch_downbeat if is_downbeat else self.sequencer.metronome_pitch_beat
-                velocity = int(100 * self.sequencer.song.metronome_volume)
-                note_on = mido.Message('note_on', channel=self.sequencer.metronome_channel, note=pitch, velocity=velocity)
-                note_off = mido.Message('note_off', channel=self.sequencer.metronome_channel, note=pitch, velocity=0)
+                pitch = self._rt_metronome_pitch_downbeat if is_downbeat else self._rt_metronome_pitch_beat
+                velocity = int(100 * self._rt_metronome_volume)
+                note_on = mido.Message('note_on', channel=self._rt_metronome_channel, note=pitch, velocity=velocity)
+                note_off = mido.Message('note_off', channel=self._rt_metronome_channel, note=pitch, velocity=0)
                 port.send(note_on)
                 self._metronome_notes_to_turn_off.append(note_off)
                 beat_to_check += 1
 
-    def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
+    def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block, pos_struct: Any):
         if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
             if start_beat_of_block < self.sequencer.play_range_end_beat:
                 # Schedule the stop command to be executed on the main thread
@@ -1056,34 +1180,41 @@ class JackManager:
                 # When looping, re-prime automation to the loop start point
                 self._prime_automation_at_beat(self.sequencer.loop_start_beat)
 
-                beats_per_second = self.sequencer.song.tempo / 60.0
+                beats_per_second = getattr(self, '_rt_tempo', 120) / 60.0
                 samplerate = self.jack_client.samplerate
                 if beats_per_second > 0 and samplerate > 0:
                     target_frame = int((self.sequencer.loop_start_beat / beats_per_second) * samplerate)
-                    _ , pos = self.jack_client.transport_query_struct()
-                    pos.frame = target_frame
-                    self.jack_client.transport_reposition_struct(pos)
+                    # RT Safe: Use the passed pos_struct
+                    pos_struct.frame = target_frame
+                    self.jack_client.transport_reposition_struct(pos_struct)
 
-        song_length_beats = self.sequencer.get_song_length_in_beats()
+        # song_length_beats should be cached in Sequencer
+        song_length_beats = self.sequencer._cached_song_length_beats or self.sequencer.get_song_length_in_beats()
         
         if not self.sequencer.loop_enabled and not self.sequencer.is_recording and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
                 self.jack_client.transport_stop()
-                self.sequencer.playback_state = "stopped"
+                # playback_state is a Kivy property, but setting it here might be okay as it's atomic-ish
+                # (but better to use Clock.schedule_once if we want to be 100% strict,
+                # however Sequencer._poll_engine_state will handle it anyway)
 
-    def _process_callback(self, frames: int):
+    def _process_callback(self, frames: int, pos_struct: Any):
         try:
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
-                    self.set_all_audio_pause_state(False)
+                    self.set_all_audio_pause_state(False, rt_safe=True)
                 else: # STOPPED or other state
-                    self.set_all_audio_pause_state(True)
+                    self.set_all_audio_pause_state(True, rt_safe=True)
                 self.last_transport_state = current_transport_state
 
             with self.sync_lock:
-                if self.sequencer.song.metronome_enabled and self.sequencer.song.metronome_port_name in self.open_ports:
-                    port = self.open_ports[self.sequencer.song.metronome_port_name]
+                # Use snapshots for everything in the process callback
+                snapshots = self._track_snapshots
+
+                metronome_port_name = getattr(self, '_rt_metronome_port_name', None)
+                if getattr(self, '_rt_metronome_enabled', False) and metronome_port_name in self.open_ports:
+                    port = self.open_ports[metronome_port_name]
                     for note_off_msg in self._metronome_notes_to_turn_off:
                         port.send(note_off_msg)
                     self._metronome_notes_to_turn_off.clear()
@@ -1091,17 +1222,18 @@ class JackManager:
                 if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
                     if self._active_notes:
                         for (track_idx, pitch), end_beat in list(self._active_notes.items()):
-                            track = self.sequencer.song.tracks[track_idx]
-                            if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
-                                port = self.open_ports[track.output_port_name]
-                                port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                            if 0 <= track_idx < len(snapshots):
+                                snap = snapshots[track_idx]
+                                if snap.is_midi and snap.output_port_name in self.open_ports:
+                                    port = self.open_ports[snap.output_port_name]
+                                    port.send(mido.Message('note_off', channel=snap.channel, note=pitch, velocity=0))
                         self._active_notes.clear()
                     return
 
-            state, pos_struct = self.jack_client.transport_query_struct()
+            # RT Safe: Use the provided pos_struct instead of transport_query_struct()
             pos = jack.position2dict(pos_struct)
             samplerate = self.jack_client.samplerate
-            tempo = self.sequencer.song.tempo
+            tempo = getattr(self, '_rt_tempo', 120)
             beats_per_second = tempo / 60.0
 
             start_beat_of_block = self.last_beat
@@ -1116,27 +1248,26 @@ class JackManager:
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                 if start_beat_of_block <= end_beat < end_beat_of_block:
-                    track = self.sequencer.song.tracks[track_idx]
-                    if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
-                        port = self.open_ports[track.output_port_name]
-                        port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                    if 0 <= track_idx < len(snapshots):
+                        snap = snapshots[track_idx]
+                        if snap.is_midi and snap.output_port_name in self.open_ports:
+                            port = self.open_ports[snap.output_port_name]
+                            port.send(mido.Message('note_off', channel=snap.channel, note=pitch, velocity=0))
                     del self._active_notes[(track_idx, pitch)]
 
             self._process_midi_events(start_beat_of_block, end_beat_of_block)
             self._process_automation_events(start_beat_of_block, end_beat_of_block)
             self._process_metronome(start_beat_of_block, end_beat_of_block)
 
-            with self.process_lock:
-                for ap in self.active_audio_processes:
-                    track = self.sequencer.song.tracks[ap.track_index]
-                    if isinstance(track, AudioTrack):
-                        duration_beats = self.sequencer._get_audio_duration_in_beats(track)
-                        end_beat = track.start_time + duration_beats
-                        if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
-                            command = {"command": ["set_property", "pause", True]}
-                            self._send_ipc_command(ap.socket_path, command)
+            # Process audio track end-of-track pausing via snapshots and queue
+            for snap in snapshots:
+                if snap.is_audio:
+                    end_beat = snap.start_time + snap.duration_beats
+                    if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
+                        command = {"command": ["set_property", "pause", True]}
+                        self._queue_ipc_command(snap.socket_path, command)
 
-            self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
+            self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block, pos_struct)
 
             self.last_beat = end_beat_of_block
             #if self.sequencer.gui_mode:

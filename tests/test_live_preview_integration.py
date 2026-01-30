@@ -62,6 +62,8 @@ class TestLivePreviewIntegration(unittest.TestCase):
 
         # Place the modified copy in the track_overrides dictionary
         self.sequencer.track_overrides[original_track_index] = track_copy
+        # Snapshot the override
+        jack_manager.refresh_automation()
 
         # --- Simulate Playback ---
         # Process a block of time that includes the note
@@ -84,6 +86,8 @@ class TestLivePreviewIntegration(unittest.TestCase):
         # --- Verify Original Data ---
         # Reset the mock and play again without the override to ensure the original is unchanged
         mock_port.reset_mock()
+        self.sequencer.track_overrides.clear()
+        jack_manager.refresh_automation()
         jack_manager._sync_playhead_to_beat(0.0) # Reset playhead
         jack_manager._process_midi_events(start_beat, end_beat)
 

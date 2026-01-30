@@ -959,22 +959,29 @@ class TrackWidget(BoxLayout):
         found_vol = False
         found_pan = False
 
+        # Use cached target automation tracks if available to avoid full scan
+        if not hasattr(self, '_target_automation_tracks') or self.sequencer_layout.sequencer.is_dirty:
+            self._target_automation_tracks = [
+                t for t in self.sequencer_layout.sequencer.song.tracks
+                if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index
+            ]
+
         # On cherche l'automation cible
-        for t in self.sequencer_layout.sequencer.song.tracks:
-            if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index:
-                
-                # VOLUME : On récupère les points pour ce paramètre précis
-                points_vol = [p for p in t.points if p.parameter == 'vol']
-                if points_vol:
-                    found_vol = True
-                    # ON APPLIQUE LA VALEUR (C'est ça qui fait bouger le slider)
-                    vol_slider.value = t.get_value_at(current_beat, 'vol')
-                
-                # PAN
-                points_pan = [p for p in t.points if p.parameter == 'pan']
-                if points_pan:
-                    found_pan = True
-                    pan_slider.value = t.get_value_at(current_beat, 'pan')
+        for t in self._target_automation_tracks:
+            # VOLUME : On récupère les points pour ce paramètre précis
+            # Filter optimization: only call get_value_at if there are points
+            if any(p.parameter == 'vol' for p in t.points):
+                found_vol = True
+                val = t.get_value_at(current_beat, 'vol')
+                if abs(vol_slider.value - val) > 0.001:
+                    vol_slider.value = val
+
+            # PAN
+            if any(p.parameter == 'pan' for p in t.points):
+                found_pan = True
+                val = t.get_value_at(current_beat, 'pan')
+                if abs(pan_slider.value - val) > 0.001:
+                    pan_slider.value = val
 
         # Mise à jour des drapeaux (utile pour changer l'opacité ou l'icône)
         self.vol_automated = found_vol

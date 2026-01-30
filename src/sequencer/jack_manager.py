@@ -64,7 +64,6 @@ class JackManager:
         self._metronome_notes_to_turn_off = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
-        self.sync_lock = threading.Lock()
         self._display_thread = None
         self._display_stop_event = threading.Event()
         self.automation_events = []
@@ -97,6 +96,7 @@ class JackManager:
         #self._diag_last_target_idx = -1
         self._last_beat_rt = 0.0 # Atomic float for UI sync
         self._last_transport_state_rt = jack.STOPPED        
+        self._paused_audio_tracks = set() # To avoid redundant IPC commands in RT thread
 
     def find_port_by_name(self, pattern):
         """
@@ -415,6 +415,9 @@ class JackManager:
         self._rt_metronome_pitch_beat = self.sequencer.metronome_pitch_beat
         self._rt_metronome_volume = self.sequencer.song.metronome_volume
         self._rt_metronome_pan = self.sequencer.song.metronome_pan
+
+        # Take a snapshot of song length for RT-safe end detection
+        self._rt_song_length_beats = self.sequencer._cached_song_length_beats or self.sequencer.get_song_length_in_beats()
 
         # Take a snapshot of tracks for RT-safe access
         new_snapshots = []
@@ -1168,7 +1171,7 @@ class JackManager:
                 self._metronome_notes_to_turn_off.append(note_off)
                 beat_to_check += 1
 
-    def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block, pos_struct: Any):
+    def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
         if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
             if start_beat_of_block < self.sequencer.play_range_end_beat:
                 # Schedule the stop command to be executed on the main thread
@@ -1184,12 +1187,13 @@ class JackManager:
                 samplerate = self.jack_client.samplerate
                 if beats_per_second > 0 and samplerate > 0:
                     target_frame = int((self.sequencer.loop_start_beat / beats_per_second) * samplerate)
-                    # RT Safe: Use the passed pos_struct
-                    pos_struct.frame = target_frame
-                    self.jack_client.transport_reposition_struct(pos_struct)
+                    # Only query full struct when we actually need to reposition (rare)
+                    _ , pos = self.jack_client.transport_query_struct()
+                    pos.frame = target_frame
+                    self.jack_client.transport_reposition_struct(pos)
 
-        # song_length_beats should be cached in Sequencer
-        song_length_beats = self.sequencer._cached_song_length_beats or self.sequencer.get_song_length_in_beats()
+        # Use RT-safe snapshotted song length
+        song_length_beats = getattr(self, '_rt_song_length_beats', 0.0)
         
         if not self.sequencer.loop_enabled and not self.sequencer.is_recording and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
@@ -1200,50 +1204,54 @@ class JackManager:
 
     def _process_callback(self, frames: int):
         try:
-            # Re-read position info inside callback as it's not passed as argument in python-jack
-            current_transport_state, pos_struct = self.jack_client.transport_query_struct()
+            # Use RT-safe property access
+            current_transport_state = self.jack_client.transport_state
+            self._last_transport_state_rt = current_transport_state
 
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
                     self.set_all_audio_pause_state(False, rt_safe=True)
+                    self._paused_audio_tracks.clear()
                 else: # STOPPED or other state
                     self.set_all_audio_pause_state(True, rt_safe=True)
                 self.last_transport_state = current_transport_state
 
-            with self.sync_lock:
-                # Use snapshots for everything in the process callback
-                snapshots = self._track_snapshots
+            # Use snapshots for everything in the process callback
+            snapshots = self._track_snapshots
 
-                metronome_port_name = getattr(self, '_rt_metronome_port_name', None)
-                if getattr(self, '_rt_metronome_enabled', False) and metronome_port_name in self.open_ports:
-                    port = self.open_ports[metronome_port_name]
-                    for note_off_msg in self._metronome_notes_to_turn_off:
-                        port.send(note_off_msg)
-                    self._metronome_notes_to_turn_off.clear()
+            metronome_port_name = getattr(self, '_rt_metronome_port_name', None)
+            if getattr(self, '_rt_metronome_enabled', False) and metronome_port_name in self.open_ports:
+                port = self.open_ports[metronome_port_name]
+                for note_off_msg in self._metronome_notes_to_turn_off:
+                    port.send(note_off_msg)
+                self._metronome_notes_to_turn_off.clear()
 
-                if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
-                    if self._active_notes:
-                        for (track_idx, pitch), end_beat in list(self._active_notes.items()):
-                            if 0 <= track_idx < len(snapshots):
-                                snap = snapshots[track_idx]
-                                if snap.is_midi and snap.output_port_name in self.open_ports:
-                                    port = self.open_ports[snap.output_port_name]
-                                    port.send(mido.Message('note_off', channel=snap.channel, note=pitch, velocity=0))
-                        self._active_notes.clear()
-                    return
+            if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
+                if self._active_notes:
+                    for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                        if 0 <= track_idx < len(snapshots):
+                            snap = snapshots[track_idx]
+                            if snap.is_midi and snap.output_port_name in self.open_ports:
+                                port = self.open_ports[snap.output_port_name]
+                                port.send(mido.Message('note_off', channel=snap.channel, note=pitch, velocity=0))
+                    self._active_notes.clear()
+                return
 
-            pos = jack.position2dict(pos_struct)
             samplerate = self.jack_client.samplerate
             tempo = getattr(self, '_rt_tempo', 120)
             beats_per_second = tempo / 60.0
 
             start_beat_of_block = self.last_beat
 
-            current_frame = pos.get('frame', 0)
+            # Use RT-safe property access
+            current_frame = self.jack_client.transport_frame
             if samplerate > 0 and beats_per_second > 0:
                 authoritative_beat_now = (current_frame / samplerate) * beats_per_second
             else:
                 authoritative_beat_now = self.last_beat
+
+            # Atomic-ish update for the UI
+            self._last_beat_rt = authoritative_beat_now
 
             end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
 
@@ -1262,13 +1270,14 @@ class JackManager:
 
             # Process audio track end-of-track pausing via snapshots and queue
             for snap in snapshots:
-                if snap.is_audio:
+                if snap.is_audio and snap.index not in self._paused_audio_tracks:
                     end_beat = snap.start_time + snap.duration_beats
                     if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
                         command = {"command": ["set_property", "pause", True]}
                         self._queue_ipc_command(snap.socket_path, command)
+                        self._paused_audio_tracks.add(snap.index)
 
-            self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block, pos_struct)
+            self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
             self.last_beat = end_beat_of_block
             #if self.sequencer.gui_mode:

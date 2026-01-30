@@ -2283,6 +2283,14 @@ class SequencerLayout(BoxLayout):
     def _synchronize_scroll(self, source_scroll_view, scroll_x_value):
         if self._is_scrolling:
             return
+
+        # Optimization: Only sync if the change is significant enough (e.g., more than 0.1 pixels)
+        # to avoid constant layout updates for sub-pixel movements during playback.
+        last_val = getattr(source_scroll_view, '_last_synced_scroll_x', -1)
+        if abs(last_val - scroll_x_value) < 0.0001: # Roughly 0.1 pixel for a 1000px wide content
+            return
+        source_scroll_view._last_synced_scroll_x = scroll_x_value
+
         self._is_scrolling = True
         # Calculate the absolute pixel offset from the source.
         # Use children[0] width as content width.

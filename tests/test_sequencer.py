@@ -312,8 +312,7 @@ class TestSequencer(unittest.TestCase):
 
         # Simulate the callback hitting the end of the range.
         # This logic is now in JackManager, so we call it on the real instance.
-        mock_pos = MagicMock()
-        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1, pos_struct=mock_pos)
+        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1)
 
         # The method should schedule sequencer.stop() to be called.
         mock_schedule.assert_called_once()

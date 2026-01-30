@@ -113,27 +113,17 @@ class Sequencer(EventDispatcher):
         if not self.jack_manager or not self.jack_manager.is_running:
             return
 
-        # 1. Obtenir l'état directement depuis JACK (Source de vérité absolue)
-        state_code, pos_struct = self.jack_manager.jack_client.transport_query_struct()
-        
-        # state_code ici est directement jack.ROLLING ou jack.STOPPED
-        # C'est beaucoup plus fiable que _last_transport_state_rt
+        # 1. Read state from shared variables (no blocking IPC)
+        state_code = self.jack_manager._last_transport_state_rt
         engine_is_rolling = (state_code == jack.ROLLING)
 
-        # 2. Update current beat (Votre code actuel qui fonctionne)
-        pos_dict = jack.position2dict(pos_struct)
-        current_frame = pos_dict.get('frame', 0)
-        samplerate = self.jack_manager.jack_client.samplerate
-        beats_per_second = self.song.tempo / 60.0        
+        # 2. Update current beat from shared variable
+        new_beat = self.jack_manager._last_beat_rt
         
-        if samplerate > 0 and beats_per_second > 0:
-            new_beat = (current_frame / samplerate) * beats_per_second
-            if new_beat < 0: new_beat = 0.0
-            
-            if not math.isclose(self.current_beat, new_beat, abs_tol=0.001):
-                self.current_beat = new_beat
-                self.last_beat_update_time = time.perf_counter()
-                self._update_current_routing()
+        if not math.isclose(self.current_beat, new_beat, abs_tol=0.001):
+            self.current_beat = new_beat
+            self.last_beat_update_time = time.perf_counter()
+            self._update_current_routing()
 
         # 3. Synchronisation de l'état Playback
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)

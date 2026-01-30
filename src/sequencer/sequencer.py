@@ -2,7 +2,9 @@ from .midi_export import export_to_midi
 from .midi_import import import_song
 from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
-from .models import AnyTrack, AudioTrack, AutomationTrack, AutomationPoint, CCMessage, Event, MidiTrack, Note, Song, MidiMapping
+from .models import (AnyTrack, AudioTrack, AutomationTrack, AutomationPoint,
+                    CCMessage, Event, MidiTrack, Note, Song, MidiMapping,
+                    is_midi_track, is_audio_track)
 from .config import MidiConfig
 from .config_manager import ConfigManager
 from .terminal_input import cancellable_input, UserInputCancelled
@@ -31,13 +33,14 @@ from typing import List, Optional, Any, Dict
 from functools import wraps
 from contextlib import contextmanager
 
-from kivy.properties import NumericProperty, StringProperty, BooleanProperty
+from kivy.properties import NumericProperty, StringProperty, BooleanProperty, ObjectProperty
 from kivy.event import EventDispatcher
 from kivy.clock import Clock
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
     last_beat_update_time = NumericProperty(0)
+    current_routing_index = NumericProperty(-1)
     playback_state = StringProperty("stopped")
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
@@ -99,6 +102,99 @@ class Sequencer(EventDispatcher):
 
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
+
+        self.bind(song_structure_changed=self._update_current_routing)
+        
+        if self.gui_mode:
+            Clock.schedule_interval(self._poll_engine_state, 1/60.0)        
+
+    def _poll_engine_state(self, dt):
+        if not self.jack_manager or not self.jack_manager.is_running:
+            return
+
+        # 1. Obtenir l'état directement depuis JACK (Source de vérité absolue)
+        state_code, pos_struct = self.jack_manager.jack_client.transport_query_struct()
+        
+        # state_code ici est directement jack.ROLLING ou jack.STOPPED
+        # C'est beaucoup plus fiable que _last_transport_state_rt
+        engine_is_rolling = (state_code == jack.ROLLING)
+
+        # 2. Update current beat (Votre code actuel qui fonctionne)
+        pos_dict = jack.position2dict(pos_struct)
+        current_frame = pos_dict.get('frame', 0)
+        samplerate = self.jack_manager.jack_client.samplerate
+        beats_per_second = self.song.tempo / 60.0        
+        
+        if samplerate > 0 and beats_per_second > 0:
+            new_beat = (current_frame / samplerate) * beats_per_second
+            if new_beat < 0: new_beat = 0.0
+            
+            if not math.isclose(self.current_beat, new_beat, abs_tol=0.001):
+                self.current_beat = new_beat
+                self.last_beat_update_time = time.perf_counter()
+                self._update_current_routing()
+
+        # 3. Synchronisation de l'état Playback
+        time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
+
+        if not engine_is_rolling: # Si JACK est à l'arrêt
+            if self.playback_state != "stopped" and time_since_play > 1.0:
+                print(f"[UI] Engine STOP detected par transport_query.")
+                self.playback_state = "stopped"
+                self.jack_manager.silence_all_midi_notes()
+        else: # Si JACK tourne
+            if self.playback_state == "stopped":
+                print(f"[UI] Engine ROLL detected par transport_query.")
+                self.playback_state = "playing"
+                
+        # 3. Process Pending Commands from RT (MIDI controller)
+        if self.jack_manager._pending_play_pause:
+            self.jack_manager._pending_play_pause = False
+            self.process_transport_command("play_pause")
+
+        if self.jack_manager._pending_stop:
+            self.jack_manager._pending_stop = False
+            self.process_transport_command("stop")
+
+        if self.jack_manager._pending_record:
+            self.jack_manager._pending_record = False
+            self.process_transport_command("record")
+
+        while self.jack_manager._pending_mappings:
+            try:
+                mapping, value = self.jack_manager._pending_mappings.popleft()
+                self._apply_midi_mapping_action(mapping, value)
+            except IndexError: break
+
+    def _update_current_routing(self, *args):
+        """
+        Updates the current_routing_index property based on the current beat.
+
+        This method queries the jack_manager to retrieve the input routing value
+        for the current beat position. If a valid routing index is found, it updates
+        the current_routing_index property. If no routing value exists for the current
+        beat, the routing index is set to -1 to indicate no routing.
+
+        Args:
+            *args: Variable length argument list (typically used with property observers).
+
+        Raises:
+            None
+
+        Side Effects:
+            - Updates self.current_routing_index if the value changes
+        """
+        if self.jack_manager:
+            # Ajoute une petite compensation (ex: 0.05 beat) pour compenser le lag de l'UI
+            look_ahead_beat = self.current_beat + 0.05           
+            val = self.jack_manager._get_input_routing_value(look_ahead_beat)
+            if val is not None:
+                new_index = int(round(val))
+                if new_index != self.current_routing_index:
+                    self.current_routing_index = new_index                                
+#                else:
+#                    if self.current_routing_index != -1:
+#                        self.current_routing_index = -1
 
     def _start_carla_process(self, carla_project_path: Optional[str] = None):
         """
@@ -331,9 +427,74 @@ class Sequencer(EventDispatcher):
             inport_name=self.default_record_port
         )
 
+    def _merge_recorded_events(self, dt):
+        """Polls recorded events from JackManager and merges them into tracks."""
+        any_added = False
+        while True:
+            try:
+                event_data = self.jack_manager._recorded_events_to_merge.popleft()
+                track_idx = event_data['track_idx']
+                if not 0 <= track_idx < len(self.song.tracks):
+                    continue
+
+                track = self.song.tracks[track_idx]
+                if not is_midi_track(track):
+                    continue
+
+                if event_data['type'] == 'note':
+                    note = Note(pitch=event_data['pitch'], velocity=event_data['velocity'], duration=event_data['duration'])
+                    event = Event(start_time=event_data['start_time'], notes=[note])
+                    track.add_event(event)
+                elif event_data['type'] == 'cc':
+                    cc = CCMessage(control=event_data['control'], value=event_data['value'])
+                    # Find or create event at this time
+                    existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
+                    if existing_event:
+                        existing_event.cc_messages.append(cc)
+                    else:
+                        event = Event(start_time=event_data['start_time'], cc_messages=[cc])
+                        track.add_event(event)
+
+                any_added = True
+            except IndexError:
+                break
+
+        if any_added:
+            self.is_dirty = True
+            self.invalidate_song_length_cache()
+            self.song_structure_changed += 1
+
     def get_default_record_port(self) -> Optional[str]:
         """Retourne le port d'enregistrement par défaut"""
         return self.default_record_port
+
+    def get_armed_track_index(self) -> Optional[int]:
+        """Returns the index of the currently armed MIDI track, or None if no track is armed."""
+        for i, track in enumerate(self.song.tracks):
+            if is_midi_track(track) and getattr(track, 'record_mode', 'OFF') != 'OFF':
+                return i
+        return None
+
+    def get_input_routing_track(self) -> AutomationTrack:
+        """Returns or creates the global MIDI input routing automation track (stored in song.input_routing)."""
+        if self.song.input_routing:
+            return self.song.input_routing
+
+        # Create it if not found
+        track = AutomationTrack(name="Input Routing", target_track_index=-1) # -1 means Global
+
+        # Find first MIDI track index for default routing
+        first_midi_idx = 0
+        for i, t in enumerate(self.song.tracks):
+            if getattr(t, 'is_midi', False):
+                first_midi_idx = i
+                break
+
+        track.add_point(AutomationPoint(start_time=0.0, value=float(first_midi_idx), parameter='input_routing', curve='none'))
+
+        self.song.input_routing = track
+        self.is_dirty = True
+        return track
 
     def invalidate_song_length_cache(self):
         """Invalidates the cached song length."""
@@ -478,6 +639,8 @@ class Sequencer(EventDispatcher):
             self.song.add_track(track)
             self.is_dirty = True
             self.invalidate_song_length_cache()
+            self.song_structure_changed += 1
+            
             return {"status": "success", "message": f"MIDI track '{name}' added."}
         elif track_type == 'audio':
             if not filepath:
@@ -555,6 +718,9 @@ class Sequencer(EventDispatcher):
         self.song.tracks.pop(track_index)
         self.is_dirty = True
         self.invalidate_song_length_cache()
+        
+        self.song_structure_changed += 1
+                
         return {"status": "success", "message": f"Track '{track_name}' deleted."}
 
     def add_cc_event(self, track_index: int, position_str: str, control: int, value: int) -> str:
@@ -2147,7 +2313,9 @@ class Sequencer(EventDispatcher):
         
         track.record_mode = mode
         self.is_dirty = True
-        
+
+        self.song_structure_changed += 1
+                
         mode_descriptions = {
             'OFF': 'Piste désactivée',
             'OVERWRITE': 'Écrase les notes existantes', 
@@ -2386,6 +2554,10 @@ class Sequencer(EventDispatcher):
             print(f"[DIAGNOSTIC] === _resync_all_at_beat END (With JACK) ===\n")
 
     def play(self, start_beat: Optional[float] = None):
+    # 1. On change l'état IMMÉDIATEMENT (Optimisme)
+        self.playback_state = "playing"
+        self._last_play_click_time = time.perf_counter() # Pour le poll_engine_state
+        
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             self.jack_manager.start()
             time.sleep(0.2) # Give JACK time to start and connect
@@ -2397,7 +2569,6 @@ class Sequencer(EventDispatcher):
         # Store the beat from which playback is starting
         effective_start_beat = start_beat if start_beat is not None else self.rewind_beat
         self.last_play_start_beat = effective_start_beat
-
 
         # If a start beat is provided, reposition the transport
         if start_beat is not None:
@@ -2416,10 +2587,14 @@ class Sequencer(EventDispatcher):
         self.prime_all_tracks(primed_by_automation=primed_by_automation)
 
         # Simply tell JACK to start rolling
-        if self.jack_manager.jack_client.transport_state != jack.ROLLING:
-            self.jack_manager.jack_client.transport_start()
-            self.playback_state = "playing"
+#        if self.jack_manager.jack_client.transport_state != jack.ROLLING:
+#            self.jack_manager.jack_client.transport_start()
+#            self.playback_state = "playing"
+        if self.jack_manager:
+                self.jack_manager.jack_client.transport_start()            
 
+        self.current_routing_index = -1
+        self._update_current_routing()
 
     def pause(self):
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
@@ -2481,6 +2656,9 @@ class Sequencer(EventDispatcher):
 
     def stop(self):
         """Stops recording and/or playback."""
+        # 1. On change l'état LOCAL immédiatement pour bloquer le polling
+        self.playback_state = 'stopped'
+        
         if self.is_recording and self.recording_thread:
             print("Stopping recording...")
             self._stop_event.set()
@@ -2500,6 +2678,8 @@ class Sequencer(EventDispatcher):
         else:
             self._stop_playback_transport()
 
+        self.current_routing_index = -1
+        
         # LA LIGNE SUIVANTE EST LA CAUSE DU PROBLÈME ET A ÉTÉ VOLONTAIREMENT SUPPRIMÉE :
         # self.jack_manager.stop()
 

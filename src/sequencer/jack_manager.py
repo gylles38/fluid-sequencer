@@ -11,6 +11,7 @@ import tempfile
 import socket
 import threading
 import time
+import collections
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Optional, TYPE_CHECKING, Dict
@@ -20,7 +21,8 @@ from kivy.clock import Clock
 if TYPE_CHECKING:
     from .sequencer import Sequencer
 
-from .models import AudioTrack, MidiTrack, AutomationTrack, AutomationPoint
+from .models import (AudioTrack, MidiTrack, AutomationTrack, AutomationPoint,
+                    is_midi_track, is_audio_track)
 
 @dataclass
 class ActiveAudioProcess:
@@ -49,13 +51,27 @@ class JackManager:
         self.automation_events = []
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
+        self._routing_track: Optional[AutomationTrack] = None        
 
+        # --- UI Command Flags (from MIDI) ---
+        self._pending_play_pause = False
+        self._pending_stop = False
+        self._pending_record = False
+        self._pending_mappings = collections.deque() # (mapping_obj, value)
+        
         # --- Dynamic Audio Correction ---
         self.CORRECTION_GAIN = 0.02
         self.CORRECTION_THRESHOLD = 0.03 # 30ms
         self._correction_thread = None
         self._correction_stop_event = threading.Event()
         self.last_applied_speeds = {}
+        
+        # --- Diagnostics (RT Safe) ---
+        #self._diag_clavier_in = 0
+        #self._diag_clavier_routed = 0
+        #self._diag_last_target_idx = -1
+        self._last_beat_rt = 0.0 # Atomic float for UI sync
+        self._last_transport_state_rt = jack.STOPPED        
 
     def find_port_by_name(self, pattern):
         """
@@ -311,6 +327,10 @@ class JackManager:
     def _prepare_automation_events(self):
         """Generates and sorts all automation events for the song."""
         self.automation_events.clear()
+        
+        # Link the global routing track from the song
+        self._routing_track = self.sequencer.song.input_routing
+                
         tracks = self.sequencer.song.tracks
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
         for track in tracks:
@@ -341,6 +361,9 @@ class JackManager:
 
             try:
                 self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
+                # Ensure routing track exists
+                self.sequencer.get_input_routing_track()                
+                
                 tracks = self.sequencer.song.tracks
 
                 # --- MIDI Port Setup ---
@@ -1042,6 +1065,7 @@ class JackManager:
                     self.jack_client.transport_reposition_struct(pos)
 
         song_length_beats = self.sequencer.get_song_length_in_beats()
+        
         if not self.sequencer.loop_enabled and not self.sequencer.is_recording and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
                 self.jack_client.transport_stop()
@@ -1115,8 +1139,34 @@ class JackManager:
             self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 
             self.last_beat = end_beat_of_block
-            if self.sequencer.gui_mode:
-                self.sequencer.current_beat = start_beat_of_block
-                self.sequencer.last_beat_update_time = time.perf_counter()
+            #if self.sequencer.gui_mode:
+            #    self.sequencer.current_beat = start_beat_of_block
+            #    self.sequencer.last_beat_update_time = time.perf_counter()
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
+
+    def _get_input_routing_value(self, beat: float) -> Optional[int]:
+        """
+        Returns the target track index for MIDI input routing at the given beat.
+        Prioritization:
+        1. Automation points on the routing track.
+        2. Armed track index (cached).
+        3. Final Fallback: First MIDI track (cached).
+        """
+        # 1. Automation Priority
+        if self._routing_track and self._routing_track.points:
+            routing_points = [p for p in self._routing_track.points if p.parameter == 'input_routing']
+            if routing_points:
+                val = self._routing_track.get_value_at(beat, 'input_routing')
+                if val is not None:
+                    return int(round(val))
+
+        # 2. Armed Track Priority (RT safe)
+        armed_idx = getattr(self, '_cached_armed_idx', None)
+        if armed_idx is not None:
+            return armed_idx
+
+        # 3. Final Fallback (RT safe)
+        fallback_idx = getattr(self, '_cached_first_midi_idx', None)
+        return fallback_idx
+    

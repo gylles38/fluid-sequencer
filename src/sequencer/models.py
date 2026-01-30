@@ -153,7 +153,7 @@ class AutomationPoint:
                     raise ValueError("CC number must be between 0 and 127.")
             except (ValueError, IndexError):
                  raise ValueError(f"Invalid CC parameter format: {self.parameter}")
-        elif param_lower not in ["vol", "pan", "vel", "prog"]:
+        elif param_lower not in ["vol", "pan", "vel", "prog", "input_routing"]:
              raise ValueError(f"Invalid parameter name: {self.parameter}")
         self.parameter = param_lower
 
@@ -231,6 +231,22 @@ class AutomationTrack(BaseTrack, EventDispatcher):
 # Using Union to allow the list to contain both MidiTrack and AudioTrack objects
 AnyTrack = Union[MidiTrack, AudioTrack, AutomationTrack]
 
+def is_midi_track(track) -> bool:
+    """Robustly checks if a track is a MIDI track."""
+    if track is None: return False
+    # Note: Avoid checking just 'hasattr(track, "events")' because Kivy's EventDispatcher
+    # has an internal 'events()' method.
+    return (getattr(track, 'is_midi', False) is True or
+            track.__class__.__name__ == 'MidiTrack' or
+            (hasattr(track, 'events') and isinstance(getattr(track, 'events'), list)))
+
+def is_audio_track(track) -> bool:
+    """Robustly checks if a track is an audio track."""
+    if track is None: return False
+    return (getattr(track, 'is_audio', False) is True or
+            track.__class__.__name__ == 'AudioTrack' or
+            (hasattr(track, 'filepath') and isinstance(getattr(track, 'filepath'), str)))
+
 @dataclass
 class MidiMapping:
     """Represents a mapping from a MIDI CC message to a sequencer action."""
@@ -256,6 +272,7 @@ class Song:
     metronome_pan: float = 0.0
     carla_project_path: Optional[str] = None
     aj_snapshot_path: Optional[str] = None
+    input_routing: Optional[AutomationTrack] = None    
 
     def add_track(self, track: AnyTrack):
         """Adds a track to the song, assigning a default channel if it's a MIDI track."""

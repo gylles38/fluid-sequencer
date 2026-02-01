@@ -2015,9 +2015,13 @@ class SequencerLayout(BoxLayout):
         
     def on_start_pos_text_change(self, instance, value):
         self.sequencer.ui_start_pos_str = value
+        if hasattr(self, 'ruler'):
+            self.ruler.redraw()
 
     def on_end_pos_text_change(self, instance, value):
         self.sequencer.ui_end_pos_str = value
+        if hasattr(self, 'ruler'):
+            self.ruler.redraw()
 
     # Méthodes de gestion des flèches
     def handle_textinput_arrows(self, textinput, direction, modifiers, cursor_pos):

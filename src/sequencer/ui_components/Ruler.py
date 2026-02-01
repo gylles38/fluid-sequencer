@@ -41,6 +41,37 @@ class RulerContent(RelativeLayout):
             self._texture_cache[number] = lbl.texture
         return self._texture_cache[number]
 
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return super().on_touch_down(touch)
+
+        if not self.sequencer_layout or not self.sequencer_layout.sequencer:
+            return super().on_touch_down(touch)
+
+        local_touch = self.to_local(*touch.pos)
+        # Account for GPU translation
+        world_x = local_touch[0] - self.g_translate.x
+
+        beat = world_x / self.pixels_per_beat
+        if beat < 0: beat = 0
+
+        seq = self.sequencer_layout.sequencer
+
+        if touch.button == 'left':
+            pos_str = seq._format_beats_to_position(beat)
+            self.sequencer_layout.start_pos_input.text = pos_str
+            self.sequencer_layout.on_start_position_validate()
+            self.redraw()
+            return True
+        elif touch.button == 'right':
+            pos_str = seq._format_beats_to_position(beat)
+            self.sequencer_layout.end_pos_input.text = pos_str
+            self.sequencer_layout.on_end_position_validate()
+            self.redraw()
+            return True
+
+        return super().on_touch_down(touch)
+
     def _trigger_redraw(self, *args):
         if self._redraw_event:
             self._redraw_event.cancel()
@@ -57,10 +88,34 @@ class RulerContent(RelativeLayout):
         c_measure = (0.8, 0.8, 0.8, 1)
         c_beat = (0.4, 0.4, 0.4, 0.5)
         c_white = (1, 1, 1, 1)
+        c_selection = (0.2, 0.6, 0.8, 0.5) # Bleu semi-transparent
+        c_selection_range = (0.2, 0.6, 0.8, 0.15)
 
         with self.canvas:
             Color(*c_bg)
             Rectangle(pos=(0, 0), size=(target_width, self.height))
+
+            # --- DESSIN DE LA SÉLECTION (PLAGE START/END) ---
+            if self.sequencer_layout and self.sequencer_layout.sequencer:
+                seq = self.sequencer_layout.sequencer
+                start_beat = seq.parse_position_to_beats(seq.ui_start_pos_str)
+                end_beat = seq.parse_position_to_beats(seq.ui_end_pos_str) if seq.ui_end_pos_str else None
+
+                if start_beat is not None and end_beat is not None and end_beat > start_beat:
+                    Color(*c_selection_range)
+                    x_start = start_beat * self.pixels_per_beat
+                    x_end = end_beat * self.pixels_per_beat
+                    Rectangle(pos=(x_start, 0), size=(x_end - x_start, self.height))
+
+                if start_beat is not None:
+                    Color(*c_selection)
+                    x = start_beat * self.pixels_per_beat
+                    Rectangle(pos=(x, 0), size=(dp(3), self.height))
+
+                if end_beat is not None:
+                    Color(*c_selection)
+                    x = end_beat * self.pixels_per_beat
+                    Rectangle(pos=(x - dp(3), 0), size=(dp(3), self.height))
 
             # On s'assure que la boucle couvre bien tout avec int() + 1
             for beat in range(int(self.total_beats) + 1):
@@ -120,6 +175,7 @@ class Ruler(BoxLayout):
         # Timeline
         self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=0, effect_cls=ScrollEffect)
         self.ruler_content = RulerContent(
+            sequencer_layout=self.sequencer_layout,
             total_beats=self.total_beats,
             pixels_per_beat=self.pixels_per_beat,
             beats_per_measure=self.beats_per_measure,
@@ -131,7 +187,8 @@ class Ruler(BoxLayout):
         # Export du g_translate pour l'interface
         self.g_translate = self.ruler_content.g_translate
         
-        self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v),
+        self.bind(sequencer_layout=self.ruler_content.setter('sequencer_layout'),
+                  total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v),
                   pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v),
                   beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v),
                   info_width=self._update_left_panel_width,

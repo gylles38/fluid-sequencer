@@ -75,8 +75,9 @@ class EditableMidiGrid(PianoRoll):
     _selection_initial_states = None
     def __init__(self, **kwargs) -> None:
         self.g_translate = Translate(0, 0, 0)
+        self.playback_line_x = 0
+        self.playback_rect = None
         super().__init__(**kwargs)
-        self.playback_line = None
 
     def draw(self, *args):
         # We must ensure PushMatrix and PopMatrix are present and balanced
@@ -90,23 +91,21 @@ class EditableMidiGrid(PianoRoll):
             # Re-insert translation at the beginning of before
             self.canvas.before.insert(0, PushMatrix())
             self.canvas.before.insert(1, self.g_translate)
+
+            # Draw playback line instruction inside the translation block
             with self.canvas.after:
+                Color(1, 0, 0, 0.8)
+                self.playback_rect = Rectangle(pos=(self.playback_line_x, 0), size=(dp(2), self.height))
                 PopMatrix()
 
     def add_playback_line(self) -> None:
-        self.playback_line = Widget(size_hint_x=None, width=dp(2))
-        with self.canvas.after:
-            Color(1, 0, 0, 0.8)
-            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
-        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
-        self.add_widget(self.playback_line)
-        self.playback_line.size_hint_y = None
-        self.playback_line.height = self.height
+        # Now handled by direct canvas drawing in draw()
+        self.draw()
 
-    def update_playback_rect(self, *args) -> None:
-        if hasattr(self, 'playback_rect'):
-            self.playback_rect.pos = self.playback_line.pos
-            self.playback_rect.size = self.playback_line.size
+    def set_playback_line_x(self, x):
+        self.playback_line_x = x
+        if self.playback_rect:
+            self.playback_rect.pos = (x, 0)
 
     def on_touch_move(self, touch) -> None | bool:
         if touch.grab_current is not self:
@@ -1585,8 +1584,7 @@ class PianoRollEditor(FloatingWindow):
     def set_playback_position(self, current_beat: float) -> None:
         grid = self.ids.grid_viewer.grid
         x_pos = current_beat * self.pixels_per_beat
-        if grid.playback_line:
-            grid.playback_line.x = x_pos
+        grid.set_playback_line_x(x_pos)
 
     def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play_pause")
     def stop_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("stop")

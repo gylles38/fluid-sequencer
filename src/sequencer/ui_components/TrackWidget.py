@@ -434,12 +434,14 @@ class TrackWidget(BoxLayout):
                 size_hint=(1, 1),
                 do_scroll_x=True,
                 do_scroll_y=True,
-                effect_cls='ScrollEffect', # Désactive les rebonds (overscroll)
+                effect_cls=ScrollEffect, # Désactive les rebonds (overscroll)
                 bar_width=dp(2)
             )
+            self.timeline_scroll.effect_x = ScrollEffect()
+            self.timeline_scroll.effect_y = ScrollEffect()
 
             # Content container (RelativeLayout for local coordinate system)
-            self.content = RelativeLayout(size_hint=(None, 1))
+            self.content = RelativeLayout(size_hint=(None, None))
             self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
 
             # AJOUT : Préparation de la translation GPU
@@ -478,20 +480,14 @@ class TrackWidget(BoxLayout):
             # On utilise une variable de verrouillage pour éviter que l'un n'entraîne l'autre à l'infini
             self._scrolling_locked = False
 
-            def sync_scrolls(source, target, value):
-                if not self._scrolling_locked:
-                    self._scrolling_locked = True
-                    target.scroll_y = value
-                    self._scrolling_locked = False
-
             self.timeline_scroll.add_widget(self.content)
 
             # Bind for size/zoom updates
             self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
 
             # Link vertical scrolling between keyboard and timeline
-            self.keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
-            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(self.keyboard_sv, 'scroll_y', v))
+            self.keyboard_sv.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.keyboard_sv, self.timeline_scroll, v))
+            self.timeline_scroll.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.timeline_scroll, self.keyboard_sv, v))
 
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
@@ -648,6 +644,13 @@ class TrackWidget(BoxLayout):
         # Puisque la classe est dans le même fichier, l'appel est direct
         popup = ChangeTargetPopup(track_widget=self)
         popup.open()
+
+    def _sync_vertical_scrolls(self, source_sv, target_sv, value):
+        """Helper to synchronize vertical scrolling between two ScrollViews."""
+        if not self._scrolling_locked:
+            self._scrolling_locked = True
+            target_sv.scroll_y = value
+            self._scrolling_locked = False
 
     def update_track_name_display(self):
         """Met à jour le texte du bouton d'index [#] et le tooltip de l'icône de ciblage."""

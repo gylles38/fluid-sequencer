@@ -17,7 +17,7 @@ import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate
+from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
 import copy
 import mido
@@ -72,11 +72,13 @@ class EditableMidiGrid(PianoRoll):
     _drag_offset = (0, 0)
     _selection_start_pos = (0, 0)
     _selection_rect = None
+    _selection_group = None
     _selection_initial_states = None
     def __init__(self, **kwargs) -> None:
         self.g_translate = Translate(0, 0, 0)
         self.playback_line_x = 0
         self.playback_rect = None
+        self._selection_group = None
         super().__init__(**kwargs)
 
     def draw(self, *args):
@@ -97,6 +99,10 @@ class EditableMidiGrid(PianoRoll):
                 Color(1, 0, 0, 0.8)
                 self.playback_rect = Rectangle(pos=(self.playback_line_x, 0), size=(dp(2), self.height))
                 PopMatrix()
+
+                # Re-add selection rectangle if in selection mode
+                if self._selection_group:
+                    self.canvas.after.add(self._selection_group)
 
     def add_playback_line(self) -> None:
         # Now handled by direct canvas drawing in draw()
@@ -382,9 +388,12 @@ class EditableMidiGrid(PianoRoll):
             # After clearing selection (if any), prepare for a potential rubber-band selection.
             self._drag_mode = 'select'
             self._selection_start_pos = local_pos
-            with self.canvas.after:
-                Color(1, 1, 1, 0.3)
-                self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
+            self._selection_group = InstructionGroup()
+            self._selection_group.add(Color(1, 1, 1, 0.3))
+            self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
+            self._selection_group.add(self._selection_rect)
+            self.canvas.after.add(self._selection_group)
+
             touch.grab(self)
             self.draw()
             return True
@@ -427,8 +436,12 @@ class EditableMidiGrid(PianoRoll):
             return super(EditableMidiGrid, self).on_touch_up(touch)
 
         if self._drag_mode == 'select':
-            if self._selection_rect:
-                self.canvas.after.remove(self._selection_rect)
+            if self._selection_group:
+                try:
+                    self.canvas.after.remove(self._selection_group)
+                except ValueError:
+                    pass
+                self._selection_group = None
                 self._selection_rect = None
             # Record the state after the selection is finalized.
             self.editor._record_state()

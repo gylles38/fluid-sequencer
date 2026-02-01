@@ -74,14 +74,24 @@ class EditableMidiGrid(PianoRoll):
     _selection_rect = None
     _selection_initial_states = None
     def __init__(self, **kwargs) -> None:
+        self.g_translate = Translate(0, 0, 0)
         super().__init__(**kwargs)
         self.playback_line = None
-        # --- GPU TRANSLATION ---
-        with self.canvas.before:
-            PushMatrix()
-            self.g_translate = Translate(0, 0, 0)
-        with self.canvas.after:
-            PopMatrix()
+
+    def draw(self, *args):
+        # We must ensure PushMatrix and PopMatrix are present and balanced
+        # since PianoRoll.draw() clears canvas.before but not canvas.after.
+        if hasattr(self, 'canvas'):
+            self.canvas.after.clear()
+
+        super().draw(*args) # Clears before and canvas redrawing everything
+
+        if hasattr(self, 'canvas'):
+            # Re-insert translation at the beginning of before
+            self.canvas.before.insert(0, PushMatrix())
+            self.canvas.before.insert(1, self.g_translate)
+            with self.canvas.after:
+                PopMatrix()
 
     def add_playback_line(self) -> None:
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -900,10 +910,15 @@ class PianoRollEditor(FloatingWindow):
         self._center_view_on_c4()
         current_beat = self.sequencer_layout.sequencer.current_beat
         if current_beat > 0 and self.total_beats > 0:
-            scroll_pos = (current_beat * self.pixels_per_beat)
-            max_scroll = self.ids.grid_viewer.grid.width - timeline_scroll.width
-            if max_scroll > 0:
-                timeline_scroll.scroll_x = min(1.0, scroll_pos / max_scroll)
+            def sync_at_start(dt):
+                scroll_pos = (current_beat * self.pixels_per_beat)
+                max_scroll = self.ids.grid_viewer.grid.width - timeline_scroll.width
+                if max_scroll > 0:
+                    target_scroll_x = min(1.0, scroll_pos / max_scroll)
+                    timeline_scroll.scroll_x = target_scroll_x
+                    ruler_scroll.scroll_x = target_scroll_x
+            # We schedule it to ensure widths are correctly computed
+            Clock.schedule_once(sync_at_start)
 
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button

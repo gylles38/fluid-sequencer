@@ -111,7 +111,7 @@ class Ruler(BoxLayout):
             self.info_width + 
             self.controls_width + 
             self.keyboard_width + 
-            (self.spacing * 3) # Ajustez ce multiplicateur selon le nombre de gaps dans TrackWidget
+            (self.spacing * 2) # Ajustez ce multiplicateur selon le nombre de gaps dans TrackWidget
         )
 
         self.ruler_left_panel = Widget(size_hint_x=None, width=total_left_width)
@@ -144,7 +144,7 @@ class Ruler(BoxLayout):
             self.info_width +
             self.controls_width +
             self.keyboard_width +
-            (self.spacing * 3)
+            (self.spacing * 2)
         )
 
     def redraw(self, *args):

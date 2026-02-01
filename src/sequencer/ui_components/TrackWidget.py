@@ -27,6 +27,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.boxlayout import MDBoxLayout
+from kivy.graphics import Translate, PushMatrix, PopMatrix
 
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
@@ -423,28 +424,33 @@ class TrackWidget(BoxLayout):
             note_height = dp(12)
 
             # 1. Keyboard (fixed width)
-            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
+            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True, effect_cls=ScrollEffect)
             self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
-            #self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
-            #self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
-            #self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
             self.timeline_scroll = ScrollView(
                 size_hint=(1, 1),
                 do_scroll_x=True,
-                do_scroll_y=False,
+                do_scroll_y=True,
                 effect_cls='ScrollEffect', # Désactive les rebonds (overscroll)
-                bar_width=0
+                bar_width=dp(2)
             )
 
             # Content container (RelativeLayout for local coordinate system)
-            self.content = RelativeLayout(size_hint=(None, None))
+            self.content = RelativeLayout(size_hint=(None, 1))
             self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
-            self.timeline_container = self.content  # For compatibility with other methods
 
+            # AJOUT : Préparation de la translation GPU
+            with self.content.canvas.before:
+                PushMatrix()
+                self.g_translate = Translate(0, 0, 0) # On crée l'objet de translation
+            with self.content.canvas.after:
+                PopMatrix()
+
+            self.timeline_container = self.content
+            
             # Piano roll grid/notes
             self.piano_roll = PianoRoll(
                 track=track,
@@ -467,6 +473,16 @@ class TrackWidget(BoxLayout):
                 self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
             self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
             self.content.add_widget(self.playback_line)
+
+            # --- SYNCHRONISATION SÉCURISÉE ---
+            # On utilise une variable de verrouillage pour éviter que l'un n'entraîne l'autre à l'infini
+            self._scrolling_locked = False
+
+            def sync_scrolls(source, target, value):
+                if not self._scrolling_locked:
+                    self._scrolling_locked = True
+                    target.scroll_y = value
+                    self._scrolling_locked = False
 
             self.timeline_scroll.add_widget(self.content)
 
@@ -534,6 +550,13 @@ class TrackWidget(BoxLayout):
 
             # A ScrollView must have a single child.
             self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
+            # AJOUT : Préparation de la translation GPU
+            with self.timeline_container.canvas.before:
+                PushMatrix()
+                self.g_translate = Translate(0, 0, 0)
+            with self.timeline_container.canvas.after:
+                PopMatrix()            
+            
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1), # The grid itself can fill the container
                 beat_per_measure=self.beats_per_measure,
@@ -606,7 +629,6 @@ class TrackWidget(BoxLayout):
         
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
-
 
     def _get_target_track_name_for_tooltip(self) -> str:
         """Retourne le nom de la piste cible pour le tooltip."""

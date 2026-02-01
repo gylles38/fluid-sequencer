@@ -1,13 +1,13 @@
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
 from kivy.uix.relativelayout import RelativeLayout
-from kivy.properties import ObjectProperty, NumericProperty, ListProperty, StringProperty
-from kivy.uix.label import Label
+from kivy.properties import ObjectProperty, NumericProperty, StringProperty
 from kivy.metrics import dp
-import math
 from kivy.clock import Clock
 from kivy.uix.scrollview import ScrollView
-from kivy.graphics import Color, Rectangle, Line
+from kivy.effects.scroll import ScrollEffect
+from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate
+from kivy.core.text import Label as CoreLabel # On utilise CoreLabel pour dessiner sur le canvas
 
 class RulerContent(RelativeLayout):
     sequencer_layout = ObjectProperty(None)
@@ -15,171 +15,123 @@ class RulerContent(RelativeLayout):
     total_beats = NumericProperty(16)
     beats_per_measure = NumericProperty(4)
     label_padding_x = NumericProperty(dp(4))
-    end_pos_str = StringProperty('')
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.size_hint_x = None
         self._redraw_event = None
-        self.drawing_widget = Widget(size_hint=(1, 1), pos=(0, 0))
-        self.add_widget(self.drawing_widget)
+        self._texture_cache = {}  # CACHE POUR LES NUMÉROS
+        
+        # --- TRANSLATION GPU ---
+        with self.canvas.before:
+            PushMatrix()
+            self.g_translate = Translate(0, 0, 0)
+        with self.canvas.after:
+            PopMatrix()
 
-        with self.drawing_widget.canvas.before:
-            Color(0.18, 0.18, 0.18, 1)
-            self.bg_rect = Rectangle(pos=(0, 0), size=self.size)
+        self.bind(size=self._trigger_redraw, 
+                  total_beats=self._trigger_redraw, 
+                  pixels_per_beat=self._trigger_redraw)
 
-        self.bind(size=self._update_bg, end_pos_str=self.trigger_redraw,
-                  total_beats=self.trigger_redraw, pixels_per_beat=self.trigger_redraw)
+    def get_measure_texture(self, number):
+        """ Crée ou récupère la texture du numéro de mesure """
+        if number not in self._texture_cache:
+            lbl = CoreLabel(text=str(number), font_size=dp(12), color=(0.7, 0.7, 0.7, 1))
+            lbl.refresh()
+            self._texture_cache[number] = lbl.texture
+        return self._texture_cache[number]
 
-    def _update_bg(self, *args):
-        self.bg_rect.size = self.size
-        self.drawing_widget.size = self.size
-        self.drawing_widget.pos = (0, 0)
-        self.trigger_redraw()
-
-    def trigger_redraw(self, *args):
+    def _trigger_redraw(self, *args):
         if self._redraw_event:
             self._redraw_event.cancel()
-        self._redraw_event = Clock.schedule_once(self.redraw)
-
+        self._redraw_event = Clock.schedule_once(self.redraw, 0)
+        
     def redraw(self, *args):
-        for child in list(self.children):
-            if child is not self.drawing_widget:
-                self.remove_widget(child)
+        # On calcule la largeur cible
+        target_width = self.total_beats * self.pixels_per_beat
+        self.width = target_width # Met à jour le widget pour le ScrollView
+        
+        self.canvas.clear()
+        
+        c_bg = (0.18, 0.18, 0.18, 1)
+        c_measure = (0.8, 0.8, 0.8, 1)
+        c_beat = (0.4, 0.4, 0.4, 0.5)
+        c_white = (1, 1, 1, 1)
 
-        self.drawing_widget.canvas.clear()
-        if self.total_beats <= 0 or self.beats_per_measure <= 0:
-            return
+        with self.canvas:
+            Color(*c_bg)
+            Rectangle(pos=(0, 0), size=(target_width, self.height))
 
-        pixels_per_beat = self.pixels_per_beat
-        # num_measures is the number of full measures in the project
-        num_measures = int(self.total_beats / self.beats_per_measure)
-
-        with self.drawing_widget.canvas:
-            # Draw lines for each measure boundary, including the last one
-            for i in range(num_measures + 1):
-                beat_pos = i * self.beats_per_measure
-                x_pos = beat_pos * pixels_per_beat
-                Color(0.4, 0.4, 0.4, 1)
-                Line(points=[x_pos, 0, x_pos, self.height], width=1)
-
-            if self.sequencer_layout and self.end_pos_str:
-                end_beat = self.sequencer_layout.sequencer.parse_position_to_beats(self.end_pos_str)
-                if end_beat is not None:
-                    end_x_pos = end_beat * pixels_per_beat
-                    Color(0.2, 0.5, 0.8, 1)
-                    Line(points=[end_x_pos, 0, end_x_pos, self.height], width=dp(1.5))
-
-        # Draw labels for each measure
-        for i in range(num_measures):
-            beat_pos = i * self.beats_per_measure
-            x_pos = beat_pos * pixels_per_beat
-
-            label = Label(
-                text=str(i + 1),
-                font_size='10sp',
-                pos=(x_pos, 0),
-                size=(pixels_per_beat * self.beats_per_measure, self.height),
-                size_hint=(None, None),
-                halign='left',
-                valign='middle',
-                color=(0.8, 0.8, 0.8, 1),
-                padding_x=self.label_padding_x
-            )
-            label.text_size = label.size
-            self.add_widget(label)
-
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            if not self.sequencer_layout or self.total_beats <= 0 or self.pixels_per_beat <= 0:
-                return True
-            local_x, _ = self.to_local(*touch.pos)
-            clicked_beat = local_x / self.pixels_per_beat
-            if True: # Allow seeking even when playing/paused
-                if touch.button == 'left':
-                    self.sequencer_layout.sequencer._resync_all_at_beat(clicked_beat)
-                    new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
-                    self.sequencer_layout.sequencer.ui_start_pos_str = new_pos_str
-                    self.sequencer_layout.start_pos_input.text = new_pos_str
-                elif touch.button == 'right':
-                    new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(clicked_beat)
-                    self.sequencer_layout.sequencer.ui_end_pos_str = new_pos_str
-                    self.sequencer_layout.end_pos_input.text = new_pos_str
-            return True
-        return super().on_touch_down(touch)
+            # On s'assure que la boucle couvre bien tout avec int() + 1
+            for beat in range(int(self.total_beats) + 1):
+                x = beat * self.pixels_per_beat
+                
+                if beat % self.beats_per_measure == 0:
+                    Color(*c_measure)
+                    Line(points=[x, 0, x, self.height], width=1.2)
+                    
+                    measure_num = (beat // self.beats_per_measure) + 1
+                    texture = self.get_measure_texture(measure_num)
+                    
+                    Color(*c_white)
+                    Rectangle(
+                        texture=texture,
+                        pos=(int(x + self.label_padding_x), int(self.height * 0.2)),
+                        size=texture.size
+                    )
+                else:
+                    Color(*c_beat)
+                    Line(points=[x, self.height * 0.4, x, self.height * 0.6], width=1)
 
 class Ruler(BoxLayout):
-    sequencer_layout = ObjectProperty(None)
-    scroll_view = ObjectProperty(None)
+    total_beats = NumericProperty(16)
+    pixels_per_beat = NumericProperty(dp(100))
+    beats_per_measure = NumericProperty(4)
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
     keyboard_width = NumericProperty(dp(40))
-    pixels_per_beat = NumericProperty(dp(100))
-    total_beats = NumericProperty(16)
-    beats_per_measure = NumericProperty(4)
-    # Use standard BoxLayout properties for spacing/padding
-    label_padding_x = NumericProperty(dp(4))
-    end_pos_str = StringProperty('')
-
+    spacing = NumericProperty(dp(12))
+    sequencer_layout = ObjectProperty(None)    
+    
     def __init__(self, **kwargs):
-        # Set defaults before super().__init__ if not provided in kwargs
-        kwargs.setdefault('orientation', 'horizontal')
-        kwargs.setdefault('spacing', dp(12))
-        kwargs.setdefault('padding', [0, 0, 0, 0])
+        # On extrait sequencer_layout avant le super() si on veut être prudent, 
+        # mais avec ObjectProperty déclaré plus haut, super() l'acceptera.
         super().__init__(**kwargs)
+        
+        self.orientation = 'horizontal'
+        self.size_hint_y = None
+        self.height = dp(30)
 
-        # --- Exact mirror of TrackWidget layout ---
-        self.ruler_left_panel = BoxLayout(
-            orientation='horizontal',
-            size_hint_x=None,
-            spacing=self.spacing,
-            width=self.info_width + self.controls_width + self.spacing
+        # --- CALCUL DE L'ALIGNEMENT PRÉCIS ---
+        # On doit additionner les largeurs ET les espacements (spacing)
+        # Dans TrackWidget, il y a souvent un spacing entre info/controls, 
+        # puis entre controls/keyboard, puis entre keyboard/timeline.
+        
+        total_left_width = (
+            self.info_width + 
+            self.controls_width + 
+            self.keyboard_width + 
+            (self.spacing * 2) # Ajustez ce multiplicateur selon le nombre de gaps dans TrackWidget
         )
-        self.left_spacer = Widget(size_hint_x=None, width=self.info_width)
-        self.controls_spacer = Widget(size_hint_x=None, width=self.controls_width)
-        self.ruler_left_panel.add_widget(self.left_spacer)
-        self.ruler_left_panel.add_widget(self.controls_spacer)
 
-        self.keyboard_spacer = Widget(size_hint_x=None, width=self.keyboard_width)
-
-        self.scroll_view = ScrollView(size_hint_x=1, do_scroll_y=False)
+        self.ruler_left_panel = Widget(size_hint_x=None, width=total_left_width)
+        self.add_widget(self.ruler_left_panel)
+        
+        # Timeline
+        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=0, effect_cls=ScrollEffect)
         self.ruler_content = RulerContent(
-            sequencer_layout=self.sequencer_layout,
-            pixels_per_beat=self.pixels_per_beat,
             total_beats=self.total_beats,
+            pixels_per_beat=self.pixels_per_beat,
             beats_per_measure=self.beats_per_measure,
-            end_pos_str=self.end_pos_str,
-            size_hint=(None, 1)
+            height=self.height
         )
         self.scroll_view.add_widget(self.ruler_content)
-
-        self.add_widget(self.ruler_left_panel)
-        self.add_widget(self.keyboard_spacer)
         self.add_widget(self.scroll_view)
 
-        # Dynamic updates
-        def update_left_panel_width(*args):
-             self.ruler_left_panel.width = self.info_width + self.controls_width + self.spacing
-
-        self.bind(info_width=update_left_panel_width, controls_width=update_left_panel_width, spacing=update_left_panel_width)
-        self.bind(spacing=lambda i, v: setattr(self.ruler_left_panel, 'spacing', v))
-        self.bind(info_width=lambda i, v: setattr(self.left_spacer, 'width', v))
-        self.bind(controls_width=lambda i, v: setattr(self.controls_spacer, 'width', v))
-        self.bind(keyboard_width=lambda i, v: setattr(self.keyboard_spacer, 'width', v))
-        self.bind(sequencer_layout=lambda i, v: setattr(self.ruler_content, 'sequencer_layout', v))
-        self.bind(pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v))
-        self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))
-        self.bind(beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v))
-        self.bind(label_padding_x=lambda i,v: setattr(self.ruler_content, 'label_padding_x', v))
-        self.bind(end_pos_str=lambda i, v: setattr(self.ruler_content, 'end_pos_str', v))
-
-        # Ensure Ruler is reactive to total_beats and pixels_per_beat changes
-        self.bind(total_beats=self.trigger_redraw, pixels_per_beat=self.trigger_redraw)
-
-    def trigger_redraw(self, *args):
-        # We need to update the content width before redrawing
-        self.ruler_content.width = self.total_beats * self.pixels_per_beat
-        self.ruler_content.trigger_redraw()
+        # Export du g_translate pour l'interface
+        self.g_translate = self.ruler_content.g_translate
+        
+        self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))        
 
     def redraw(self, *args):
-        self.ruler_content.width = self.total_beats * self.pixels_per_beat
-        self.ruler_content.redraw(*args)
+        self.ruler_content.redraw()

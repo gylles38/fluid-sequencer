@@ -192,9 +192,6 @@ class Sequencer(EventDispatcher):
                 new_index = int(round(val))
                 if new_index != self.current_routing_index:
                     self.current_routing_index = new_index                                
-#                else:
-#                    if self.current_routing_index != -1:
-#                        self.current_routing_index = -1
 
     def _start_carla_process(self, carla_project_path: Optional[str] = None):
         """
@@ -304,6 +301,12 @@ class Sequencer(EventDispatcher):
                 self.stop()
             else:
                 self.start_midi_recording() # Assumes a track is armed
+
+    def get_start_beat(self):
+        """Calcule le beat de départ basé sur le texte de l'interface"""
+        start_pos_str = getattr(self, 'ui_start_pos_str', "1:1") or "1:1"
+        start_beat = self.parse_position_to_beats(start_pos_str)
+        return start_beat if start_beat is not None else 0.0
 
     def invalidate_caches(self):
             """Invalide tous les caches qui dépendent de la structure du morceau ou des données audio."""
@@ -2348,6 +2351,7 @@ class Sequencer(EventDispatcher):
         self._start_recording_internal(**settings)
         return "Re-recording with last used settings..."        
 
+    '''
     def _calculate_song_length_in_beats(self) -> float:
         """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""
         max_beats = 0.0
@@ -2381,7 +2385,8 @@ class Sequencer(EventDispatcher):
                     print(f"Could not calculate duration for {track.filepath}: {e}")
                     pass
         return max_beats
-
+    '''
+    
     def _generate_automation_events(self, auto_track: 'AutomationTrack') -> List[dict]:
         """
         Generates a list of concrete MIDI/audio events from an automation track.

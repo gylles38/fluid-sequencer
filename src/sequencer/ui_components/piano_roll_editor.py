@@ -17,7 +17,7 @@ import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate
 from collections import deque
 import copy
 import mido
@@ -76,6 +76,12 @@ class EditableMidiGrid(PianoRoll):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.playback_line = None
+        # --- GPU TRANSLATION ---
+        with self.canvas.before:
+            PushMatrix()
+            self.g_translate = Translate(0, 0, 0)
+        with self.canvas.after:
+            PopMatrix()
 
     def add_playback_line(self) -> None:
         self.playback_line = Widget(size_hint_x=None, width=dp(2))
@@ -825,6 +831,9 @@ class PianoRollEditor(FloatingWindow):
     selected_event = ObjectProperty(None, allownone=True)
     history = ObjectProperty(None)
     hovered_note = ObjectProperty(None, allownone=True)
+    display_beat = NumericProperty(0.0)
+    saved_scroll_x = NumericProperty(0.0)
+    last_playback_state = StringProperty("stopped")
 
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
@@ -870,6 +879,17 @@ class PianoRollEditor(FloatingWindow):
 
         self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
         self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
+
+        # --- ALIGNMENT SYNC ---
+        # Ensure Ruler's alignment properties match the editor's layout
+        self.ids.ruler.keyboard_width = self.ids.keyboard_sv.width
+        self.ids.ruler.info_width = 0
+        self.ids.ruler.controls_width = 0
+        self.ids.ruler.spacing = 0
+
+        # Ensure ruler content width matches the grid
+        self.ids.ruler.ruler_content.width = self.ids.grid_viewer.grid.width
+        self.ids.grid_viewer.grid.bind(width=lambda i, v: setattr(self.ids.ruler.ruler_content, 'width', v))
 
         # Add the playback line here to ensure it's drawn on top
         self.ids.grid_viewer.grid.add_playback_line()
@@ -1495,40 +1515,63 @@ class PianoRollEditor(FloatingWindow):
                 # un stop/start pour prendre en compte les gros changements.
 
     def update_playhead(self, dt) -> None:
-        current_beat = self.sequencer_layout.sequencer.current_beat
-        self.set_playback_position(current_beat)
+        current_state = self.sequencer_layout.sequencer.playback_state
+        ppb = self.pixels_per_beat
 
-        # Update position label
-        pos_str = self.sequencer_layout.sequencer._format_beats_to_position(current_beat)
+        # --- 1. SNAPSHOT & RESTAURATION DU CONTEXTE (HORIZONTAL UNIQUEMENT) ---
+        if current_state in ("playing", "recording") and self.last_playback_state not in ("playing", "recording"):
+            self.saved_scroll_x = self.ids.timeline_scroll.scroll_x
+            self.display_beat = self.sequencer_layout.sequencer.current_beat
+
+        # --- 2. RESET AU STOP ---
+        if current_state not in ("playing", "recording") and self.last_playback_state in ("playing", "recording"):
+            self.display_beat = self.sequencer_layout.sequencer.current_beat
+            self.ids.ruler.g_translate.x = 0
+            self.ids.grid_viewer.grid.g_translate.x = 0
+
+        self.last_playback_state = current_state
+
+        # --- 3. POSITION SMOOTHING ---
+        jack_beat = self.sequencer_layout.sequencer.current_beat
+        if current_state in ("playing", "recording"):
+            safe_dt = min(dt, 1/15.0)
+            beats_per_second = self.sequencer_layout.sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
+        else:
+            self.display_beat = jack_beat
+
+        # --- 4. MISE À JOUR VISUELLE ---
+        self.set_playback_position(self.display_beat)
+        pos_str = self.sequencer_layout.sequencer._format_beats_to_position(self.display_beat)
         self.ids.pos_label.text = f"Pos: {pos_str}"
+
+        # --- 5. CALCUL DE L'OFFSET (HORIZONTAL) ---
+        if current_state in ("playing", "recording"):
+            scroll_view = self.ids.timeline_scroll
+            grid = self.ids.grid_viewer.grid
+
+            timeline_width = grid.width
+            viewport_width = scroll_view.width
+
+            if timeline_width > viewport_width:
+                max_scroll_width = timeline_width - viewport_width
+                scroll_offset_px = self.saved_scroll_x * max_scroll_width
+                target_pixel_x = self.display_beat * ppb
+                offset_x = -(target_pixel_x - scroll_offset_px)
+
+                self.ids.ruler.g_translate.x = offset_x
+                grid.g_translate.x = offset_x
 
     def set_playback_position(self, current_beat: float) -> None:
         grid = self.ids.grid_viewer.grid
-        pixels_per_beat = self.pixels_per_beat
-        x_pos = current_beat * pixels_per_beat
-
+        x_pos = current_beat * self.pixels_per_beat
         if grid.playback_line:
             grid.playback_line.x = x_pos
-
-        if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
-            scroll_view = self.ids.timeline_scroll
-            timeline_width = grid.width
-            viewport_width = scroll_view.width
-            if timeline_width <= viewport_width: return
-
-            margin_x = viewport_width * 0.3
-            max_displacement = timeline_width - viewport_width
-            current_scroll_x_pixels = scroll_view.scroll_x * max_displacement
-            new_scroll_x_pixels = -1
-
-            if x_pos > current_scroll_x_pixels + viewport_width - margin_x:
-                new_scroll_x_pixels = x_pos - (viewport_width - margin_x)
-            elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > 1:
-                new_scroll_x_pixels = x_pos - margin_x
-
-            if new_scroll_x_pixels != -1:
-                new_scroll_x_pixels: int = max(0, min(new_scroll_x_pixels, max_displacement))
-                scroll_view.scroll_x = new_scroll_x_pixels / max_displacement
 
     def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play_pause")
     def stop_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("stop")

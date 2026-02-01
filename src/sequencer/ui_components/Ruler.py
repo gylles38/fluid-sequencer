@@ -111,7 +111,7 @@ class Ruler(BoxLayout):
             self.info_width + 
             self.controls_width + 
             self.keyboard_width + 
-            (self.spacing * 2) # Ajustez ce multiplicateur selon le nombre de gaps dans TrackWidget
+            (self.spacing * 3) # Ajustez ce multiplicateur selon le nombre de gaps dans TrackWidget
         )
 
         self.ruler_left_panel = Widget(size_hint_x=None, width=total_left_width)
@@ -131,7 +131,21 @@ class Ruler(BoxLayout):
         # Export du g_translate pour l'interface
         self.g_translate = self.ruler_content.g_translate
         
-        self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v))        
+        self.bind(total_beats=lambda i, v: setattr(self.ruler_content, 'total_beats', v),
+                  pixels_per_beat=lambda i, v: setattr(self.ruler_content, 'pixels_per_beat', v),
+                  beats_per_measure=lambda i, v: setattr(self.ruler_content, 'beats_per_measure', v),
+                  info_width=self._update_left_panel_width,
+                  controls_width=self._update_left_panel_width,
+                  keyboard_width=self._update_left_panel_width,
+                  spacing=self._update_left_panel_width)
+
+    def _update_left_panel_width(self, *args):
+        self.ruler_left_panel.width = (
+            self.info_width +
+            self.controls_width +
+            self.keyboard_width +
+            (self.spacing * 3)
+        )
 
     def redraw(self, *args):
         self.ruler_content.redraw()

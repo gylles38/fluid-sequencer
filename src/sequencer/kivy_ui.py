@@ -1782,7 +1782,7 @@ class SequencerLayout(BoxLayout):
             self.display_beat = self.sequencer.get_start_beat()
 
         # --- 2. RESET AU STOP ---
-        if current_state != "playing" and self.last_playback_state == "playing":
+        if current_state == "stopped" and self.last_playback_state != "stopped":
             start_beat = self.sequencer.get_start_beat()
             self.display_beat = start_beat
             self.sequencer.current_beat = start_beat

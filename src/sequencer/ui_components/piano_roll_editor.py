@@ -1551,7 +1551,7 @@ class PianoRollEditor(FloatingWindow):
             self.display_beat = self.sequencer_layout.sequencer.current_beat
 
         # --- 2. RESET AU STOP ---
-        if current_state not in ("playing", "recording") and self.last_playback_state in ("playing", "recording"):
+        if current_state == "stopped" and self.last_playback_state != "stopped":
             self.display_beat = self.sequencer_layout.sequencer.current_beat
             self.ids.ruler.g_translate.x = 0
             self.ids.grid_viewer.grid.g_translate.x = 0

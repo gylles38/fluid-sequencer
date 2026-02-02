@@ -888,16 +888,9 @@ class TrackWidget(BoxLayout):
 
             sequencer = self.sequencer_layout.sequencer
             
-            # 1. Capturer la position actuelle AVANT d'arrêter
-            captured_beat = sequencer.current_beat
-
-            # 2. Arrêter la lecture
+            # 1. Mettre en pause la lecture si elle est en cours
             if sequencer.playback_state in ['playing', 'recording']:
-                sequencer.stop()
-
-            # 3. Restaurer la position dans le séquenceur
-            if captured_beat > 0:
-                sequencer.current_beat = captured_beat
+                sequencer.pause()
 
             editor = PianoRollEditor(
                 track=self.track,
@@ -915,6 +908,11 @@ class TrackWidget(BoxLayout):
                 existing._bring_to_front()
                 return
             
+            sequencer = self.sequencer_layout.sequencer
+            # 1. Mettre en pause la lecture si elle est en cours
+            if sequencer.playback_state in ['playing', 'recording']:
+                sequencer.pause()
+
             # On demande à l'objet automation_controls quel paramètre est actif
             active_param = 'vol' # Valeur de sécurité
             if hasattr(self, 'automation_controls') and self.automation_controls.selected_param:

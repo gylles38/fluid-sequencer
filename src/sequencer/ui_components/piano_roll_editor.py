@@ -1555,6 +1555,8 @@ class PianoRollEditor(FloatingWindow):
             self.display_beat = self.sequencer_layout.sequencer.current_beat
             self.ids.ruler.g_translate.x = 0
             self.ids.grid_viewer.grid.g_translate.x = 0
+            # On repositionne le scroll sur le point de départ
+            self.scroll_to_beat(self.display_beat)
 
         self.last_playback_state = current_state
 

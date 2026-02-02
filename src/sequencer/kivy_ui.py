@@ -1759,6 +1759,21 @@ class SequencerLayout(BoxLayout):
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 
+    def scroll_to_beat(self, beat):
+        """Défile la timeline pour afficher le beat spécifié."""
+        if not self.track_widgets: return
+        ppb = self.track_widgets[0].pixels_per_beat
+        grid_width = self.ruler.total_beats * ppb
+        scroll_view = self.ruler.scroll_view
+        viewport_width = scroll_view.width
+
+        if grid_width > viewport_width:
+            target_pixel_x = beat * ppb
+            max_scroll_width = grid_width - viewport_width
+            new_scroll_x = target_pixel_x / max_scroll_width
+            scroll_view.scroll_x = max(0, min(1, new_scroll_x))
+            # La synchro avec les pistes se fait via le binding scroll_x
+
     def update_playhead(self, dt):
         current_state = self.sequencer.playback_state
         ppb = self.track_widgets[0].pixels_per_beat if self.track_widgets else 100
@@ -1779,7 +1794,8 @@ class SequencerLayout(BoxLayout):
             
             # On force la mise à jour interne
             self.ruler.scroll_view.update_from_scroll() 
-            self.display_beat = self.sequencer.get_start_beat()
+            # On utilise current_beat pour gérer correctement la reprise après pause
+            self.display_beat = self.sequencer.current_beat
 
         # --- 2. RESET AU STOP ---
         if current_state == "stopped" and self.last_playback_state != "stopped":
@@ -1791,6 +1807,9 @@ class SequencerLayout(BoxLayout):
             for track in self.track_widgets:
                 if hasattr(track, 'g_translate'):
                     track.g_translate.x = 0
+
+            # On repositionne le scroll sur le point de départ
+            self.scroll_to_beat(start_beat)
 
         self.last_playback_state = current_state
 

@@ -14,7 +14,7 @@ from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.boxlayout import BoxLayout
 from .HoverBehavior import HoverableButton
-from kivy.graphics import Color, Line, Rectangle, Mesh
+from kivy.graphics import Color, Line, Rectangle, Mesh, Translate, PushMatrix, PopMatrix
 from kivy.metrics import dp
 import math
 from collections import deque
@@ -877,6 +877,15 @@ class AutomationEditor(FloatingWindow):
 
         sequencer = self.sequencer_layout.sequencer
         current_beat = sequencer.current_beat 
+        current_state = sequencer.playback_state
+
+        # --- RESET AU STOP ---
+        if current_state == "stopped" and getattr(self, 'last_playback_state', 'stopped') != "stopped":
+            self.ids.ruler.g_translate.x = 0
+            self.ids.grid.g_translate = Translate(0, 0, 0) # Fallback optimization
+            self.scroll_to_beat(current_beat)
+
+        self.last_playback_state = current_state
         
         # Déplacement de la barre rouge
         self.ids.playhead.x = current_beat * self.pixels_per_beat
@@ -889,6 +898,22 @@ class AutomationEditor(FloatingWindow):
         # Auto-scroll uniquement en lecture
         if sequencer.playback_state == 'playing':
             self._scroll_to_logic(current_beat)
+
+    def scroll_to_beat(self, beat):
+        """Défile la timeline pour afficher le beat spécifié."""
+        scroll_view = self.ids.timeline_scroll
+        grid_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        if grid_width <= viewport_width:
+            scroll_view.scroll_x = 0
+            return
+
+        target_pixel = beat * self.pixels_per_beat
+        max_scroll = grid_width - viewport_width
+        new_scroll_x = target_pixel / max_scroll
+
+        scroll_view.scroll_x = max(0, min(1, new_scroll_x))
 
     def _scroll_to_logic(self, current_beat):
         scroll_view = self.ids.timeline_scroll

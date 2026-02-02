@@ -243,7 +243,7 @@ class Sequencer(EventDispatcher):
         Centralized method to handle all transport commands (play, pause, stop, record)
         from both the UI and MIDI controllers to ensure consistent behavior.
         """
-        if command == "play_pause":
+        if command == "play":
             # If armed for recording, pressing play should start the recording.
             if self.is_recording and self.playback_state == 'stopped':
                 # The recording thread is already waiting for the transport to start.
@@ -254,12 +254,13 @@ class Sequencer(EventDispatcher):
                 self.play(start_beat=start_beat)
                 return
 
-            # If already playing, do nothing. If paused, resume.
-            if self.playback_state == "playing":
-                self.pause()
-                return
+            # If paused, resume.
             if self.playback_state == "paused":
                 self.pause() # The pause method handles both pause and resume
+                return
+
+            # If already playing, do nothing.
+            if self.playback_state == "playing":
                 return
 
             # --- Start new playback ---
@@ -291,6 +292,16 @@ class Sequencer(EventDispatcher):
                 self.play_range_start_beat = start_beat
                 self.play_range_end_beat = end_beat if end_beat is not None else self.get_song_length_in_beats()
                 self.play(start_beat=start_beat)
+
+        elif command == "pause":
+            if self.playback_state in ("playing", "paused"):
+                self.pause()
+
+        elif command == "play_pause":
+            if self.playback_state == "playing":
+                self.pause()
+            else:
+                self.process_transport_command("play")
 
         elif command == "stop":
             # If armed for recording but not yet playing, "stop" should just cancel the armed state.

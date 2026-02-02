@@ -1599,7 +1599,7 @@ class SequencerLayout(BoxLayout):
 
     def play_pressed(self, instance):
         # Centralized logic call
-        self.sequencer.process_transport_command("play_pause")
+        self.sequencer.process_transport_command("play")
 
     def _start_playback(self, start_pos):
         """Démarre la lecture après configuration du loop"""
@@ -1666,7 +1666,7 @@ class SequencerLayout(BoxLayout):
             return False
 
     def pause_pressed(self, instance):
-        self.sequencer.process_transport_command("play_pause")
+        self.sequencer.process_transport_command("pause")
 
     def stop_pressed(self, instance):
         self.sequencer.process_transport_command("stop")

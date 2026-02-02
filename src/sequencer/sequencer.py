@@ -138,7 +138,7 @@ class Sequencer(EventDispatcher):
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
 
         if not engine_is_rolling: # Si JACK est à l'arrêt
-            if self.playback_state in ["playing", "recording"] and time_since_play > 1.0:
+            if self.playback_state in ["playing", "recording"] and time_since_play > 10.0:
                 print(f"[UI] Engine STOP detected par transport_query.")
                 self.playback_state = "stopped"
                 self.jack_manager.silence_all_midi_notes()
@@ -2620,6 +2620,7 @@ class Sequencer(EventDispatcher):
                 self.pause_beat = current_beat
             elif self.playback_state == "paused":
                 print(f"\n[DIAGNOSTIC] --- RESUMING from beat {self.pause_beat:.6f} ---")
+                self._last_play_click_time = time.perf_counter()
                 # Resync all tracks to the last beat and resume
                 self._resync_all_at_beat(self.pause_beat, force_play=True)
                 self.playback_state = "playing"

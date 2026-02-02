@@ -138,12 +138,16 @@ class Sequencer(EventDispatcher):
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
 
         if not engine_is_rolling: # Si JACK est à l'arrêt
-            if self.playback_state != "stopped" and time_since_play > 1.0:
+            if self.playback_state in ["playing", "recording"] and time_since_play > 1.0:
                 print(f"[UI] Engine STOP detected par transport_query.")
                 self.playback_state = "stopped"
                 self.jack_manager.silence_all_midi_notes()
+            elif self.playback_state == "paused" and current_frame == 0:
+                # Si on est en pause mais que le moteur est revenu à 0, c'est un STOP externe
+                print(f"[UI] Engine RESET to 0 detected while paused. Switching to stopped.")
+                self.playback_state = "stopped"
         else: # Si JACK tourne
-            if self.playback_state == "stopped":
+            if self.playback_state in ["stopped", "paused"]:
                 print(f"[UI] Engine ROLL detected par transport_query.")
                 self.playback_state = "playing"
                 

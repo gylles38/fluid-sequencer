@@ -719,6 +719,18 @@ class SequencerLayout(BoxLayout):
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
+        # --- Barre d'espace (Play/Pause) ---
+        if keyboard == 32:
+            # Ne pas déclencher si on tape dans un champ texte (pour éviter de mettre des espaces partout)
+            # On vérifie si l'un de nos inputs principaux a le focus
+            if (self.tempo_input.focus or
+                self.start_pos_input.focus or
+                self.end_pos_input.focus):
+                return False
+
+            self.sequencer.process_transport_command("play_pause")
+            return True
+
         # The 'keyboard' argument is the integer keycode
         if keyboard in (43, 270):  # Keycode for '+' and 'numpadadd'
             self.zoom(1.2)

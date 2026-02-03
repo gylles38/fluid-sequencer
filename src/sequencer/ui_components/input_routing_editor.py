@@ -14,7 +14,7 @@ from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
 from .HoverBehavior import HoverableButton
-from kivy.graphics import Color, Line, Rectangle, Mesh
+from kivy.graphics import Color, Line, Rectangle, Mesh, Translate, PushMatrix, PopMatrix
 from kivy.metrics import dp
 import math
 from collections import deque
@@ -114,6 +114,7 @@ class EditableRoutingGrid(RelativeLayout):
     selected_point = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kwargs):
+        self.g_translate = Translate(0, 0, 0)
         super().__init__(**kwargs)
         self.grid_widget = Widget(size_hint=(1, 1), pos=(0, 0))
         self.curve_widget = Widget(size_hint=(1, 1), pos=(0, 0))
@@ -230,8 +231,13 @@ class EditableRoutingGrid(RelativeLayout):
         return super().on_touch_up(touch)
 
     def draw(self, *args):
+        self.grid_widget.canvas.before.clear()
         self.grid_widget.canvas.clear()
-        with self.grid_widget.canvas:
+
+        with self.grid_widget.canvas.before:
+            PushMatrix()
+            self.grid_widget.canvas.before.add(self.g_translate)
+
             Color(0.1, 0.1, 0.1, 1)
             Rectangle(pos=(0, 0), size=self.size)
 
@@ -251,11 +257,18 @@ class EditableRoutingGrid(RelativeLayout):
                     Color(0.2, 0.2, 0.2, 1)
                 Line(points=[0, y, self.width, y], width=0.5)
 
+            PopMatrix()
+
         self.draw_curve_and_points()
 
     def draw_curve_and_points(self, *args):
+        self.curve_widget.canvas.before.clear()
         self.curve_widget.canvas.clear()
         if not self.points: return
+
+        with self.curve_widget.canvas.before:
+            PushMatrix()
+            self.curve_widget.canvas.before.add(self.g_translate)
 
         sorted_points = sorted(self.points, key=lambda p: p.start_time)
 
@@ -299,6 +312,8 @@ class EditableRoutingGrid(RelativeLayout):
                 else:
                     Color(0.8, 0.8, 1, 0.9)
                     Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
+
+            PopMatrix()
 
 Builder.load_string("""
 <InputRoutingEditor>:
@@ -506,6 +521,10 @@ class InputRoutingEditor(FloatingWindow):
     midi_tracks = ListProperty([])
     edit_mode = StringProperty('insert')
     is_dirty = BooleanProperty(False)
+    _is_scrolling = False
+    display_beat = NumericProperty(0.0)
+    saved_scroll_x = NumericProperty(0.0)
+    last_playback_state = StringProperty("stopped")
     history = ObjectProperty(None)
 
     def __init__(self, **kwargs):
@@ -544,9 +563,74 @@ class InputRoutingEditor(FloatingWindow):
             if isinstance(t, MidiTrack)
         ]
 
+    def scroll_to_beat(self, beat):
+        """Défile la timeline pour afficher le beat spécifié."""
+        scroll_view = self.ids.timeline_scroll
+        grid_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        if grid_width <= viewport_width:
+            scroll_view.scroll_x = 0
+            return
+
+        target_pixel = beat * self.pixels_per_beat
+        max_scroll = grid_width - viewport_width
+        new_scroll_x = target_pixel / max_scroll
+
+        scroll_view.scroll_x = max(0, min(1, new_scroll_x))
+
     def update_playhead(self, dt):
-        current_beat = self.sequencer_layout.sequencer.current_beat
-        self.ids.playhead.x = current_beat * self.pixels_per_beat
+        current_state = self.sequencer_layout.sequencer.playback_state
+        ppb = self.pixels_per_beat
+
+        # --- 1. SNAPSHOT & RESTAURATION DU CONTEXTE (HORIZONTAL UNIQUEMENT) ---
+        if current_state in ("playing", "recording") and self.last_playback_state not in ("playing", "recording"):
+            self.saved_scroll_x = self.ids.timeline_scroll.scroll_x
+            self.display_beat = self.sequencer_layout.sequencer.current_beat
+
+        # --- 2. RESET AU STOP ---
+        if current_state == "stopped" and self.last_playback_state != "stopped":
+            self.display_beat = self.sequencer_layout.sequencer.current_beat
+            self.ids.ruler.g_translate.x = 0
+            self.ids.grid.g_translate.x = 0
+            # On repositionne le scroll sur le point de départ
+            self.scroll_to_beat(self.display_beat)
+
+        self.last_playback_state = current_state
+
+        # --- 3. POSITION SMOOTHING ---
+        jack_beat = self.sequencer_layout.sequencer.current_beat
+        if current_state in ("playing", "recording"):
+            safe_dt = min(dt, 1/15.0)
+            beats_per_second = self.sequencer_layout.sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
+        else:
+            self.display_beat = jack_beat
+
+        # --- 4. MISE À JOUR VISUELLE ---
+        self.ids.playhead.x = self.display_beat * self.pixels_per_beat
+
+        # --- 5. CALCUL DE L'OFFSET (HORIZONTAL) ---
+        if current_state in ("playing", "recording"):
+            scroll_view = self.ids.timeline_scroll
+            grid = self.ids.grid
+
+            timeline_width = grid.width
+            viewport_width = scroll_view.width
+
+            if timeline_width > viewport_width:
+                max_scroll_width = timeline_width - viewport_width
+                scroll_offset_px = self.saved_scroll_x * max_scroll_width
+                target_pixel_x = self.display_beat * ppb
+                offset_x = -(target_pixel_x - scroll_offset_px)
+
+                self.ids.ruler.g_translate.x = offset_x
+                grid.g_translate.x = offset_x
 
     def set_edit_mode(self, mode, btn):
         self.edit_mode = mode
@@ -592,17 +676,75 @@ class InputRoutingEditor(FloatingWindow):
     def zoom_out(self): self._apply_zoom(max(dp(20), self.pixels_per_beat / 1.25))
     def zoom_reset(self): self._apply_zoom(dp(100))
 
-    def _apply_zoom(self, new_val):
-        self.pixels_per_beat = new_val
-        self.ids.grid.width = self.total_beats * self.pixels_per_beat
+    def _apply_zoom(self, new_pixels_per_beat):
+        """Applique le zoom en tentant de conserver le centre de la vue."""
+        scroll_view = self.ids.timeline_scroll
+
+        # 1. Calculer le beat qui est actuellement au centre de l'écran
+        old_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        if old_total_width > viewport_width:
+            center_pixel = (scroll_view.scroll_x * (old_total_width - viewport_width)) + (viewport_width / 2)
+        else:
+            center_pixel = viewport_width / 2
+        center_beat = center_pixel / self.pixels_per_beat
+
+        # 2. Appliquer le nouveau zoom
+        self.pixels_per_beat = new_pixels_per_beat
+
+        # 3. Recalculer le scroll_x pour que le center_beat reste au centre
+        Clock.schedule_once(lambda dt: self._update_scroll_after_zoom(center_beat), 0)
+
+    def _update_scroll_after_zoom(self, target_beat):
+        scroll_view = self.ids.timeline_scroll
+        new_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        self.ids.grid.width = new_total_width
+
+        if new_total_width <= viewport_width:
+            scroll_view.scroll_x = 0
+        else:
+            new_center_pixel = target_beat * self.pixels_per_beat
+            new_scroll_pixels = new_center_pixel - (viewport_width / 2)
+            max_scroll = new_total_width - viewport_width
+            scroll_view.scroll_x = max(0, min(1, new_scroll_pixels / max_scroll))
+
         self.ids.ruler.redraw()
         self.ids.grid.draw_curve_and_points()
 
-    def sync_horizontal_scroll(self, instance, value):
-        if instance is self.ids.ruler.scroll_view:
-            self.ids.timeline_scroll.scroll_x = value
-        else:
-            self.ids.ruler.scroll_view.scroll_x = value
+    def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value):
+        if self._is_scrolling: return
+        self._is_scrolling = True
+
+        try:
+            # Calculate absolute pixel offset from source
+            content_width_source = source_scroll_view.children[0].width
+            viewport_width_source = source_scroll_view.width
+            max_scroll_source = max(0, content_width_source - viewport_width_source)
+            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
+
+            ruler_scroll = self.ids.ruler.scroll_view
+            timeline_scroll = self.ids.timeline_scroll
+
+            targets = [ruler_scroll, timeline_scroll]
+            for sv in targets:
+                if sv is not source_scroll_view:
+                    try:
+                        content_width = sv.children[0].width
+                        viewport_width = sv.width
+                        max_scroll = max(0, content_width - viewport_width)
+                        if max_scroll > 0:
+                            sv.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
+                        else:
+                            sv.scroll_x = 0
+                    except (IndexError, AttributeError):
+                        continue
+        except (IndexError, AttributeError):
+            pass
+
+        self._is_scrolling = False
 
     def play_pressed(self): self.sequencer_layout.sequencer.process_transport_command("play_pause")
     def stop_pressed(self): self.sequencer_layout.sequencer.process_transport_command("stop")

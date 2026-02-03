@@ -173,7 +173,7 @@ class Ruler(BoxLayout):
         self.add_widget(self.ruler_left_panel)
         
         # Timeline
-        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=0, effect_cls=ScrollEffect)
+        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_x=True, do_scroll_y=False, bar_width=0, scroll_type=['bars', 'content'], effect_cls=ScrollEffect)
         self.ruler_content = RulerContent(
             sequencer_layout=self.sequencer_layout,
             total_beats=self.total_beats,

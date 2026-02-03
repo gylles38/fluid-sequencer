@@ -716,8 +716,13 @@ Builder.load_string("""
             TooltipMDIconButton:
                 id: play_button
                 icon: 'play'
-                tooltip_text: "Play / Pause"
+                tooltip_text: "Play"
                 on_press: root.play_pressed()
+            TooltipMDIconButton:
+                id: pause_button
+                icon: 'pause'
+                tooltip_text: "Pause / Resume"
+                on_press: root.pause_pressed()
             TooltipMDIconButton:
                 id: stop_button
                 icon: 'stop'
@@ -1601,7 +1606,8 @@ class PianoRollEditor(FloatingWindow):
         x_pos = current_beat * self.pixels_per_beat
         grid.set_playback_line_x(x_pos)
 
-    def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play_pause")
+    def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play")
+    def pause_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("pause")
     def stop_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("stop")
     def record_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("record")
     def rewind_pressed(self, *args) -> None: self.sequencer_layout.sequencer._resync_all_at_beat(0)

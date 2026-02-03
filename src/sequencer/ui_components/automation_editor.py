@@ -526,8 +526,13 @@ Builder.load_string("""
             TooltipMDIconButton:
                 id: play_button
                 icon: 'play'
-                tooltip_text: "Play / Pause"
+                tooltip_text: "Play"
                 on_press: root.play_pressed()
+            TooltipMDIconButton:
+                id: pause_button
+                icon: 'pause'
+                tooltip_text: "Pause / Resume"
+                on_press: root.pause_pressed()
             TooltipMDIconButton:
                 id: stop_button
                 icon: 'stop'
@@ -760,9 +765,9 @@ class AutomationEditor(FloatingWindow):
         # On stocke le paramètre souhaité
         self.selected_parameter = initial_param
         
+        self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
+
         Clock.schedule_once(self._post_kv_init)
-        # On lance la surveillance automatique
-        Clock.schedule_interval(self._sync_ui, 0.1)
         Window.bind(on_key_down=self._on_key_down)
 
     def _post_kv_init(self, dt):
@@ -840,13 +845,26 @@ class AutomationEditor(FloatingWindow):
         if hasattr(self.ids.ruler, 'scroll_view'):
             self.ids.ruler.scroll_view.scroll_x = value
 
-    def _sync_ui(self, dt):
-        # 1. Synchronisation de l'icône Play/Pause
-        btn = self.ids.get('play_button')
-        sequencer = self.sequencer_layout.sequencer        
-        if btn :
-            is_playing = sequencer.playback_state == 'playing'
-            btn.icon = "pause" if is_playing else "play"
+    def on_playback_state_change(self, instance, state):
+        play_btn = self.ids.get('play_button')
+        pause_btn = self.ids.get('pause_button')
+        if not play_btn or not pause_btn: return
+
+        if state in ('playing', 'recording'):
+            play_btn.icon = 'play-circle-outline'
+            play_btn.icon_color = [0, 0.7, 0.3, 1]
+            pause_btn.icon = 'pause'
+            pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
+        elif state == 'paused':
+            play_btn.icon = 'play'
+            play_btn.icon_color = [1, 1, 1, 0.8]
+            pause_btn.icon = 'pause-circle-outline'
+            pause_btn.md_bg_color = [0.9, 0.7, 0, 1]
+        else: # stopped
+            play_btn.icon = 'play'
+            play_btn.icon_color = [1, 1, 1, 0.8]
+            pause_btn.icon = 'pause'
+            pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
 
     def update_status_bar(self, point):
         if point:
@@ -959,6 +977,8 @@ class AutomationEditor(FloatingWindow):
 
     def on_dismiss(self):
         """Nettoyage des bindings et de l'horloge à la fermeture de l'éditeur."""
+        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+
         # 1. On libère le clavier
         Window.unbind(on_key_down=self._on_key_down)
         
@@ -1366,7 +1386,8 @@ class AutomationEditor(FloatingWindow):
 
         self._is_scrolling = False
 
-    def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play_pause")
+    def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play")
+    def pause_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("pause")
     def stop_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("stop")
 
     def rewind_pressed(self, *args):

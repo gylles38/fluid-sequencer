@@ -741,7 +741,7 @@ Builder.load_string("""
             total_beats: root.total_beats
             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             end_pos_str: root.end_pos_str
-            size_hint: 1, None
+            size_hint_y: None
             height: dp(30)
             info_width: 0
             controls_width: 0
@@ -1561,10 +1561,6 @@ class PianoRollEditor(FloatingWindow):
         self.set_playback_position(self.display_beat)
         pos_str = self.sequencer_layout.sequencer._format_beats_to_position(self.display_beat)
         self.ids.pos_label.text = f"Pos: {pos_str}"
-
-        # --- 3. RESET AU STOP ---
-        if current_state == "stopped" and self.last_playback_state != "stopped":
-             self.scroll_to_beat(self.display_beat)
 
         self.last_playback_state = current_state
 

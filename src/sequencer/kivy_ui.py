@@ -698,6 +698,39 @@ class SequencerLayout(BoxLayout):
 
         Window.bind(on_key_down=self._on_keyboard_down)
 
+    def move_to_beat(self, beat):
+        """
+        Déplace la tête de lecture, synchronise le séquenceur/JACK et ajuste le scroll.
+        """
+        # 1. Mise à jour de l'état du séquenceur et de l'UI
+        new_pos_str = self.sequencer._format_beats_to_position(beat)
+        self.sequencer.ui_start_pos_str = new_pos_str
+        self.start_pos_input.text = new_pos_str
+
+        # 2. Synchronisation moteur et JACK
+        self.sequencer._resync_all_at_beat(beat)
+
+        # 3. Ajustement du défilement de la grille
+        self.scroll_to_beat(beat)
+
+    def go_to_start(self):
+        """Déplace au tout début (Mesure 1, Temps 1)"""
+        self.move_to_beat(0)
+
+    def go_to_last_measure_start(self):
+        """Déplace au début de la dernière mesure"""
+        total_beats = self.sequencer.get_song_length_in_beats()
+        beats_per_measure = getattr(self.sequencer.song, 'time_signature_numerator', 4)
+
+        if total_beats <= 0:
+            target_beat = 0
+        else:
+            # Calcul du premier temps de la dernière mesure entamée
+            last_measure_index = (total_beats - 1) // beats_per_measure
+            target_beat = last_measure_index * beats_per_measure
+
+        self.move_to_beat(target_beat)
+
     def sync_scroll_from_track(self, instance, value):
         """Appelé quand l'utilisateur fait glisser une grille de piste à la main"""
         # On ne synchronise manuellement que si on n'est pas en train de jouer
@@ -729,6 +762,22 @@ class SequencerLayout(BoxLayout):
                 return False
 
             self.sequencer.process_transport_command("play_pause")
+            return True
+
+        # HOME : Retour au début
+        if keyboard == 278:
+            # Ne pas déclencher si un champ texte a le focus
+            if (self.tempo_input.focus or self.start_pos_input.focus or self.end_pos_input.focus):
+                return False
+            self.go_to_start()
+            return True
+
+        # END : Aller au début de la dernière mesure
+        if keyboard == 279:
+            # Ne pas déclencher si un champ texte a le focus
+            if (self.tempo_input.focus or self.start_pos_input.focus or self.end_pos_input.focus):
+                return False
+            self.go_to_last_measure_start()
             return True
 
         # The 'keyboard' argument is the integer keycode

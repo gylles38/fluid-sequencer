@@ -102,6 +102,7 @@ class Sequencer(EventDispatcher):
 
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
+        self._last_transport_command_time = 0.0
 
         self.bind(song_structure_changed=self._update_current_routing)
         
@@ -110,6 +111,10 @@ class Sequencer(EventDispatcher):
 
     def _poll_engine_state(self, dt):
         if not self.jack_manager or not self.jack_manager.is_running:
+            return
+
+        # Skip sync if we recently sent a manual command (cooldown to allow engine to catch up)
+        if time.perf_counter() - self._last_transport_command_time < 0.5:
             return
 
         # 1. Obtenir l'état directement depuis JACK (Source de vérité absolue)
@@ -138,7 +143,7 @@ class Sequencer(EventDispatcher):
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
 
         if not engine_is_rolling: # Si JACK est à l'arrêt
-            if self.playback_state in ["playing", "recording"] and time_since_play > 10.0:
+            if self.playback_state in ["playing", "recording"] and time_since_play > 0.5:
                 print(f"[UI] Engine STOP detected par transport_query.")
                 self.playback_state = "stopped"
                 self.jack_manager.silence_all_midi_notes()
@@ -2580,6 +2585,7 @@ class Sequencer(EventDispatcher):
     # 1. On change l'état IMMÉDIATEMENT (Optimisme)
         self.playback_state = "playing"
         self._last_play_click_time = time.perf_counter() # Pour le poll_engine_state
+        self._last_transport_command_time = time.perf_counter()
         
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             self.jack_manager.start()
@@ -2622,6 +2628,8 @@ class Sequencer(EventDispatcher):
     def pause(self):
         if not self.jack_manager.is_running or not self.jack_manager.jack_client:
             return
+
+        self._last_transport_command_time = time.perf_counter()
 
         try:
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
@@ -2682,6 +2690,7 @@ class Sequencer(EventDispatcher):
         """Stops recording and/or playback."""
         # 1. On change l'état LOCAL immédiatement pour bloquer le polling
         self.playback_state = 'stopped'
+        self._last_transport_command_time = time.perf_counter()
         
         if self.is_recording and self.recording_thread:
             print("Stopping recording...")

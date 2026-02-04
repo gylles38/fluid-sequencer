@@ -17,7 +17,7 @@ import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
 import copy
 import mido
@@ -72,25 +72,37 @@ class EditableMidiGrid(PianoRoll):
     _drag_offset = (0, 0)
     _selection_start_pos = (0, 0)
     _selection_rect = None
+    _selection_group = None
     _selection_initial_states = None
     def __init__(self, **kwargs) -> None:
+        self.playback_line_x = 0
+        self.playback_rect = None
+        self._selection_group = None
         super().__init__(**kwargs)
-        self.playback_line = None
+
+    def draw(self, *args):
+        if hasattr(self, 'canvas'):
+            self.canvas.after.clear()
+
+        super().draw(*args) # Clears before and canvas redrawing everything
+
+        if hasattr(self, 'canvas'):
+            with self.canvas.after:
+                Color(1, 0, 0, 0.8)
+                self.playback_rect = Rectangle(pos=(self.playback_line_x, 0), size=(dp(2), self.height))
+
+                # Re-add selection rectangle if in selection mode
+                if self._selection_group:
+                    self.canvas.after.add(self._selection_group)
 
     def add_playback_line(self) -> None:
-        self.playback_line = Widget(size_hint_x=None, width=dp(2))
-        with self.canvas.after:
-            Color(1, 0, 0, 0.8)
-            self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
-        self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
-        self.add_widget(self.playback_line)
-        self.playback_line.size_hint_y = None
-        self.playback_line.height = self.height
+        # Now handled by direct canvas drawing in draw()
+        self.draw()
 
-    def update_playback_rect(self, *args) -> None:
-        if hasattr(self, 'playback_rect'):
-            self.playback_rect.pos = self.playback_line.pos
-            self.playback_rect.size = self.playback_line.size
+    def set_playback_line_x(self, x):
+        self.playback_line_x = x
+        if self.playback_rect:
+            self.playback_rect.pos = (x, 0)
 
     def on_touch_move(self, touch) -> None | bool:
         if touch.grab_current is not self:
@@ -367,9 +379,12 @@ class EditableMidiGrid(PianoRoll):
             # After clearing selection (if any), prepare for a potential rubber-band selection.
             self._drag_mode = 'select'
             self._selection_start_pos = local_pos
-            with self.canvas.after:
-                Color(1, 1, 1, 0.3)
-                self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
+            self._selection_group = InstructionGroup()
+            self._selection_group.add(Color(1, 1, 1, 0.3))
+            self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
+            self._selection_group.add(self._selection_rect)
+            self.canvas.after.add(self._selection_group)
+
             touch.grab(self)
             self.draw()
             return True
@@ -412,8 +427,12 @@ class EditableMidiGrid(PianoRoll):
             return super(EditableMidiGrid, self).on_touch_up(touch)
 
         if self._drag_mode == 'select':
-            if self._selection_rect:
-                self.canvas.after.remove(self._selection_rect)
+            if self._selection_group:
+                try:
+                    self.canvas.after.remove(self._selection_group)
+                except ValueError:
+                    pass
+                self._selection_group = None
                 self._selection_rect = None
             # Record the state after the selection is finalized.
             self.editor._record_state()
@@ -688,8 +707,13 @@ Builder.load_string("""
             TooltipMDIconButton:
                 id: play_button
                 icon: 'play'
-                tooltip_text: "Play / Pause"
+                tooltip_text: "Play"
                 on_press: root.play_pressed()
+            TooltipMDIconButton:
+                id: pause_button
+                icon: 'pause'
+                tooltip_text: "Pause / Resume"
+                on_press: root.pause_pressed()
             TooltipMDIconButton:
                 id: stop_button
                 icon: 'stop'
@@ -825,6 +849,9 @@ class PianoRollEditor(FloatingWindow):
     selected_event = ObjectProperty(None, allownone=True)
     history = ObjectProperty(None)
     hovered_note = ObjectProperty(None, allownone=True)
+    display_beat = NumericProperty(0.0)
+    saved_scroll_x = NumericProperty(0.0)
+    last_playback_state = StringProperty("stopped")
 
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
@@ -871,6 +898,17 @@ class PianoRollEditor(FloatingWindow):
         self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
         self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
 
+        # --- ALIGNMENT SYNC ---
+        # Ensure Ruler's alignment properties match the editor's layout
+        self.ids.ruler.keyboard_width = self.ids.keyboard_sv.width
+        self.ids.ruler.info_width = 0
+        self.ids.ruler.controls_width = 0
+        self.ids.ruler.spacing = 0
+
+        # Ensure ruler content width matches the grid
+        self.ids.ruler.ruler_content.width = self.ids.grid_viewer.grid.width
+        self.ids.grid_viewer.grid.bind(width=lambda i, v: setattr(self.ids.ruler.ruler_content, 'width', v))
+
         # Add the playback line here to ensure it's drawn on top
         self.ids.grid_viewer.grid.add_playback_line()
 
@@ -880,10 +918,15 @@ class PianoRollEditor(FloatingWindow):
         self._center_view_on_c4()
         current_beat = self.sequencer_layout.sequencer.current_beat
         if current_beat > 0 and self.total_beats > 0:
-            scroll_pos = (current_beat * self.pixels_per_beat)
-            max_scroll = self.ids.grid_viewer.grid.width - timeline_scroll.width
-            if max_scroll > 0:
-                timeline_scroll.scroll_x = min(1.0, scroll_pos / max_scroll)
+            def sync_at_start(dt):
+                scroll_pos = (current_beat * self.pixels_per_beat)
+                max_scroll = self.ids.grid_viewer.grid.width - timeline_scroll.width
+                if max_scroll > 0:
+                    target_scroll_x = min(1.0, scroll_pos / max_scroll)
+                    timeline_scroll.scroll_x = target_scroll_x
+                    ruler_scroll.scroll_x = target_scroll_x
+            # We schedule it to ensure widths are correctly computed
+            Clock.schedule_once(sync_at_start)
 
         self.mode_buttons = {
             'insert': self.ids.insert_button, 'move': self.ids.move_button, 'delete': self.ids.delete_button
@@ -1495,52 +1538,85 @@ class PianoRollEditor(FloatingWindow):
                 # un stop/start pour prendre en compte les gros changements.
 
     def update_playhead(self, dt) -> None:
-        current_beat = self.sequencer_layout.sequencer.current_beat
-        self.set_playback_position(current_beat)
+        current_state = self.sequencer_layout.sequencer.playback_state
 
-        # Update position label
-        pos_str = self.sequencer_layout.sequencer._format_beats_to_position(current_beat)
+        # --- 1. POSITION JACK & SMOOTHING ---
+        jack_beat = self.sequencer_layout.sequencer.current_beat
+        if current_state in ("playing", "recording"):
+            safe_dt = min(dt, 1/15.0)
+            beats_per_second = self.sequencer_layout.sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
+
+            # Auto-scroll uniquement en lecture
+            self._scroll_to_logic(self.display_beat)
+        else:
+            self.display_beat = jack_beat
+
+        # --- 2. MISE À JOUR VISUELLE ---
+        self.set_playback_position(self.display_beat)
+        pos_str = self.sequencer_layout.sequencer._format_beats_to_position(self.display_beat)
         self.ids.pos_label.text = f"Pos: {pos_str}"
+
+        self.last_playback_state = current_state
+
+    def _scroll_to_logic(self, current_beat):
+        scroll_view = self.ids.timeline_scroll
+        grid = self.ids.grid_viewer.grid
+        ppb = self.pixels_per_beat
+        total_width = grid.width
+        viewport_width = scroll_view.width
+
+        max_scroll_dist = total_width - viewport_width
+        if max_scroll_dist <= 0:
+            return
+
+        playhead_pixel_x = current_beat * ppb
+        trigger_point = viewport_width * 0.5
+
+        if playhead_pixel_x > trigger_point:
+            target_view_start = playhead_pixel_x - trigger_point
+            new_scroll_x = target_view_start / max_scroll_dist
+            scroll_view.scroll_x = max(0, min(1, new_scroll_x))
 
     def set_playback_position(self, current_beat: float) -> None:
         grid = self.ids.grid_viewer.grid
-        pixels_per_beat = self.pixels_per_beat
-        x_pos = current_beat * pixels_per_beat
+        x_pos = current_beat * self.pixels_per_beat
+        grid.set_playback_line_x(x_pos)
 
-        if grid.playback_line:
-            grid.playback_line.x = x_pos
-
-        if self.sequencer_layout.sequencer.playback_state in ['playing', 'recording']:
-            scroll_view = self.ids.timeline_scroll
-            timeline_width = grid.width
-            viewport_width = scroll_view.width
-            if timeline_width <= viewport_width: return
-
-            margin_x = viewport_width * 0.3
-            max_displacement = timeline_width - viewport_width
-            current_scroll_x_pixels = scroll_view.scroll_x * max_displacement
-            new_scroll_x_pixels = -1
-
-            if x_pos > current_scroll_x_pixels + viewport_width - margin_x:
-                new_scroll_x_pixels = x_pos - (viewport_width - margin_x)
-            elif x_pos < current_scroll_x_pixels + margin_x and current_scroll_x_pixels > 1:
-                new_scroll_x_pixels = x_pos - margin_x
-
-            if new_scroll_x_pixels != -1:
-                new_scroll_x_pixels: int = max(0, min(new_scroll_x_pixels, max_displacement))
-                scroll_view.scroll_x = new_scroll_x_pixels / max_displacement
-
-    def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play_pause")
+    def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play")
+    def pause_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("pause")
     def stop_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("stop")
     def record_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("record")
     def rewind_pressed(self, *args) -> None: self.sequencer_layout.sequencer._resync_all_at_beat(0)
 
     def on_playback_state_change(self, instance, state) -> None:
-        play_button, record_button = self.ids.play_button, self.ids.record_button
-        play_button.icon = 'pause' if state in ('playing', 'recording') else 'play'
-        play_button.tooltip_text = "Pause" if state in ('playing', 'recording') else "Play"
-        record_button.icon_color = [1, 0.2, 0.2, 1] if state == 'recording' else [0.8, 0.8, 0.8, 1]
-        record_button.md_bg_color = [0.5, 0.1, 0.1, 1] if state == 'recording' else [1, 1, 1, 0.05]
+        play_btn = self.ids.play_button
+        pause_btn = self.ids.pause_button
+        record_btn = self.ids.record_button
+
+        if state in ('playing', 'recording'):
+            play_btn.icon = 'play-circle-outline'
+            play_btn.icon_color = [0, 0.7, 0.3, 1]
+            pause_btn.icon = 'pause'
+            pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
+        elif state == 'paused':
+            play_btn.icon = 'play'
+            play_btn.icon_color = [1, 1, 1, 0.8]
+            pause_btn.icon = 'pause-circle-outline'
+            pause_btn.md_bg_color = [0.9, 0.7, 0, 1]
+        else: # stopped
+            play_btn.icon = 'play'
+            play_btn.icon_color = [1, 1, 1, 0.8]
+            pause_btn.icon = 'pause'
+            pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
+
+        record_btn.icon_color = [1, 0.2, 0.2, 1] if state == 'recording' else [0.8, 0.8, 0.8, 1]
+        record_btn.md_bg_color = [0.5, 0.1, 0.1, 1] if state == 'recording' else [1, 1, 1, 0.05]
 
         # --- Live Preview Logic ---
         sequencer = self.sequencer_layout.sequencer

@@ -27,6 +27,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
 from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.boxlayout import MDBoxLayout
+from kivy.graphics import Translate, PushMatrix, PopMatrix
 
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
@@ -423,28 +424,35 @@ class TrackWidget(BoxLayout):
             note_height = dp(12)
 
             # 1. Keyboard (fixed width)
-            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True)
+            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True, effect_cls=ScrollEffect)
             self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
             self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
-            #self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=True)
-            #self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
-            #self.timeline_scroll.effect_y = ScrollEffect()  # Bounded, no bounce
             self.timeline_scroll = ScrollView(
                 size_hint=(1, 1),
                 do_scroll_x=True,
-                do_scroll_y=False,
-                effect_cls='ScrollEffect', # Désactive les rebonds (overscroll)
-                bar_width=0
+                do_scroll_y=True,
+                effect_cls=ScrollEffect, # Désactive les rebonds (overscroll)
+                bar_width=dp(2)
             )
+            self.timeline_scroll.effect_x = ScrollEffect()
+            self.timeline_scroll.effect_y = ScrollEffect()
 
             # Content container (RelativeLayout for local coordinate system)
             self.content = RelativeLayout(size_hint=(None, None))
             self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
-            self.timeline_container = self.content  # For compatibility with other methods
 
+            # AJOUT : Préparation de la translation GPU
+            with self.content.canvas.before:
+                PushMatrix()
+                self.g_translate = Translate(0, 0, 0) # On crée l'objet de translation
+            with self.content.canvas.after:
+                PopMatrix()
+
+            self.timeline_container = self.content
+            
             # Piano roll grid/notes
             self.piano_roll = PianoRoll(
                 track=track,
@@ -468,14 +476,18 @@ class TrackWidget(BoxLayout):
             self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
             self.content.add_widget(self.playback_line)
 
+            # --- SYNCHRONISATION SÉCURISÉE ---
+            # On utilise une variable de verrouillage pour éviter que l'un n'entraîne l'autre à l'infini
+            self._scrolling_locked = False
+
             self.timeline_scroll.add_widget(self.content)
 
             # Bind for size/zoom updates
             self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
 
             # Link vertical scrolling between keyboard and timeline
-            self.keyboard_sv.bind(scroll_y=lambda i, v: setattr(self.timeline_scroll, 'scroll_y', v))
-            self.timeline_scroll.bind(scroll_y=lambda i, v: setattr(self.keyboard_sv, 'scroll_y', v))
+            self.keyboard_sv.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.keyboard_sv, self.timeline_scroll, v))
+            self.timeline_scroll.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.timeline_scroll, self.keyboard_sv, v))
 
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
@@ -534,6 +546,13 @@ class TrackWidget(BoxLayout):
 
             # A ScrollView must have a single child.
             self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
+            # AJOUT : Préparation de la translation GPU
+            with self.timeline_container.canvas.before:
+                PushMatrix()
+                self.g_translate = Translate(0, 0, 0)
+            with self.timeline_container.canvas.after:
+                PopMatrix()            
+            
             self.measure_grid = MeasureGrid(
                 size_hint=(1, 1), # The grid itself can fill the container
                 beat_per_measure=self.beats_per_measure,
@@ -607,7 +626,6 @@ class TrackWidget(BoxLayout):
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
 
-
     def _get_target_track_name_for_tooltip(self) -> str:
         """Retourne le nom de la piste cible pour le tooltip."""
         if not isinstance(self.track, AutomationTrack):
@@ -626,6 +644,13 @@ class TrackWidget(BoxLayout):
         # Puisque la classe est dans le même fichier, l'appel est direct
         popup = ChangeTargetPopup(track_widget=self)
         popup.open()
+
+    def _sync_vertical_scrolls(self, source_sv, target_sv, value):
+        """Helper to synchronize vertical scrolling between two ScrollViews."""
+        if not self._scrolling_locked:
+            self._scrolling_locked = True
+            target_sv.scroll_y = value
+            self._scrolling_locked = False
 
     def update_track_name_display(self):
         """Met à jour le texte du bouton d'index [#] et le tooltip de l'icône de ciblage."""
@@ -863,17 +888,6 @@ class TrackWidget(BoxLayout):
 
             sequencer = self.sequencer_layout.sequencer
             
-            # 1. Capturer la position actuelle AVANT d'arrêter
-            captured_beat = sequencer.current_beat
-
-            # 2. Arrêter la lecture
-            if sequencer.playback_state in ['playing', 'recording']:
-                sequencer.stop()
-
-            # 3. Restaurer la position dans le séquenceur
-            if captured_beat > 0:
-                sequencer.current_beat = captured_beat
-
             editor = PianoRollEditor(
                 track=self.track,
                 sequencer_layout=self.sequencer_layout,
@@ -890,6 +904,8 @@ class TrackWidget(BoxLayout):
                 existing._bring_to_front()
                 return
             
+            sequencer = self.sequencer_layout.sequencer
+
             # On demande à l'objet automation_controls quel paramètre est actif
             active_param = 'vol' # Valeur de sécurité
             if hasattr(self, 'automation_controls') and self.automation_controls.selected_param:

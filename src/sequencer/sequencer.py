@@ -138,12 +138,19 @@ class Sequencer(EventDispatcher):
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
 
         if not engine_is_rolling: # Si JACK est à l'arrêt
-            if self.playback_state != "stopped" and time_since_play > 1.0:
+            if self.playback_state in ["playing", "recording"] and time_since_play > 10.0:
                 print(f"[UI] Engine STOP detected par transport_query.")
                 self.playback_state = "stopped"
                 self.jack_manager.silence_all_midi_notes()
+            elif self.playback_state == "paused" and current_frame == 0:
+                # Si on est en pause mais que le moteur est revenu à 0 alors qu'on n'était pas au début,
+                # c'est probablement un STOP externe.
+                # On utilise une petite marge pour éviter les faux positifs au tout début du morceau.
+                if getattr(self, 'pause_beat', 0) > 0.1:
+                    print(f"[UI] Engine RESET to 0 detected while paused. Switching to stopped.")
+                    self.playback_state = "stopped"
         else: # Si JACK tourne
-            if self.playback_state == "stopped":
+            if self.playback_state in ["stopped", "paused"]:
                 print(f"[UI] Engine ROLL detected par transport_query.")
                 self.playback_state = "playing"
                 
@@ -192,9 +199,6 @@ class Sequencer(EventDispatcher):
                 new_index = int(round(val))
                 if new_index != self.current_routing_index:
                     self.current_routing_index = new_index                                
-#                else:
-#                    if self.current_routing_index != -1:
-#                        self.current_routing_index = -1
 
     def _start_carla_process(self, carla_project_path: Optional[str] = None):
         """
@@ -242,7 +246,7 @@ class Sequencer(EventDispatcher):
         Centralized method to handle all transport commands (play, pause, stop, record)
         from both the UI and MIDI controllers to ensure consistent behavior.
         """
-        if command == "play_pause":
+        if command == "play":
             # If armed for recording, pressing play should start the recording.
             if self.is_recording and self.playback_state == 'stopped':
                 # The recording thread is already waiting for the transport to start.
@@ -253,12 +257,13 @@ class Sequencer(EventDispatcher):
                 self.play(start_beat=start_beat)
                 return
 
-            # If already playing, do nothing. If paused, resume.
-            if self.playback_state == "playing":
-                self.pause()
-                return
+            # If paused, resume.
             if self.playback_state == "paused":
                 self.pause() # The pause method handles both pause and resume
+                return
+
+            # If already playing, do nothing.
+            if self.playback_state == "playing":
                 return
 
             # --- Start new playback ---
@@ -291,6 +296,16 @@ class Sequencer(EventDispatcher):
                 self.play_range_end_beat = end_beat if end_beat is not None else self.get_song_length_in_beats()
                 self.play(start_beat=start_beat)
 
+        elif command == "pause":
+            if self.playback_state in ("playing", "paused"):
+                self.pause()
+
+        elif command == "play_pause":
+            if self.playback_state == "playing":
+                self.pause()
+            else:
+                self.process_transport_command("play")
+
         elif command == "stop":
             # If armed for recording but not yet playing, "stop" should just cancel the armed state.
             if self.is_recording and self.playback_state == 'stopped':
@@ -304,6 +319,12 @@ class Sequencer(EventDispatcher):
                 self.stop()
             else:
                 self.start_midi_recording() # Assumes a track is armed
+
+    def get_start_beat(self):
+        """Calcule le beat de départ basé sur le texte de l'interface"""
+        start_pos_str = getattr(self, 'ui_start_pos_str', "1:1") or "1:1"
+        start_beat = self.parse_position_to_beats(start_pos_str)
+        return start_beat if start_beat is not None else 0.0
 
     def invalidate_caches(self):
             """Invalide tous les caches qui dépendent de la structure du morceau ou des données audio."""
@@ -2348,6 +2369,7 @@ class Sequencer(EventDispatcher):
         self._start_recording_internal(**settings)
         return "Re-recording with last used settings..."        
 
+    '''
     def _calculate_song_length_in_beats(self) -> float:
         """Calculates the total length of the song in beats, considering both MIDI and audio tracks."""
         max_beats = 0.0
@@ -2381,7 +2403,8 @@ class Sequencer(EventDispatcher):
                     print(f"Could not calculate duration for {track.filepath}: {e}")
                     pass
         return max_beats
-
+    '''
+    
     def _generate_automation_events(self, auto_track: 'AutomationTrack') -> List[dict]:
         """
         Generates a list of concrete MIDI/audio events from an automation track.
@@ -2611,6 +2634,7 @@ class Sequencer(EventDispatcher):
                 self.pause_beat = current_beat
             elif self.playback_state == "paused":
                 print(f"\n[DIAGNOSTIC] --- RESUMING from beat {self.pause_beat:.6f} ---")
+                self._last_play_click_time = time.perf_counter()
                 # Resync all tracks to the last beat and resume
                 self._resync_all_at_beat(self.pause_beat, force_play=True)
                 self.playback_state = "playing"

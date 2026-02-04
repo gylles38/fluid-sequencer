@@ -386,19 +386,27 @@ Builder.load_string("""
             TooltipMDIconButton:
                 id: rewind_button
                 icon: 'skip-backward'
+                tooltip_text: "Rewind to Start"
                 on_press: root.rewind_pressed()
             TooltipMDIconButton:
                 id: play_button
                 icon: 'play'
+                tooltip_text: "Play"
                 on_press: root.play_pressed()
+            TooltipMDIconButton:
+                id: pause_button
+                icon: 'pause'
+                tooltip_text: "Pause / Resume"
+                on_press: root.pause_pressed()
             TooltipMDIconButton:
                 id: stop_button
                 icon: 'stop'
+                tooltip_text: "Stop"
                 on_press: root.stop_pressed()
 
         Ruler:
             id: ruler
-            size_hint_y: None
+            size_hint: 1, None
             height: dp(30)
             sequencer_layout: root.sequencer_layout
             pixels_per_beat: root.pixels_per_beat
@@ -427,34 +435,31 @@ Builder.load_string("""
                 do_scroll_x: True
                 do_scroll_y: False
                 bar_width: dp(15)
+                scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
+                bar_margin: dp(2)
 
-                FloatLayout:
+                # Utiliser un RelativeLayout direct pour le contenu scrollable
+                RelativeLayout:
                     id: scroll_content
                     size_hint: None, 1
                     width: grid.width
 
-                    BoxLayout:
-                        orientation: 'vertical'
-                        size_hint: (1, 1)
-                        padding: [0, 0, 0, dp(15)]
+                    # Grille d'automation (Routing)
+                    EditableRoutingGrid:
+                        id: grid
+                        editor: root
+                        size_hint: None, 1
+                        width: root.total_beats * root.pixels_per_beat
+                        points: root.track_copy.points
+                        total_beats: root.total_beats
+                        pixels_per_beat: root.pixels_per_beat
+                        midi_tracks: root.midi_tracks
+                        beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
+                        active_index: root.current_routing_index
+                        pos: 0, dp(15)
 
-                        EditableRoutingGrid:
-                            id: grid
-                            editor: root
-                            size_hint: None, 1
-                            width: root.total_beats * root.pixels_per_beat
-                            points: root.track_copy.points
-                            total_beats: root.total_beats
-                            pixels_per_beat: root.pixels_per_beat
-                            midi_tracks: root.midi_tracks
-                            beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
-                            active_index: root.current_routing_index
-
-                        Widget:
-                            size_hint_y: None
-                            height: dp(18)
-
+                    # Playhead
                     Widget:
                         id: playhead
                         size_hint: None, 1
@@ -506,6 +511,7 @@ class InputRoutingEditor(FloatingWindow):
     midi_tracks = ListProperty([])
     edit_mode = StringProperty('insert')
     is_dirty = BooleanProperty(False)
+    _is_scrolling = False
     history = ObjectProperty(None)
 
     def __init__(self, **kwargs):
@@ -525,6 +531,7 @@ class InputRoutingEditor(FloatingWindow):
 
         self.sequencer_layout.sequencer.bind(current_routing_index=self.setter('current_routing_index'))
         self.current_routing_index = self.sequencer_layout.sequencer.current_routing_index
+        self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
 
         Clock.schedule_once(self._post_kv_init)
         Clock.schedule_interval(self.update_playhead, 1/60)
@@ -544,9 +551,49 @@ class InputRoutingEditor(FloatingWindow):
             if isinstance(t, MidiTrack)
         ]
 
+    def scroll_to_beat(self, beat):
+        """Défile la timeline pour afficher le beat spécifié."""
+        scroll_view = self.ids.timeline_scroll
+        grid_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        if grid_width <= viewport_width:
+            scroll_view.scroll_x = 0
+            return
+
+        target_pixel = beat * self.pixels_per_beat
+        max_scroll = grid_width - viewport_width
+        new_scroll_x = target_pixel / max_scroll
+
+        scroll_view.scroll_x = max(0, min(1, new_scroll_x))
+
     def update_playhead(self, dt):
-        current_beat = self.sequencer_layout.sequencer.current_beat
+        sequencer = self.sequencer_layout.sequencer
+        current_beat = sequencer.current_beat
+
+        # Déplacement de la barre rouge
         self.ids.playhead.x = current_beat * self.pixels_per_beat
+
+        # Auto-scroll uniquement en lecture
+        if sequencer.playback_state == 'playing':
+            self._scroll_to_logic(current_beat)
+
+    def _scroll_to_logic(self, current_beat):
+        scroll_view = self.ids.timeline_scroll
+        total_width = self.ids.grid.width
+        viewport_width = scroll_view.width
+
+        max_scroll_dist = total_width - viewport_width
+        if max_scroll_dist <= 0:
+            return
+
+        playhead_pixel_x = current_beat * self.pixels_per_beat
+        trigger_point = viewport_width * 0.5
+
+        if playhead_pixel_x > trigger_point:
+            target_view_start = playhead_pixel_x - trigger_point
+            new_scroll_x = target_view_start / max_scroll_dist
+            scroll_view.scroll_x = max(0, min(1, new_scroll_x))
 
     def set_edit_mode(self, mode, btn):
         self.edit_mode = mode
@@ -592,21 +639,84 @@ class InputRoutingEditor(FloatingWindow):
     def zoom_out(self): self._apply_zoom(max(dp(20), self.pixels_per_beat / 1.25))
     def zoom_reset(self): self._apply_zoom(dp(100))
 
-    def _apply_zoom(self, new_val):
-        self.pixels_per_beat = new_val
-        self.ids.grid.width = self.total_beats * self.pixels_per_beat
+    def _apply_zoom(self, new_pixels_per_beat):
+        """Applique le zoom en tentant de conserver le centre de la vue."""
+        scroll_view = self.ids.timeline_scroll
+
+        # 1. Calculer le beat qui est actuellement au centre de l'écran
+        old_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        if old_total_width > viewport_width:
+            center_pixel = (scroll_view.scroll_x * (old_total_width - viewport_width)) + (viewport_width / 2)
+        else:
+            center_pixel = viewport_width / 2
+        center_beat = center_pixel / self.pixels_per_beat
+
+        # 2. Appliquer le nouveau zoom
+        self.pixels_per_beat = new_pixels_per_beat
+
+        # 3. Recalculer le scroll_x pour que le center_beat reste au centre
+        Clock.schedule_once(lambda dt: self._update_scroll_after_zoom(center_beat), 0)
+
+    def _update_scroll_after_zoom(self, target_beat):
+        scroll_view = self.ids.timeline_scroll
+        new_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        self.ids.grid.width = new_total_width
+
+        if new_total_width <= viewport_width:
+            scroll_view.scroll_x = 0
+        else:
+            new_center_pixel = target_beat * self.pixels_per_beat
+            new_scroll_pixels = new_center_pixel - (viewport_width / 2)
+            max_scroll = new_total_width - viewport_width
+            scroll_view.scroll_x = max(0, min(1, new_scroll_pixels / max_scroll))
+
         self.ids.ruler.redraw()
         self.ids.grid.draw_curve_and_points()
 
     def sync_horizontal_scroll(self, instance, value):
+        if self._is_scrolling: return
+        self._is_scrolling = True
+
+        # Simple and direct synchronization for identical widths
         if instance is self.ids.ruler.scroll_view:
             self.ids.timeline_scroll.scroll_x = value
         else:
             self.ids.ruler.scroll_view.scroll_x = value
 
-    def play_pressed(self): self.sequencer_layout.sequencer.process_transport_command("play_pause")
+        self._is_scrolling = False
+
+    def play_pressed(self): self.sequencer_layout.sequencer.process_transport_command("play")
+    def pause_pressed(self): self.sequencer_layout.sequencer.process_transport_command("pause")
     def stop_pressed(self): self.sequencer_layout.sequencer.process_transport_command("stop")
     def rewind_pressed(self): self.sequencer_layout.sequencer._resync_all_at_beat(0)
+
+    def on_playback_state_change(self, instance, state):
+        play_btn = self.ids.play_button
+        pause_btn = self.ids.pause_button
+
+        if state in ('playing', 'recording'):
+            play_btn.icon = 'play-circle-outline'
+            play_btn.icon_color = [0, 0.7, 0.3, 1]
+            pause_btn.icon = 'pause'
+            pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
+        elif state == 'paused':
+            play_btn.icon = 'play'
+            play_btn.icon_color = [1, 1, 1, 0.8]
+            pause_btn.icon = 'pause-circle-outline'
+            pause_btn.md_bg_color = [0.9, 0.7, 0, 1]
+        else: # stopped
+            play_btn.icon = 'play'
+            play_btn.icon_color = [1, 1, 1, 0.8]
+            pause_btn.icon = 'pause'
+            pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
+
+    def on_dismiss(self):
+        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+        super(InputRoutingEditor, self).on_dismiss()
 
     def dismiss(self, action=None, *args):
         if action == 'save_and_close':

@@ -100,6 +100,7 @@ class SequencerLayout(BoxLayout):
         self._current_measure = None # Initialisation pour la détection du beat 1
         self._is_seeking_on_scroll = False
         self.pixels_per_beat = dp(100)
+        self.last_playback_state = "stopped"        
 
         # Tête de lecture "lissée" (celle que l'utilisateur voit)
         self.display_beat = 0.0
@@ -444,7 +445,6 @@ class SequencerLayout(BoxLayout):
         #self.focused_input = None
         self.start_pos_input.bind(on_text_validate=self.on_start_position_validate, text=self.on_start_pos_text_change)
         self.end_pos_input.bind(on_text_validate=self.on_end_position_validate, text=self.on_end_pos_text_change)
-   
         
         # Séparateur
         transport_card.add_widget(Widget(size_hint_x=None, width=dp(15)))
@@ -627,13 +627,24 @@ class SequencerLayout(BoxLayout):
             elevation=2,
         )
 
-        # Règle des mesures
+        # 1. Règle des mesures
         self.ruler = Ruler(
             sequencer_layout=self,
             size_hint_y=None,
-            height=dp(30), # Increased height for better visibility
+            height=dp(30),
             pixels_per_beat=self.pixels_per_beat,
+            total_beats=self.sequencer.get_song_length_in_beats(), # <-- On passe la valeur initiale
+            # On passe les dimensions pour l'alignement automatique :
+            info_width=dp(150),
+            controls_width=dp(430),
+            keyboard_width=dp(40),
+            spacing=dp(12)
         )
+
+        # 2. Liaison (Binding) CRUCIAL pour l'affichage après la mesure 5
+        # Chaque fois que le séquenceur change de durée, la règle se met à jour.
+        #self.sequencer.bind(total_beats=self.ruler.setter('total_beats'))
+        
         self.sequencer.bind(ui_end_pos_str=lambda instance, value: setattr(self.ruler, 'end_pos_str', value))
         track_area_card.add_widget(self.ruler)
 
@@ -687,6 +698,50 @@ class SequencerLayout(BoxLayout):
 
         Window.bind(on_key_down=self._on_keyboard_down)
 
+    def move_to_beat(self, beat):
+        """
+        Déplace la tête de lecture, synchronise le séquenceur/JACK et ajuste le scroll.
+        """
+        # 1. Mise à jour de l'état du séquenceur et de l'UI
+        new_pos_str = self.sequencer._format_beats_to_position(beat)
+        self.sequencer.ui_start_pos_str = new_pos_str
+        self.start_pos_input.text = new_pos_str
+
+        # 2. Synchronisation moteur et JACK
+        self.sequencer._resync_all_at_beat(beat)
+
+        # 3. Ajustement du défilement de la grille
+        self.scroll_to_beat(beat)
+
+    def go_to_start(self):
+        """Déplace au tout début (Mesure 1, Temps 1)"""
+        self.move_to_beat(0)
+
+    def go_to_last_measure_start(self):
+        """Déplace au début de la dernière mesure"""
+        total_beats = self.sequencer.get_song_length_in_beats()
+        beats_per_measure = getattr(self.sequencer.song, 'time_signature_numerator', 4)
+
+        if total_beats <= 0:
+            target_beat = 0
+        else:
+            # Calcul du premier temps de la dernière mesure entamée
+            last_measure_index = (total_beats - 1) // beats_per_measure
+            target_beat = last_measure_index * beats_per_measure
+
+        self.move_to_beat(target_beat)
+
+    def sync_scroll_from_track(self, instance, value):
+        """Appelé quand l'utilisateur fait glisser une grille de piste à la main"""
+        # On ne synchronise manuellement que si on n'est pas en train de jouer
+        if self.sequencer.playback_state != "playing":
+            # 1. On met à jour la règle
+            if self.ruler.scroll_view.scroll_x != value:
+                self.ruler.scroll_view.scroll_x = value
+                
+            # 2. On met à jour toutes les autres pistes
+            self._synchronize_scroll(instance, value)
+
     def on_song_structure_changed(self, *args):
         """
         Callback for when the song's structure (e.g., notes in a track) changes
@@ -697,6 +752,34 @@ class SequencerLayout(BoxLayout):
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
+        # --- Barre d'espace (Play/Pause) ---
+        if keyboard == 32:
+            # Ne pas déclencher si on tape dans un champ texte (pour éviter de mettre des espaces partout)
+            # On vérifie si l'un de nos inputs principaux a le focus
+            if (self.tempo_input.focus or
+                self.start_pos_input.focus or
+                self.end_pos_input.focus):
+                return False
+
+            self.sequencer.process_transport_command("play_pause")
+            return True
+
+        # HOME : Retour au début
+        if keyboard == 278:
+            # Ne pas déclencher si un champ texte a le focus
+            if (self.tempo_input.focus or self.start_pos_input.focus or self.end_pos_input.focus):
+                return False
+            self.go_to_start()
+            return True
+
+        # END : Aller au début de la dernière mesure
+        if keyboard == 279:
+            # Ne pas déclencher si un champ texte a le focus
+            if (self.tempo_input.focus or self.start_pos_input.focus or self.end_pos_input.focus):
+                return False
+            self.go_to_last_measure_start()
+            return True
+
         # The 'keyboard' argument is the integer keycode
         if keyboard in (43, 270):  # Keycode for '+' and 'numpadadd'
             self.zoom(1.2)
@@ -1565,7 +1648,7 @@ class SequencerLayout(BoxLayout):
 
     def play_pressed(self, instance):
         # Centralized logic call
-        self.sequencer.process_transport_command("play_pause")
+        self.sequencer.process_transport_command("play")
 
     def _start_playback(self, start_pos):
         """Démarre la lecture après configuration du loop"""
@@ -1632,7 +1715,7 @@ class SequencerLayout(BoxLayout):
             return False
 
     def pause_pressed(self, instance):
-        self.sequencer.process_transport_command("play_pause")
+        self.sequencer.process_transport_command("pause")
 
     def stop_pressed(self, instance):
         self.sequencer.process_transport_command("stop")
@@ -1725,83 +1808,93 @@ class SequencerLayout(BoxLayout):
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 
-    def update_playhead(self, dt):
-        """
-        Unified method to update the playhead, labels, and handle scrolling.
-        Called by a Clock schedule.
-        """
-        # 1. Read the master position from the sequencer (driven by JACK)
-        jack_beat = self.sequencer.current_beat
+    def scroll_to_beat(self, beat):
+        """Défile la timeline pour afficher le beat spécifié."""
+        if not self.track_widgets: return
+        ppb = self.track_widgets[0].pixels_per_beat
+        grid_width = self.ruler.total_beats * ppb
+        scroll_view = self.ruler.scroll_view
+        viewport_width = scroll_view.width
 
-        # 2. Calculate the smoothed display beat for fluid scrolling
-        if self.sequencer.playback_state == "playing":
-            # Predict next position based on tempo and delta-time
-            safe_dt = min(dt, 1/15.0) # Cap dt to avoid large jumps
+        if grid_width > viewport_width:
+            target_pixel_x = beat * ppb
+            max_scroll_width = grid_width - viewport_width
+            new_scroll_x = target_pixel_x / max_scroll_width
+            scroll_view.scroll_x = max(0, min(1, new_scroll_x))
+            # La synchro avec les pistes se fait via le binding scroll_x
+
+    def update_playhead(self, dt):
+        current_state = self.sequencer.playback_state
+        ppb = self.track_widgets[0].pixels_per_beat if self.track_widgets else 100
+
+        # --- 1. SNAPSHOT & RESTAURATION DU CONTEXTE (HORIZONTAL UNIQUEMENT) ---
+        if current_state == "playing" and self.last_playback_state != "playing":
+            if not hasattr(self, 'saved_scroll_x') or self.saved_scroll_x is None:
+                self.saved_scroll_x = self.ruler.scroll_view.scroll_x
+            
+            # On sauvegarde aussi la position verticale ACTUELLE pour ne pas la perdre
+            # car synchroniser le scroll_x peut parfois réinitialiser le scroll_y sur certains widgets
+            current_y = self.ruler.scroll_view.scroll_y
+            
+            # On restaure le X sauvegardé
+            self.ruler.scroll_view.scroll_x = self.saved_scroll_x
+            # On s'assure de garder le Y là où il est
+            self.ruler.scroll_view.scroll_y = current_y
+            
+            # On force la mise à jour interne
+            self.ruler.scroll_view.update_from_scroll() 
+            # On utilise current_beat pour gérer correctement la reprise après pause
+            self.display_beat = self.sequencer.current_beat
+
+        # --- 2. RESET AU STOP ---
+        if current_state == "stopped" and self.last_playback_state != "stopped":
+            start_beat = self.sequencer.get_start_beat()
+            self.display_beat = start_beat
+            self.sequencer.current_beat = start_beat
+            
+            self.ruler.g_translate.x = 0
+            for track in self.track_widgets:
+                if hasattr(track, 'g_translate'):
+                    track.g_translate.x = 0
+
+            # On repositionne le scroll sur le point de départ
+            self.scroll_to_beat(start_beat)
+
+        self.last_playback_state = current_state
+
+        # --- 3. POSITION JACK & SMOOTHING ---
+        jack_beat = self.sequencer.current_beat
+        if current_state == "playing":
+            safe_dt = min(dt, 1/15.0)
             beats_per_second = self.sequencer.song.tempo / 60.0
             if beats_per_second > 0:
                 self.display_beat += (beats_per_second * safe_dt)
-
-            # Calculate error and apply correction (smoothing)
             error = jack_beat - self.display_beat
-            correction_speed = 5.0 # Slower correction to reduce jitter
-
-            # Snap to master position if error is too large or on big time lags
-            if abs(error) > 0.5 or dt > 0.1:
-                self.display_beat = jack_beat
-            else:
-                self.display_beat += (error * correction_speed * dt)
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
         else:
-            # When not playing, snap directly to the master beat
             self.display_beat = jack_beat
 
-        # 3. Update all track widgets with the smoothed position
+        # --- 4. MISE À JOUR VISUELLE ---
         for track_widget in self.track_widgets:
             track_widget.set_playback_position(self.display_beat)
+        
+        self.playhead_label.text = f"Pos: {self.sequencer._format_beats_to_position(self.display_beat)}"
 
-        # 4. Update UI labels and animations with the smoothed position
-        current_position = self.sequencer._format_beats_to_position(self.display_beat)
-        self.playhead_label.text = f"Pos: {current_position}"
-        self._detect_beat_one_for_animation(current_position)
-
-        # 5. Check if song length has changed and update widgets if needed
-        new_total_beats = self.sequencer.get_song_length_in_beats()
-        if self.track_widgets and self.track_widgets[0].total_beats != new_total_beats:
-            self.ruler.total_beats = new_total_beats
-            self.ruler.redraw()
-            for track_widget in self.track_widgets:
-                if track_widget.total_beats != new_total_beats:
-                    track_widget.total_beats = new_total_beats
-
-        #print(self.sequencer.playback_state, self.track_widgets, self.display_beat)
-# --- ÉTAPE 6 : LE SCROLL CORRIGÉ ---
-        # On pilote désormais le défilement horizontal via le ScrollView de la règle (ruler.scroll_view)
-        # qui synchronisera automatiquement toutes les grilles de pistes.
-        if self.sequencer.playback_state == "playing" and self.track_widgets:
-            source_sv = self.ruler.scroll_view
-            content_w = source_sv.children[0].width
-            view_w = source_sv.width
-            max_scroll = content_w - view_w
+        # --- 5. CALCUL DE L'OFFSET (HORIZONTAL) ---
+        if current_state == "playing" and self.track_widgets:
+            # On calcule l'offset uniquement sur l'axe X
+            max_scroll_width = (self.ruler.total_beats * ppb) - self.ruler.scroll_view.width
+            scroll_offset_px = self.saved_scroll_x * max_scroll_width if max_scroll_width > 0 else 0
+            target_pixel_x = self.display_beat * ppb
+            offset_x = -(target_pixel_x - scroll_offset_px)
             
-            if max_scroll > 0:
-                # 1. Calculer la position de la tête en pixels
-                ppb = self.track_widgets[0].pixels_per_beat
-                playhead_pixel = self.display_beat * ppb
-                
-                # 2. On ne commence à scroller que si la tête dépasse le milieu de l'écran
-                half_view = view_w / 2
-                
-                if playhead_pixel > half_view:
-                    # On essaie de garder la tête au centre
-                    target_pixel = playhead_pixel - half_view
-                    target_x = max(0.0, min(1.0, target_pixel / max_scroll))
-                    
-                    if abs(source_sv.scroll_x - target_x) > 0.001:
-                        # Cela déclenchera _synchronize_scroll et déplacera toutes les pistes
-                        source_sv.scroll_x = target_x
-                else:
-                    # Avant le milieu, on reste au début
-                    if source_sv.scroll_x != 0:
-                        source_sv.scroll_x = 0.0
+            # On applique à X. L'axe Y des g_translate reste à 0 (non modifié)
+            self.ruler.g_translate.x = offset_x
+            for track in self.track_widgets:
+                if hasattr(track, 'g_translate'):
+                    track.g_translate.x = offset_x
 
     def snap_ui_to_jack(self):
         """
@@ -1867,7 +1960,11 @@ class SequencerLayout(BoxLayout):
             track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
             self.track_widgets.append(track_widget)
             # Force l'appel de la mise à jour graphique une fois que tout est rendu
-            Clock.schedule_once(track_widget._update_graphics, 0) 
+            Clock.schedule_once(track_widget._update_graphics, 0)
+            
+            if hasattr(track_widget, 'timeline_scroll'):
+                    track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
+                    
             self.track_list_layout.add_widget(track_widget)            
 
         # Bind ruler spacer widths and timeline width
@@ -1993,14 +2090,18 @@ class SequencerLayout(BoxLayout):
         # Cela appellent update_track_list qui utilise la nouvelle valeur
         # update_track_list se chargera de mettre à jour ruler.total_beats et d'appeler ruler.redraw()
         self.sequencer.song_structure_changed += 1 
-        
+
         print(f"Grid extended to: {position}")
         
     def on_start_pos_text_change(self, instance, value):
         self.sequencer.ui_start_pos_str = value
+        if hasattr(self, 'ruler'):
+            self.ruler.redraw()
 
     def on_end_pos_text_change(self, instance, value):
         self.sequencer.ui_end_pos_str = value
+        if hasattr(self, 'ruler'):
+            self.ruler.redraw()
 
     # Méthodes de gestion des flèches
     def handle_textinput_arrows(self, textinput, direction, modifiers, cursor_pos):
@@ -2280,40 +2381,16 @@ class SequencerLayout(BoxLayout):
                 # Fin de l'animation
                 self.stop_beat_pulse_animation()
 
-    def _synchronize_scroll(self, source_scroll_view, scroll_x_value):
-        if self._is_scrolling:
-            return
-        self._is_scrolling = True
-        # Calculate the absolute pixel offset from the source.
-        # Use children[0] width as content width.
-        try:
-            content_width_source = source_scroll_view.children[0].width
-            viewport_width_source = source_scroll_view.width
-            # Robust max_scroll calculation
-            max_scroll_source = max(0, content_width_source - viewport_width_source)
-            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
-
-            scrollable_widgets = [self.ruler.scroll_view] + [
-                track.timeline_scroll for track in self.track_widgets if track.timeline_scroll
-            ]
-
-            for scroll_widget in scrollable_widgets:
-                if scroll_widget is not source_scroll_view:
-                    try:
-                        content_width = scroll_widget.children[0].width
-                        viewport_width = scroll_widget.width
-                        max_scroll = max(0, content_width - viewport_width)
-                        if max_scroll > 0:
-                            scroll_widget.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
-                        else:
-                            scroll_widget.scroll_x = 0
-                    except (IndexError, AttributeError):
-                        continue
-        except (IndexError, AttributeError):
-            pass
-
-        self._is_scrolling = False
-
+    def _synchronize_scroll(self, instance, value):
+        """
+        instance: le ScrollView qui a bougé (ex: source_sv)
+        value: la nouvelle valeur de scroll_x (entre 0 et 1)
+        """
+        for track in self.track_widgets:
+            # On évite de synchroniser le widget qui est déjà la source
+            if track.timeline_scroll != instance:
+                track.timeline_scroll.scroll_x = value
+                
     def _on_scroll_stop(self, scroll_view, *args):
         """Called when a user stops scrolling one of the timelines."""
         pass

@@ -48,6 +48,7 @@ from sequencer.ui_components.VportsPopup import VportsPopup
 from sequencer.ui_components.PreferencesPopup import PreferencesPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.ui_components.Ruler import Ruler
+from sequencer.ui_components.ui_utils import is_any_text_input_focused
 # ============================================
 
 from sequencer.sequencer import Sequencer
@@ -752,31 +753,22 @@ class SequencerLayout(BoxLayout):
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
+        # --- Sécurité : Désactiver les raccourcis si un champ texte a le focus ---
+        if is_any_text_input_focused():
+            return False
+
         # --- Barre d'espace (Play/Pause) ---
         if keyboard == 32:
-            # Ne pas déclencher si on tape dans un champ texte (pour éviter de mettre des espaces partout)
-            # On vérifie si l'un de nos inputs principaux a le focus
-            if (self.tempo_input.focus or
-                self.start_pos_input.focus or
-                self.end_pos_input.focus):
-                return False
-
             self.sequencer.process_transport_command("play_pause")
             return True
 
         # HOME : Retour au début
         if keyboard == 278:
-            # Ne pas déclencher si un champ texte a le focus
-            if (self.tempo_input.focus or self.start_pos_input.focus or self.end_pos_input.focus):
-                return False
             self.go_to_start()
             return True
 
         # END : Aller au début de la dernière mesure
         if keyboard == 279:
-            # Ne pas déclencher si un champ texte a le focus
-            if (self.tempo_input.focus or self.start_pos_input.focus or self.end_pos_input.focus):
-                return False
             self.go_to_last_measure_start()
             return True
 

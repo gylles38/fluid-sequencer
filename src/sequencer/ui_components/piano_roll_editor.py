@@ -6,6 +6,7 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
+from .ui_utils import is_any_text_input_focused
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -958,6 +959,10 @@ class PianoRollEditor(FloatingWindow):
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         """Handle keyboard shortcuts for the editor."""
+        # --- Sécurité : Désactiver les raccourcis si un champ texte a le focus ---
+        if is_any_text_input_focused():
+            return False
+
         # --- Gestion de la Vélocité (+/-) ---
         # 43 = + (numpad), 45 = - (clavier/numpad), 61 = + (clavier principal)
         if text in ('+', '-') or keyboard in (43, 45, 61, 269, 270):

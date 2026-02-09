@@ -403,9 +403,9 @@ class JackManager:
                 found_src = src
                 break
 
-        if found_src:
+        if found_src and self._clavier_inport:
             # Connect physical keyboard to our internal "In:Clavier" input
-            dest = f"{self.jack_client.name}:In:Clavier"
+            dest = self._clavier_inport.name
             self.auto_connect_dynamic(found_src, dest)
             # print(f"Auto-connected hardware MIDI keyboard '{found_src}' to '{dest}'")
             if not self.sequencer.default_record_port:
@@ -451,7 +451,11 @@ class JackManager:
 
                 # 3. Manage Connections
                 # We bridge the sequencer's stable OUTPUT to the instrument
-                conductor_src = f"{self.jack_client.name}:Clavier"
+                if not self._clavier_outport:
+                    time.sleep(1.0)
+                    continue
+
+                conductor_src = self._clavier_outport.name
 
                 if src_port != self._last_connected_src or dest_port != self._last_connected_dest:
                     # Disconnect old
@@ -1272,8 +1276,8 @@ class JackManager:
             # --- MIDI Pass-through (In:Clavier -> Clavier) ---
             if self._clavier_inport and self._clavier_outport:
                 self._clavier_outport.clear_buffer()
-                for event in self._clavier_inport.get_buffer():
-                    self._clavier_outport.write_midi_event(event.time, event.data)
+                for offset, data in self._clavier_inport:
+                    self._clavier_outport.write_midi_event(offset, data)
 
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:

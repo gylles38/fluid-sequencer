@@ -128,10 +128,17 @@ class JackManager:
         tokens = [t for t in tokens if t not in ignored and not t.isdigit()]
 
         if tokens:
+            # We look for the best match (the one containing all tokens with minimal extra length)
+            matches = []
             for port in all_ports:
                 p_lower = port.lower()
                 if all(t in p_lower for t in tokens):
-                    return port
+                    matches.append(port)
+
+            if matches:
+                # Sort by length to prefer the most specific name
+                matches.sort(key=len)
+                return matches[0]
 
         return None
 
@@ -154,15 +161,16 @@ class JackManager:
                 # IMPORTANT: In some versions of python-jack, connections check is not
                 # reliable across all backends (PipeWire). We prefer catching the error.
                 self.jack_client.connect(full_source, full_dest)
+                print(f"[Conductor] Successfully connected: {full_source} -> {full_dest}")
             except jack.JackError as e:
                 # Error 22 often means already connected in some backends (PipeWire)
                 # or incompatible ports (which shouldn't happen here as both are MIDI).
                 if "(22)" in str(e) or "exists" in str(e).lower():
                     return
                 # Only log unexpected errors
-                # print(f"Connection warning: {e}")
-            except Exception:
-                pass
+                print(f"Connection warning: {e}")
+            except Exception as e:
+                print(f"Connection error: {e}")
         else:
             # Fallback to command line if client not available
             try:
@@ -420,11 +428,7 @@ class JackManager:
                      src_port = self.sequencer.default_record_port
 
                 if not src_port:
-                    # If still no port, clean up any previous connection and wait
-                    if self._last_connected_src and self._last_connected_dest:
-                        self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
-                        self._last_connected_src = None
-                        self._last_connected_dest = None
+                    # Cleanup wait if no hardware detected
                     time.sleep(1.0)
                     continue
 
@@ -438,18 +442,47 @@ class JackManager:
                     if is_midi_track(track):
                         dest_port = track.input_port_name
 
-                # 3. Manage Connections
-                if src_port != self._last_connected_src or dest_port != self._last_connected_dest:
-                    # Disconnect old
-                    if self._last_connected_src and self._last_connected_dest:
-                        self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
+                # 3. Robust Connection Management
+                if dest_port:
+                    # Check actual connection in JACK instead of just tracking state
+                    full_src = self.find_port_by_name(src_port)
+                    full_dest = self.find_port_by_name(dest_port)
 
-                    # Connect new
-                    if src_port and dest_port:
-                        self.auto_connect_dynamic(src_port, dest_port)
+                    if full_src and full_dest:
+                        is_already_connected = False
+                        try:
+                            # Verify if these specific ports are connected
+                            src_p = self.jack_client.get_port_by_name(full_src)
+                            dest_p = self.jack_client.get_port_by_name(full_dest)
+                            is_already_connected = dest_p in src_p.connections
+                        except jack.JackError:
+                            pass
 
-                    self._last_connected_src = src_port
-                    self._last_connected_dest = dest_port
+                        if not is_already_connected:
+                            # Disconnect ANY other connection from the hardware keyboard
+                            # to avoid double-triggers or messy routing
+                            try:
+                                src_p = self.jack_client.get_port_by_name(full_src)
+                                for connected_port in src_p.connections:
+                                    if str(connected_port) != full_dest:
+                                        self.jack_client.disconnect(full_src, str(connected_port))
+                            except jack.JackError: pass
+
+                            # Perform the new connection
+                            self.auto_connect_dynamic(full_src, full_dest)
+                            self._last_connected_src = src_port
+                            self._last_connected_dest = dest_port
+                    else:
+                        if not full_src:
+                             pass # Hardware not yet found
+                        if not full_dest:
+                             pass # Instrument not yet found
+
+                elif self._last_connected_src and self._last_connected_dest:
+                    # Cleanup if routing target lost
+                    self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
+                    self._last_connected_src = None
+                    self._last_connected_dest = None
 
             except Exception as e:
                 print(f"Error in routing worker loop: {e}", file=sys.stderr)

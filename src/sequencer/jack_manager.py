@@ -73,8 +73,6 @@ class JackManager:
         self._routing_stop_event = threading.Event()
         self._last_connected_src = None
         self._last_connected_dest = None
-        self._clavier_inport = None
-        self._clavier_outport = None
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -153,23 +151,18 @@ class JackManager:
 
         if self.jack_client:
             try:
-                # Check if already connected to avoid Error 22 (EINVAL) or EEXIST
-                try:
-                    src_port = self.jack_client.get_port_by_name(full_source)
-                    dest_port = self.jack_client.get_port_by_name(full_dest)
-                    if dest_port in src_port.connections:
-                        return # Already connected
-                except jack.JackError:
-                    pass # Port might have disappeared, let connect() handle it
-
+                # IMPORTANT: In some versions of python-jack, connections check is not
+                # reliable across all backends (PipeWire). We prefer catching the error.
                 self.jack_client.connect(full_source, full_dest)
             except jack.JackError as e:
                 # Error 22 often means already connected in some backends (PipeWire)
+                # or incompatible ports (which shouldn't happen here as both are MIDI).
                 if "(22)" in str(e) or "exists" in str(e).lower():
                     return
-                print(f"Connection warning: {e}")
-            except Exception as e:
-                print(f"Connection error: {e}", file=sys.stderr)
+                # Only log unexpected errors
+                # print(f"Connection warning: {e}")
+            except Exception:
+                pass
         else:
             # Fallback to command line if client not available
             try:
@@ -392,7 +385,7 @@ class JackManager:
             time.sleep(0.05)
 
     def _auto_connect_hardware(self):
-        """Attempts to find and bridge physical MIDI hardware to the 'In:Clavier' input."""
+        """Attempts to find physical MIDI hardware and set it as default record port."""
         keywords = ['akai', 'mpk', 'arturia', 'launchkey', 'keyboard', 'clavier', 'controller', 'keylab', 'minilab']
 
         sources = self.get_midi_input_ports()
@@ -403,11 +396,7 @@ class JackManager:
                 found_src = src
                 break
 
-        if found_src and self._clavier_inport:
-            # Connect physical keyboard to our internal "In:Clavier" input
-            dest = self._clavier_inport.name
-            self.auto_connect_dynamic(found_src, dest)
-            # print(f"Auto-connected hardware MIDI keyboard '{found_src}' to '{dest}'")
+        if found_src:
             if not self.sequencer.default_record_port:
                 self.sequencer.default_record_port = found_src
 
@@ -450,30 +439,14 @@ class JackManager:
                         dest_port = track.input_port_name
 
                 # 3. Manage Connections
-                # We bridge the sequencer's stable OUTPUT to the instrument
-                if not self._clavier_outport:
-                    time.sleep(1.0)
-                    continue
-
-                conductor_src = self._clavier_outport.name
-
                 if src_port != self._last_connected_src or dest_port != self._last_connected_dest:
                     # Disconnect old
                     if self._last_connected_src and self._last_connected_dest:
-                        # Direct bridge cleanup (if any)
                         self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
-                        # Conductor bridge cleanup
-                        self.disconnect_dynamic(conductor_src, self._last_connected_dest)
 
                     # Connect new
-                    if dest_port:
-                        # Conductor Bridge (via the sequencer's MIDI Thru)
-                        # This ensures manual cabling to 'In:Clavier' also works.
-                        self.auto_connect_dynamic(conductor_src, dest_port)
-
-                        # Direct Bridge (Optional, but we'll stick to Thru for consistency)
-                        # if src_port:
-                        #    self.auto_connect_dynamic(src_port, dest_port)
+                    if src_port and dest_port:
+                        self.auto_connect_dynamic(src_port, dest_port)
 
                     self._last_connected_src = src_port
                     self._last_connected_dest = dest_port
@@ -530,15 +503,6 @@ class JackManager:
 
             try:
                 self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
-
-                # Register native MIDI ports for the sequencer bridge
-                try:
-                    # 'Clavier' is the stable MIDI destination for instruments
-                    self._clavier_outport = self.jack_client.midi_outports.register('Clavier')
-                    # 'In:Clavier' is the stable MIDI target for hardware/users
-                    self._clavier_inport = self.jack_client.midi_inports.register('In:Clavier')
-                except Exception as e:
-                    print(f"Warning: Could not register 'Clavier' ports: {e}")
 
                 # Ensure routing track exists
                 self.sequencer.get_input_routing_track()                
@@ -1273,12 +1237,6 @@ class JackManager:
 
     def _process_callback(self, frames: int):
         try:
-            # --- MIDI Pass-through (In:Clavier -> Clavier) ---
-            if self._clavier_inport and self._clavier_outport:
-                self._clavier_outport.clear_buffer()
-                for offset, data in self._clavier_inport:
-                    self._clavier_outport.write_midi_event(offset, data)
-
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:

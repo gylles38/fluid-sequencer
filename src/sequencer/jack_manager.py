@@ -73,6 +73,7 @@ class JackManager:
         self._routing_stop_event = threading.Event()
         self._last_connected_src = None
         self._last_connected_dest = None
+        self._clavier_inport = None
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -81,70 +82,96 @@ class JackManager:
         self._last_beat_rt = 0.0 # Atomic float for UI sync
         self._last_transport_state_rt = jack.STOPPED        
 
-    def find_port_by_name(self, pattern):
+    def find_port_by_name(self, pattern: str) -> Optional[str]:
         """
-        Cherche un port JACK complet qui contient le 'pattern' donné.
-        Retourne le nom complet du premier port trouvé, ou None.
+        Searches for a full JACK port name matching the given 'pattern'.
+        It uses a multi-stage approach for robustness:
+        1. Exact match
+        2. Case-insensitive partial match
+        3. Token-based matching (to handle ALSA/JACK name differences)
         """
-        try:
-            # On demande à JACK/PipeWire la liste de tous les ports
-            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
-            all_ports = result.stdout.splitlines()
+        if not pattern:
+            return None
 
+        all_ports = []
+        if self.jack_client:
+            try:
+                all_ports = [str(p) for p in self.jack_client.get_ports()]
+            except jack.JackError:
+                pass
+
+        if not all_ports:
+            try:
+                result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
+                all_ports = [p.strip() for p in result.stdout.splitlines() if p.strip()]
+            except FileNotFoundError:
+                return None
+
+        # Stage 1: Exact match
+        for port in all_ports:
+            if port == pattern:
+                return port
+
+        # Stage 2: Case-insensitive partial match
+        pat_lower = pattern.lower()
+        for port in all_ports:
+            if pat_lower in port.lower():
+                return port
+
+        # Stage 3: Token-based match (e.g. "MPK249" + "Port A")
+        import re
+        # Extract meaningful tokens (alphanumeric, > 2 chars)
+        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', pattern) if len(t) > 2]
+        # Ignore common technical tokens that vary between systems
+        ignored = {'capture', 'playback', 'events', 'midi', 'bridge'}
+        tokens = [t for t in tokens if t not in ignored]
+
+        if tokens:
             for port in all_ports:
-                # On cherche une correspondance partielle (ex: "RtMidiOut" dans le nom complet)
-                if pattern in port:
-                    return port.strip() # On nettoie les espaces/sauts de ligne
+                p_lower = port.lower()
+                if all(t in p_lower for t in tokens):
+                    return port
 
-            return None
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
-            return None
+        return None
 
-    def auto_connect_dynamic(self, src_keyword, dest_keyword):
+    def auto_connect_dynamic(self, src_keyword: str, dest_keyword: str):
         """
-        Connecte deux ports en utilisant des mots-clés partiels.
+        Connects two ports using partial keywords or full names.
+        Uses native JACK API for connection.
         """
-        print(f"--- Attempting auto-connect: '{src_keyword}' -> '{dest_keyword}' ---")
+        if not src_keyword or not dest_keyword:
+            return
 
-        # 1. Recherche des noms complets
         full_source = self.find_port_by_name(src_keyword)
         full_dest = self.find_port_by_name(dest_keyword)
 
         if not full_source:
-            print(f"Info: Source port not found with keyword: '{src_keyword}'")
+            # print(f"Info: Source port not found with keyword: '{src_keyword}'")
             return
         if not full_dest:
-            print(f"Info: Destination port not found with keyword: '{dest_keyword}'")
+            # print(f"Info: Destination port not found with keyword: '{dest_keyword}'")
             return
 
-        print(f"Ports identified:\n   Source: {full_source}\n   Dest  : {full_dest}")
+        if self.jack_client:
+            try:
+                self.jack_client.connect(full_source, full_dest)
+            except jack.JackError as e:
+                # PipeWire often returns an error if already connected, we ignore it.
+                if "exists" not in str(e).lower():
+                    print(f"Connection warning: {e}")
+            except Exception as e:
+                print(f"Connection error: {e}", file=sys.stderr)
+        else:
+            # Fallback to command line if client not available
+            try:
+                subprocess.run(["jack_connect", full_source, full_dest],
+                             capture_output=True, text=True, check=False)
+            except FileNotFoundError:
+                pass
 
-        # 2. Tentative de connexion via jack_connect
-        try:
-            res = subprocess.run(
-                ["jack_connect", full_source, full_dest],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-
-            if res.returncode == 0:
-                print("Connection successful!")
-            else:
-                # If error (often because already connected), we display the message
-                # PipeWire often returns an error if it's already connected, it's not serious.
-                if "exists" in res.stderr:
-                     print("Already connected.")
-                else:
-                     print(f"Connection warning: {res.stderr.strip()}")
-
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_connect' introuvable.", file=sys.stderr)
-
-    def disconnect_dynamic(self, src_keyword, dest_keyword):
+    def disconnect_dynamic(self, src_keyword: str, dest_keyword: str):
         """
-        Disconnects two ports using partial keywords.
+        Disconnects two ports using partial keywords or full names.
         """
         if not src_keyword or not dest_keyword:
             return
@@ -155,28 +182,51 @@ class JackManager:
         if not full_source or not full_dest:
             return
 
-        try:
-            subprocess.run(
-                ["jack_disconnect", full_source, full_dest],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_disconnect' introuvable.", file=sys.stderr)
+        if self.jack_client:
+            try:
+                self.jack_client.disconnect(full_source, full_dest)
+            except Exception:
+                pass
+        else:
+            try:
+                subprocess.run(["jack_disconnect", full_source, full_dest],
+                             capture_output=True, text=True, check=False)
+            except FileNotFoundError:
+                pass
 
-    def get_midi_input_ports(self):
+    def get_midi_input_ports(self) -> List[str]:
         """
-        Retourne une liste de tous les ports d'entrée MIDI JACK disponibles (se terminant par :events-in).
+        Returns a list of all available MIDI SOURCE ports (outputs in JACK terminology).
+        These are ports we can record from (e.g., hardware keyboards).
         """
+        if self.jack_client:
+            try:
+                ports = self.jack_client.get_ports(is_midi=True, is_output=True)
+                return sorted([str(p) for p in ports])
+            except jack.JackError:
+                pass
+
+        # Fallback to jack_lsp
         try:
-            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
-            all_ports = result.stdout.splitlines()
-            midi_input_ports = [port.strip() for port in all_ports if port.strip().endswith(':events-in')]
-            return midi_input_ports
+            result = subprocess.run(["jack_lsp", "-t", "midi"], capture_output=True, text=True, check=False)
+            # This doesn't easily distinguish input/output without more flags,
+            # but it's a better fallback than nothing.
+            return sorted([p.strip() for p in result.stdout.splitlines() if p.strip()])
         except FileNotFoundError:
-            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
             return []
+
+    def get_midi_destination_ports(self) -> List[str]:
+        """
+        Returns a list of all available MIDI DESTINATION ports (inputs in JACK terminology).
+        These are ports we can send MIDI to (e.g., Carla plugins).
+        """
+        if self.jack_client:
+            try:
+                ports = self.jack_client.get_ports(is_midi=True, is_input=True)
+                return sorted([str(p) for p in ports])
+            except jack.JackError:
+                pass
+        return []
 
     def open_midi_port(self, port_name: str):
         """Opens a MIDI port if it's not already open."""
@@ -332,6 +382,25 @@ class JackManager:
 
             time.sleep(0.05)
 
+    def _auto_connect_hardware(self):
+        """Attempts to find and bridge physical MIDI hardware to the 'Clavier' input."""
+        keywords = ['akai', 'mpk', 'arturia', 'launchkey', 'keyboard', 'clavier', 'controller', 'keylab', 'minilab']
+
+        sources = self.get_midi_input_ports()
+        found_src = None
+        for src in sources:
+            src_lower = src.lower()
+            if any(k in src_lower for k in keywords):
+                found_src = src
+                break
+
+        if found_src:
+            dest = f"{self.jack_client.name}:Clavier"
+            self.auto_connect_dynamic(found_src, dest)
+            # print(f"Auto-connected hardware MIDI keyboard '{found_src}' to '{dest}'")
+            if not self.sequencer.default_record_port:
+                self.sequencer.default_record_port = found_src
+
     def _routing_worker_loop(self):
         """
         A background loop that manages the physical MIDI keyboard routing.
@@ -345,8 +414,14 @@ class JackManager:
 
                 # 1. Identify Source Port (Hardware Keyboard)
                 src_port = self.sequencer.default_record_port
+
+                # Auto-detection on first run or if lost
+                if not src_port or not self.find_port_by_name(src_port):
+                     self._auto_connect_hardware()
+                     src_port = self.sequencer.default_record_port
+
                 if not src_port:
-                    # If no port selected, clean up any previous connection and wait
+                    # If still no port, clean up any previous connection and wait
                     if self._last_connected_src and self._last_connected_dest:
                         self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
                         self._last_connected_src = None
@@ -365,14 +440,20 @@ class JackManager:
                         dest_port = track.input_port_name
 
                 # 3. Manage Connections
+                clavier_src = f"{self.jack_client.name}:Clavier"
+
                 if src_port != self._last_connected_src or dest_port != self._last_connected_dest:
                     # Disconnect old
                     if self._last_connected_src and self._last_connected_dest:
                         self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
+                        self.disconnect_dynamic(clavier_src, self._last_connected_dest)
 
                     # Connect new
-                    if src_port and dest_port:
-                        self.auto_connect_dynamic(src_port, dest_port)
+                    if dest_port:
+                        if src_port:
+                            self.auto_connect_dynamic(src_port, dest_port)
+                        # Always bridge our internal Clavier port to the target
+                        self.auto_connect_dynamic(clavier_src, dest_port)
 
                     self._last_connected_src = src_port
                     self._last_connected_dest = dest_port
@@ -429,6 +510,14 @@ class JackManager:
 
             try:
                 self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
+
+                # Register a native MIDI input port for the sequencer
+                try:
+                    self._clavier_inport = self.jack_client.midi_inports.register('Clavier')
+                except Exception as e:
+                    print(f"Warning: Could not register 'Clavier' input port: {e}")
+                    self._clavier_inport = None
+
                 # Ensure routing track exists
                 self.sequencer.get_input_routing_track()                
                 
@@ -507,6 +596,9 @@ class JackManager:
                 self.jack_client.set_timebase_callback(self._time_callback)
                 self.jack_client.activate()
                 self.is_running = True
+
+                # --- Auto-connect hardware ---
+                self._auto_connect_hardware()
 
                 # --- Initial Transport Sync ---
                 state, pos_struct = self.jack_client.transport_query_struct()

@@ -52,6 +52,8 @@ class JackManager:
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
         self._routing_track: Optional[AutomationTrack] = None        
+        self._cached_first_midi_idx = None
+        self._cached_armed_idx = None
 
         # --- UI Command Flags (from MIDI) ---
         self._pending_play_pause = False
@@ -65,6 +67,12 @@ class JackManager:
         self._correction_thread = None
         self._correction_stop_event = threading.Event()
         self.last_applied_speeds = {}
+
+        # --- Dynamic MIDI Routing (Conductor) ---
+        self._routing_thread = None
+        self._routing_stop_event = threading.Event()
+        self._last_connected_src = None
+        self._last_connected_dest = None
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -324,14 +332,74 @@ class JackManager:
 
             time.sleep(0.05)
 
+    def _routing_worker_loop(self):
+        """
+        A background loop that manages the physical MIDI keyboard routing.
+        It connects the keyboard to the currently active MIDI track's instrument.
+        """
+        while not self._routing_stop_event.is_set():
+            try:
+                if not self.jack_client or not self.is_running:
+                    time.sleep(0.5)
+                    continue
+
+                # 1. Identify Source Port (Hardware Keyboard)
+                src_port = self.sequencer.default_record_port
+                if not src_port:
+                    # If no port selected, clean up any previous connection and wait
+                    if self._last_connected_src and self._last_connected_dest:
+                        self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
+                        self._last_connected_src = None
+                        self._last_connected_dest = None
+                    time.sleep(1.0)
+                    continue
+
+                # 2. Identify Current Routing Target
+                current_beat = self.last_beat
+                target_idx = self._get_input_routing_value(current_beat)
+
+                dest_port = None
+                if target_idx is not None and 0 <= target_idx < len(self.sequencer.song.tracks):
+                    track = self.sequencer.song.tracks[target_idx]
+                    if is_midi_track(track):
+                        dest_port = track.input_port_name
+
+                # 3. Manage Connections
+                if src_port != self._last_connected_src or dest_port != self._last_connected_dest:
+                    # Disconnect old
+                    if self._last_connected_src and self._last_connected_dest:
+                        self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
+
+                    # Connect new
+                    if src_port and dest_port:
+                        self.auto_connect_dynamic(src_port, dest_port)
+
+                    self._last_connected_src = src_port
+                    self._last_connected_dest = dest_port
+
+            except Exception as e:
+                print(f"Error in routing worker loop: {e}", file=sys.stderr)
+
+            time.sleep(0.1)
+
     def _prepare_automation_events(self):
         """Generates and sorts all automation events for the song."""
         self.automation_events.clear()
         
         # Link the global routing track from the song
         self._routing_track = self.sequencer.song.input_routing
-                
+
+        # Update cached indices for real-time safe routing
+        self._cached_first_midi_idx = None
+        self._cached_armed_idx = None
         tracks = self.sequencer.song.tracks
+        for i, t in enumerate(tracks):
+            if is_midi_track(t):
+                if self._cached_first_midi_idx is None:
+                    self._cached_first_midi_idx = i
+                if getattr(t, 'record_mode', 'OFF') != 'OFF':
+                    self._cached_armed_idx = i
+
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
         for track in tracks:
             if isinstance(track, AutomationTrack):
@@ -467,6 +535,12 @@ class JackManager:
                 self._correction_thread.daemon = True
                 self._correction_thread.start()
 
+                # --- Start the routing thread ---
+                self._routing_stop_event.clear()
+                self._routing_thread = threading.Thread(target=self._routing_worker_loop)
+                self._routing_thread.daemon = True
+                self._routing_thread.start()
+
                 print("JACK client started and activated.")
             except jack.JackError as e:
                 print(f"Error starting JACK client: {e}")
@@ -490,6 +564,18 @@ class JackManager:
             self._correction_stop_event.set()
             self._correction_thread.join(timeout=1.0)
             self._correction_thread = None
+
+        # Stop the routing thread
+        if self._routing_thread and self._routing_thread.is_alive():
+            self._routing_stop_event.set()
+            self._routing_thread.join(timeout=1.0)
+            self._routing_thread = None
+
+        # Cleanup last connection
+        if self._last_connected_src and self._last_connected_dest:
+            self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
+            self._last_connected_src = None
+            self._last_connected_dest = None
 
         # Deactivate and close the JACK client
         if self.jack_client:

@@ -3,6 +3,7 @@ from kivy.lang import Builder
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, AutomationControls
+from .ui_utils import is_any_text_input_focused
 from sequencer.models import AutomationTrack, MidiTrack
 import copy
 from kivy.core.window import Window
@@ -1058,7 +1059,8 @@ class AutomationEditor(FloatingWindow):
         self.ids.grid.points = self.visible_points
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
-        if self.ids.pos_label.focus:
+        # --- Sécurité : Désactiver les raccourcis si un champ texte a le focus ---
+        if is_any_text_input_focused():
             return False
 
         sequencer = self.sequencer_layout.sequencer

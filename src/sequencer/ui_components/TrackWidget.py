@@ -94,7 +94,7 @@ class MidiInputSelectorPopup(Popup):
         grid.bind(minimum_height=grid.setter('height'))
 
         # Fetch available ports using the new method
-        available_ports = self.sequencer.jack_manager.get_midi_input_ports()
+        available_ports = self.sequencer.jack_manager.get_midi_destination_ports()
 
         # Add a disconnect button
         disconnect_btn = MDButton(MDButtonText(text="-- Disconnect --"), size_hint_y=None, height=dp(40))

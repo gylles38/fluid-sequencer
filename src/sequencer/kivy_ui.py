@@ -849,13 +849,6 @@ class SequencerLayout(BoxLayout):
         def apply_settings(port_name):
             if port_name:
                 try:
-                    import mido
-                    input_ports = mido.get_input_names()
-                    if port_name not in input_ports:
-                        self.show_error_popup("Invalid Port", 
-                                            f"Port '{port_name}' is not available.")
-                        return
-                    
                     self.process_command_ui(f'setrecordport "{port_name}"')
                     self.show_info_popup("Success", f"MIDI input port set to:\n{port_name}")
                     
@@ -863,8 +856,12 @@ class SequencerLayout(BoxLayout):
                     self.show_error_popup("Error", f"Failed to set MIDI port:\n{str(e)}")
         
         try:
-            import mido
-            input_ports = mido.get_input_names()
+            # Prefer native JACK ports if the engine is running
+            if self.sequencer.jack_manager.is_running:
+                input_ports = self.sequencer.jack_manager.get_midi_input_ports()
+            else:
+                import mido
+                input_ports = mido.get_input_names()
             
             if not input_ports:
                 self.show_error_popup("No MIDI Input Ports", 

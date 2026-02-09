@@ -74,6 +74,7 @@ class JackManager:
         self._last_connected_src = None
         self._last_connected_dest = None
         self._clavier_inport = None
+        self._clavier_outport = None
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -120,11 +121,13 @@ class JackManager:
 
         # Stage 3: Token-based match (e.g. "MPK249" + "Port A")
         import re
-        # Extract meaningful tokens (alphanumeric, > 2 chars)
-        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', pattern) if len(t) > 2]
-        # Ignore common technical tokens that vary between systems
+        # Clean pattern from trailing ALSA indices like " 32:0" or ":0"
+        pattern_clean = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
+        # Extract meaningful tokens (alphanumeric, > 1 char to allow 'A', 'B', etc.)
+        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', pattern_clean) if len(t) >= 1]
+        # Ignore common technical tokens and purely numeric tokens (often volatile)
         ignored = {'capture', 'playback', 'events', 'midi', 'bridge'}
-        tokens = [t for t in tokens if t not in ignored]
+        tokens = [t for t in tokens if t not in ignored and not t.isdigit()]
 
         if tokens:
             for port in all_ports:
@@ -137,7 +140,7 @@ class JackManager:
     def auto_connect_dynamic(self, src_keyword: str, dest_keyword: str):
         """
         Connects two ports using partial keywords or full names.
-        Uses native JACK API for connection.
+        Uses native JACK API for connection and checks for existing connections.
         """
         if not src_keyword or not dest_keyword:
             return
@@ -145,20 +148,26 @@ class JackManager:
         full_source = self.find_port_by_name(src_keyword)
         full_dest = self.find_port_by_name(dest_keyword)
 
-        if not full_source:
-            # print(f"Info: Source port not found with keyword: '{src_keyword}'")
-            return
-        if not full_dest:
-            # print(f"Info: Destination port not found with keyword: '{dest_keyword}'")
+        if not full_source or not full_dest:
             return
 
         if self.jack_client:
             try:
+                # Check if already connected to avoid Error 22 (EINVAL) or EEXIST
+                try:
+                    src_port = self.jack_client.get_port_by_name(full_source)
+                    dest_port = self.jack_client.get_port_by_name(full_dest)
+                    if dest_port in src_port.connections:
+                        return # Already connected
+                except jack.JackError:
+                    pass # Port might have disappeared, let connect() handle it
+
                 self.jack_client.connect(full_source, full_dest)
             except jack.JackError as e:
-                # PipeWire often returns an error if already connected, we ignore it.
-                if "exists" not in str(e).lower():
-                    print(f"Connection warning: {e}")
+                # Error 22 often means already connected in some backends (PipeWire)
+                if "(22)" in str(e) or "exists" in str(e).lower():
+                    return
+                print(f"Connection warning: {e}")
             except Exception as e:
                 print(f"Connection error: {e}", file=sys.stderr)
         else:
@@ -383,7 +392,7 @@ class JackManager:
             time.sleep(0.05)
 
     def _auto_connect_hardware(self):
-        """Attempts to find and bridge physical MIDI hardware to the 'Clavier' input."""
+        """Attempts to find and bridge physical MIDI hardware to the 'In:Clavier' input."""
         keywords = ['akai', 'mpk', 'arturia', 'launchkey', 'keyboard', 'clavier', 'controller', 'keylab', 'minilab']
 
         sources = self.get_midi_input_ports()
@@ -395,7 +404,8 @@ class JackManager:
                 break
 
         if found_src:
-            dest = f"{self.jack_client.name}:Clavier"
+            # Connect physical keyboard to our internal "In:Clavier" input
+            dest = f"{self.jack_client.name}:In:Clavier"
             self.auto_connect_dynamic(found_src, dest)
             # print(f"Auto-connected hardware MIDI keyboard '{found_src}' to '{dest}'")
             if not self.sequencer.default_record_port:
@@ -440,20 +450,26 @@ class JackManager:
                         dest_port = track.input_port_name
 
                 # 3. Manage Connections
-                clavier_src = f"{self.jack_client.name}:Clavier"
+                # We bridge the sequencer's stable OUTPUT to the instrument
+                conductor_src = f"{self.jack_client.name}:Clavier"
 
                 if src_port != self._last_connected_src or dest_port != self._last_connected_dest:
                     # Disconnect old
                     if self._last_connected_src and self._last_connected_dest:
+                        # Direct bridge cleanup (if any)
                         self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
-                        self.disconnect_dynamic(clavier_src, self._last_connected_dest)
+                        # Conductor bridge cleanup
+                        self.disconnect_dynamic(conductor_src, self._last_connected_dest)
 
                     # Connect new
                     if dest_port:
-                        if src_port:
-                            self.auto_connect_dynamic(src_port, dest_port)
-                        # Always bridge our internal Clavier port to the target
-                        self.auto_connect_dynamic(clavier_src, dest_port)
+                        # Conductor Bridge (via the sequencer's MIDI Thru)
+                        # This ensures manual cabling to 'In:Clavier' also works.
+                        self.auto_connect_dynamic(conductor_src, dest_port)
+
+                        # Direct Bridge (Optional, but we'll stick to Thru for consistency)
+                        # if src_port:
+                        #    self.auto_connect_dynamic(src_port, dest_port)
 
                     self._last_connected_src = src_port
                     self._last_connected_dest = dest_port
@@ -511,12 +527,14 @@ class JackManager:
             try:
                 self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
 
-                # Register a native MIDI input port for the sequencer
+                # Register native MIDI ports for the sequencer bridge
                 try:
-                    self._clavier_inport = self.jack_client.midi_inports.register('Clavier')
+                    # 'Clavier' is the stable MIDI destination for instruments
+                    self._clavier_outport = self.jack_client.midi_outports.register('Clavier')
+                    # 'In:Clavier' is the stable MIDI target for hardware/users
+                    self._clavier_inport = self.jack_client.midi_inports.register('In:Clavier')
                 except Exception as e:
-                    print(f"Warning: Could not register 'Clavier' input port: {e}")
-                    self._clavier_inport = None
+                    print(f"Warning: Could not register 'Clavier' ports: {e}")
 
                 # Ensure routing track exists
                 self.sequencer.get_input_routing_track()                
@@ -1251,6 +1269,12 @@ class JackManager:
 
     def _process_callback(self, frames: int):
         try:
+            # --- MIDI Pass-through (In:Clavier -> Clavier) ---
+            if self._clavier_inport and self._clavier_outport:
+                self._clavier_outport.clear_buffer()
+                for event in self._clavier_inport.get_buffer():
+                    self._clavier_outport.write_midi_event(event.time, event.data)
+
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:

@@ -71,8 +71,8 @@ class JackManager:
         # --- Dynamic MIDI Routing (Conductor) ---
         self._routing_thread = None
         self._routing_stop_event = threading.Event()
-        self._last_connected_src = None
-        self._last_connected_dest = None
+        self._last_connected_src_id = None
+        self._last_connected_dest_id = None
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -81,168 +81,102 @@ class JackManager:
         self._last_beat_rt = 0.0 # Atomic float for UI sync
         self._last_transport_state_rt = jack.STOPPED        
 
-    def find_port_by_name(self, pattern: str, is_input: bool = False, is_output: bool = False) -> Optional[str]:
+    def find_port_by_name(self, pattern):
         """
-        Searches for a full JACK port name matching the given 'pattern'.
-        It uses a multi-stage approach for robustness and filters by port type (input/output).
-        JACK terminology:
-        - is_output=True: A port that SENDS data (capture, source).
-        - is_input=True: A port that RECEIVES data (playback, sink/instrument).
+        Cherche un port JACK complet qui contient le 'pattern' donné.
+        Retourne le nom complet du premier port trouvé, ou None.
         """
-        if not pattern:
+        try:
+            # On demande à JACK/PipeWire la liste de tous les ports
+            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
+            all_ports = result.stdout.splitlines()
+
+            for port in all_ports:
+                # On cherche une correspondance partielle (ex: "RtMidiOut" dans le nom complet)
+                if pattern in port:
+                    return port.strip() # On nettoie les espaces/sauts de ligne
+
+            return None
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
             return None
 
-        all_ports = []
-        if self.jack_client:
-            try:
-                # Filter at the API level if flags are provided
-                ports = self.jack_client.get_ports(is_input=is_input, is_output=is_output)
-                all_ports = [str(p) for p in ports]
-            except jack.JackError:
-                pass
-
-        if not all_ports and not (is_input or is_output):
-            try:
-                result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
-                all_ports = [p.strip() for p in result.stdout.splitlines() if p.strip()]
-            except FileNotFoundError:
-                return None
-
-        # Stage 1: Exact match
-        for port in all_ports:
-            if port == pattern:
-                return port
-
-        # Stage 2: Case-insensitive partial match
-        pat_lower = pattern.lower()
-        for port in all_ports:
-            if pat_lower in port.lower():
-                return port
-
-        # Stage 3: Token-based match (e.g. "MPK249" + "Port A")
-        import re
-        # Clean pattern from trailing ALSA indices like " 32:0" or ":0"
-        pattern_clean = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
-        # Extract meaningful tokens (alphanumeric, > 1 char to allow 'A', 'B', etc.)
-        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', pattern_clean) if len(t) >= 1]
-        # Ignore common technical tokens and purely numeric tokens (often volatile)
-        ignored = {'capture', 'playback', 'events', 'midi', 'bridge'}
-        tokens = [t for t in tokens if t not in ignored and not t.isdigit()]
-
-        if tokens:
-            # We look for the best match (the one containing all tokens with minimal extra length)
-            matches = []
-            for port in all_ports:
-                p_lower = port.lower()
-                if all(t in p_lower for t in tokens):
-                    matches.append(port)
-
-            if matches:
-                # Sort by length to prefer the most specific name
-                matches.sort(key=len)
-                return matches[0]
-
-        # Debugging if no match found
-        # if pattern:
-        #    print(f"[Conductor] No match for '{pattern}' (Tokens: {tokens}, Input: {is_input}, Output: {is_output})")
-
-        return None
-
-    def auto_connect_dynamic(self, src_keyword: str, dest_keyword: str):
+    def auto_connect_dynamic(self, src_keyword, dest_keyword):
         """
-        Connects two ports using partial keywords or full names.
-        Uses native JACK API for connection and checks for existing connections.
+        Connecte deux ports en utilisant des mots-clés partiels.
         """
-        if not src_keyword or not dest_keyword:
-            return
+        print(f"--- Attempting auto-connect: '{src_keyword}' -> '{dest_keyword}' ---")
 
+        # 1. Recherche des noms complets
         full_source = self.find_port_by_name(src_keyword)
         full_dest = self.find_port_by_name(dest_keyword)
 
-        if not full_source or not full_dest:
+        if not full_source:
+            print(f"Info: Source port not found with keyword: '{src_keyword}'")
+            return
+        if not full_dest:
+            print(f"Info: Destination port not found with keyword: '{dest_keyword}'")
             return
 
-        if self.jack_client:
-            try:
-                # IMPORTANT: In some versions of python-jack, connections check is not
-                # reliable across all backends (PipeWire). We prefer catching the error.
-                self.jack_client.connect(full_source, full_dest)
-                print(f"[Conductor] Successfully connected: {full_source} -> {full_dest}")
-            except jack.JackError as e:
-                # Error 22 often means already connected in some backends (PipeWire)
-                # or incompatible ports (which shouldn't happen here as both are MIDI).
-                if "(22)" in str(e) or "exists" in str(e).lower():
-                    return
-                # Only log unexpected errors
-                print(f"Connection warning: {e}")
-            except Exception as e:
-                print(f"Connection error: {e}")
-        else:
-            # Fallback to command line if client not available
-            try:
-                subprocess.run(["jack_connect", full_source, full_dest],
-                             capture_output=True, text=True, check=False)
-            except FileNotFoundError:
-                pass
+        print(f"Ports identified:\n   Source: {full_source}\n   Dest  : {full_dest}")
 
-    def disconnect_dynamic(self, src_keyword: str, dest_keyword: str):
-        """
-        Disconnects two ports using partial keywords or full names.
-        """
-        if not src_keyword or not dest_keyword:
-            return
-
-        full_source = self.find_port_by_name(src_keyword)
-        full_dest = self.find_port_by_name(dest_keyword)
-
-        if not full_source or not full_dest:
-            return
-
-        if self.jack_client:
-            try:
-                self.jack_client.disconnect(full_source, full_dest)
-            except Exception:
-                pass
-        else:
-            try:
-                subprocess.run(["jack_disconnect", full_source, full_dest],
-                             capture_output=True, text=True, check=False)
-            except FileNotFoundError:
-                pass
-
-    def get_midi_input_ports(self) -> List[str]:
-        """
-        Returns a list of all available MIDI SOURCE ports (outputs in JACK terminology).
-        These are ports we can record from (e.g., hardware keyboards).
-        """
-        if self.jack_client:
-            try:
-                ports = self.jack_client.get_ports(is_midi=True, is_output=True)
-                return sorted([str(p) for p in ports])
-            except jack.JackError:
-                pass
-
-        # Fallback to jack_lsp
+        # 2. Tentative de connexion via jack_connect
         try:
-            result = subprocess.run(["jack_lsp", "-t", "midi"], capture_output=True, text=True, check=False)
-            # This doesn't easily distinguish input/output without more flags,
-            # but it's a better fallback than nothing.
-            return sorted([p.strip() for p in result.stdout.splitlines() if p.strip()])
-        except FileNotFoundError:
-            return []
+            res = subprocess.run(
+                ["jack_connect", full_source, full_dest],
+                capture_output=True,
+                text=True,
+                check=False
+            )
 
-    def get_midi_destination_ports(self) -> List[str]:
+            if res.returncode == 0:
+                print("Connection successful!")
+            else:
+                # If error (often because already connected), we display the message
+                # PipeWire often returns an error if it's already connected, it's not serious.
+                if "exists" in res.stderr:
+                     print("Already connected.")
+                else:
+                     print(f"Connection warning: {res.stderr.strip()}")
+
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_connect' introuvable.", file=sys.stderr)
+
+    def disconnect_dynamic(self, src_keyword, dest_keyword):
         """
-        Returns a list of all available MIDI DESTINATION ports (inputs in JACK terminology).
-        These are ports we can send MIDI to (e.g., Carla plugins).
+        Disconnects two ports using partial keywords.
         """
-        if self.jack_client:
-            try:
-                ports = self.jack_client.get_ports(is_midi=True, is_input=True)
-                return sorted([str(p) for p in ports])
-            except jack.JackError:
-                pass
-        return []
+        if not src_keyword or not dest_keyword:
+            return
+
+        full_source = self.find_port_by_name(src_keyword)
+        full_dest = self.find_port_by_name(dest_keyword)
+
+        if not full_source or not full_dest:
+            return
+
+        try:
+            subprocess.run(
+                ["jack_disconnect", full_source, full_dest],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_disconnect' introuvable.", file=sys.stderr)
+
+    def get_midi_input_ports(self):
+        """
+        Retourne une liste de tous les ports d'entrée MIDI JACK disponibles (se terminant par :events-in).
+        """
+        try:
+            result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
+            all_ports = result.stdout.splitlines()
+            midi_input_ports = [port.strip() for port in all_ports if port.strip().endswith(':events-in')]
+            return midi_input_ports
+        except FileNotFoundError:
+            print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
+            return []
 
     def open_midi_port(self, port_name: str):
         """Opens a MIDI port if it's not already open."""
@@ -398,109 +332,63 @@ class JackManager:
 
             time.sleep(0.05)
 
-    def _auto_connect_hardware(self):
-        """Attempts to find physical MIDI hardware and set it as default record port."""
-        keywords = ['akai', 'mpk', 'arturia', 'launchkey', 'keyboard', 'clavier', 'controller', 'keylab', 'minilab']
-
-        sources = self.get_midi_input_ports()
-        found_src = None
-        for src in sources:
-            src_lower = src.lower()
-            if any(k in src_lower for k in keywords):
-                found_src = src
-                break
-
-        if found_src:
-            if not self.sequencer.default_record_port:
-                self.sequencer.default_record_port = found_src
-
     def _routing_worker_loop(self):
         """
-        A background loop that manages the physical MIDI keyboard routing.
-        It connects the keyboard to the currently active MIDI track's instrument.
+        Background loop managing the dynamic MIDI routing using pw-link.
         """
         while not self._routing_stop_event.is_set():
             try:
-                if not self.jack_client or not self.is_running:
-                    time.sleep(0.5)
-                    continue
-
-                # 1. Identify Source Port (Hardware Keyboard)
-                src_port = self.sequencer.default_record_port
-
-                # Auto-detection on first run or if lost
-                if not src_port or not self.find_port_by_name(src_port):
-                     self._auto_connect_hardware()
-                     src_port = self.sequencer.default_record_port
-
-                if not src_port:
-                    # Cleanup wait if no hardware detected
+                if not self.is_running:
                     time.sleep(1.0)
                     continue
 
-                # 2. Identify Current Routing Target
+                # 1. Determine target track index
                 current_beat = self.last_beat
                 target_idx = self._get_input_routing_value(current_beat)
 
-                dest_port = None
+                # 2. Identify source keyboard
+                # We use sequencer.default_record_port or a default pattern
+                src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+
+                # 3. Identify destination instrument
+                dest_pattern = None
                 if target_idx is not None and 0 <= target_idx < len(self.sequencer.song.tracks):
                     track = self.sequencer.song.tracks[target_idx]
                     if is_midi_track(track):
-                        dest_port = track.input_port_name
+                        dest_pattern = getattr(track, 'input_port_name', None)
 
-                # 3. Robust Connection Management
-                if dest_port:
-                    # Search source as OUTPUT and destination as INPUT
-                    full_src = self.find_port_by_name(src_port, is_output=True)
-                    full_dest = self.find_port_by_name(dest_port, is_input=True)
+                # 4. Manage connections if target changed or need refresh
+                if dest_pattern:
+                    src_id = self._get_pw_id(src_pattern, is_output=True)
+                    dest_id = self._get_pw_id(dest_pattern, is_output=False)
 
-                    if not full_src or not full_dest:
-                         # Log the specific failure for visibility
-                         if not full_src:
-                             print(f"[Conductor] Source keyboard not found: '{src_port}'")
-                         if not full_dest:
-                             print(f"[Conductor] Destination instrument not found: '{dest_port}'")
-                         time.sleep(1.0)
-                         continue
+                    if src_id and dest_id:
+                        if src_id != self._last_connected_src_id or dest_id != self._last_connected_dest_id:
+                            # Target changed, disconnect previous
+                            if self._last_connected_src_id and self._last_connected_dest_id:
+                                self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
 
-                    if full_src and full_dest:
-                        is_already_connected = False
-                        try:
-                            # Verify if these specific ports are connected
-                            src_p = self.jack_client.get_port_by_name(full_src)
-                            dest_p = self.jack_client.get_port_by_name(full_dest)
-                            is_already_connected = dest_p in src_p.connections
-                        except jack.JackError:
-                            pass
-
-                        if not is_already_connected:
-                            # Disconnect ANY other connection from the hardware keyboard
-                            # to avoid double-triggers or messy routing
-                            try:
-                                src_p = self.jack_client.get_port_by_name(full_src)
-                                for connected_port in src_p.connections:
-                                    if str(connected_port) != full_dest:
-                                        self.jack_client.disconnect(full_src, str(connected_port))
-                            except jack.JackError: pass
-
-                            # Perform the new connection
-                            self.auto_connect_dynamic(full_src, full_dest)
-                            self._last_connected_src = src_port
-                            self._last_connected_dest = dest_port
+                            # Connect new
+                            self._pw_link_connect(src_id, dest_id)
+                            self._last_connected_src_id = src_id
+                            self._last_connected_dest_id = dest_id
                     else:
-                        if not full_src:
-                             pass # Hardware not yet found
-                        if not full_dest:
-                             pass # Instrument not yet found
-
-                elif self._last_connected_src and self._last_connected_dest:
-                    # Cleanup if routing target lost
-                    self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
-                    self._last_connected_src = None
-                    self._last_connected_dest = None
+                        # Log specific failure to find ID
+                        if not src_id:
+                            # print(f"[Conductor] Source keyboard ID not found for: '{src_pattern}'")
+                            pass
+                        if not dest_id:
+                            # print(f"[Conductor] Destination instrument ID not found for: '{dest_pattern}'")
+                            pass
+                else:
+                    # No target or not a MIDI track
+                    if self._last_connected_src_id and self._last_connected_dest_id:
+                         self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+                         self._last_connected_src_id = None
+                         self._last_connected_dest_id = None
 
             except Exception as e:
-                print(f"Error in routing worker loop: {e}", file=sys.stderr)
+                print(f"[Conductor] Error in routing loop: {e}", file=sys.stderr)
 
             time.sleep(0.1)
 
@@ -511,7 +399,7 @@ class JackManager:
         # Link the global routing track from the song
         self._routing_track = self.sequencer.song.input_routing
 
-        # Update cached indices for real-time safe routing
+        # Update cached indices for fallback routing
         self._cached_first_midi_idx = None
         self._cached_armed_idx = None
         tracks = self.sequencer.song.tracks
@@ -551,7 +439,6 @@ class JackManager:
 
             try:
                 self.jack_client = jack.Client(f"{self.sequencer.song.name}-sequencer")
-
                 # Ensure routing track exists
                 self.sequencer.get_input_routing_track()                
                 
@@ -631,9 +518,6 @@ class JackManager:
                 self.jack_client.activate()
                 self.is_running = True
 
-                # --- Auto-connect hardware ---
-                self._auto_connect_hardware()
-
                 # --- Initial Transport Sync ---
                 state, pos_struct = self.jack_client.transport_query_struct()
                 pos_dict = jack.position2dict(pos_struct)
@@ -661,7 +545,7 @@ class JackManager:
                 self._correction_thread.daemon = True
                 self._correction_thread.start()
 
-                # --- Start the routing thread ---
+                # --- Start the routing thread (Conductor) ---
                 self._routing_stop_event.clear()
                 self._routing_thread = threading.Thread(target=self._routing_worker_loop)
                 self._routing_thread.daemon = True
@@ -698,10 +582,10 @@ class JackManager:
             self._routing_thread = None
 
         # Cleanup last connection
-        if self._last_connected_src and self._last_connected_dest:
-            self.disconnect_dynamic(self._last_connected_src, self._last_connected_dest)
-            self._last_connected_src = None
-            self._last_connected_dest = None
+        if self._last_connected_src_id and self._last_connected_dest_id:
+            self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+            self._last_connected_src_id = None
+            self._last_connected_dest_id = None
 
         # Deactivate and close the JACK client
         if self.jack_client:
@@ -1356,6 +1240,49 @@ class JackManager:
             #    self.sequencer.last_beat_update_time = time.perf_counter()
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
+
+    def _get_pw_id(self, pattern: str, is_output: bool = False) -> Optional[str]:
+        """
+        Uses pw-link to find the ID of a port matching the given pattern.
+        Following the user's logic:
+        SOURCE_ID=$(timeout 0.01s pw-link -m -o -I | grep "pattern" | awk '{print $2}')
+        """
+        if not pattern:
+            return None
+
+        mode = "-o" if is_output else "-i"
+        try:
+            # We use a slightly longer timeout just in case, but follow the user's structure
+            cmd = f"timeout 0.1s pw-link -m {mode} -I"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+            for line in result.stdout.splitlines():
+                if pattern in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return parts[1] # The ID is usually the second field
+            return None
+        except Exception as e:
+            print(f"[Conductor] Error getting pw-id for {pattern}: {e}", file=sys.stderr)
+            return None
+
+    def _pw_link_connect(self, src_id: str, dest_id: str):
+        if not src_id or not dest_id:
+            return
+        try:
+            subprocess.run(["pw-link", src_id, dest_id], check=False)
+            print(f"[Conductor] Connected: {src_id} -> {dest_id}")
+        except Exception as e:
+            print(f"[Conductor] Error connecting: {e}", file=sys.stderr)
+
+    def _pw_link_disconnect(self, src_id: str, dest_id: str):
+        if not src_id or not dest_id:
+            return
+        try:
+            subprocess.run(["pw-link", "-d", src_id, dest_id], check=False)
+            print(f"[Conductor] Disconnected: {src_id} -> {dest_id}")
+        except Exception as e:
+            print(f"[Conductor] Error disconnecting: {e}", file=sys.stderr)
 
     def _get_input_routing_value(self, beat: float) -> Optional[int]:
         """

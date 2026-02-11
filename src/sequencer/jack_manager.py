@@ -81,13 +81,13 @@ class JackManager:
         self._last_beat_rt = 0.0 # Atomic float for UI sync
         self._last_transport_state_rt = jack.STOPPED        
 
-    def find_port_by_name(self, pattern: str) -> Optional[str]:
+    def find_port_by_name(self, pattern: str, is_input: bool = False, is_output: bool = False) -> Optional[str]:
         """
         Searches for a full JACK port name matching the given 'pattern'.
-        It uses a multi-stage approach for robustness:
-        1. Exact match
-        2. Case-insensitive partial match
-        3. Token-based matching (to handle ALSA/JACK name differences)
+        It uses a multi-stage approach for robustness and filters by port type (input/output).
+        JACK terminology:
+        - is_output=True: A port that SENDS data (capture, source).
+        - is_input=True: A port that RECEIVES data (playback, sink/instrument).
         """
         if not pattern:
             return None
@@ -95,11 +95,13 @@ class JackManager:
         all_ports = []
         if self.jack_client:
             try:
-                all_ports = [str(p) for p in self.jack_client.get_ports()]
+                # Filter at the API level if flags are provided
+                ports = self.jack_client.get_ports(is_input=is_input, is_output=is_output)
+                all_ports = [str(p) for p in ports]
             except jack.JackError:
                 pass
 
-        if not all_ports:
+        if not all_ports and not (is_input or is_output):
             try:
                 result = subprocess.run(["jack_lsp"], capture_output=True, text=True, check=False)
                 all_ports = [p.strip() for p in result.stdout.splitlines() if p.strip()]
@@ -139,6 +141,10 @@ class JackManager:
                 # Sort by length to prefer the most specific name
                 matches.sort(key=len)
                 return matches[0]
+
+        # Debugging if no match found
+        # if pattern:
+        #    print(f"[Conductor] No match for '{pattern}' (Tokens: {tokens}, Input: {is_input}, Output: {is_output})")
 
         return None
 
@@ -444,9 +450,18 @@ class JackManager:
 
                 # 3. Robust Connection Management
                 if dest_port:
-                    # Check actual connection in JACK instead of just tracking state
-                    full_src = self.find_port_by_name(src_port)
-                    full_dest = self.find_port_by_name(dest_port)
+                    # Search source as OUTPUT and destination as INPUT
+                    full_src = self.find_port_by_name(src_port, is_output=True)
+                    full_dest = self.find_port_by_name(dest_port, is_input=True)
+
+                    if not full_src or not full_dest:
+                         # Log the specific failure for visibility
+                         if not full_src:
+                             print(f"[Conductor] Source keyboard not found: '{src_port}'")
+                         if not full_dest:
+                             print(f"[Conductor] Destination instrument not found: '{dest_port}'")
+                         time.sleep(1.0)
+                         continue
 
                     if full_src and full_dest:
                         is_already_connected = False

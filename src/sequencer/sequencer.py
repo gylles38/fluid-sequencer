@@ -666,6 +666,8 @@ class Sequencer(EventDispatcher):
             self.is_dirty = True
             self.invalidate_song_length_cache()
             self.song_structure_changed += 1
+            if self.jack_manager.is_running:
+                self.jack_manager._prepare_automation_events()
             
             return {"status": "success", "message": f"MIDI track '{name}' added."}
         elif track_type == 'audio':
@@ -746,6 +748,8 @@ class Sequencer(EventDispatcher):
         self.invalidate_song_length_cache()
         
         self.song_structure_changed += 1
+        if self.jack_manager.is_running:
+            self.jack_manager._prepare_automation_events()
                 
         return {"status": "success", "message": f"Track '{track_name}' deleted."}
 
@@ -2341,6 +2345,8 @@ class Sequencer(EventDispatcher):
         self.is_dirty = True
 
         self.song_structure_changed += 1
+        if self.jack_manager.is_running:
+            self.jack_manager._prepare_automation_events()
                 
         mode_descriptions = {
             'OFF': 'Piste désactivée',

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import math
+import re
 import mido
 import jack
 import numpy as np
@@ -369,17 +370,13 @@ class JackManager:
                                 self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
 
                             # Connect new
+                            print(f"[Conductor] New Route Detected: {src_pattern} -> {dest_pattern}")
                             self._pw_link_connect(src_id, dest_id)
                             self._last_connected_src_id = src_id
                             self._last_connected_dest_id = dest_id
                     else:
-                        # Log specific failure to find ID
-                        if not src_id:
-                            # print(f"[Conductor] Source keyboard ID not found for: '{src_pattern}'")
-                            pass
-                        if not dest_id:
-                            # print(f"[Conductor] Destination instrument ID not found for: '{dest_pattern}'")
-                            pass
+                        # Periodic check if ID is missing (log once per change)
+                        pass
                 else:
                     # No target or not a MIDI track
                     if self._last_connected_src_id and self._last_connected_dest_id:
@@ -1250,6 +1247,10 @@ class JackManager:
         if not pattern:
             return None
 
+        # Clean pattern from ALSA indices (e.g. " 32:0")
+        import re
+        clean_pattern = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
+
         mode = "-o" if is_output else "-i"
         try:
             # We use a slightly longer timeout just in case, but follow the user's structure
@@ -1257,10 +1258,20 @@ class JackManager:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
             for line in result.stdout.splitlines():
-                if pattern in line:
+                # We use the clean pattern to match
+                if clean_pattern in line:
                     parts = line.split()
+                    # The example showed "= 147 ...", so ID is at index 1
+                    # If no "=", ID might be at index 0. We'll be robust.
                     if len(parts) >= 2:
-                        return parts[1] # The ID is usually the second field
+                        if parts[0] == "=":
+                            return parts[1]
+                        else:
+                            # Check if first part is a number
+                            if parts[0].isdigit():
+                                return parts[0]
+                            elif parts[1].isdigit():
+                                return parts[1]
             return None
         except Exception as e:
             print(f"[Conductor] Error getting pw-id for {pattern}: {e}", file=sys.stderr)

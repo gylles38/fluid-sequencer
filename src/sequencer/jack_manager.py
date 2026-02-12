@@ -1241,37 +1241,40 @@ class JackManager:
     def _get_pw_id(self, pattern: str, is_output: bool = False) -> Optional[str]:
         """
         Uses pw-link to find the ID of a port matching the given pattern.
-        Following the user's logic:
-        SOURCE_ID=$(timeout 0.01s pw-link -m -o -I | grep "pattern" | awk '{print $2}')
+        Handles token-based matching to bridge ALSA/PipeWire discrepancies.
+        Example Match: 'MPK249:MPK249 Port A 32:0' -> 'Midi-Bridge:MPK249 4:(capture_0) MPK249 Port A'
         """
         if not pattern:
             return None
 
-        # Clean pattern from ALSA indices (e.g. " 32:0")
-        import re
+        # 1. Clean and tokenize the pattern
+        # Remove ALSA indices (e.g., " 32:0" or ":0")
         clean_pattern = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
+        # Extract alphanumeric tokens
+        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
+        if not tokens:
+            return None
+        unique_tokens = set(tokens)
 
         mode = "-o" if is_output else "-i"
         try:
-            # We use a slightly longer timeout just in case, but follow the user's structure
-            cmd = f"timeout 0.1s pw-link -m {mode} -I"
+            # We use a slightly longer timeout for robustness
+            cmd = f"timeout 0.2s pw-link -m {mode} -I"
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
             for line in result.stdout.splitlines():
-                # We use the clean pattern to match
-                if clean_pattern in line:
+                line_lower = line.lower()
+                # Check if all pattern tokens are present in this candidate line
+                if all(token in line_lower for token in unique_tokens):
                     parts = line.split()
-                    # The example showed "= 147 ...", so ID is at index 1
-                    # If no "=", ID might be at index 0. We'll be robust.
+                    # Handle formats like "= 147 ..." or "147 ..."
                     if len(parts) >= 2:
                         if parts[0] == "=":
                             return parts[1]
-                        else:
-                            # Check if first part is a number
-                            if parts[0].isdigit():
-                                return parts[0]
-                            elif parts[1].isdigit():
-                                return parts[1]
+                        elif parts[0].isdigit():
+                            return parts[0]
+                        elif parts[1].isdigit():
+                            return parts[1]
             return None
         except Exception as e:
             print(f"[Conductor] Error getting pw-id for {pattern}: {e}", file=sys.stderr)

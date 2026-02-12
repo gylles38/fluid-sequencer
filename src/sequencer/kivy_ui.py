@@ -373,7 +373,7 @@ class SequencerLayout(BoxLayout):
         self.bridge_activity_dot.bind(pos=lambda *a: setattr(self.bridge_dot_rect, 'pos', self.bridge_activity_dot.pos))
 
         self.bridge_label = MDLabel(
-            text="Bridge: -",
+            text="Conductor: -",
             size_hint_x=None,
             width=dp(180),
             size_hint_y=None,
@@ -1996,25 +1996,25 @@ class SequencerLayout(BoxLayout):
             
     def update_bridge_label(self, instance, value):
         if not self.sequencer.jack_manager.is_running:
-            self.bridge_label.text = "Bridge: NO JACK"
+            self.bridge_label.text = "Conductor: NO JACK"
             self.bridge_label.text_color = [0.8, 0.2, 0.2, 1]
         elif value == -1:
             # Vérifier si c'est parce qu'il n'y a aucune piste MIDI
             has_midi = any(isinstance(t, MidiTrack) for t in self.sequencer.song.tracks)
             if not has_midi:
-                self.bridge_label.text = "Bridge: No MIDI Tracks"
+                self.bridge_label.text = "Conductor: No MIDI Tracks"
             else:
-                self.bridge_label.text = "Bridge: OFF (No Route)"
+                self.bridge_label.text = "Conductor: OFF (No Route)"
             self.bridge_label.text_color = [0.5, 0.5, 0.5, 1]
         else:
             try:
                 track_name = self.sequencer.song.tracks[value].name
                 # Display both index and a shortened name
                 short_name = (track_name[:12] + '..') if len(track_name) > 12 else track_name
-                self.bridge_label.text = f"Bridge -> [{value}] {short_name}"
+                self.bridge_label.text = f"Conductor -> [{value}] {short_name}"
                 self.bridge_label.text_color = [0.2, 0.8, 1.0, 1]
             except (IndexError, AttributeError):
-                self.bridge_label.text = "Bridge: ?"
+                self.bridge_label.text = "Conductor: ?"
                 self.bridge_label.text_color = [1, 0.5, 0, 1]
 
     def update_status_display(self):

@@ -74,6 +74,7 @@ class JackManager:
         self._routing_stop_event = threading.Event()
         self._last_connected_src_id = None
         self._last_connected_dest_id = None
+        self._last_routing_target_idx = -1
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -367,6 +368,10 @@ class JackManager:
                         if src_id != self._last_connected_src_id or dest_id != self._last_connected_dest_id:
                             # Target changed, disconnect previous
                             if self._last_connected_src_id and self._last_connected_dest_id:
+                                # --- SILENCE PREVIOUS INSTRUMENT ---
+                                if self._last_routing_target_idx != -1:
+                                    self._silence_instrument_at_index(self._last_routing_target_idx)
+
                                 self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
 
                             # Connect new
@@ -374,15 +379,27 @@ class JackManager:
                             self._pw_link_connect(src_id, dest_id)
                             self._last_connected_src_id = src_id
                             self._last_connected_dest_id = dest_id
+                            self._last_routing_target_idx = target_idx
                     else:
-                        # Periodic check if ID is missing (log once per change)
-                        pass
+                        # We have a target but couldn't resolve IDs (e.g. instrument closed)
+                        if self._last_connected_src_id and self._last_connected_dest_id:
+                            if self._last_routing_target_idx != -1:
+                                self._silence_instrument_at_index(self._last_routing_target_idx)
+                            self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+                            self._last_connected_src_id = None
+                            self._last_connected_dest_id = None
+                            self._last_routing_target_idx = -1
                 else:
                     # No target or not a MIDI track
                     if self._last_connected_src_id and self._last_connected_dest_id:
+                         # --- SILENCE PREVIOUS INSTRUMENT ---
+                         if self._last_routing_target_idx != -1:
+                             self._silence_instrument_at_index(self._last_routing_target_idx)
+
                          self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
                          self._last_connected_src_id = None
                          self._last_connected_dest_id = None
+                         self._last_routing_target_idx = -1
 
             except Exception as e:
                 print(f"[Conductor] Error in routing loop: {e}", file=sys.stderr)
@@ -1322,4 +1339,19 @@ class JackManager:
         # 3. Final Fallback (RT safe)
         fallback_idx = getattr(self, '_cached_first_midi_idx', None)
         return fallback_idx
+
+    def _silence_instrument_at_index(self, track_idx: int):
+        """Sends MIDI Panic (All Notes Off) to the specified track."""
+        if 0 <= track_idx < len(self.sequencer.song.tracks):
+            track = self.sequencer.song.tracks[track_idx]
+            if is_midi_track(track) and track.output_port_name in self.open_ports:
+                port = self.open_ports[track.output_port_name]
+                if port and not port.closed:
+                    # CC 123: All Notes Off
+                    # CC 121: Reset All Controllers
+                    # CC 64: Sustain Off (just in case)
+                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+                    port.send(mido.Message('control_change', channel=track.channel, control=121, value=0))
+                    port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))
+                    print(f"[Conductor] Silenced instrument on track {track_idx}")
     

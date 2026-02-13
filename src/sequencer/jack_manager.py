@@ -1341,17 +1341,82 @@ class JackManager:
         return fallback_idx
 
     def _silence_instrument_at_index(self, track_idx: int):
-        """Sends MIDI Panic (All Notes Off) to the specified track."""
+        """
+        Sends targeted Note Offs to the specified track to cut keyboard notes
+        without interrupting notes currently played by the sequencer.
+        """
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
             if is_midi_track(track) and track.output_port_name in self.open_ports:
                 port = self.open_ports[track.output_port_name]
                 if port and not port.closed:
-                    # CC 123: All Notes Off
-                    # CC 121: Reset All Controllers
-                    # CC 64: Sustain Off (just in case)
-                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
-                    port.send(mido.Message('control_change', channel=track.channel, control=121, value=0))
+                    # 1. Individual Note Offs for notes NOT managed by the sequencer
+                    with self.sync_lock:
+                        active_pitches = {pitch for (t_idx, pitch) in self._active_notes.keys() if t_idx == track_idx}
+
+                    for pitch in range(128):
+                        if pitch not in active_pitches:
+                            port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+
+                    # 2. Sustain Off (to cut keyboard notes held by pedal)
                     port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))
-                    print(f"[Conductor] Silenced instrument on track {track_idx}")
+
+                    # 3. Restore state (Volume, Pan) to avoid Reset All Controllers effect
+                    # or just ensure they are correct after potential keyboard interference.
+                    current_beat = self.last_beat
+
+                    # Find and apply automation for this track at current beat
+                    primed_params = self._prime_automation_at_beat_for_track(track_idx, current_beat)
+
+                    # If no automation for core parameters, use the track's default values
+                    if (track_idx, 'vol') not in primed_params:
+                        midi_volume = int(track.volume * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                    if (track_idx, 'pan') not in primed_params:
+                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
+                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                    if (track_idx, 'prog') not in primed_params:
+                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+
+                    # Banks
+                    if track.bank_msb is not None and (track_idx, 'cc0') not in primed_params:
+                        port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                    if track.bank_lsb is not None and (track_idx, 'cc32') not in primed_params:
+                        port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+
+                    print(f"[Conductor] Silenced keyboard notes on track {track_idx} (spared {len(active_pitches)} sequencer notes)")
+
+    def _prime_automation_at_beat_for_track(self, track_index: int, beat: float) -> set:
+        """
+        Calculates and applies automation values for a specific track at a given beat
+        by reusing the logic in AutomationTrack.
+        Returns a set of (track_index, parameter_name) tuples that were primed.
+        """
+        primed_params = set()
+        param_map = {
+            "vol": {"type": "midi_cc", "control": 7},
+            "pan": {"type": "midi_cc", "control": 10},
+            "vel": {"type": "velocity_multiplier"},
+            "prog": {"type": "program_change"},
+            **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}
+        }
+
+        for track in self.sequencer.song.tracks:
+            if isinstance(track, AutomationTrack) and track.target_track_index == track_index:
+                # Identify all unique parameters automated on this track
+                parameters = {p.parameter for p in track.points}
+                for param in parameters:
+                    value = track.get_value_at(beat, param)
+                    param_config = param_map.get(param.lower())
+                    if param_config:
+                        event_dict = {
+                            "target_track_index": track_index,
+                            "parameter": param,
+                            "param_config": param_config,
+                            "value": value
+                        }
+                        self._apply_automation_event(event_dict)
+                        primed_params.add((track_index, param))
+
+        return primed_params
     

@@ -52,6 +52,7 @@ class JackManager:
         self.automation_events = []
         self.next_automation_event_index = 0
         self.event_to_ignore: Optional[dict] = None
+        self._last_cc_values = {} # key: (track_idx, cc_num), value: val
         self._routing_track: Optional[AutomationTrack] = None        
         self._cached_first_midi_idx = None
         self._cached_armed_idx = None
@@ -981,6 +982,7 @@ class JackManager:
                         for cc in event.cc_messages:
                             cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
                             port.send(cc_msg)
+                            self._last_cc_values[(i, cc.control)] = cc.value
                     self.next_event_indices[i] += 1
                 elif event.start_time >= end_beat_of_block:
                     break
@@ -1096,6 +1098,7 @@ class JackManager:
 
                     msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
                     port.send(msg)
+                    self._last_cc_values[(target_track_index, param_config['control'])] = midi_value
             elif param_config.get('type') == 'program_change':
                 if target_track.output_port_name in self.open_ports:
                     port = self.open_ports[target_track.output_port_name]
@@ -1344,7 +1347,8 @@ class JackManager:
         """
         Sends targeted Note Offs to the specified track to cut keyboard notes
         without interrupting notes currently played by the sequencer.
-        Spares all notes currently managed by the sequencer on the same port and channel.
+        Spares all notes currently managed by the sequencer on the same port and channel,
+        including those starting very soon (look-ahead).
         """
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
@@ -1358,13 +1362,27 @@ class JackManager:
                     # on this specific port and channel, across ALL tracks.
                     active_pitches = set()
                     with self.sync_lock:
+                        # Current active notes in audio thread
                         for (t_idx, pitch) in list(self._active_notes.keys()):
                             if 0 <= t_idx < len(self.sequencer.song.tracks):
                                 other_track = self.sequencer.song.tracks[t_idx]
                                 if (is_midi_track(other_track) and
-                                    other_track.output_port_name == target_port and
-                                    other_track.channel == target_chan):
+                                    getattr(other_track, 'output_port_name', None) == target_port and
+                                    getattr(other_track, 'channel', -1) == target_chan):
                                     active_pitches.add(pitch)
+
+                        # Look ahead for upcoming notes in the next say 0.25 beats
+                        # to avoid race conditions with notes starting in the next audio block.
+                        look_ahead = 0.25
+                        upcoming_beat = self.last_beat + look_ahead
+                        for other_track in self.sequencer.song.tracks:
+                            if (is_midi_track(other_track) and
+                                getattr(other_track, 'output_port_name', None) == target_port and
+                                getattr(other_track, 'channel', -1) == target_chan):
+                                for event in other_track.events:
+                                    if self.last_beat <= event.start_time <= upcoming_beat:
+                                        for note in event.notes:
+                                            active_pitches.add(note.pitch)
 
                     # Also spare metronome notes if they share the same port/channel
                     if (self.sequencer.song.metronome_enabled and
@@ -1378,25 +1396,31 @@ class JackManager:
                         if pitch not in active_pitches:
                             port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
 
-                    # 3. Sustain Off (to cut keyboard notes held by pedal)
+                    # 3. Sustain: Force-stop keyboard sustain but immediately restore sequencer sustain
+                    # to prevent sequencer notes from cutting if they were being held by the pedal.
                     port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
 
-                    # 4. Restore state (Volume, Pan, Program, Bank)
+                    # 4. Restore state (Volume, Pan, Sustain)
+                    # Note: We REMOVE Program Change and Bank Select restoration as they
+                    # cause many plugins to abruptly cut all current voices.
                     current_beat = self.last_beat
                     primed_params = self._prime_automation_at_beat_for_track(track_idx, current_beat)
 
+                    # Volume
                     if (track_idx, 'vol') not in primed_params:
                         midi_volume = int(track.volume * 127)
                         port.send(mido.Message('control_change', channel=target_chan, control=7, value=midi_volume))
+                    # Pan
                     if (track_idx, 'pan') not in primed_params:
                         midi_pan = int((track.pan + 1.0) / 2.0 * 127)
                         port.send(mido.Message('control_change', channel=target_chan, control=10, value=midi_pan))
-                    if (track_idx, 'prog') not in primed_params:
-                        port.send(mido.Message('program_change', channel=target_chan, program=track.instrument))
-                    if track.bank_msb is not None and (track_idx, 'cc0') not in primed_params:
-                        port.send(mido.Message('control_change', channel=target_chan, control=0, value=track.bank_msb))
-                    if track.bank_lsb is not None and (track_idx, 'cc32') not in primed_params:
-                        port.send(mido.Message('control_change', channel=target_chan, control=32, value=track.bank_lsb))
+
+                    # Restore Sustain (CC 64) if it's not automated but was recently active
+                    if (track_idx, 'cc64') not in primed_params:
+                         with self.sync_lock:
+                             last_sustain = self._last_cc_values.get((track_idx, 64))
+                             if last_sustain is not None:
+                                 port.send(mido.Message('control_change', channel=target_chan, control=64, value=last_sustain))
 
                     print(f"[Conductor] Silenced keyboard notes on track {track_idx} (spared {len(active_pitches)} sequencer notes on port {target_port} ch {target_chan+1})")
 

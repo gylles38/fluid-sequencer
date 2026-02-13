@@ -122,16 +122,16 @@ class EditableRoutingGrid(RelativeLayout):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(size=self._update_layout, points=self.draw,
-                  pixels_per_beat=self.draw, total_beats=self.draw,
-                  midi_tracks=self.draw, active_index=self.draw)
+        self.bind(size=self._update_layout, points=self.redraw,
+                  pixels_per_beat=self.redraw, total_beats=self.redraw,
+                  midi_tracks=self.redraw, active_index=self.redraw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
         self.grid_widget.pos = (0, 0)
         self.curve_widget.size = self.size
         self.curve_widget.pos = (0, 0)
-        self.draw()
+        self.redraw()
 
     def _get_y_from_abs_idx(self, abs_idx):
         if not self.midi_tracks: return 0
@@ -233,7 +233,7 @@ class EditableRoutingGrid(RelativeLayout):
             return True
         return super().on_touch_up(touch)
 
-    def draw(self, *args):
+    def redraw(self, *args):
         self.grid_widget.canvas.clear()
         with self.grid_widget.canvas:
             Color(0.1, 0.1, 0.1, 1)
@@ -672,7 +672,7 @@ class InputRoutingEditor(FloatingWindow):
         self.track_copy.points.append(new_point)
         self.track_copy.points.sort(key=lambda p: p.start_time)
         self.visible_points = list(self.track_copy.points)
-        self.ids.grid.draw()
+        self.ids.grid.redraw()
         self._record_state()
         self.is_dirty = True
 
@@ -685,7 +685,7 @@ class InputRoutingEditor(FloatingWindow):
                 self.ids.grid.selected_point = None
             self.update_status_bar(None)
             self.visible_points = list(self.track_copy.points)
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
             self._record_state()
             self.is_dirty = True
 
@@ -706,7 +706,7 @@ class InputRoutingEditor(FloatingWindow):
     def _apply_state(self, state):
         self.track_copy.points = [AutomationPoint(**d) for d in state]
         self.visible_points = list(self.track_copy.points)
-        self.ids.grid.draw()
+        self.ids.grid.redraw()
         self.is_dirty = True
 
     def zoom_in(self): self._apply_zoom(self.pixels_per_beat * 1.25)
@@ -798,7 +798,7 @@ class InputRoutingEditor(FloatingWindow):
             new_val = int(float(self.ids.input_value.text))
             point.start_time = max(0, min(self.total_beats, new_beat))
             point.value = new_val
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
             self.update_status_bar(point)
             self.is_dirty = True
             self._record_state()
@@ -841,7 +841,7 @@ class InputRoutingEditor(FloatingWindow):
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.ids.ruler.total_beats = self.total_beats
         self.ids.ruler.redraw()
-        self.ids.grid.draw()
+        self.ids.grid.redraw()
 
     def on_dismiss(self):
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)

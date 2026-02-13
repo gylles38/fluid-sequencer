@@ -337,7 +337,11 @@ class JackManager:
     def _routing_worker_loop(self):
         """
         Background loop managing the dynamic MIDI routing using pw-link.
+        Optimized to minimize subprocess calls by only reacting to changes.
         """
+        last_evaluated_target_idx = -2
+        last_evaluated_src_pattern = None
+
         while not self._routing_stop_event.is_set():
             try:
                 if not self.is_running:
@@ -349,8 +353,15 @@ class JackManager:
                 target_idx = self._get_input_routing_value(current_beat)
 
                 # 2. Identify source keyboard
-                # We use sequencer.default_record_port or a default pattern
                 src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+
+                # Optimization: Only proceed if target or source changed
+                if target_idx == last_evaluated_target_idx and src_pattern == last_evaluated_src_pattern:
+                    time.sleep(0.1)
+                    continue
+
+                last_evaluated_target_idx = target_idx
+                last_evaluated_src_pattern = src_pattern
 
                 # 3. Identify destination instrument
                 dest_pattern = None

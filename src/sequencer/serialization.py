@@ -25,6 +25,7 @@ class CustomSongEncoder(json.JSONEncoder):
                 'metronome_pan': o.metronome_pan,
                 'carla_project_path': o.carla_project_path,
                 'aj_snapshot_path': o.aj_snapshot_path,
+                'input_routing': o.input_routing,
             }
         if isinstance(o, MidiTrack):
             return {
@@ -78,17 +79,24 @@ def song_decoder(d):
     if '__type__' in d:
         type_name = d.pop('__type__')
 
-        if type_name == 'Song':
-            # Remove input_routing from dictionary as it is now an init=False field
-            # and will be re-linked from the tracks list during startup.
-            d.pop('input_routing', None)
-
         # The classes are defined in the 'sequencer.models' module.
         # We need to look there to find the class definitions.
-        module = sys.modules.get('sequencer.models')
+        # We try multiple common ways the module might be named in sys.modules.
+        module = sys.modules.get('sequencer.models') or sys.modules.get('models')
+
+        if not module:
+            # If not found, it might be because of relative imports.
+            # We try to find it by looking through all modules for one that has the classes.
+            for m in sys.modules.values():
+                if hasattr(m, 'Song') and hasattr(m, 'AutomationTrack'):
+                    module = m
+                    break
+
         if module:
             cls = getattr(module, type_name, None)
             if cls:
+                # Special handling for Song to ensure input_routing is correctly typed
+                # if it was somehow skipped by the bottom-up decoding (unlikely but safe)
                 return cls(**d)
 
     return d

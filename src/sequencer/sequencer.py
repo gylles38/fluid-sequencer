@@ -506,11 +506,19 @@ class Sequencer(EventDispatcher):
         if self.song.input_routing:
             return self.song.input_routing
 
-        # 1. Search in existing tracks first (for projects loaded from file)
-        for t in self.song.tracks:
+        # 1. Search in existing tracks first (for migration of old projects)
+        routing_track_index = -1
+        for i, t in enumerate(self.song.tracks):
             if isinstance(t, AutomationTrack) and t.target_track_index == -1:
                 self.song.input_routing = t
-                return t
+                routing_track_index = i
+                break
+
+        if routing_track_index != -1:
+            # Remove from standard tracks list so it is no longer visible in the UI
+            self.song.tracks.pop(routing_track_index)
+            self.song_structure_changed += 1
+            return self.song.input_routing
 
         # 2. Create it if not found
         track = AutomationTrack(name="Input Routing", target_track_index=-1) # -1 means Global
@@ -524,11 +532,9 @@ class Sequencer(EventDispatcher):
 
         track.add_point(AutomationPoint(start_time=0.0, value=float(first_midi_idx), parameter='input_routing', curve='none'))
 
-        # Add to standard tracks list so it is saved and visible
-        self.song.add_track(track)
+        # Set as dedicated property, DO NOT add to song.tracks
         self.song.input_routing = track
         self.is_dirty = True
-        self.song_structure_changed += 1
         return track
 
     def invalidate_song_length_cache(self):

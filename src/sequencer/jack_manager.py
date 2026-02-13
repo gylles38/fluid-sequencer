@@ -1344,47 +1344,61 @@ class JackManager:
         """
         Sends targeted Note Offs to the specified track to cut keyboard notes
         without interrupting notes currently played by the sequencer.
+        Spares all notes currently managed by the sequencer on the same port and channel.
         """
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
             if is_midi_track(track) and track.output_port_name in self.open_ports:
                 port = self.open_ports[track.output_port_name]
                 if port and not port.closed:
-                    # 1. Individual Note Offs for notes NOT managed by the sequencer
-                    with self.sync_lock:
-                        active_pitches = {pitch for (t_idx, pitch) in self._active_notes.keys() if t_idx == track_idx}
+                    target_port = track.output_port_name
+                    target_chan = track.channel
 
+                    # 1. Collect ALL pitches currently being played by the sequencer
+                    # on this specific port and channel, across ALL tracks.
+                    active_pitches = set()
+                    with self.sync_lock:
+                        for (t_idx, pitch) in list(self._active_notes.keys()):
+                            if 0 <= t_idx < len(self.sequencer.song.tracks):
+                                other_track = self.sequencer.song.tracks[t_idx]
+                                if (is_midi_track(other_track) and
+                                    other_track.output_port_name == target_port and
+                                    other_track.channel == target_chan):
+                                    active_pitches.add(pitch)
+
+                    # Also spare metronome notes if they share the same port/channel
+                    if (self.sequencer.song.metronome_enabled and
+                        self.sequencer.song.metronome_port_name == target_port and
+                        self.sequencer.metronome_channel == target_chan):
+                        active_pitches.add(self.sequencer.metronome_pitch_downbeat)
+                        active_pitches.add(self.sequencer.metronome_pitch_beat)
+
+                    # 2. Individual Note Offs for pitches NOT currently in use by the sequencer
                     for pitch in range(128):
                         if pitch not in active_pitches:
-                            port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                            port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
 
-                    # 2. Sustain Off (to cut keyboard notes held by pedal)
-                    port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))
+                    # 3. Sustain Off (to cut keyboard notes held by pedal)
+                    port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
 
-                    # 3. Restore state (Volume, Pan) to avoid Reset All Controllers effect
-                    # or just ensure they are correct after potential keyboard interference.
+                    # 4. Restore state (Volume, Pan, Program, Bank)
                     current_beat = self.last_beat
-
-                    # Find and apply automation for this track at current beat
                     primed_params = self._prime_automation_at_beat_for_track(track_idx, current_beat)
 
-                    # If no automation for core parameters, use the track's default values
                     if (track_idx, 'vol') not in primed_params:
                         midi_volume = int(track.volume * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                        port.send(mido.Message('control_change', channel=target_chan, control=7, value=midi_volume))
                     if (track_idx, 'pan') not in primed_params:
                         midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                        port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                        port.send(mido.Message('control_change', channel=target_chan, control=10, value=midi_pan))
                     if (track_idx, 'prog') not in primed_params:
-                        port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
-
-                    # Banks
+                        port.send(mido.Message('program_change', channel=target_chan, program=track.instrument))
                     if track.bank_msb is not None and (track_idx, 'cc0') not in primed_params:
-                        port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                        port.send(mido.Message('control_change', channel=target_chan, control=0, value=track.bank_msb))
                     if track.bank_lsb is not None and (track_idx, 'cc32') not in primed_params:
-                        port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                        port.send(mido.Message('control_change', channel=target_chan, control=32, value=track.bank_lsb))
 
-                    print(f"[Conductor] Silenced keyboard notes on track {track_idx} (spared {len(active_pitches)} sequencer notes)")
+                    print(f"[Conductor] Silenced keyboard notes on track {track_idx} (spared {len(active_pitches)} sequencer notes on port {target_port} ch {target_chan+1})")
 
     def _prime_automation_at_beat_for_track(self, track_index: int, beat: float) -> set:
         """

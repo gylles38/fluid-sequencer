@@ -670,13 +670,20 @@ class InputRoutingEditor(FloatingWindow):
         self.track_copy.points.append(new_point)
         self.track_copy.points.sort(key=lambda p: p.start_time)
         self.ids.grid.points = list(self.track_copy.points)
+        self.ids.grid.draw()
         self._record_state()
         self.is_dirty = True
 
     def delete_point(self, point):
         if point in self.track_copy.points:
             self.track_copy.points.remove(point)
+            if self.selected_point == point:
+                self.selected_point = None
+            if self.ids.grid.selected_point == point:
+                self.ids.grid.selected_point = None
+            self.update_status_bar(None)
             self.ids.grid.points = list(self.track_copy.points)
+            self.ids.grid.draw()
             self._record_state()
             self.is_dirty = True
 
@@ -696,7 +703,8 @@ class InputRoutingEditor(FloatingWindow):
 
     def _apply_state(self, state):
         self.track_copy.points = [AutomationPoint(**d) for d in state]
-        self.ids.grid.draw_curve_and_points()
+        self.ids.grid.points = list(self.track_copy.points)
+        self.ids.grid.draw()
         self.is_dirty = True
 
     def zoom_in(self): self._apply_zoom(self.pixels_per_beat * 1.25)
@@ -788,7 +796,7 @@ class InputRoutingEditor(FloatingWindow):
             new_val = int(float(self.ids.input_value.text))
             point.start_time = max(0, min(self.total_beats, new_beat))
             point.value = new_val
-            self.ids.grid.draw_curve_and_points()
+            self.ids.grid.draw()
             self.update_status_bar(point)
             self.is_dirty = True
             self._record_state()

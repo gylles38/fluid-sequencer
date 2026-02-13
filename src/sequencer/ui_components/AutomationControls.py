@@ -35,6 +35,10 @@ class AutomationControls(BoxLayout, EventDispatcher):
                 ("speedometer", "Velocity", "vel"),
                 ("music-box-outline", "Program Change", "prog"),
             ]
+        elif self.track_type == 'routing':
+            automation_types = [
+                ("lan", "MIDI Input Routing", "input_routing"),
+            ]
         else: # audio
             automation_types = [
                 ("volume-high", "Volume", "vol"),

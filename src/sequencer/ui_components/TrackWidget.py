@@ -243,9 +243,12 @@ class TrackWidget(BoxLayout):
             )
             self.controls_section.add_widget(self.solo_button)
         elif isinstance(track, AutomationTrack):
-            # On récupère le type (midi/audio) de la piste cible
-            target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
-            automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
+            # On récupère le type (midi/audio/routing) de la piste cible
+            if track.target_track_index == -1:
+                automation_type = 'routing'
+            else:
+                target_track = self.sequencer_layout.sequencer.song.tracks[track.target_track_index]
+                automation_type = 'midi' if isinstance(target_track, MidiTrack) else 'audio'
 
             # On crée les contrôles d'automation à la place du bouton Record
             self.automation_controls = AutomationControls(
@@ -904,22 +907,27 @@ class TrackWidget(BoxLayout):
                 existing._bring_to_front()
                 return
             
-            sequencer = self.sequencer_layout.sequencer
+            if self.track.target_track_index == -1:
+                from .input_routing_editor import InputRoutingEditor
+                editor = InputRoutingEditor(
+                    track=self.track,
+                    sequencer_layout=self.sequencer_layout,
+                    size_hint=(0.9, 0.8),
+                    pos_hint={'center_x': 0.5, 'center_y': 0.5}
+                )
+            else:
+                active_param = 'vol' # Valeur de sécurité
+                if hasattr(self, 'automation_controls') and self.automation_controls.selected_param:
+                    active_param = self.automation_controls.selected_param
 
-            # On demande à l'objet automation_controls quel paramètre est actif
-            active_param = 'vol' # Valeur de sécurité
-            if hasattr(self, 'automation_controls') and self.automation_controls.selected_param:
-                active_param = self.automation_controls.selected_param            
-
-            # On passe ce paramètre à l'initialisation de l'éditeur
-            editor = AutomationEditor(
-                track=self.track,
-                sequencer_layout=self.sequencer_layout,
-                initial_param=active_param,
-                pixels_per_beat=self.pixels_per_beat,
-                size_hint=(0.9, 0.8),
-                pos_hint={'center_x': 0.5, 'center_y': 0.5}
-            )
+                editor = AutomationEditor(
+                    track=self.track,
+                    sequencer_layout=self.sequencer_layout,
+                    initial_param=active_param,
+                    pixels_per_beat=self.pixels_per_beat,
+                    size_hint=(0.9, 0.8),
+                    pos_hint={'center_x': 0.5, 'center_y': 0.5}
+                )
             
             if self.sequencer_layout.window_manager:
                 self.sequencer_layout.window_manager.add_widget(editor)

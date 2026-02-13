@@ -502,24 +502,33 @@ class Sequencer(EventDispatcher):
         return None
 
     def get_input_routing_track(self) -> AutomationTrack:
-        """Returns or creates the global MIDI input routing automation track (stored in song.input_routing)."""
+        """Returns or creates the global MIDI input routing automation track."""
         if self.song.input_routing:
             return self.song.input_routing
 
-        # Create it if not found
+        # 1. Search in existing tracks first (for projects loaded from file)
+        for t in self.song.tracks:
+            if isinstance(t, AutomationTrack) and t.target_track_index == -1:
+                self.song.input_routing = t
+                return t
+
+        # 2. Create it if not found
         track = AutomationTrack(name="Input Routing", target_track_index=-1) # -1 means Global
 
         # Find first MIDI track index for default routing
         first_midi_idx = 0
         for i, t in enumerate(self.song.tracks):
-            if getattr(t, 'is_midi', False):
+            if is_midi_track(t):
                 first_midi_idx = i
                 break
 
         track.add_point(AutomationPoint(start_time=0.0, value=float(first_midi_idx), parameter='input_routing', curve='none'))
 
+        # Add to standard tracks list so it is saved and visible
+        self.song.add_track(track)
         self.song.input_routing = track
         self.is_dirty = True
+        self.song_structure_changed += 1
         return track
 
     def invalidate_song_length_cache(self):

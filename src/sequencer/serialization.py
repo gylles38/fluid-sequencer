@@ -25,7 +25,6 @@ class CustomSongEncoder(json.JSONEncoder):
                 'metronome_pan': o.metronome_pan,
                 'carla_project_path': o.carla_project_path,
                 'aj_snapshot_path': o.aj_snapshot_path,
-                'input_routing': o.input_routing,
             }
         if isinstance(o, MidiTrack):
             return {
@@ -78,6 +77,11 @@ class CustomSongEncoder(json.JSONEncoder):
 def song_decoder(d):
     if '__type__' in d:
         type_name = d.pop('__type__')
+
+        if type_name == 'Song':
+            # Remove input_routing from dictionary as it is now an init=False field
+            # and will be re-linked from the tracks list during startup.
+            d.pop('input_routing', None)
 
         # The classes are defined in the 'sequencer.models' module.
         # We need to look there to find the class definitions.

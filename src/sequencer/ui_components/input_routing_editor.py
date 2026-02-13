@@ -479,7 +479,7 @@ Builder.load_string("""
                             editor: root
                             size_hint: None, 1
                             width: root.total_beats * root.pixels_per_beat
-                            points: root.track_copy.points
+                            points: root.visible_points
                             total_beats: root.total_beats
                             pixels_per_beat: root.pixels_per_beat
                             midi_tracks: root.midi_tracks
@@ -571,6 +571,7 @@ class InputRoutingEditor(FloatingWindow):
     _is_scrolling = False
     history = ObjectProperty(None)
     selected_point = ObjectProperty(None, allownone=True)
+    visible_points = ListProperty([])
 
     def __init__(self, **kwargs):
         self.history = EditHistoryManager()
@@ -581,6 +582,7 @@ class InputRoutingEditor(FloatingWindow):
                 target_track_index=-1, # Global
                 points=copy.deepcopy(self.track.points)
             )
+            self.visible_points = list(self.track_copy.points)
         super(InputRoutingEditor, self).__init__(**kwargs)
         self.title = "MIDI Input Routing Editor"
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
@@ -669,7 +671,7 @@ class InputRoutingEditor(FloatingWindow):
         new_point = AutomationPoint(start_time=beat, value=value, parameter='input_routing', curve='none')
         self.track_copy.points.append(new_point)
         self.track_copy.points.sort(key=lambda p: p.start_time)
-        self.ids.grid.points = list(self.track_copy.points)
+        self.visible_points = list(self.track_copy.points)
         self.ids.grid.draw()
         self._record_state()
         self.is_dirty = True
@@ -682,7 +684,7 @@ class InputRoutingEditor(FloatingWindow):
             if self.ids.grid.selected_point == point:
                 self.ids.grid.selected_point = None
             self.update_status_bar(None)
-            self.ids.grid.points = list(self.track_copy.points)
+            self.visible_points = list(self.track_copy.points)
             self.ids.grid.draw()
             self._record_state()
             self.is_dirty = True
@@ -703,7 +705,7 @@ class InputRoutingEditor(FloatingWindow):
 
     def _apply_state(self, state):
         self.track_copy.points = [AutomationPoint(**d) for d in state]
-        self.ids.grid.points = list(self.track_copy.points)
+        self.visible_points = list(self.track_copy.points)
         self.ids.grid.draw()
         self.is_dirty = True
 

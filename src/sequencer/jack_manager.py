@@ -56,6 +56,10 @@ class JackManager:
         self._cached_first_midi_idx = None
         self._cached_armed_idx = None
 
+        # --- Native JACK MIDI Ports ---
+        self.inport_clavier = None
+        self.track_outports = {} # track_index -> jack.Port
+
         # --- UI Command Flags (from MIDI) ---
         self._pending_play_pause = False
         self._pending_stop = False
@@ -105,67 +109,48 @@ class JackManager:
 
     def auto_connect_dynamic(self, src_keyword, dest_keyword):
         """
-        Connecte deux ports en utilisant des mots-clés partiels.
-        """
-        print(f"--- Attempting auto-connect: '{src_keyword}' -> '{dest_keyword}' ---")
-
-        # 1. Recherche des noms complets
-        full_source = self.find_port_by_name(src_keyword)
-        full_dest = self.find_port_by_name(dest_keyword)
-
-        if not full_source:
-            print(f"Info: Source port not found with keyword: '{src_keyword}'")
-            return
-        if not full_dest:
-            print(f"Info: Destination port not found with keyword: '{dest_keyword}'")
-            return
-
-        print(f"Ports identified:\n   Source: {full_source}\n   Dest  : {full_dest}")
-
-        # 2. Tentative de connexion via jack_connect
-        try:
-            res = subprocess.run(
-                ["jack_connect", full_source, full_dest],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-
-            if res.returncode == 0:
-                print("Connection successful!")
-            else:
-                # If error (often because already connected), we display the message
-                # PipeWire often returns an error if it's already connected, it's not serious.
-                if "exists" in res.stderr:
-                     print("Already connected.")
-                else:
-                     print(f"Connection warning: {res.stderr.strip()}")
-
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_connect' introuvable.", file=sys.stderr)
-
-    def disconnect_dynamic(self, src_keyword, dest_keyword):
-        """
-        Disconnects two ports using partial keywords.
+        Connects two ports using robust pw-link token matching.
+        This is more reliable for Carla/PipeWire naming schemes.
         """
         if not src_keyword or not dest_keyword:
             return
 
-        full_source = self.find_port_by_name(src_keyword)
-        full_dest = self.find_port_by_name(dest_keyword)
+        print(f"[Cabling] Attempting robust connect: '{src_keyword}' -> '{dest_keyword}'")
 
-        if not full_source or not full_dest:
+        src_id = self._get_pw_id(src_keyword, is_output=True)
+        dest_id = self._get_pw_id(dest_keyword, is_output=False)
+
+        if src_id and dest_id:
+            self._pw_link_connect(src_id, dest_id)
+        else:
+            # Fallback to legacy jack_connect if pw-id fails
+            full_source = self.find_port_by_name(src_keyword)
+            full_dest = self.find_port_by_name(dest_keyword)
+            if full_source and full_dest:
+                try:
+                    subprocess.run(["jack_connect", full_source, full_dest], capture_output=True, check=False)
+                except: pass
+
+    def disconnect_dynamic(self, src_keyword, dest_keyword):
+        """
+        Disconnects two ports using robust pw-link token matching.
+        """
+        if not src_keyword or not dest_keyword:
             return
 
-        try:
-            subprocess.run(
-                ["jack_disconnect", full_source, full_dest],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-        except FileNotFoundError:
-            print("Erreur: commande 'jack_disconnect' introuvable.", file=sys.stderr)
+        src_id = self._get_pw_id(src_keyword, is_output=True)
+        dest_id = self._get_pw_id(dest_keyword, is_output=False)
+
+        if src_id and dest_id:
+            self._pw_link_disconnect(src_id, dest_id)
+        else:
+            # Fallback
+            full_source = self.find_port_by_name(src_keyword)
+            full_dest = self.find_port_by_name(dest_keyword)
+            if full_source and full_dest:
+                try:
+                    subprocess.run(["jack_disconnect", full_source, full_dest], capture_output=True, check=False)
+                except: pass
 
     def get_midi_input_ports(self):
         """
@@ -337,10 +322,12 @@ class JackManager:
     def _routing_worker_loop(self):
         """
         Background loop managing the dynamic MIDI routing using pw-link.
-        Optimized to minimize subprocess calls by only reacting to changes.
+        Optimized to minimize subprocess calls by only reacting to changes
+        in source, target track index, OR destination instrument.
         """
         last_evaluated_target_idx = -2
         last_evaluated_src_pattern = None
+        last_evaluated_dest_pattern = None
 
         while not self._routing_stop_event.is_set():
             try:
@@ -353,15 +340,7 @@ class JackManager:
                 target_idx = self._get_input_routing_value(current_beat)
 
                 # 2. Identify source keyboard
-                src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
-
-                # Optimization: Only proceed if target or source changed
-                if target_idx == last_evaluated_target_idx and src_pattern == last_evaluated_src_pattern:
-                    time.sleep(0.1)
-                    continue
-
-                last_evaluated_target_idx = target_idx
-                last_evaluated_src_pattern = src_pattern
+                src_pattern = self.sequencer.song.keyboard_source_port or self.sequencer.default_record_port or "MPK249 Port A"
 
                 # 3. Identify destination instrument
                 dest_pattern = None
@@ -369,6 +348,17 @@ class JackManager:
                     track = self.sequencer.song.tracks[target_idx]
                     if is_midi_track(track):
                         dest_pattern = getattr(track, 'input_port_name', None)
+
+                # Optimization: Only proceed if something significant changed
+                if (target_idx == last_evaluated_target_idx and
+                    src_pattern == last_evaluated_src_pattern and
+                    dest_pattern == last_evaluated_dest_pattern):
+                    time.sleep(0.1)
+                    continue
+
+                last_evaluated_target_idx = target_idx
+                last_evaluated_src_pattern = src_pattern
+                last_evaluated_dest_pattern = dest_pattern
 
                 # 4. Manage connections if target changed or need refresh
                 if dest_pattern:
@@ -469,21 +459,25 @@ class JackManager:
                 
                 tracks = self.sequencer.song.tracks
 
-                # --- MIDI Port Setup ---
-                self.open_ports.clear()
-                required_ports = {track.output_port_name for track in tracks if isinstance(track, MidiTrack) and track.output_port_name}
-                if self.sequencer.song.metronome_port_name:
-                    required_ports.add(self.sequencer.song.metronome_port_name)
+                # --- Native MIDI Port Registration ---
+                self.inport_clavier = self.jack_client.midi_inports.register('Clavier')
+                self.track_outports.clear()
+                for i, track in enumerate(tracks):
+                    if isinstance(track, MidiTrack):
+                        # Use a clean name for the port
+                        clean_name = re.sub(r'[^a-zA-Z0-9]', '_', track.name)
+                        port_name = f"Track_{i}_{clean_name}"
+                        self.track_outports[i] = self.jack_client.midi_outports.register(port_name)
 
-                for name in required_ports:
-                    vp = next((p for p in self.sequencer.virtual_ports if p.name == name), None)
-                    if vp:
-                        self.open_ports[name] = vp
-                    else:
-                        try:
-                            self.open_ports[name] = mido.open_output(name)
-                        except Exception as e:
-                            print(f"Could not open MIDI port '{name}': {e}")
+                # --- Legacy MIDI Port Setup (for metronome/external) ---
+                self.open_ports.clear()
+                # required_ports = {track.output_port_name for track in tracks if isinstance(track, MidiTrack) and track.output_port_name}
+                if self.sequencer.song.metronome_port_name:
+                    name = self.sequencer.song.metronome_port_name
+                    try:
+                        self.open_ports[name] = mido.open_output(name)
+                    except Exception as e:
+                        print(f"Could not open Metronome MIDI port '{name}': {e}")
 
                 # --- Audio Track Setup ---
                 with self.process_lock:
@@ -569,6 +563,20 @@ class JackManager:
                 self._correction_thread = threading.Thread(target=self._audio_correction_loop)
                 self._correction_thread.daemon = True
                 self._correction_thread.start()
+
+                # --- Automatic Hardware Detection ---
+                # Attempt to bridge common MIDI hardware to the 'Clavier' input
+                if self.sequencer.song.keyboard_source_port:
+                    self.auto_connect_dynamic(self.sequencer.song.keyboard_source_port, 'sequencer:Clavier')
+                else:
+                    hardware_keywords = ['Akai', 'MPK', 'Arturia', 'Launchkey', 'KeyStep', 'Midi-Bridge']
+                    for kw in hardware_keywords:
+                         src_port = self.find_port_by_name(kw)
+                         if src_port and 'sequencer:Clavier' not in src_port:
+                             print(f"[Startup] Found potential hardware: {src_port}. Bridging to Clavier.")
+                             self.auto_connect_dynamic(src_port, 'sequencer:Clavier')
+                             self.sequencer.song.keyboard_source_port = src_port
+                             break
 
                 # --- Start the routing thread (Conductor) ---
                 self._routing_stop_event.clear()
@@ -958,21 +966,31 @@ class JackManager:
                 self.sequencer.current_beat = current_beat
                 self.sequencer.last_beat_update_time = time.perf_counter()
 
+    def _write_midi_safe(self, port, msg, offset=0):
+        """RT-safe MIDI writing for native JACK ports."""
+        try:
+            port.write_midi(offset, msg.bytes())
+        except Exception:
+            pass
+
     def _process_midi_events(self, start_beat_of_block, end_beat_of_block):
         tracks = self.sequencer.song.tracks
         is_any_track_soloed = any(t.is_solo for t in tracks if hasattr(t, 'is_solo'))
 
         for i, track in enumerate(tracks):
+            if i not in self.track_outports:
+                continue
+
+            port = self.track_outports[i]
+
             # --- Live Preview Override ---
-            # If a track is being edited, use the temporary version from the editor.
             if i in self.sequencer.track_overrides:
                 track = self.sequencer.track_overrides[i]
 
-            if not isinstance(track, MidiTrack) or not track.output_port_name in self.open_ports:
+            if not isinstance(track, MidiTrack):
                 continue
 
             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-            port = self.open_ports[track.output_port_name]
 
             if i >= len(self.next_event_indices):
                 self.next_event_indices.extend([0] * (i - len(self.next_event_indices) + 1))
@@ -986,12 +1004,12 @@ class JackManager:
                             final_velocity = int(note.velocity * track.velocity)
                             final_velocity = max(0, min(127, final_velocity))
                             note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=final_velocity)
-                            port.send(note_on_msg)
+                            self._write_midi_safe(port, note_on_msg)
                             note_end_beat = event.start_time + note.duration
                             self._active_notes[(i, note.pitch)] = note_end_beat
                         for cc in event.cc_messages:
                             cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
-                            port.send(cc_msg)
+                            self._write_midi_safe(port, cc_msg)
                     self.next_event_indices[i] += 1
                 elif event.start_time >= end_beat_of_block:
                     break
@@ -1079,7 +1097,7 @@ class JackManager:
         return primed_params
 
     def _apply_automation_event(self, event: dict):
-        """Applies a single automation event."""
+        """Applies a single automation event. RT-safe for native ports."""
         target_track_index = event['target_track_index']
         if not 0 <= target_track_index < len(self.sequencer.song.tracks):
             return
@@ -1092,8 +1110,8 @@ class JackManager:
         # Branch by Track Type first for clarity and correctness
         if isinstance(target_track, MidiTrack):
             if param_config.get('type') == 'midi_cc':
-                if target_track.output_port_name in self.open_ports:
-                    port = self.open_ports[target_track.output_port_name]
+                if target_track_index in self.track_outports:
+                    port = self.track_outports[target_track_index]
                     midi_value = 0
                     if param_name == 'vol':
                         midi_value = int(value * 127)
@@ -1102,17 +1120,15 @@ class JackManager:
                     else:
                         midi_value = int(value)
 
-                    # --- FIX: Clamp the final value to the valid MIDI range ---
                     midi_value = max(0, min(127, midi_value))
-
                     msg = mido.Message('control_change', channel=target_track.channel, control=param_config['control'], value=midi_value)
-                    port.send(msg)
+                    self._write_midi_safe(port, msg)
             elif param_config.get('type') == 'program_change':
-                if target_track.output_port_name in self.open_ports:
-                    port = self.open_ports[target_track.output_port_name]
+                if target_track_index in self.track_outports:
+                    port = self.track_outports[target_track_index]
                     program_value = max(0, min(127, int(value)))
                     msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
-                    port.send(msg)
+                    self._write_midi_safe(port, msg)
             elif param_config.get('type') == 'velocity_multiplier':
                 target_track.velocity = float(value)
 
@@ -1352,17 +1368,23 @@ class JackManager:
         return fallback_idx
 
     def _silence_instrument_at_index(self, track_idx: int):
-        """Sends MIDI Panic (All Notes Off) to the specified track."""
+        """Sends MIDI Panic (All Notes Off) to the specified track. Uses native ports if possible."""
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
-            if is_midi_track(track) and track.output_port_name in self.open_ports:
-                port = self.open_ports[track.output_port_name]
-                if port and not port.closed:
-                    # CC 123: All Notes Off
-                    # CC 121: Reset All Controllers
-                    # CC 64: Sustain Off (just in case)
-                    port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
-                    port.send(mido.Message('control_change', channel=track.channel, control=121, value=0))
-                    port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))
-                    print(f"[Conductor] Silenced instrument on track {track_idx}")
+            if is_midi_track(track):
+                # 1. Use native port if transport is rolling or just for thoroughness
+                if track_idx in self.track_outports:
+                    port = self.track_outports[track_idx]
+                    for cc in [123, 121, 64]:
+                         msg = mido.Message('control_change', channel=track.channel, control=cc, value=0)
+                         self._write_midi_safe(port, msg)
+
+                # 2. Also use legacy port if assigned (for external hardware)
+                if track.output_port_name in self.open_ports:
+                    port = self.open_ports[track.output_port_name]
+                    if port and not port.closed:
+                        for cc in [123, 121, 64]:
+                            port.send(mido.Message('control_change', channel=track.channel, control=cc, value=0))
+
+                print(f"[Conductor] Silenced instrument on track {track_idx}")
     

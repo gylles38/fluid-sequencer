@@ -113,16 +113,20 @@ class MidiInputSelectorPopup(Popup):
 
     def select_port(self, port_name) -> None:
         track = self.track_widget.track
+        track_idx = self.track_widget.track_index
+
+        # We use the track's native port name as the source for cabling to Carla
+        src_keyword = f"Track_{track_idx}"
 
         # Disconnect existing connection if a new port is chosen or disconnect is clicked
-        if track.input_port_name and track.output_port_name:
-            self.sequencer.jack_manager.disconnect_dynamic(track.output_port_name, track.input_port_name)
+        if track.input_port_name:
+            self.sequencer.jack_manager.disconnect_dynamic(src_keyword, track.input_port_name)
 
         track.input_port_name = port_name
 
         if port_name:
             # Connect to the new port
-            self.sequencer.jack_manager.auto_connect_dynamic(track.output_port_name, port_name)
+            self.sequencer.jack_manager.auto_connect_dynamic(src_keyword, port_name)
             self.track_widget.input_button_text_button_text.text = f"Dest: {port_name.split(':')[0]}"
         else:
             # No new port, just disconnected

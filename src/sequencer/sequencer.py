@@ -1752,9 +1752,10 @@ class Sequencer(EventDispatcher):
                         print(f"Final error restoring aj-snapshot: {e2}", file=sys.stderr)
             else:
                 # --- Auto-connect MIDI tracks based on project data (fallback) ---
-                for track in self.song.tracks:
-                    if isinstance(track, MidiTrack) and track.output_port_name and track.input_port_name:
-                        self.jack_manager.auto_connect_dynamic(track.output_port_name, track.input_port_name)
+                for i, track in enumerate(self.song.tracks):
+                    if isinstance(track, MidiTrack) and track.input_port_name:
+                        src_keyword = f"Track_{i}"
+                        self.jack_manager.auto_connect_dynamic(src_keyword, track.input_port_name)
 
             return f"Successfully loaded project from '{project_filepath}'"
         except FileNotFoundError:

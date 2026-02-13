@@ -272,6 +272,7 @@ class Song:
     metronome_pan: float = 0.0
     carla_project_path: Optional[str] = None
     aj_snapshot_path: Optional[str] = None
+    keyboard_source_port: Optional[str] = None
     input_routing: Optional[AutomationTrack] = None
 
     def add_track(self, track: AnyTrack):

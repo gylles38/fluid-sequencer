@@ -74,8 +74,9 @@ class ThreeStateRecordButton(TooltipMDIconButton):
         is_playing = self.sequencer_layout.sequencer.playback_state != 'stopped'
         is_target = self.sequencer_layout.sequencer.current_routing_index == self.track_index
 
-        if is_recording and is_playing and is_target and mode != 'OFF':
+        if is_recording and is_playing and is_target:
             # Solid bright red background when this track is actively receiving recorded input
+            # We highlight it even if mode is 'OFF' because routing forces recording
             state_config['bg_color'] = [0.8, 0, 0, 1]
             state_config['icon_color'] = [1, 1, 1, 1]
 

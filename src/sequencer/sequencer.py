@@ -107,7 +107,8 @@ class Sequencer(EventDispatcher):
         self.bind(song_structure_changed=self._update_current_routing)
         
         if self.gui_mode:
-            Clock.schedule_interval(self._poll_engine_state, 1/60.0)        
+            Clock.schedule_interval(self._poll_engine_state, 1/60.0)
+            Clock.schedule_interval(self._merge_recorded_events, 1/60.0)
 
     def _poll_engine_state(self, dt):
         if not self.jack_manager or not self.jack_manager.is_running:
@@ -2082,12 +2083,15 @@ class Sequencer(EventDispatcher):
                                     duration = current_beat - note_start
                                     
                                     if duration > 0:
-                                        track = self.song.tracks[track_idx]
-                                        note = Note(pitch=msg.note, velocity=original_velocity, duration=duration)
-                                        event = Event(notes=[note], start_time=note_start)
-                                        track.add_event(event)
-                                        self.is_dirty = True
-                                        self.invalidate_song_length_cache()
+                                        # Use the safe merger to avoid background thread issues and ensure UI refresh
+                                        self.jack_manager._recorded_events_to_merge.append({
+                                            'type': 'note',
+                                            'track_idx': track_idx,
+                                            'pitch': msg.note,
+                                            'velocity': original_velocity,
+                                            'start_time': note_start,
+                                            'duration': duration
+                                        })
 
                                     # Thru OFF
                                     if enable_thru:
@@ -2113,10 +2117,14 @@ class Sequencer(EventDispatcher):
                 for note, (note_start, original_velocity, track_idx) in open_notes.items():
                     duration = current_beat - note_start
                     if duration > 0:
-                        track = self.song.tracks[track_idx]
-                        note_obj = Note(pitch=note, velocity=original_velocity, duration=duration)
-                        event = Event(notes=[note_obj], start_time=note_start)
-                        track.add_event(event)
+                        self.jack_manager._recorded_events_to_merge.append({
+                            'type': 'note',
+                            'track_idx': track_idx,
+                            'pitch': note,
+                            'velocity': original_velocity,
+                            'start_time': note_start,
+                            'duration': duration
+                        })
 
                 # Restore original mute states
                 for track_idx, was_muted in original_mute_states.items():

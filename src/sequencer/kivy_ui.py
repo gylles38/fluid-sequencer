@@ -1677,37 +1677,26 @@ class SequencerLayout(BoxLayout):
             self.show_midi_settings()
             return False
 
-        # Trouver la piste armée
-        armed_track_index = None
-        for i, track in enumerate(self.sequencer.song.tracks):
-            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
-                if armed_track_index is not None:
-                    self.show_error_popup("Multiple Tracks Armed",
-                                        "Multiple tracks are armed for recording.\nPlease arm only one track.")
-                    return False
-                armed_track_index = i
+        # Dynamic Routing Support: Check if any track is armed or if routing track is present
+        any_armed = any(isinstance(t, MidiTrack) and t.record_mode != 'OFF' for t in self.sequencer.song.tracks)
+        has_routing = self.sequencer.song.input_routing and self.sequencer.song.input_routing.points
 
-        if armed_track_index is None:
+        if not any_armed and not has_routing:
             self.show_error_popup("No Track Armed",
-                                "No track is armed for recording.\nPlease arm a MIDI track first.")
+                                "No track is armed and no MIDI routing is defined.\nPlease arm a MIDI track or set up routing.")
             return False
 
         # Récupérer la position de départ
         start_pos_text = self.start_pos_input.text.strip()
-        if not start_pos_text:
-            start_pos_text = "1:1"  # Par défaut
-
-        # Convertir en beats
-        start_beat = self.sequencer.parse_position_to_beats(start_pos_text)
+        start_beat = self.sequencer.parse_position_to_beats(start_pos_text or "1:1")
         if start_beat is None:
-            self.show_error_popup("Invalid Start Position",
-                                f"Invalid start position: {start_pos_text}")
+            self.show_error_popup("Invalid Start Position", f"Invalid start position: {start_pos_text}")
             return False
 
-        # Démarrer l'enregistrement
+        # Démarrer l'enregistrement (track_idx=None for dynamic)
         try:
             result = self.sequencer.record_track(
-                track_idx=armed_track_index,
+                track_idx=None,
                 start_beat=start_beat,
                 inport_name=self.sequencer.default_record_port
             )

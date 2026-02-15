@@ -620,7 +620,8 @@ class TrackWidget(BoxLayout):
         # Liaison avec le séquenceur pour la mise à jour en temps réel
         self.sequencer_layout.sequencer.bind(
             current_beat=lambda instance, val: self.update_sliders_from_automation(val),
-            current_routing_index=lambda inst, val: self._sync_routing_status(inst, val)
+            current_routing_index=lambda inst, val: self._sync_routing_status(inst, val),
+            is_recording=lambda inst, val: self._sync_recording_status(inst, val)
         )
         
         # Appel initial pour régler les sliders au chargement du projet
@@ -709,7 +710,14 @@ class TrackWidget(BoxLayout):
         is_active = (self.track_index == value)
         if is_active != self.is_active_routing:
             self.is_active_routing = is_active
-            self._update_bg_color() # Appel direct sans passer par un bind supplémentaire
+            self._update_bg_color()
+
+        if hasattr(self, 'record_mode_button'):
+            self.record_mode_button.update_appearance()
+
+    def _sync_recording_status(self, instance, value):
+        if hasattr(self, 'record_mode_button'):
+            self.record_mode_button.update_appearance()
 
     def _update_bg_color(self, *args):
         """

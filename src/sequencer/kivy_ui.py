@@ -521,17 +521,33 @@ class SequencerLayout(BoxLayout):
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
 
+        self.panic_button = TooltipMDIconButton(
+            icon='alert-octagon-outline',
+            tooltip_text='Panic (Reset MIDI)',
+            size_hint_x=None,
+            pos_hint={'center_y': 0.5},
+            width=dp(40),
+            size_hint_y=None,
+            height=common_height,
+            theme_icon_color="Custom",
+            icon_color=[1, 0.6, 0, 1],
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
+        )
+
         transport_card.add_widget(self.play_button)
         transport_card.add_widget(self.loop_button)
         transport_card.add_widget(self.pause_button)
         transport_card.add_widget(self.stop_button)
         transport_card.add_widget(self.record_button)
+        transport_card.add_widget(self.panic_button)
 
         self.play_button.bind(on_press=self.play_pressed)
         self.loop_button.bind(on_press=self.loop_pressed)
         self.pause_button.bind(on_press=self.pause_pressed)
         self.stop_button.bind(on_press=self.stop_pressed)
         self.record_button.bind(on_press=self.record_pressed)
+        self.panic_button.bind(on_press=self.panic_pressed)
         
         # Espace flexible à droite
         transport_card.add_widget(Widget(size_hint_x=1))
@@ -1714,6 +1730,9 @@ class SequencerLayout(BoxLayout):
 
     def record_pressed(self, instance):
         self.sequencer.process_transport_command("record")
+
+    def panic_pressed(self, instance):
+        self.sequencer.panic()
 
     def get_armed_track(self) -> Optional[int]:
         """Retourne l'index de la piste armée, ou None si aucune piste n'est armée."""

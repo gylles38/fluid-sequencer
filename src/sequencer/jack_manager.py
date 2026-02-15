@@ -63,6 +63,11 @@ class JackManager:
         self._pending_record = False
         self._pending_mappings = collections.deque() # (mapping_obj, value)
         
+        # --- RT-Safe IPC Handling ---
+        self._ipc_queue = collections.deque()
+        self._ipc_worker_thread = None
+        self._ipc_worker_stop_event = threading.Event()
+
         # --- Dynamic Audio Correction ---
         self.CORRECTION_GAIN = 0.02
         self.CORRECTION_THRESHOLD = 0.03 # 30ms
@@ -560,6 +565,12 @@ class JackManager:
                 self._correction_thread.daemon = True
                 self._correction_thread.start()
 
+                # --- Start the IPC worker thread ---
+                self._ipc_worker_stop_event.clear()
+                self._ipc_worker_thread = threading.Thread(target=self._ipc_worker_loop)
+                self._ipc_worker_thread.daemon = True
+                self._ipc_worker_thread.start()
+
                 # --- Start the routing thread (Conductor) ---
                 self._routing_stop_event.clear()
                 self._routing_thread = threading.Thread(target=self._routing_worker_loop)
@@ -589,6 +600,12 @@ class JackManager:
             self._correction_stop_event.set()
             self._correction_thread.join(timeout=1.0)
             self._correction_thread = None
+
+        # Stop the IPC worker thread
+        if self._ipc_worker_thread and self._ipc_worker_thread.is_alive():
+            self._ipc_worker_stop_event.set()
+            self._ipc_worker_thread.join(timeout=1.0)
+            self._ipc_worker_thread = None
 
         # Stop the routing thread
         if self._routing_thread and self._routing_thread.is_alive():
@@ -649,6 +666,24 @@ class JackManager:
                         port.send(note_off_msg)
 
         self._active_notes.clear()
+
+    def _queue_ipc_command(self, socket_path, command_data):
+        """Queues an IPC command for the worker thread to send (RT safe)."""
+        self._ipc_queue.append((socket_path, command_data))
+
+    def _ipc_worker_loop(self):
+        """Worker thread that sends queued IPC commands."""
+        while not self._ipc_worker_stop_event.is_set():
+            try:
+                if self._ipc_queue:
+                    socket_path, command_data = self._ipc_queue.popleft()
+                    self._send_ipc_command(socket_path, command_data)
+                else:
+                    time.sleep(0.01)
+            except IndexError:
+                time.sleep(0.01)
+            except Exception as e:
+                print(f"Error in IPC worker loop: {e}", file=sys.stderr)
 
     def _send_ipc_command(self, socket_path, command_data) -> bool:
         try:
@@ -1218,13 +1253,14 @@ class JackManager:
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
                     # Selective unpause: only tracks that should be playing now
-                    with self.process_lock:
-                        for ap in self.active_audio_processes:
-                            track = self.sequencer.song.tracks[ap.track_index]
-                            if isinstance(track, AudioTrack):
-                                duration = self.sequencer._get_audio_duration_in_beats(track)
-                                if track.start_time <= authoritative_beat_now < (track.start_time + duration):
-                                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
+                    # NOTE: We access active_audio_processes without lock for RT safety.
+                    # It's only modified in main thread during track add/start/stop.
+                    for ap in self.active_audio_processes:
+                        track = self.sequencer.song.tracks[ap.track_index]
+                        if is_audio_track(track):
+                            duration = track.duration_beats or 0.0
+                            if track.start_time <= authoritative_beat_now < (track.start_time + duration):
+                                self._queue_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
                 else: # STOPPED or other state
                     self.set_all_audio_pause_state(True)
                 self.last_transport_state = current_transport_state
@@ -1261,20 +1297,20 @@ class JackManager:
             self._process_automation_events(start_beat_of_block, end_beat_of_block)
             self._process_metronome(start_beat_of_block, end_beat_of_block)
 
-            with self.process_lock:
-                for ap in self.active_audio_processes:
-                    track = self.sequencer.song.tracks[ap.track_index]
-                    if isinstance(track, AudioTrack):
-                        duration_beats = self.sequencer._get_audio_duration_in_beats(track)
-                        end_beat = track.start_time + duration_beats
+            # Update audio track pause states based on boundaries (RT safe)
+            for ap in self.active_audio_processes:
+                track = self.sequencer.song.tracks[ap.track_index]
+                if is_audio_track(track):
+                    duration_beats = track.duration_beats or 0.0
+                    end_beat = track.start_time + duration_beats
 
-                        # Stop at end of track
-                        if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
-                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
+                    # Stop at end of track
+                    if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
+                        self._queue_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
 
-                        # Start at beginning of track
-                        if start_beat_of_block <= track.start_time < end_beat_of_block:
-                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
+                    # Start at beginning of track
+                    if start_beat_of_block <= track.start_time < end_beat_of_block:
+                        self._queue_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
 
             self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 

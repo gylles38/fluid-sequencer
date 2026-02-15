@@ -603,11 +603,35 @@ class Sequencer(EventDispatcher):
         # On déclenche l'événement pour que Kivy mette à jour les widgets
         self.song_structure_changed += 1
 
-    def _all_notes_off(self):
+    def panic(self):
+        """Sends Panic (All Notes Off, Reset All Controllers) to all MIDI channels on all open ports."""
+        if self.jack_manager:
+            self.jack_manager.silence_all_midi_notes()
+
         for port in self.open_ports.values():
             if port and not port.closed:
                 for channel in range(16):
+                    # CC 123: All Notes Off
+                    # CC 120: All Sound Off
+                    # CC 121: Reset All Controllers
+                    # CC 64: Sustain Off
                     port.send(mido.Message('control_change', channel=channel, control=123, value=0))
+                    port.send(mido.Message('control_change', channel=channel, control=120, value=0))
+                    port.send(mido.Message('control_change', channel=channel, control=121, value=0))
+                    port.send(mido.Message('control_change', channel=channel, control=64, value=0))
+
+        # Also send to JackManager's open ports if they differ
+        if self.jack_manager and self.jack_manager.is_running:
+             for port in self.jack_manager.open_ports.values():
+                 if port and not port.closed:
+                     for channel in range(16):
+                         port.send(mido.Message('control_change', channel=channel, control=123, value=0))
+                         port.send(mido.Message('control_change', channel=channel, control=120, value=0))
+                         port.send(mido.Message('control_change', channel=channel, control=121, value=0))
+                         port.send(mido.Message('control_change', channel=channel, control=64, value=0))
+
+    def _all_notes_off(self):
+        self.panic()
 
     def parse_position_to_beats(self, position_str: str, default: str = "1:1") -> Optional[float]:
         if not position_str:

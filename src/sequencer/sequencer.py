@@ -2068,7 +2068,8 @@ class Sequencer(EventDispatcher):
                                                 # Truncate from current beat until the end of the recording session
                                                 session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
                                                 self._truncate_track_for_recording(target_idx, current_beat, session_end_beat)
-                                                track.is_muted = True
+                                                # UI property update must be on main thread
+                                                Clock.schedule_once(lambda dt, t=track: setattr(t, 'is_muted', True))
                                             processed_tracks.add(target_idx)
 
                                         if msg.note not in open_notes:
@@ -2167,8 +2168,12 @@ class Sequencer(EventDispatcher):
                 final_events.append(event)
 
         target_track.events = [e for e in final_events if e.notes or e.cc_messages]
-        self.invalidate_song_length_cache()
-        self.song_structure_changed += 1
+
+        # Schedule UI updates on the main thread for thread safety
+        def _finish_truncation(dt):
+            self.invalidate_song_length_cache()
+            self.song_structure_changed += 1
+        Clock.schedule_once(_finish_truncation)
 
     def _start_recording_internal(self, track_index: Optional[int], start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: Optional[bool], enable_thru: bool):
             # If track_index is provided, we do initial truncation for that specific track.

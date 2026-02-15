@@ -43,6 +43,7 @@ class JackManager:
         self.open_ports = {}
         self.next_event_indices = []
         self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
+        self._sustained_notes = set() # key: (track_idx, note_pitch)
         self._metronome_notes_to_turn_off = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.process_lock = threading.Lock()
@@ -62,7 +63,8 @@ class JackManager:
         self._pending_stop = False
         self._pending_record = False
         self._pending_mappings = collections.deque() # (mapping_obj, value)
-        
+        self._recorded_events_to_merge = collections.deque()
+
         # --- RT-Safe IPC Handling ---
         self._ipc_queue = collections.deque()
         self._ipc_worker_thread = None
@@ -653,7 +655,7 @@ class JackManager:
 
     def silence_all_midi_notes(self):
         """Sends note_off messages for all currently playing MIDI notes."""
-        if not self._active_notes:
+        if not self._active_notes and not self._sustained_notes:
             return
 
         for (track_idx, pitch), end_beat in list(self._active_notes.items()):
@@ -666,6 +668,7 @@ class JackManager:
                         port.send(note_off_msg)
 
         self._active_notes.clear()
+        self._sustained_notes.clear()
 
     def _queue_ipc_command(self, socket_path, command_data):
         """Queues an IPC command for the worker thread to send (RT safe)."""
@@ -965,6 +968,7 @@ class JackManager:
         num_tracks = len(tracks)
         self.next_event_indices = [0] * num_tracks
         self._active_notes.clear()
+        self._sustained_notes.clear()
 
         for i, track in enumerate(tracks):
             if isinstance(track, MidiTrack):
@@ -1034,6 +1038,10 @@ class JackManager:
                             cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
                             port.send(cc_msg)
                             self._last_cc_values[(i, cc.control)] = cc.value
+
+                            # If sustain pedal is released, clear sustained notes for this track
+                            if cc.control == 64 and cc.value < 64:
+                                self._sustained_notes = {p for p in self._sustained_notes if p[0] != i}
                     self.next_event_indices[i] += 1
                 elif event.start_time >= end_beat_of_block:
                     break
@@ -1276,26 +1284,32 @@ class JackManager:
                     if self._active_notes:
                         for (track_idx, pitch), end_beat in list(self._active_notes.items()):
                             track = self.sequencer.song.tracks[track_idx]
-                            if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                            if is_midi_track(track) and track.output_port_name in self.open_ports:
                                 port = self.open_ports[track.output_port_name]
                                 port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
                         self._active_notes.clear()
+                    self._sustained_notes.clear()
                     return
 
-            start_beat_of_block = self.last_beat
-            end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
+                start_beat_of_block = self.last_beat
+                end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
 
-            for (track_idx, pitch), end_beat in list(self._active_notes.items()):
-                if start_beat_of_block <= end_beat < end_beat_of_block:
-                    track = self.sequencer.song.tracks[track_idx]
-                    if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
-                        port = self.open_ports[track.output_port_name]
-                        port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
-                    del self._active_notes[(track_idx, pitch)]
+                for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                    if start_beat_of_block <= end_beat < end_beat_of_block:
+                        track = self.sequencer.song.tracks[track_idx]
+                        if is_midi_track(track) and track.output_port_name in self.open_ports:
+                            port = self.open_ports[track.output_port_name]
+                            port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
 
-            self._process_midi_events(start_beat_of_block, end_beat_of_block)
-            self._process_automation_events(start_beat_of_block, end_beat_of_block)
-            self._process_metronome(start_beat_of_block, end_beat_of_block)
+                            # If sustain pedal is ON, move the note to sustained_notes
+                            if self._last_cc_values.get((track_idx, 64), 0) >= 64:
+                                self._sustained_notes.add((track_idx, pitch))
+
+                        del self._active_notes[(track_idx, pitch)]
+
+                self._process_midi_events(start_beat_of_block, end_beat_of_block)
+                self._process_automation_events(start_beat_of_block, end_beat_of_block)
+                self._process_metronome(start_beat_of_block, end_beat_of_block)
 
             # Update audio track pause states based on boundaries (RT safe)
             for ap in self.active_audio_processes:
@@ -1421,12 +1435,21 @@ class JackManager:
                     target_port = track.output_port_name
                     target_chan = track.channel
 
-                    # 1. Collect ALL pitches currently being played by the sequencer
+                    # 1. Collect ALL pitches currently being played OR sustained by the sequencer
                     # on this specific port and channel, across ALL tracks.
                     active_pitches = set()
                     with self.sync_lock:
-                        # Current active notes in audio thread
+                        # Current active notes (keys down)
                         for (t_idx, pitch) in list(self._active_notes.keys()):
+                            if 0 <= t_idx < len(self.sequencer.song.tracks):
+                                other_track = self.sequencer.song.tracks[t_idx]
+                                if (is_midi_track(other_track) and
+                                    getattr(other_track, 'output_port_name', None) == target_port and
+                                    getattr(other_track, 'channel', -1) == target_chan):
+                                    active_pitches.add(pitch)
+
+                        # Current sustained notes (keys up but pedal down)
+                        for (t_idx, pitch) in list(self._sustained_notes):
                             if 0 <= t_idx < len(self.sequencer.song.tracks):
                                 other_track = self.sequencer.song.tracks[t_idx]
                                 if (is_midi_track(other_track) and
@@ -1459,9 +1482,15 @@ class JackManager:
                         if pitch not in active_pitches:
                             port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
 
-                    # 3. Sustain: Force-stop keyboard sustain but immediately restore sequencer sustain
-                    # to prevent sequencer notes from cutting if they were being held by the pedal.
-                    port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
+                    # 3. Sustain: We only release the pedal if the sequencer is not currently holding it.
+                    # This prevents sequencer notes from being cut by the routing change.
+                    # If the keyboard was also holding the pedal, its notes will stay sustained
+                    # until the sequencer eventually releases the pedal.
+                    last_seq_sustain = self._last_cc_values.get((track_idx, 64), 0)
+                    if last_seq_sustain < 64:
+                        port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
+                    else:
+                        print(f"[Conductor] Sparing sustain on track {track_idx} because sequencer is holding it.")
 
                     # 4. Restore state (Volume, Pan, Sustain)
                     # Note: We REMOVE Program Change and Bank Select restoration as they

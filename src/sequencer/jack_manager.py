@@ -768,11 +768,11 @@ class JackManager:
         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "balance", track.pan]})
         self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]})
 
-        # If playback is active, seek the new track to the current position and unpause
+        # If playback is active, seek the new track to the current position.
+        # seek_audio_to_beat will handle unpausing if the track is within its active range.
         if self.jack_client and self.jack_client.transport_state == jack.ROLLING:
             current_beat = self.get_current_beat()
             self.seek_audio_to_beat(current_beat)
-            self.set_all_audio_pause_state(False)
             print(f"  - New track '{track.name}' synced to current playback position.")
 
     def _launch_audio_track_player(self, track: AudioTrack, track_index: int):
@@ -878,9 +878,25 @@ class JackManager:
             for ap in self.active_audio_processes:
                 track = self.sequencer.song.tracks[ap.track_index]
                 if isinstance(track, AudioTrack):
-                    mpv_time = (beat_pos - track.start_time) / beats_per_second
-                    if mpv_time < 0:
+                    duration_beats = self.sequencer._get_audio_duration_in_beats(track)
+                    end_beat = track.start_time + duration_beats
+
+                    is_rolling = (self.jack_client and self.jack_client.transport_state == jack.ROLLING)
+
+                    if beat_pos >= end_beat:
+                        # Past end: Pause and seek to almost-end
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
+                        mpv_time = (duration_beats - 0.01) / beats_per_second
+                        if mpv_time < 0: mpv_time = 0.0
+                    elif beat_pos < track.start_time:
+                        # Before start: Pause and seek to 0
+                        self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
                         mpv_time = 0.0
+                    else:
+                        # Within track
+                        mpv_time = (beat_pos - track.start_time) / beats_per_second
+                        if is_rolling:
+                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
 
                     if synchronous:
                         # Create and start a thread for each synchronous seek
@@ -1186,10 +1202,29 @@ class JackManager:
 
     def _process_callback(self, frames: int):
         try:
+            state, pos_struct = self.jack_client.transport_query_struct()
+            pos = jack.position2dict(pos_struct)
+            samplerate = self.jack_client.samplerate
+            tempo = self.sequencer.song.tempo
+            beats_per_second = tempo / 60.0
+
+            current_frame = pos.get('frame', 0)
+            if samplerate > 0 and beats_per_second > 0:
+                authoritative_beat_now = (current_frame / samplerate) * beats_per_second
+            else:
+                authoritative_beat_now = self.last_beat
+
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
-                    self.set_all_audio_pause_state(False)
+                    # Selective unpause: only tracks that should be playing now
+                    with self.process_lock:
+                        for ap in self.active_audio_processes:
+                            track = self.sequencer.song.tracks[ap.track_index]
+                            if isinstance(track, AudioTrack):
+                                duration = self.sequencer._get_audio_duration_in_beats(track)
+                                if track.start_time <= authoritative_beat_now < (track.start_time + duration):
+                                    self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
                 else: # STOPPED or other state
                     self.set_all_audio_pause_state(True)
                 self.last_transport_state = current_transport_state
@@ -1211,20 +1246,7 @@ class JackManager:
                         self._active_notes.clear()
                     return
 
-            state, pos_struct = self.jack_client.transport_query_struct()
-            pos = jack.position2dict(pos_struct)
-            samplerate = self.jack_client.samplerate
-            tempo = self.sequencer.song.tempo
-            beats_per_second = tempo / 60.0
-
             start_beat_of_block = self.last_beat
-
-            current_frame = pos.get('frame', 0)
-            if samplerate > 0 and beats_per_second > 0:
-                authoritative_beat_now = (current_frame / samplerate) * beats_per_second
-            else:
-                authoritative_beat_now = self.last_beat
-
             end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
 
             for (track_idx, pitch), end_beat in list(self._active_notes.items()):
@@ -1245,9 +1267,14 @@ class JackManager:
                     if isinstance(track, AudioTrack):
                         duration_beats = self.sequencer._get_audio_duration_in_beats(track)
                         end_beat = track.start_time + duration_beats
+
+                        # Stop at end of track
                         if end_beat_of_block >= end_beat and start_beat_of_block < end_beat:
-                            command = {"command": ["set_property", "pause", True]}
-                            self._send_ipc_command(ap.socket_path, command)
+                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", True]})
+
+                        # Start at beginning of track
+                        if start_beat_of_block <= track.start_time < end_beat_of_block:
+                            self._send_ipc_command(ap.socket_path, {"command": ["set_property", "pause", False]})
 
             self._check_for_loop_and_play_range(start_beat_of_block, end_beat_of_block)
 

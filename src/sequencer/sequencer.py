@@ -2579,7 +2579,7 @@ class Sequencer(EventDispatcher):
             if was_rolling or force_play:
                 print("[DIAGNOSTIC] Restarting transport...")
                 self.jack_manager.jack_client.transport_start()
-                self.jack_manager.set_all_audio_pause_state(False)
+                # Selective unpause is now handled by JackManager._process_callback
                 print("[DIAGNOSTIC] Transport restarted.")
 
         except jack.JackError as e:

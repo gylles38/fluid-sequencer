@@ -794,6 +794,16 @@ class InputRoutingEditor(FloatingWindow):
         try:
             new_beat = float(self.ids.input_beat.text)
             new_val = int(float(self.ids.input_value.text))
+
+            # Validation: Check if the track index exists and is a MIDI track
+            valid_indices = [t[0] for t in self.midi_tracks]
+            if new_val not in valid_indices:
+                # Reverting to the previous value if invalid
+                self.update_status_bar(point)
+                self.ids.input_beat.focus = False
+                self.ids.input_value.focus = False
+                return
+
             point.start_time = max(0, min(self.total_beats, new_beat))
             point.value = new_val
             self.ids.grid.draw()

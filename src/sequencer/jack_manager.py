@@ -1457,18 +1457,19 @@ class JackManager:
                                     getattr(other_track, 'channel', -1) == target_chan):
                                     active_pitches.add(pitch)
 
-                        # Look ahead for upcoming notes in the next say 0.25 beats
-                        # to avoid race conditions with notes starting in the next audio block.
-                        look_ahead = 0.25
-                        upcoming_beat = self.last_beat + look_ahead
-                        for other_track in self.sequencer.song.tracks:
-                            if (is_midi_track(other_track) and
-                                getattr(other_track, 'output_port_name', None) == target_port and
-                                getattr(other_track, 'channel', -1) == target_chan):
-                                for event in other_track.events:
-                                    if self.last_beat <= event.start_time <= upcoming_beat:
-                                        for note in event.notes:
-                                            active_pitches.add(note.pitch)
+                    # 2. Look ahead for upcoming notes (OUTSIDE the lock to avoid RT-blocking)
+                    look_ahead = 0.1
+                    upcoming_beat = self.last_beat + look_ahead
+                    for other_track in self.sequencer.song.tracks:
+                        if (is_midi_track(other_track) and
+                            getattr(other_track, 'output_port_name', None) == target_port and
+                            getattr(other_track, 'channel', -1) == target_chan):
+                            # Only check a reasonable range of events around current beat
+                            # (Ideally we'd use bisect here, but even a full loop is better outside the lock)
+                            for event in other_track.events:
+                                if self.last_beat <= event.start_time <= upcoming_beat:
+                                    for note in event.notes:
+                                        active_pitches.add(note.pitch)
 
                     # Also spare metronome notes if they share the same port/channel
                     if (self.sequencer.song.metronome_enabled and
@@ -1477,10 +1478,15 @@ class JackManager:
                         active_pitches.add(self.sequencer.metronome_pitch_downbeat)
                         active_pitches.add(self.sequencer.metronome_pitch_beat)
 
-                    # 2. Individual Note Offs for pitches NOT currently in use by the sequencer
-                    for pitch in range(128):
-                        if pitch not in active_pitches:
-                            port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
+                    # 3. Silencing
+                    if not active_pitches:
+                        # Optimization: if no sequencer notes are active, use "All Notes Off" (CC 123)
+                        port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
+                    else:
+                        # Surgical silence: Individual Note Offs for pitches NOT in use
+                        for pitch in range(128):
+                            if pitch not in active_pitches:
+                                port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
 
                     # 3. Sustain: We only release the pedal if the sequencer is not currently holding it.
                     # This prevents sequencer notes from being cut by the routing change.

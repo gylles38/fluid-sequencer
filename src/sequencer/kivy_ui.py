@@ -763,8 +763,13 @@ class SequencerLayout(BoxLayout):
         """
         Callback for when the song's structure (e.g., notes in a track) changes
         in a way that requires a full UI redraw.
+        Debounced to avoid lagging during heavy updates (like recording or bulk edits).
         """
-        Logger.info("UI: Song structure changed, forcing full UI refresh.")
+        Clock.unschedule(self._debounced_refresh_ui)
+        Clock.schedule_once(self._debounced_refresh_ui, 0.1)
+
+    def _debounced_refresh_ui(self, dt):
+        Logger.info("UI: Song structure changed, performing debounced UI refresh.")
         self.update_status_display()
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):

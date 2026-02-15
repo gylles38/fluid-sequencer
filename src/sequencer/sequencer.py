@@ -486,8 +486,7 @@ class Sequencer(EventDispatcher):
 
         if any_added:
             self.is_dirty = True
-            self.invalidate_song_length_cache()
-            self.song_structure_changed += 1
+            self._trigger_song_structure_change()
 
     def get_default_record_port(self) -> Optional[str]:
         """Retourne le port d'enregistrement par défaut"""
@@ -2106,7 +2105,8 @@ class Sequencer(EventDispatcher):
                             self._stop_event.set()
                             break
                         
-                        time.sleep(0.001)
+                        # Increased sleep slightly to reduce CPU usage and ALSA contention
+                        time.sleep(0.002)
 
             except Exception as e:
                 print(f"Erreur lors de l'enregistrement: {e}")
@@ -2170,10 +2170,12 @@ class Sequencer(EventDispatcher):
         target_track.events = [e for e in final_events if e.notes or e.cc_messages]
 
         # Schedule UI updates on the main thread for thread safety
-        def _finish_truncation(dt):
-            self.invalidate_song_length_cache()
-            self.song_structure_changed += 1
-        Clock.schedule_once(_finish_truncation)
+        Clock.schedule_once(lambda dt: self._trigger_song_structure_change())
+
+    def _trigger_song_structure_change(self):
+        """Triggers a UI refresh due to song structure changes."""
+        self.invalidate_song_length_cache()
+        self.song_structure_changed += 1
 
     def _start_recording_internal(self, track_index: Optional[int], start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: Optional[bool], enable_thru: bool):
             # If track_index is provided, we do initial truncation for that specific track.

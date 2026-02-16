@@ -766,7 +766,7 @@ class SequencerLayout(BoxLayout):
         Debounced to avoid lagging during heavy updates (like recording or bulk edits).
         """
         Clock.unschedule(self._debounced_refresh_ui)
-        Clock.schedule_once(self._debounced_refresh_ui, 0.1)
+        Clock.schedule_once(self._debounced_refresh_ui, 0.3)
 
     def _debounced_refresh_ui(self, dt):
         Logger.info("UI: Song structure changed, performing debounced UI refresh.")
@@ -1946,31 +1946,49 @@ class SequencerLayout(BoxLayout):
                 if hasattr(window, 'source_track') and window.source_track not in self.sequencer.song.tracks:
                     window.dismiss()
 
-        self.track_list_layout.clear_widgets()
-        self.track_widgets.clear()
-
         final_total_beats = self.sequencer.get_song_length_in_beats()
-
-        # Update the main ruler's properties
         self.ruler.total_beats = final_total_beats
         self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
 
-        for i, track in enumerate(self.sequencer.song.tracks):
-            if isinstance(track, MidiTrack) and track.is_metronome:
-                continue
+        # Optimization: Reuse existing TrackWidget instances to avoid expensive reconstruction
+        # Create a mapping of current tracks to their widgets
+        existing_widgets = {w.track: w for w in self.track_widgets}
 
-            track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
-            track_widget.total_beats = final_total_beats
-            track_widget.pixels_per_beat = self.pixels_per_beat
-            track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
-            self.track_widgets.append(track_widget)
-            # Force l'appel de la mise à jour graphique une fois que tout est rendu
-            Clock.schedule_once(track_widget._update_graphics, 0)
-            
-            if hasattr(track_widget, 'timeline_scroll'):
-                    track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
-                    
-            self.track_list_layout.add_widget(track_widget)            
+        new_track_widgets = []
+        tracks_to_show = [t for t in self.sequencer.song.tracks if not (isinstance(t, MidiTrack) and t.is_metronome)]
+
+        # Determine if we need to clear and re-add widgets (e.g., if order or count changed)
+        current_tracks_in_widgets = [w.track for w in self.track_widgets]
+        if current_tracks_in_widgets != tracks_to_show:
+            self.track_list_layout.clear_widgets()
+            for i, track in enumerate(tracks_to_show):
+                if track in existing_widgets:
+                    track_widget = existing_widgets[track]
+                    track_widget.track_index = i
+                else:
+                    track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
+                    if hasattr(track_widget, 'timeline_scroll'):
+                        track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
+
+                track_widget.total_beats = final_total_beats
+                track_widget.pixels_per_beat = self.pixels_per_beat
+                track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
+
+                new_track_widgets.append(track_widget)
+                self.track_list_layout.add_widget(track_widget)
+                Clock.schedule_once(track_widget._update_graphics, 0)
+        else:
+            # Order is the same, just update properties of existing widgets
+            for i, track_widget in enumerate(self.track_widgets):
+                track_widget.track_index = i
+                track_widget.total_beats = final_total_beats
+                track_widget.pixels_per_beat = self.pixels_per_beat
+                track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
+                new_track_widgets.append(track_widget)
+                # We still want a redraw if notes changed
+                Clock.schedule_once(track_widget._update_graphics, 0)
+
+        self.track_widgets = new_track_widgets
 
         # Bind ruler spacer widths and timeline width
         if self.track_widgets:

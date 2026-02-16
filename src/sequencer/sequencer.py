@@ -2105,8 +2105,8 @@ class Sequencer(EventDispatcher):
                             self._stop_event.set()
                             break
                         
-                        # Increased sleep slightly to reduce CPU usage and ALSA contention
-                        time.sleep(0.002)
+                        # Polling often to avoid ALSA buffer overflow, but processing efficiently
+                        time.sleep(0.001)
 
             except Exception as e:
                 print(f"Erreur lors de l'enregistrement: {e}")

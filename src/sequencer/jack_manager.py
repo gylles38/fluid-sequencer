@@ -42,7 +42,7 @@ class JackManager:
         self.last_transport_state = jack.STOPPED
         self.open_ports = {}
         self.next_event_indices = []
-        self._active_notes = {} # key: (track_idx, note_pitch), value: end_beat
+        self._active_notes = {} # key: (track_idx, note_pitch), value: (end_beat, velocity)
         self._sustained_notes = set() # key: (track_idx, note_pitch)
         self._metronome_notes_to_turn_off = []
         self.active_audio_processes: List[ActiveAudioProcess] = []
@@ -658,10 +658,10 @@ class JackManager:
         if not self._active_notes and not self._sustained_notes:
             return
 
-        for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+        for (track_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
             if 0 <= track_idx < len(self.sequencer.song.tracks):
                 track = self.sequencer.song.tracks[track_idx]
-                if isinstance(track, MidiTrack) and track.output_port_name in self.open_ports:
+                if is_midi_track(track) and track.output_port_name in self.open_ports:
                     port = self.open_ports[track.output_port_name]
                     if port and not port.closed:
                         note_off_msg = mido.Message('note_off', channel=track.channel, note=pitch, velocity=0)
@@ -1033,7 +1033,7 @@ class JackManager:
                             note_on_msg = mido.Message('note_on', channel=track.channel, note=note.pitch, velocity=final_velocity)
                             port.send(note_on_msg)
                             note_end_beat = event.start_time + note.duration
-                            self._active_notes[(i, note.pitch)] = note_end_beat
+                            self._active_notes[(i, note.pitch)] = (note_end_beat, final_velocity)
                         for cc in event.cc_messages:
                             cc_msg = mido.Message('control_change', channel=track.channel, control=cc.control, value=cc.value)
                             port.send(cc_msg)
@@ -1282,7 +1282,7 @@ class JackManager:
 
                 if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
                     if self._active_notes:
-                        for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                        for (track_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
                             track = self.sequencer.song.tracks[track_idx]
                             if is_midi_track(track) and track.output_port_name in self.open_ports:
                                 port = self.open_ports[track.output_port_name]
@@ -1294,7 +1294,7 @@ class JackManager:
                 start_beat_of_block = self.last_beat
                 end_beat_of_block = authoritative_beat_now + (frames / samplerate) * beats_per_second
 
-                for (track_idx, pitch), end_beat in list(self._active_notes.items()):
+                for (track_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
                     if start_beat_of_block <= end_beat < end_beat_of_block:
                         track = self.sequencer.song.tracks[track_idx]
                         if is_midi_track(track) and track.output_port_name in self.open_ports:
@@ -1424,8 +1424,7 @@ class JackManager:
         """
         Sends targeted Note Offs to the specified track to cut keyboard notes
         without interrupting notes currently played by the sequencer.
-        Spares all notes currently managed by the sequencer on the same port and channel,
-        including those starting very soon (look-ahead).
+        Uses CC 123 (All Notes Off) for efficiency and then restores sequencer notes.
         """
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
@@ -1435,58 +1434,21 @@ class JackManager:
                     target_port = track.output_port_name
                     target_chan = track.channel
 
-                    # 1. Collect ALL pitches currently being played OR sustained by the sequencer
-                    # on this specific port and channel, across ALL tracks.
-                    active_pitches = set()
+                    # 1. Kill everything on this channel using CC 123 (All Notes Off)
+                    # This is much faster than 128 individual Note Offs.
+                    port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
+
+                    # 2. Restore sequencer notes (Note On) for those currently active
+                    # This happens immediately after silencing, minimizing any audible cut.
                     with self.sync_lock:
-                        # Current active notes (keys down)
-                        for (t_idx, pitch) in list(self._active_notes.keys()):
+                        for (t_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
                             if 0 <= t_idx < len(self.sequencer.song.tracks):
                                 other_track = self.sequencer.song.tracks[t_idx]
                                 if (is_midi_track(other_track) and
                                     getattr(other_track, 'output_port_name', None) == target_port and
                                     getattr(other_track, 'channel', -1) == target_chan):
-                                    active_pitches.add(pitch)
-
-                        # Current sustained notes (keys up but pedal down)
-                        for (t_idx, pitch) in list(self._sustained_notes):
-                            if 0 <= t_idx < len(self.sequencer.song.tracks):
-                                other_track = self.sequencer.song.tracks[t_idx]
-                                if (is_midi_track(other_track) and
-                                    getattr(other_track, 'output_port_name', None) == target_port and
-                                    getattr(other_track, 'channel', -1) == target_chan):
-                                    active_pitches.add(pitch)
-
-                    # 2. Look ahead for upcoming notes (OUTSIDE the lock to avoid RT-blocking)
-                    look_ahead = 0.1
-                    upcoming_beat = self.last_beat + look_ahead
-                    for other_track in self.sequencer.song.tracks:
-                        if (is_midi_track(other_track) and
-                            getattr(other_track, 'output_port_name', None) == target_port and
-                            getattr(other_track, 'channel', -1) == target_chan):
-                            # Only check a reasonable range of events around current beat
-                            # (Ideally we'd use bisect here, but even a full loop is better outside the lock)
-                            for event in other_track.events:
-                                if self.last_beat <= event.start_time <= upcoming_beat:
-                                    for note in event.notes:
-                                        active_pitches.add(note.pitch)
-
-                    # Also spare metronome notes if they share the same port/channel
-                    if (self.sequencer.song.metronome_enabled and
-                        self.sequencer.song.metronome_port_name == target_port and
-                        self.sequencer.metronome_channel == target_chan):
-                        active_pitches.add(self.sequencer.metronome_pitch_downbeat)
-                        active_pitches.add(self.sequencer.metronome_pitch_beat)
-
-                    # 3. Silencing
-                    if not active_pitches:
-                        # Optimization: if no sequencer notes are active, use "All Notes Off" (CC 123)
-                        port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
-                    else:
-                        # Surgical silence: Individual Note Offs for pitches NOT in use
-                        for pitch in range(128):
-                            if pitch not in active_pitches:
-                                port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
+                                    # Re-trigger the sequencer note
+                                    port.send(mido.Message('note_on', channel=target_chan, note=pitch, velocity=velocity))
 
                     # 3. Sustain: We only release the pedal if the sequencer is not currently holding it.
                     # This prevents sequencer notes from being cut by the routing change.

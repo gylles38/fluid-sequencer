@@ -1951,8 +1951,8 @@ class SequencerLayout(BoxLayout):
         self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
 
         # Optimization: Reuse existing TrackWidget instances to avoid expensive reconstruction
-        # Create a mapping of current tracks to their widgets
-        existing_widgets = {w.track: w for w in self.track_widgets}
+        # Create a mapping of current tracks to their widgets using id(track) for hashability
+        existing_widgets = {id(w.track): w for w in self.track_widgets}
 
         new_track_widgets = []
         tracks_to_show = [t for t in self.sequencer.song.tracks if not (isinstance(t, MidiTrack) and t.is_metronome)]
@@ -1962,8 +1962,8 @@ class SequencerLayout(BoxLayout):
         if current_tracks_in_widgets != tracks_to_show:
             self.track_list_layout.clear_widgets()
             for i, track in enumerate(tracks_to_show):
-                if track in existing_widgets:
-                    track_widget = existing_widgets[track]
+                if id(track) in existing_widgets:
+                    track_widget = existing_widgets[id(track)]
                     track_widget.track_index = i
                 else:
                     track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)

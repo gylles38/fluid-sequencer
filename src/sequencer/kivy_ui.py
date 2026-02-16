@@ -765,8 +765,10 @@ class SequencerLayout(BoxLayout):
         in a way that requires a full UI redraw.
         Debounced to avoid lagging during heavy updates (like recording or bulk edits).
         """
+        # Longer debounce during recording to prioritize MIDI thread
+        debounce_time = 1.0 if (self.sequencer and self.sequencer.is_recording) else 0.3
         Clock.unschedule(self._debounced_refresh_ui)
-        Clock.schedule_once(self._debounced_refresh_ui, 0.3)
+        Clock.schedule_once(self._debounced_refresh_ui, debounce_time)
 
     def _debounced_refresh_ui(self, dt):
         Logger.info("UI: Song structure changed, performing debounced UI refresh.")
@@ -1985,8 +1987,13 @@ class SequencerLayout(BoxLayout):
                 track_widget.pixels_per_beat = self.pixels_per_beat
                 track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
                 new_track_widgets.append(track_widget)
-                # We still want a redraw if notes changed
-                Clock.schedule_once(track_widget._update_graphics, 0)
+
+                # Redraw only the piano roll or measure grid if notes changed.
+                # We use redraw() which is debounced.
+                if hasattr(track_widget, 'piano_roll'):
+                    track_widget.piano_roll.redraw()
+                elif hasattr(track_widget, 'measure_grid'):
+                    track_widget.measure_grid.redraw()
 
         self.track_widgets = new_track_widgets
 

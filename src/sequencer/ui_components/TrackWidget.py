@@ -683,12 +683,12 @@ class TrackWidget(BoxLayout):
             self.piano_roll.beat_per_measure = self.beats_per_measure
             # ----------------------
             
-            self.piano_roll.draw()
+            # Redraw is handled by property bindings in PianoRoll
         else:
             # For other tracks (unchanged)
             content_width = self.total_beats * self.pixels_per_beat
             self.timeline_container.width = content_width
-            # Vous le faisiez déjà ici pour measure_grid, mais pas pour piano_roll !
+            # Redraw is handled by property bindings in MeasureGrid
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
             self.measure_grid.beat_per_measure = self.beats_per_measure

@@ -1,7 +1,8 @@
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Line
+from kivy.graphics import Color, Line, Mesh
 from kivy.properties import NumericProperty
 from kivy.metrics import dp
+from kivy.clock import Clock
 
 # --- Définition de MeasureGrid ---
 class MeasureGrid(Widget):
@@ -12,32 +13,37 @@ class MeasureGrid(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.draw_measure_lines, size=self.draw_measure_lines,
-                  beat_per_measure=self.draw_measure_lines, total_beats=self.draw_measure_lines,
-                  pixels_per_beat=self.draw_measure_lines)
-        self.draw_measure_lines()
+        self.bind(pos=self.redraw, size=self.redraw,
+                  beat_per_measure=self.redraw, total_beats=self.redraw,
+                  pixels_per_beat=self.redraw)
+        self.redraw()
+
+    def redraw(self, *args):
+        """Debounced redraw of the measure lines."""
+        Clock.unschedule(self.draw_measure_lines)
+        Clock.schedule_once(self.draw_measure_lines, 0)
 
     def draw_measure_lines(self, *args):
         self.canvas.clear()
         
-        total_width = self.total_beats * self.pixels_per_beat
-        
         with self.canvas:
-            current_beat = 0
-            while current_beat <= self.total_beats:
-                x_pos = current_beat * self.pixels_per_beat
+            major_vertices = []
+            minor_vertices = []
 
-                # Style de la ligne
-                if current_beat % self.beat_per_measure == 0:
-                    line_width = 1.5
-                    Color(0.8, 0.8, 0.8, 0.8) # Mesure (Barre)
+            for i in range(int(self.total_beats) + 1):
+                x_pos = i * self.pixels_per_beat
+                if i % self.beat_per_measure == 0:
+                    # Major line
+                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
                 else:
-                    line_width = 0.5
-                    Color(0.5, 0.5, 0.5, 0.4) # Temps intermédiaire (si vous implémentez l'affichage des temps)
+                    # Minor line
+                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
 
-                # Dessin : local coordinates thanks to RelativeLayout
-                Line(points=[x_pos, 0, x_pos, self.height], width=line_width)
+            if major_vertices:
+                Color(0.8, 0.8, 0.8, 0.8)
+                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
 
-                # Incrémenter par 1 beat pour afficher les temps
-                current_beat += 1
+            if minor_vertices:
+                Color(0.5, 0.5, 0.5, 0.4)
+                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
 # ----------------------------------

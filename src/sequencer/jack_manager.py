@@ -1440,6 +1440,7 @@ class JackManager:
 
                     # 2. Restore sequencer notes (Note On) for those currently active
                     # This happens immediately after silencing, minimizing any audible cut.
+                    restored_count = 0
                     with self.sync_lock:
                         for (t_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
                             if 0 <= t_idx < len(self.sequencer.song.tracks):
@@ -1449,6 +1450,7 @@ class JackManager:
                                     getattr(other_track, 'channel', -1) == target_chan):
                                     # Re-trigger the sequencer note
                                     port.send(mido.Message('note_on', channel=target_chan, note=pitch, velocity=velocity))
+                                    restored_count += 1
 
                     # 3. Sustain: We only release the pedal if the sequencer is not currently holding it.
                     # This prevents sequencer notes from being cut by the routing change.
@@ -1482,7 +1484,7 @@ class JackManager:
                              if last_sustain is not None:
                                  port.send(mido.Message('control_change', channel=target_chan, control=64, value=last_sustain))
 
-                    print(f"[Conductor] Silenced keyboard notes on track {track_idx} (spared {len(active_pitches)} sequencer notes on port {target_port} ch {target_chan+1})")
+                    print(f"[Conductor] Silenced keyboard notes on track {track_idx} (restored {restored_count} sequencer notes on port {target_port} ch {target_chan+1})")
 
     def _prime_automation_at_beat_for_track(self, track_index: int, beat: float) -> set:
         """

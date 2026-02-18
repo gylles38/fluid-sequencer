@@ -139,7 +139,9 @@ class Sequencer(EventDispatcher):
             if not math.isclose(self.current_beat, new_beat, abs_tol=0.001):
                 self.current_beat = new_beat
                 self.last_beat_update_time = time.perf_counter()
-                self._update_current_routing()
+
+            # Update routing even if beat didn't change (to catch arming changes or manual seek while stopped)
+            self._update_current_routing()
 
         # 3. Synchronisation de l'état Playback
         time_since_play = time.perf_counter() - getattr(self, '_last_play_click_time', 0)
@@ -202,10 +204,9 @@ class Sequencer(EventDispatcher):
             # Ajoute une petite compensation (ex: 0.05 beat) pour compenser le lag de l'UI
             look_ahead_beat = self.current_beat + 0.05           
             val = self.jack_manager._get_input_routing_value(look_ahead_beat)
-            if val is not None:
-                new_index = int(round(val))
-                if new_index != self.current_routing_index:
-                    self.current_routing_index = new_index                                
+            new_index = int(round(val)) if val is not None else -1
+            if new_index != self.current_routing_index:
+                self.current_routing_index = new_index
 
     def _start_carla_process(self, carla_project_path: Optional[str] = None):
         """

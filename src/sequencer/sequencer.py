@@ -1671,6 +1671,7 @@ class Sequencer(EventDispatcher):
             self.is_dirty = True
             self.last_project_basename = None
             self.invalidate_song_length_cache()
+            self.last_record_settings = None
             return f"Successfully loaded song from '{filepath}'."
         except Exception as e:
             return f"Error loading MIDI file: {e}"
@@ -1712,6 +1713,7 @@ class Sequencer(EventDispatcher):
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
             self.song = project_data.get("song", Song(name="New Song"))
+            self.last_record_settings = None
 
 
             self.audio_player_command = project_data.get("audio_player_command", self.DEFAULT_AUDIO_PLAYER_COMMAND)
@@ -1729,6 +1731,7 @@ class Sequencer(EventDispatcher):
             self.is_dirty = False
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
+            self.last_record_settings = None
 
             # --- Stop existing Carla instance and start a new one ---
             # This will load the project's carla file if it exists,
@@ -1830,6 +1833,7 @@ class Sequencer(EventDispatcher):
         self.last_project_basename = None
         self.is_dirty = False
         self.invalidate_song_length_cache()
+        self.last_record_settings = None
 
         # --- Restart Jack Manager and Carla for the new empty project ---
         self.jack_manager.stop()
@@ -2252,7 +2256,8 @@ class Sequencer(EventDispatcher):
 
             # track_idx is None means we follow dynamic MIDI Routing
             # self.last_record_settings is checked for record_bis
-            if track_idx is not None or self.last_record_settings is None or 'start_beat' not in self.last_record_settings:
+            if (track_idx is not None or start_beat is not None or inport_name is not None or
+                self.last_record_settings is None or 'start_beat' not in self.last_record_settings):
                 # NEW SESSION
                 if inport_name is None:
                     if self.default_record_port:

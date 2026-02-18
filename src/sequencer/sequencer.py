@@ -119,14 +119,15 @@ class Sequencer(EventDispatcher):
             return
 
         # 1. Obtenir l'état directement depuis JACK (Source de vérité absolue)
-        state_code, pos_struct = self.jack_manager.jack_client.transport_query_struct()
-        
+        state_code, pos_dict = self.jack_manager.get_safe_transport_pos()
+        if state_code is None:
+            return
+
         # state_code ici est directement jack.ROLLING ou jack.STOPPED
         # C'est beaucoup plus fiable que _last_transport_state_rt
         engine_is_rolling = (state_code == jack.ROLLING)
 
         # 2. Update current beat (Votre code actuel qui fonctionne)
-        pos_dict = jack.position2dict(pos_struct)
         current_frame = pos_dict.get('frame', 0)
         samplerate = self.jack_manager.jack_client.samplerate
         beats_per_second = self.song.tempo / 60.0        
@@ -1325,10 +1326,10 @@ class Sequencer(EventDispatcher):
             if debug:
                 print("[DEBUG] Forcing JACK transport resync...")
             try:
-                jc = self.jack_manager.jack_client
                 # Read current position
-                state, pos_struct = jc.transport_query_struct()
-                pos_dict = jack.position2dict(pos_struct)
+                state, pos_dict = self.jack_manager.get_safe_transport_pos()
+                if pos_dict is None:
+                    return
                 frame = pos_dict.get('frame', 0)
                 samplerate = jc.samplerate
                 beats_per_second = self.song.tempo / 60.0
@@ -1966,8 +1967,9 @@ class Sequencer(EventDispatcher):
     def _get_current_beat(self) -> float:
         if self.jack_manager and self.jack_manager.is_running and self.jack_manager.jack_client:
             try:
-                _ , pos_struct = self.jack_manager.jack_client.transport_query_struct()
-                pos = jack.position2dict(pos_struct)
+                _ , pos = self.jack_manager.get_safe_transport_pos()
+                if pos is None:
+                    return self.current_beat
 
                 # Frame-based calculation is more reliable than bar/beat from transport
                 frame = pos.get('frame', 0)
@@ -2760,9 +2762,11 @@ class Sequencer(EventDispatcher):
                 offset_beats = sign * value
 
             # Get current position
-            _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
-            pos_dict = jack.position2dict(pos_struct)
-            current_frame = pos_dict.get('frame', 0)
+            _, pos_dict = self.jack_manager.get_safe_transport_pos()
+            if pos_dict:
+                current_frame = pos_dict.get('frame', 0)
+            else:
+                current_frame = 0
 
             samplerate = self.jack_manager.jack_client.samplerate
             beats_per_second = self.song.tempo / 60.0

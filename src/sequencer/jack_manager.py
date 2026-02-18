@@ -237,8 +237,10 @@ class JackManager:
                     continue
 
                 # --- Get Master Time from JACK ---
-                state, pos_struct = self.jack_client.transport_query_struct()
-                pos_dict = jack.position2dict(pos_struct)
+                state, pos_dict = self.get_safe_transport_pos()
+                if pos_dict is None:
+                    time.sleep(0.1)
+                    continue
                 frame = pos_dict.get('frame', 0)
                 samplerate = self.jack_client.samplerate
                 if samplerate <= 0:
@@ -541,11 +543,12 @@ class JackManager:
                 self.is_running = True
 
                 # --- Initial Transport Sync ---
-                state, pos_struct = self.jack_client.transport_query_struct()
-                pos_dict = jack.position2dict(pos_struct)
-                self.sequencer.song.tempo = pos_dict.get('beats_per_minute', self.sequencer.song.tempo)
-
-                frame = pos_dict.get('frame', 0)
+                state, pos_dict = self.get_safe_transport_pos()
+                if pos_dict:
+                    self.sequencer.song.tempo = pos_dict.get('beats_per_minute', self.sequencer.song.tempo)
+                    frame = pos_dict.get('frame', 0)
+                else:
+                    frame = 0
                 samplerate = self.jack_client.samplerate
                 beats_per_second = self.sequencer.song.tempo / 60.0
 
@@ -652,6 +655,26 @@ class JackManager:
     def get_current_beat(self) -> float:
         """Retourne la position actuelle du transport en beats."""
         return self.last_beat
+
+    def get_safe_transport_pos(self):
+        """
+        Retrieves the transport state and position dictionary from JACK.
+        Handles AssertionError caused by race conditions during transport polling
+        by retrying the query.
+        Returns: (state_code, pos_dict) or (None, None) on persistent failure.
+        """
+        if not self.jack_client:
+            return None, None
+
+        for _ in range(3):
+            try:
+                state, pos_struct = self.jack_client.transport_query_struct()
+                pos_dict = jack.position2dict(pos_struct)
+                return state, pos_dict
+            except (AssertionError, Exception):
+                # Race condition: position updated while reading. Retry.
+                continue
+        return None, None
 
     def silence_all_midi_notes(self):
         """Sends note_off messages for all currently playing MIDI notes."""
@@ -1245,8 +1268,14 @@ class JackManager:
 
     def _process_callback(self, frames: int):
         try:
-            state, pos_struct = self.jack_client.transport_query_struct()
-            pos = jack.position2dict(pos_struct)
+            # We use a simple try/except here for RT-safety (avoid retry loop)
+            try:
+                state, pos_struct = self.jack_client.transport_query_struct()
+                pos = jack.position2dict(pos_struct)
+            except (AssertionError, Exception):
+                # Fallback to last known frame + frames per second
+                pos = {'frame': int(self.last_beat * (self.jack_client.samplerate / (self.sequencer.song.tempo / 60.0)))}
+
             samplerate = self.jack_client.samplerate
             tempo = self.sequencer.song.tempo
             beats_per_second = tempo / 60.0

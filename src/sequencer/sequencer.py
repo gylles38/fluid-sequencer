@@ -2055,6 +2055,21 @@ class Sequencer(EventDispatcher):
                         # Get current target track from MIDI routing
                         target_idx = self.jack_manager._get_input_routing_value(current_beat)
 
+                        # Handle dynamic activation for OVERWRITE mode as soon as a track becomes the target
+                        if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
+                            if target_idx not in processed_tracks:
+                                track = self.song.tracks[target_idx]
+                                if is_midi_track(track):
+                                    original_mute_states[target_idx] = track.is_muted
+                                    if track.record_mode == 'OVERWRITE':
+                                        # Truncate from the SESSION START instead of current_beat
+                                        # This ensures all "previous" notes (from start_beat) are cleared.
+                                        session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
+                                        self._truncate_track_for_recording(target_idx, start_beat, session_end_beat)
+                                        # Mute it so we don't hear old notes during the rest of the recording session
+                                        Clock.schedule_once(lambda dt, t=track: setattr(t, 'is_muted', True))
+                                    processed_tracks.add(target_idx)
+
                         # Process pending first note
                         if pending_first_note:
                             msgs = [pending_first_note]
@@ -2067,17 +2082,6 @@ class Sequencer(EventDispatcher):
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
                                     if is_midi_track(track):
-                                        # Handle dynamic truncation for OVERWRITE mode
-                                        if target_idx not in processed_tracks:
-                                            original_mute_states[target_idx] = track.is_muted
-                                            if track.record_mode == 'OVERWRITE':
-                                                # Truncate from current beat until the end of the recording session
-                                                session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
-                                                self._truncate_track_for_recording(target_idx, current_beat, session_end_beat)
-                                                # UI property update must be on main thread
-                                                Clock.schedule_once(lambda dt, t=track: setattr(t, 'is_muted', True))
-                                            processed_tracks.add(target_idx)
-
                                         if msg.note not in open_notes:
                                             open_notes[msg.note] = (current_beat, msg.velocity, target_idx)
                                             # Thru
@@ -2134,9 +2138,12 @@ class Sequencer(EventDispatcher):
                             'duration': duration
                         })
 
-                # Restore original mute states
-                for track_idx, was_muted in original_mute_states.items():
-                    self.song.tracks[track_idx].is_muted = was_muted
+                # Restore original mute states on the main thread
+                def restore_mutes(dt):
+                    for t_idx, was_muted in original_mute_states.items():
+                        if 0 <= t_idx < len(self.song.tracks):
+                            self.song.tracks[t_idx].is_muted = was_muted
+                Clock.schedule_once(restore_mutes)
 
                 self.is_recording = False
                 self._stop_event.clear()
@@ -2174,10 +2181,17 @@ class Sequencer(EventDispatcher):
             else:
                 final_events.append(event)
 
-        target_track.events = [e for e in final_events if e.notes or e.cc_messages]
+        new_events = [e for e in final_events if e.notes or e.cc_messages]
 
-        # Schedule UI updates on the main thread for thread safety
-        Clock.schedule_once(lambda dt: self._trigger_song_structure_change())
+        # UI property update must be on main thread
+        def apply_truncation(dt):
+            target_track.events = new_events
+            self._trigger_song_structure_change()
+
+        if threading.current_thread() is threading.main_thread():
+            apply_truncation(None)
+        else:
+            Clock.schedule_once(apply_truncation)
 
     def _trigger_song_structure_change(self):
         """Triggers a UI refresh due to song structure changes."""

@@ -2007,6 +2007,19 @@ class Sequencer(EventDispatcher):
             processed_tracks = set() # Tracks encountered during this session
             original_mute_states = {} # track_idx -> bool
 
+            # Pre-process tracks already armed for OVERWRITE at session start
+            # This ensures they are truncated and muted immediately.
+            for i, track in enumerate(self.song.tracks):
+                if is_midi_track(track) and track.record_mode == 'OVERWRITE':
+                    original_mute_states[i] = track.is_muted
+                    # Truncation is already done in _start_recording_internal for start-armed tracks,
+                    # but we do it here too just in case (it's idempotent) or for safety.
+                    session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
+                    self._truncate_track_for_recording(i, start_beat, session_end_beat)
+                    # Mute during recording
+                    Clock.schedule_once(lambda dt, t=track: setattr(t, 'is_muted', True))
+                    processed_tracks.add(i)
+
             try:
                 with mido.open_input(inport_name) as inport:
                     print(f"Port d'entrée MIDI ouvert: {inport_name}")
@@ -2199,18 +2212,19 @@ class Sequencer(EventDispatcher):
         self.song_structure_changed += 1
 
     def _start_recording_internal(self, track_index: Optional[int], start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: Optional[bool], enable_thru: bool):
-            # If track_index is provided, we do initial truncation for that specific track.
-            # If track_index is None, truncation will be handled dynamically in the thread.
+            # Truncation for OVERWRITE mode
+            end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
             if track_index is not None:
                 target_track = self.song.tracks[track_index]
-                if not isinstance(target_track, MidiTrack):
-                    print("Error: Recording is only supported for MIDI tracks.")
-                    return
-                
-                should_replace = target_track.record_mode == 'OVERWRITE' if replace_notes is None else replace_notes
-                if should_replace:
-                    end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
-                    self._truncate_track_for_recording(track_index, start_beat, end_beat)
+                if is_midi_track(target_track):
+                    should_replace = target_track.record_mode == 'OVERWRITE' if replace_notes is None else replace_notes
+                    if should_replace:
+                        self._truncate_track_for_recording(track_index, start_beat, end_beat)
+            else:
+                # Dynamic Routing: Pre-truncate all tracks armed for OVERWRITE at session start
+                for i, track in enumerate(self.song.tracks):
+                    if is_midi_track(track) and track.record_mode == 'OVERWRITE':
+                        self._truncate_track_for_recording(i, start_beat, end_beat)
 
             self.is_recording = True
             self.recording_thread = threading.Thread(

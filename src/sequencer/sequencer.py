@@ -2005,20 +2005,6 @@ class Sequencer(EventDispatcher):
             first_note_detected = False
             recording_start_beat = None
             processed_tracks = set() # Tracks encountered during this session
-            original_mute_states = {} # track_idx -> bool
-
-            # Pre-process tracks already armed for OVERWRITE at session start
-            # This ensures they are truncated and muted immediately.
-            for i, track in enumerate(self.song.tracks):
-                if is_midi_track(track) and track.record_mode == 'OVERWRITE':
-                    original_mute_states[i] = track.is_muted
-                    # Truncation is already done in _start_recording_internal for start-armed tracks,
-                    # but we do it here too just in case (it's idempotent) or for safety.
-                    session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
-                    self._truncate_track_for_recording(i, start_beat, session_end_beat)
-                    # Mute during recording
-                    Clock.schedule_once(lambda dt, t=track: setattr(t, 'is_muted', True))
-                    processed_tracks.add(i)
 
             try:
                 with mido.open_input(inport_name) as inport:
@@ -2073,14 +2059,11 @@ class Sequencer(EventDispatcher):
                             if target_idx not in processed_tracks:
                                 track = self.song.tracks[target_idx]
                                 if is_midi_track(track):
-                                    original_mute_states[target_idx] = track.is_muted
                                     if track.record_mode == 'OVERWRITE':
                                         # Truncate from the SESSION START instead of current_beat
                                         # This ensures all "previous" notes (from start_beat) are cleared.
                                         session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
                                         self._truncate_track_for_recording(target_idx, start_beat, session_end_beat)
-                                        # Mute it so we don't hear old notes during the rest of the recording session
-                                        Clock.schedule_once(lambda dt, t=track: setattr(t, 'is_muted', True))
                                     processed_tracks.add(target_idx)
 
                         # Process pending first note
@@ -2151,12 +2134,6 @@ class Sequencer(EventDispatcher):
                             'duration': duration
                         })
 
-                # Restore original mute states on the main thread
-                def restore_mutes(dt):
-                    for t_idx, was_muted in original_mute_states.items():
-                        if 0 <= t_idx < len(self.song.tracks):
-                            self.song.tracks[t_idx].is_muted = was_muted
-                Clock.schedule_once(restore_mutes)
 
                 self.is_recording = False
                 self._stop_event.clear()

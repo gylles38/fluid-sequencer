@@ -1040,6 +1040,12 @@ class JackManager:
                 continue
 
             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
+
+            # Suppression for OVERWRITE mode during recording:
+            # we skip playing existing sequencer notes for any track armed for overwrite.
+            if self.sequencer.is_recording and getattr(track, 'record_mode', 'OFF') == 'OVERWRITE':
+                should_be_audible = False
+
             port = self.open_ports[track.output_port_name]
 
             if i >= len(self.next_event_indices):

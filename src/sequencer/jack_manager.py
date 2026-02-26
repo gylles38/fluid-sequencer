@@ -1477,7 +1477,10 @@ class JackManager:
 
                     # 1. Kill everything on this channel using CC 123 (All Notes Off)
                     # This is much faster than 128 individual Note Offs.
+                    # We also send CC 120 (All Sound Off) and CC 64 (Sustain Off) for maximum safety.
                     port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
+                    port.send(mido.Message('control_change', channel=target_chan, control=120, value=0))
+                    port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
 
                     # 2. Restore sequencer notes (Note On) for those currently active
                     # This happens immediately after silencing, minimizing any audible cut.

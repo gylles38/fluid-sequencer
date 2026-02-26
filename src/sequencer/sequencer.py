@@ -1672,6 +1672,13 @@ class Sequencer(EventDispatcher):
             self.last_project_basename = None
             self.invalidate_song_length_cache()
             self.last_record_settings = None
+
+            # Initialize routing status for the UI
+            if self.jack_manager:
+                initial_idx = self.jack_manager._get_input_routing_value(0.0)
+                if initial_idx is not None:
+                    self.current_routing_index = initial_idx
+
             return f"Successfully loaded song from '{filepath}'."
         except Exception as e:
             return f"Error loading MIDI file: {e}"
@@ -1732,6 +1739,12 @@ class Sequencer(EventDispatcher):
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
             self.last_record_settings = None
+
+            # Initialize routing status for the UI
+            if self.jack_manager:
+                initial_idx = self.jack_manager._get_input_routing_value(0.0)
+                if initial_idx is not None:
+                    self.current_routing_index = initial_idx
 
             # --- Stop existing Carla instance and start a new one ---
             # This will load the project's carla file if it exists,
@@ -1834,6 +1847,12 @@ class Sequencer(EventDispatcher):
         self.is_dirty = False
         self.invalidate_song_length_cache()
         self.last_record_settings = None
+
+        # Initialize routing status for the UI
+        if self.jack_manager:
+            initial_idx = self.jack_manager._get_input_routing_value(0.0)
+            if initial_idx is not None:
+                self.current_routing_index = initial_idx
 
         # --- Restart Jack Manager and Carla for the new empty project ---
         self.jack_manager.stop()

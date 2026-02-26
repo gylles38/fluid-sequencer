@@ -84,6 +84,7 @@ class JackManager:
         self._last_connected_dest_id = None
         self._last_routing_target_idx = -1
         self._manual_routing_override = -1
+        self._routing_initialized = False
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -355,6 +356,22 @@ class JackManager:
                     time.sleep(1.0)
                     continue
 
+                # 0. Initial "Clean Slate" - Disconnect everything before starting routing
+                if not self._routing_initialized:
+                    print("[Conductor] Initializing routing: Disconnecting all existing instrument links...")
+                    src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+
+                    # Hard disconnect: attempt to disconnect ALL midi capture ports from ALL midi input ports
+                    # to ensure no leakage from previous sessions or other apps.
+                    try:
+                        subprocess.run("pw-link -l | grep capture | xargs -I {} pw-link -d {} .", shell=True, check=False)
+                    except: pass
+
+                    # Specifically ensure project instruments are silent
+                    self.silence_all_midi_notes()
+
+                    self._routing_initialized = True
+
                 # 1. Determine target track index
                 current_beat = self.last_beat
                 target_idx = self._get_input_routing_value(current_beat)
@@ -384,7 +401,7 @@ class JackManager:
                                     self._silence_instrument_at_index(self._last_routing_target_idx)
 
                                 # Short latency to allow plugins to process silence commands before disconnection
-                                time.sleep(0.1)
+                                time.sleep(0.3)
 
                                 self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
 
@@ -399,7 +416,7 @@ class JackManager:
                         if self._last_connected_src_id and self._last_connected_dest_id:
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
-                                time.sleep(0.1)
+                                time.sleep(0.3)
                             self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
                             self._last_connected_src_id = None
                             self._last_connected_dest_id = None
@@ -410,7 +427,7 @@ class JackManager:
                          # --- SILENCE PREVIOUS INSTRUMENT ---
                          if self._last_routing_target_idx != -1:
                              self._silence_instrument_at_index(self._last_routing_target_idx)
-                             time.sleep(0.1)
+                             time.sleep(0.3)
 
                          self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
                          self._last_connected_src_id = None
@@ -683,21 +700,29 @@ class JackManager:
         return None, None
 
     def silence_all_midi_notes(self):
-        """Sends note_off messages for all currently playing MIDI notes."""
-        if not self._active_notes and not self._sustained_notes:
-            return
+        """
+        Hard reset for all MIDI sound across all ports and channels.
+        Used for Panic and project transitions.
+        """
+        unique_ports = set()
+        for track in self.sequencer.song.tracks:
+            if is_midi_track(track) and track.output_port_name in self.open_ports:
+                unique_ports.add(self.open_ports[track.output_port_name])
 
-        for (track_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
-            if 0 <= track_idx < len(self.sequencer.song.tracks):
-                track = self.sequencer.song.tracks[track_idx]
-                if is_midi_track(track) and track.output_port_name in self.open_ports:
-                    port = self.open_ports[track.output_port_name]
-                    if port and not port.closed:
-                        note_off_msg = mido.Message('note_off', channel=track.channel, note=pitch, velocity=0)
-                        port.send(note_off_msg)
+        for port in unique_ports:
+            if port and not port.closed:
+                for ch in range(16):
+                    port.send(mido.Message('control_change', channel=ch, control=123, value=0))
+                    port.send(mido.Message('control_change', channel=ch, control=120, value=0))
+                    port.send(mido.Message('control_change', channel=ch, control=64, value=0))
+                # Individual note offs on all common channels
+                for ch in range(16):
+                    for pitch in range(128):
+                        port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
 
-        self._active_notes.clear()
-        self._sustained_notes.clear()
+        with self.sync_lock:
+            self._active_notes.clear()
+            self._sustained_notes.clear()
 
     def _queue_ipc_command(self, socket_path, command_data):
         """Queues an IPC command for the worker thread to send (RT safe)."""
@@ -1478,6 +1503,7 @@ class JackManager:
                 port = self.open_ports[track.output_port_name]
                 if port and not port.closed:
                     target_port_name = track.output_port_name
+                    target_chan = track.channel
 
                     # 1. Kill everything on ALL 16 channels of this port
                     # This is much safer as some plugins (like Organs) might respond
@@ -1486,6 +1512,12 @@ class JackManager:
                         port.send(mido.Message('control_change', channel=ch, control=123, value=0))
                         port.send(mido.Message('control_change', channel=ch, control=120, value=0))
                         port.send(mido.Message('control_change', channel=ch, control=64, value=0))
+
+                    # 1b. Extra Brutal Silencing for Organ plugins:
+                    # Individual Note Offs for all pitches on the target channel.
+                    # Some plugins ignore CC 123/120.
+                    for pitch in range(128):
+                        port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
 
                     # 2. Identify all tracks sharing this port to restore their state
                     tracks_on_port = []

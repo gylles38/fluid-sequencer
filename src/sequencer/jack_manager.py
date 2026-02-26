@@ -383,6 +383,9 @@ class JackManager:
                                 if self._last_routing_target_idx != -1:
                                     self._silence_instrument_at_index(self._last_routing_target_idx)
 
+                                # Short latency to allow plugins to process silence commands before disconnection
+                                time.sleep(0.1)
+
                                 self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
 
                             # Connect new
@@ -396,6 +399,7 @@ class JackManager:
                         if self._last_connected_src_id and self._last_connected_dest_id:
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
+                                time.sleep(0.1)
                             self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
                             self._last_connected_src_id = None
                             self._last_connected_dest_id = None
@@ -406,6 +410,7 @@ class JackManager:
                          # --- SILENCE PREVIOUS INSTRUMENT ---
                          if self._last_routing_target_idx != -1:
                              self._silence_instrument_at_index(self._last_routing_target_idx)
+                             time.sleep(0.1)
 
                          self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
                          self._last_connected_src_id = None
@@ -1472,63 +1477,56 @@ class JackManager:
             if is_midi_track(track) and track.output_port_name in self.open_ports:
                 port = self.open_ports[track.output_port_name]
                 if port and not port.closed:
-                    target_port = track.output_port_name
-                    target_chan = track.channel
+                    target_port_name = track.output_port_name
 
-                    # 1. Kill everything on this channel using CC 123 (All Notes Off)
-                    # This is much faster than 128 individual Note Offs.
-                    # We also send CC 120 (All Sound Off) and CC 64 (Sustain Off) for maximum safety.
-                    port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
-                    port.send(mido.Message('control_change', channel=target_chan, control=120, value=0))
-                    port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
+                    # 1. Kill everything on ALL 16 channels of this port
+                    # This is much safer as some plugins (like Organs) might respond
+                    # to different channels or we might have overlapping mappings.
+                    for ch in range(16):
+                        port.send(mido.Message('control_change', channel=ch, control=123, value=0))
+                        port.send(mido.Message('control_change', channel=ch, control=120, value=0))
+                        port.send(mido.Message('control_change', channel=ch, control=64, value=0))
 
-                    # 2. Restore sequencer notes (Note On) for those currently active
-                    # This happens immediately after silencing, minimizing any audible cut.
+                    # 2. Identify all tracks sharing this port to restore their state
+                    tracks_on_port = []
+                    for i, t in enumerate(self.sequencer.song.tracks):
+                        if is_midi_track(t) and t.output_port_name == target_port_name:
+                            tracks_on_port.append((i, t))
+
+                    # 3. Restore sequencer notes (Note On) for those currently active
                     restored_count = 0
                     with self.sync_lock:
-                        for (t_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
-                            if 0 <= t_idx < len(self.sequencer.song.tracks):
-                                other_track = self.sequencer.song.tracks[t_idx]
-                                if (is_midi_track(other_track) and
-                                    getattr(other_track, 'output_port_name', None) == target_port and
-                                    getattr(other_track, 'channel', -1) == target_chan):
-                                    # Re-trigger the sequencer note
-                                    port.send(mido.Message('note_on', channel=target_chan, note=pitch, velocity=velocity))
-                                    restored_count += 1
+                        active_notes_copy = list(self._active_notes.items())
 
-                    # 3. Sustain: We only release the pedal if the sequencer is not currently holding it.
-                    # This prevents sequencer notes from being cut by the routing change.
-                    # If the keyboard was also holding the pedal, its notes will stay sustained
-                    # until the sequencer eventually releases the pedal.
-                    last_seq_sustain = self._last_cc_values.get((track_idx, 64), 0)
-                    if last_seq_sustain < 64:
-                        port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
-                    else:
-                        print(f"[Conductor] Sparing sustain on track {track_idx} because sequencer is holding it.")
+                    for (t_idx, pitch), (end_beat, velocity) in active_notes_copy:
+                        for port_track_idx, port_track in tracks_on_port:
+                            if t_idx == port_track_idx:
+                                # Re-trigger the sequencer note on its correct channel
+                                port.send(mido.Message('note_on', channel=port_track.channel, note=pitch, velocity=velocity))
+                                restored_count += 1
 
-                    # 4. Restore state (Volume, Pan, Sustain)
-                    # Note: We REMOVE Program Change and Bank Select restoration as they
-                    # cause many plugins to abruptly cut all current voices.
+                    # 4. Restore state (Volume, Pan, Sustain) for all tracks on this port
                     current_beat = self.last_beat
-                    primed_params = self._prime_automation_at_beat_for_track(track_idx, current_beat)
+                    for port_track_idx, port_track in tracks_on_port:
+                        primed_params = self._prime_automation_at_beat_for_track(port_track_idx, current_beat)
 
-                    # Volume
-                    if (track_idx, 'vol') not in primed_params:
-                        midi_volume = int(track.volume * 127)
-                        port.send(mido.Message('control_change', channel=target_chan, control=7, value=midi_volume))
-                    # Pan
-                    if (track_idx, 'pan') not in primed_params:
-                        midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                        port.send(mido.Message('control_change', channel=target_chan, control=10, value=midi_pan))
+                        # Volume
+                        if (port_track_idx, 'vol') not in primed_params:
+                            midi_volume = int(port_track.volume * 127)
+                            port.send(mido.Message('control_change', channel=port_track.channel, control=7, value=midi_volume))
+                        # Pan
+                        if (port_track_idx, 'pan') not in primed_params:
+                            midi_pan = int((port_track.pan + 1.0) / 2.0 * 127)
+                            port.send(mido.Message('control_change', channel=port_track.channel, control=10, value=midi_pan))
 
-                    # Restore Sustain (CC 64) if it's not automated but was recently active
-                    if (track_idx, 'cc64') not in primed_params:
-                         with self.sync_lock:
-                             last_sustain = self._last_cc_values.get((track_idx, 64))
-                             if last_sustain is not None:
-                                 port.send(mido.Message('control_change', channel=target_chan, control=64, value=last_sustain))
+                        # Restore Sustain (CC 64) if it's not automated but was recently active
+                        if (port_track_idx, 'cc64') not in primed_params:
+                             with self.sync_lock:
+                                 last_sustain = self._last_cc_values.get((port_track_idx, 64))
+                                 if last_sustain is not None:
+                                     port.send(mido.Message('control_change', channel=port_track.channel, control=64, value=last_sustain))
 
-                    print(f"[Conductor] Silenced keyboard notes on track {track_idx} (restored {restored_count} sequencer notes on port {target_port} ch {target_chan+1})")
+                    print(f"[Conductor] Silenced all channels on port {target_port_name} (restored {restored_count} sequencer notes across {len(tracks_on_port)} tracks)")
 
     def _prime_automation_at_beat_for_track(self, track_index: int, beat: float) -> set:
         """

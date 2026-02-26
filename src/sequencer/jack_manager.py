@@ -83,6 +83,7 @@ class JackManager:
         self._last_connected_src_id = None
         self._last_connected_dest_id = None
         self._last_routing_target_idx = -1
+        self._manual_routing_override = -1
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -1434,10 +1435,15 @@ class JackManager:
         """
         Returns the target track index for MIDI input routing at the given beat.
         Prioritization:
+        0. Manual override (only if transport is stopped).
         1. Automation points on the routing track.
         2. Armed track index (cached).
         3. Final Fallback: First MIDI track (cached).
         """
+        # 0. Manual Override Priority (Stopped state only)
+        if self._manual_routing_override != -1 and self.sequencer.playback_state == "stopped":
+            return self._manual_routing_override
+
         # 1. Automation Priority
         if self._routing_track and self._routing_track.points:
             routing_points = [p for p in self._routing_track.points if p.parameter == 'input_routing']

@@ -736,6 +736,30 @@ class TrackWidget(BoxLayout):
         else:
             self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
 
+    def on_touch_down(self, touch):
+        """
+        Handle touch events for track selection.
+        If the sequencer is stopped and the user clicks on the track (but not on a control),
+        select this track's instrument.
+        """
+        if self.collide_point(*touch.pos):
+            # We let the default Kivy processing happen first for buttons/sliders.
+            # super().on_touch_down(touch) returns True if a child consumed the touch.
+            if super().on_touch_down(touch):
+                return True
+
+            # If the touch wasn't consumed by a child (button, slider, etc.)
+            # and the sequencer is stopped, we select this track.
+            seq = self.sequencer_layout.sequencer
+            if seq.playback_state == "stopped":
+                # Manual override of the MIDI routing for the instrument selection.
+                # We tell the JackManager to target this track specifically.
+                seq.jack_manager._manual_routing_override = self.track_index
+                # We need to refresh the UI to show the new routing.
+                seq.current_routing_index = self.track_index
+                return True
+        return False
+
     def on_automation_selection_change(self, selected_param) -> None:
         """
         Callback from AutomationControls when the user selects a new parameter to view.

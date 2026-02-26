@@ -2259,6 +2259,10 @@ class Sequencer(EventDispatcher):
             if self.playback_state != "stopped":
                 return "Error: Please stop playback before starting a new recording."
 
+            # Clear manual routing override when starting a recording session
+            if self.jack_manager:
+                self.jack_manager._manual_routing_override = -1
+
             # track_idx is None means we follow dynamic MIDI Routing
             # self.last_record_settings is checked for record_bis
             if (track_idx is not None or start_beat is not None or inport_name is not None or
@@ -2572,6 +2576,10 @@ class Sequencer(EventDispatcher):
             print(f"[DIAGNOSTIC] === _resync_all_at_beat END (With JACK) ===\n")
 
     def play(self, start_beat: Optional[float] = None):
+        # Clear manual routing override when starting playback
+        if self.jack_manager:
+            self.jack_manager._manual_routing_override = -1
+
     # 1. On change l'état IMMÉDIATEMENT (Optimisme)
         self.playback_state = "playing"
         self._last_play_click_time = time.perf_counter() # Pour le poll_engine_state

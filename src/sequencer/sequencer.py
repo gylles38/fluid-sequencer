@@ -1675,6 +1675,7 @@ class Sequencer(EventDispatcher):
 
             # Initialize routing status for the UI
             if self.jack_manager:
+                self.jack_manager._manual_routing_override = -1
                 initial_idx = self.jack_manager._get_input_routing_value(0.0)
                 if initial_idx is not None:
                     self.current_routing_index = initial_idx
@@ -1742,6 +1743,7 @@ class Sequencer(EventDispatcher):
 
             # Initialize routing status for the UI
             if self.jack_manager:
+                self.jack_manager._manual_routing_override = -1
                 initial_idx = self.jack_manager._get_input_routing_value(0.0)
                 if initial_idx is not None:
                     self.current_routing_index = initial_idx
@@ -1850,6 +1852,7 @@ class Sequencer(EventDispatcher):
 
         # Initialize routing status for the UI
         if self.jack_manager:
+            self.jack_manager._manual_routing_override = -1
             initial_idx = self.jack_manager._get_input_routing_value(0.0)
             if initial_idx is not None:
                 self.current_routing_index = initial_idx

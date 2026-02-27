@@ -358,14 +358,16 @@ class JackManager:
 
                 # 0. Initial "Clean Slate" - Disconnect everything before starting routing
                 if not self._routing_initialized:
-                    print("[Conductor] Initializing routing: Disconnecting all existing instrument links...")
+                    print("[Conductor] Initializing routing: Disconnecting all project instrument links...")
                     src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+                    src_id = self._get_pw_id(src_pattern, is_output=True)
 
-                    # Hard disconnect: attempt to disconnect ALL midi capture ports from ALL midi input ports
-                    # to ensure no leakage from previous sessions or other apps.
-                    try:
-                        subprocess.run("pw-link -l | grep capture | xargs -I {} pw-link -d {} .", shell=True, check=False)
-                    except: pass
+                    if src_id:
+                        for track in self.sequencer.song.tracks:
+                            if is_midi_track(track) and track.input_port_name:
+                                dest_id = self._get_pw_id(track.input_port_name, is_output=False)
+                                if dest_id:
+                                    self._pw_link_disconnect(src_id, dest_id)
 
                     # Specifically ensure project instruments are silent
                     self.silence_all_midi_notes()
@@ -397,11 +399,13 @@ class JackManager:
                             # Target changed, disconnect previous
                             if self._last_connected_src_id and self._last_connected_dest_id:
                                 # --- SILENCE PREVIOUS INSTRUMENT ---
+                                # Even if we don't have a known target_idx, we should silence
+                                # the last known destination port if possible.
                                 if self._last_routing_target_idx != -1:
                                     self._silence_instrument_at_index(self._last_routing_target_idx)
 
-                                # Short latency to allow plugins to process silence commands before disconnection
-                                time.sleep(0.3)
+                                # Additional latency for "sticky" plugins (like Organs)
+                                time.sleep(0.4)
 
                                 self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
 
@@ -1516,8 +1520,12 @@ class JackManager:
                     # 1b. Extra Brutal Silencing for Organ plugins:
                     # Individual Note Offs for all pitches on the target channel.
                     # Some plugins ignore CC 123/120.
+                    # We also send CC 123/120 again AFTER the note offs for good measure.
                     for pitch in range(128):
                         port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
+
+                    port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
+                    port.send(mido.Message('control_change', channel=target_chan, control=120, value=0))
 
                     # 2. Identify all tracks sharing this port to restore their state
                     tracks_on_port = []

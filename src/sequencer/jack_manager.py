@@ -358,16 +358,34 @@ class JackManager:
 
                 # 0. Initial "Clean Slate" - Disconnect everything before starting routing
                 if not self._routing_initialized:
-                    print("[Conductor] Initializing routing: Disconnecting all project instrument links...")
+                    # WAIT for external components (aj-snapshot, carla) to finish their auto-connections
+                    time.sleep(1.5)
+
+                    print("[Conductor] Initializing routing: Disconnecting ALL project instrument links...")
                     src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
                     src_id = self._get_pw_id(src_pattern, is_output=True)
 
                     if src_id:
+                        # 1. Disconnect our tracks specifically
                         for track in self.sequencer.song.tracks:
                             if is_midi_track(track) and track.input_port_name:
                                 dest_id = self._get_pw_id(track.input_port_name, is_output=False)
                                 if dest_id:
                                     self._pw_link_disconnect(src_id, dest_id)
+
+                        # 2. Aggressively disconnect ANY link from our source port
+                        # that might have been made by external tools
+                        try:
+                            # pw-link -l lists links. We grep for our source ID and disconnect them.
+                            # Format is: "src_id dest_id"
+                            cmd = f"pw-link -l | grep '^{src_id} '"
+                            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                            for line in result.stdout.splitlines():
+                                parts = line.split()
+                                if len(parts) >= 2:
+                                    dest_id = parts[1]
+                                    self._pw_link_disconnect(src_id, dest_id)
+                        except: pass
 
                     # Specifically ensure project instruments are silent
                     self.silence_all_midi_notes()
@@ -398,16 +416,21 @@ class JackManager:
                         if src_id != self._last_connected_src_id or dest_id != self._last_connected_dest_id:
                             # Target changed, disconnect previous
                             if self._last_connected_src_id and self._last_connected_dest_id:
-                                # --- SILENCE PREVIOUS INSTRUMENT ---
-                                # Even if we don't have a known target_idx, we should silence
-                                # the last known destination port if possible.
+                                # --- 1. DISCONNECT FIRST ---
+                                # This stops keyboard notes from reaching the old instrument immediately.
+                                self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+
+                                # --- 2. WAIT A BIT ---
+                                # Short delay to ensure the link is fully severed in the kernel/driver.
+                                time.sleep(0.1)
+
+                                # --- 3. THEN SILENCE ---
                                 if self._last_routing_target_idx != -1:
                                     self._silence_instrument_at_index(self._last_routing_target_idx)
 
-                                # Additional latency for "sticky" plugins (like Organs)
+                                # --- 4. ADDITIONAL LATENCY ---
+                                # Allow plugins to process silence commands and release buffers (Organs, etc.)
                                 time.sleep(0.4)
-
-                                self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
 
                             # Connect new
                             print(f"[Conductor] New Route Detected: {src_pattern} -> {dest_pattern}")
@@ -1524,8 +1547,15 @@ class JackManager:
                     for pitch in range(128):
                         port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
 
-                    port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
-                    port.send(mido.Message('control_change', channel=target_chan, control=120, value=0))
+                    # Repeated silence commands to ensure arrival
+                    for _ in range(2):
+                        port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
+                        port.send(mido.Message('control_change', channel=target_chan, control=120, value=0))
+                        port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
+
+                    # 1c. Clear sustained note tracking for this port to ensure new routing is clean
+                    with self.sync_lock:
+                        self._sustained_notes = {p for p in self._sustained_notes if p[0] != track_idx}
 
                     # 2. Identify all tracks sharing this port to restore their state
                     tracks_on_port = []

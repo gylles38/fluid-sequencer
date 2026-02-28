@@ -85,9 +85,6 @@ class JackManager:
         self._last_routing_target_idx = -1
         self._manual_routing_override = -1
         self._routing_initialized = False
-        self._pw_out_port_cache = []
-        self._pw_in_port_cache = []
-        self._last_pw_cache_update = 0
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -349,53 +346,60 @@ class JackManager:
 
             time.sleep(0.05)
 
+    def _find_jack_port(self, pattern: str, is_output: bool = False) -> Optional[jack.Port]:
+        """Finds a JACK port matching the given pattern using native API."""
+        if not pattern: return None
+        if not self.jack_client: return None
+
+        # Clean the pattern (remove ALSA indices)
+        clean_pattern = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
+        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
+        if not tokens: return None
+        unique_tokens = set(tokens)
+
+        # Query ports from JACK
+        flags = jack.IS_OUTPUT if is_output else jack.IS_INPUT
+        ports = self.jack_client.get_ports(is_midi=True, flags=flags)
+
+        for port in ports:
+            name_lower = port.name.lower()
+            if all(token in name_lower for token in unique_tokens):
+                return port
+        return None
+
     def _routing_worker_loop(self):
         """
-        Background loop managing the dynamic MIDI routing using pw-link.
+        Background loop managing the dynamic MIDI routing using native JACK API.
         """
         while not self._routing_stop_event.is_set():
             try:
-                if not self.is_running:
+                if not self.is_running or not self.jack_client:
                     time.sleep(1.0)
                     continue
 
                 # 0. Initial "Clean Slate" - Disconnect everything before starting routing
                 if not self._routing_initialized:
-                    # WAIT for external components (aj-snapshot, carla) to finish their auto-connections
                     time.sleep(1.5)
-
                     print("[Conductor] Initializing routing: Disconnecting ALL project instrument links...")
+
                     src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+                    src_port = self._find_jack_port(src_pattern, is_output=True)
 
-                    # Resolve IDs in bulk for performance
-                    out_ports = self._get_all_pw_ports_with_ids(is_output=True)
-                    in_ports = self._get_all_pw_ports_with_ids(is_output=False)
-
-                    src_id = self._match_pattern_to_id(src_pattern, out_ports)
-
-                    if src_id:
-                        # 1. Disconnect our specific project targets
+                    if src_port:
+                        # 1. Disconnect specific project targets
                         for track in self.sequencer.song.tracks:
                             if is_midi_track(track) and track.input_port_name:
-                                dest_id = self._match_pattern_to_id(track.input_port_name, in_ports)
-                                if dest_id:
-                                    self._pw_link_disconnect(src_id, dest_id)
+                                dest_port = self._find_jack_port(track.input_port_name, is_output=False)
+                                if dest_port:
+                                    try: self.jack_client.disconnect(src_port, dest_port)
+                                    except: pass
 
-                        # 2. Aggressively disconnect ANY link currently coming from our source keyboard
-                        try:
-                            # Format of pw-link -l -I: "src_id -> dest_id"
-                            res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=2.0)
-                            for line in res.stdout.splitlines():
-                                parts = line.split()
-                                if len(parts) >= 3 and parts[0] == str(src_id) and parts[1] == "->":
-                                    linked_dest_id = parts[2]
-                                    self._pw_link_disconnect(src_id, linked_dest_id)
-                        except Exception as e:
-                            print(f"[Conductor] Startup cleanup warning: {e}")
+                        # 2. Aggressively disconnect ANY existing connections from this source
+                        for connection in src_port.connections:
+                            try: self.jack_client.disconnect(src_port, connection)
+                            except: pass
 
-                    # Specifically ensure project instruments are silent
                     self.silence_all_midi_notes()
-
                     self._routing_initialized = True
 
                 # 1. Determine target track index
@@ -403,7 +407,6 @@ class JackManager:
                 target_idx = self._get_input_routing_value(current_beat)
 
                 # 2. Identify source keyboard
-                # We use sequencer.default_record_port or a default pattern
                 src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
 
                 # 3. Identify destination instrument
@@ -413,74 +416,70 @@ class JackManager:
                     if is_midi_track(track):
                         dest_pattern = getattr(track, 'input_port_name', None)
 
-                # 4. Manage connections if target changed or need refresh
+                # 4. Manage connections if target changed
                 if dest_pattern:
-                    src_id = self._get_pw_id(src_pattern, is_output=True)
-                    dest_id = self._get_pw_id(dest_pattern, is_output=False)
+                    src_port = self._find_jack_port(src_pattern, is_output=True)
+                    dest_port = self._find_jack_port(dest_pattern, is_output=False)
 
-                    if src_id and dest_id:
-                        # Detection of routing change: either port change or target track index change.
-                        if src_id != self._last_connected_src_id or dest_id != self._last_connected_dest_id or target_idx != self._last_routing_target_idx:
-                            # Target changed
+                    if src_port and dest_port:
+                        # Detection of routing change
+                        if src_port.name != self._last_connected_src_id or dest_port.name != self._last_connected_dest_id or target_idx != self._last_routing_target_idx:
                             print(f"[Conductor] Routing change detected: {self._last_routing_target_idx} -> {target_idx}")
 
-                            # --- 1. EXPLICIT DISCONNECT ---
-                            # Always attempt to disconnect the last known link first
-                            if self._last_connected_src_id and self._last_connected_dest_id:
-                                self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
-
-                            # --- 1b. NUCLEAR DISCONNECT (Safety Net) ---
-                            # Disconnect ALL physical links from the source keyboard to avoid "double routing"
-                            try:
-                                # Format of pw-link -l -I: "src_id -> dest_id"
-                                res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=2.0)
-                                for line in res.stdout.splitlines():
-                                    parts = line.split()
-                                    if len(parts) >= 3 and parts[0] == str(src_id) and parts[1] == "->":
-                                        linked_dest_id = parts[2]
-                                        self._pw_link_disconnect(src_id, linked_dest_id)
-                            except: pass
+                            # --- 1. DISCONNECT ---
+                            for connection in src_port.connections:
+                                try: self.jack_client.disconnect(src_port, connection)
+                                except: pass
 
                             # --- 2. WAIT A BIT ---
                             time.sleep(0.02)
 
                             # --- 3. NUCLEAR SILENCE ---
-                            # Silence both the previous and the new instrument for a clean slate.
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
-
-                            if target_idx is not None and target_idx != self._last_routing_target_idx:
+                            if target_idx != self._last_routing_target_idx:
                                 self._silence_instrument_at_index(target_idx)
 
                             # --- 4. SETTLING DELAY ---
-                            # Allow plugins to clear internal voice buffers.
                             time.sleep(0.08)
 
                             # Connect new
-                            print(f"[Conductor] New Route Detected: {src_pattern} -> {dest_pattern}")
-                            self._pw_link_connect(src_id, dest_id)
-                            self._last_connected_src_id = src_id
-                            self._last_connected_dest_id = dest_id
+                            print(f"[Conductor] New Route: {src_port.name} -> {dest_port.name}")
+                            try: self.jack_client.connect(src_port, dest_port)
+                            except jack.JackError: pass # Already connected
+
+                            self._last_connected_src_id = src_port.name
+                            self._last_connected_dest_id = dest_port.name
                             self._last_routing_target_idx = target_idx
                     else:
-                        # We have a target but couldn't resolve IDs (e.g. instrument closed)
-                        if self._last_connected_src_id and self._last_connected_dest_id:
+                        # Target defined but port not found (instrument closed)
+                        if self._last_connected_src_id:
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
-                                time.sleep(0.3)
-                            self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+
+                            # Cleanup all from source
+                            src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
+                            if src_port_to_clean:
+                                for conn in src_port_to_clean.connections:
+                                    try: self.jack_client.disconnect(src_port_to_clean, conn)
+                                    except: pass
+
                             self._last_connected_src_id = None
                             self._last_connected_dest_id = None
                             self._last_routing_target_idx = -1
                 else:
                     # No target or not a MIDI track
-                    if self._last_connected_src_id and self._last_connected_dest_id:
-                         # --- SILENCE PREVIOUS INSTRUMENT ---
+                    if self._last_connected_src_id:
                          if self._last_routing_target_idx != -1:
                              self._silence_instrument_at_index(self._last_routing_target_idx)
-                             time.sleep(0.3)
+                             time.sleep(0.1)
 
-                         self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+                         src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
+                         if src_port_to_clean:
+                             for conn in src_port_to_clean.connections:
+                                 try: self.jack_client.disconnect(src_port_to_clean, conn)
+                                 except: pass
+
                          self._last_connected_src_id = None
                          self._last_connected_dest_id = None
                          self._last_routing_target_idx = -1
@@ -1471,92 +1470,7 @@ class JackManager:
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
 
-    def _refresh_pw_port_cache(self, force=False):
-        """Periodically refreshes the PipeWire port ID caches."""
-        now = time.time()
-        if not force and (now - self._last_pw_cache_update < 2.0):
-            return
 
-        self._pw_out_port_cache = self._get_all_pw_ports_with_ids(is_output=True)
-        self._pw_in_port_cache = self._get_all_pw_ports_with_ids(is_output=False)
-        self._last_pw_cache_update = now
-
-    def _get_all_pw_ports_with_ids(self, is_output: bool = False) -> List[Dict]:
-        """
-        Retrieves all PipeWire ports (input or output) with their IDs and full names.
-        Returns a list of dicts: [{'id': '123', 'name': 'Full Port Name'}]
-        """
-        ports = []
-        mode = "-o" if is_output else "-i"
-        try:
-            # Increased timeout to 2.0s for robustness on slow systems
-            cmd = ["pw-link", "-m", mode, "-I"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0)
-            for line in result.stdout.splitlines():
-                parts = line.split()
-                if len(parts) >= 2:
-                    if parts[0] == "=":
-                        # Format: "= 123 Full Name"
-                        ports.append({'id': parts[1], 'name': " ".join(parts[2:])})
-                    elif parts[0].isdigit():
-                        # Format: "123 Full Name"
-                        ports.append({'id': parts[0], 'name': " ".join(parts[1:])})
-        except Exception as e:
-            # We don't print the error every time to avoid flooding the console
-            # if PipeWire is temporarily busy.
-            if not hasattr(self, '_last_pw_error_time') or (time.time() - self._last_pw_error_time > 10):
-                print(f"[Conductor] Error listing pw ports: {e}", file=sys.stderr)
-                self._last_pw_error_time = time.time()
-        return ports
-
-    def _match_pattern_to_id(self, pattern: str, port_list: List[Dict]) -> Optional[str]:
-        """Matches a pattern against a list of ports and returns the ID."""
-        if not pattern: return None
-
-        # Clean and tokenize the pattern
-        clean_pattern = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
-        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
-        if not tokens: return None
-        unique_tokens = set(tokens)
-
-        for port in port_list:
-            name_lower = port['name'].lower()
-            if all(token in name_lower for token in unique_tokens):
-                return port['id']
-        return None
-
-    def _get_pw_id(self, pattern: str, is_output: bool = False) -> Optional[str]:
-        """Uses cached port lists to find an ID matching the given pattern."""
-        self._refresh_pw_port_cache()
-        ports = self._pw_out_port_cache if is_output else self._pw_in_port_cache
-
-        found_id = self._match_pattern_to_id(pattern, ports)
-
-        # If not found, maybe our cache is stale. Try one forced refresh.
-        if not found_id and (time.time() - self._last_pw_cache_update > 0.5):
-            self._refresh_pw_port_cache(force=True)
-            ports = self._pw_out_port_cache if is_output else self._pw_in_port_cache
-            found_id = self._match_pattern_to_id(pattern, ports)
-
-        return found_id
-
-    def _pw_link_connect(self, src_id: str, dest_id: str):
-        if not src_id or not dest_id:
-            return
-        try:
-            subprocess.run(["pw-link", src_id, dest_id], check=False)
-            print(f"[Conductor] Connected: {src_id} -> {dest_id}")
-        except Exception as e:
-            print(f"[Conductor] Error connecting: {e}", file=sys.stderr)
-
-    def _pw_link_disconnect(self, src_id: str, dest_id: str):
-        if not src_id or not dest_id:
-            return
-        try:
-            subprocess.run(["pw-link", "-d", src_id, dest_id], check=False)
-            print(f"[Conductor] Disconnected: {src_id} -> {dest_id}")
-        except Exception as e:
-            print(f"[Conductor] Error disconnecting: {e}", file=sys.stderr)
 
     def _get_input_routing_value(self, beat: float) -> Optional[int]:
         """
@@ -1605,6 +1519,8 @@ class JackManager:
                 ports_to_process[track.output_port_name] = self.open_ports[track.output_port_name]
             if track.input_port_name and track.input_port_name in self.open_ports:
                 ports_to_process[track.input_port_name] = self.open_ports[track.input_port_name]
+
+            target_chan = track.channel
 
             for p_name, port in ports_to_process.items():
                 if port and not port.closed:

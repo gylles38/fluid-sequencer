@@ -714,11 +714,19 @@ class JackManager:
             self._routing_thread.join(timeout=1.0)
             self._routing_thread = None
 
-        # Cleanup last connection
-        if self._last_connected_src_id and self._last_connected_dest_id:
-            self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
-            self._last_connected_src_id = None
-            self._last_connected_dest_id = None
+        # Cleanup physical keyboard connections
+        try:
+            src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+            src_port = self._find_jack_port(src_pattern, is_output=True)
+            if src_port:
+                connections = self.jack_client.get_all_connections(src_port)
+                for conn in connections:
+                    try: self.jack_client.disconnect(src_port, conn)
+                    except: pass
+        except: pass
+
+        self._last_connected_src_id = None
+        self._last_connected_dest_id = None
 
         # Deactivate and close the JACK client
         if self.jack_client:

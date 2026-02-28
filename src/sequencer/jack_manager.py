@@ -357,9 +357,11 @@ class JackManager:
         if not tokens: return None
         unique_tokens = set(tokens)
 
-        # Query ports from JACK
-        flags = jack.IS_OUTPUT if is_output else jack.IS_INPUT
-        ports = self.jack_client.get_ports(is_midi=True, flags=flags)
+        # Query ports from JACK using keyword arguments
+        if is_output:
+            ports = self.jack_client.get_ports(is_midi=True, is_output=True)
+        else:
+            ports = self.jack_client.get_ports(is_midi=True, is_input=True)
 
         for port in ports:
             name_lower = port.name.lower()

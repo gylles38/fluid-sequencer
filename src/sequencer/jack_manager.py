@@ -363,28 +363,32 @@ class JackManager:
 
                     print("[Conductor] Initializing routing: Disconnecting ALL project instrument links...")
                     src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
-                    src_id = self._get_pw_id(src_pattern, is_output=True)
+
+                    # Resolve IDs in bulk for performance
+                    out_ports = self._get_all_pw_ports_with_ids(is_output=True)
+                    in_ports = self._get_all_pw_ports_with_ids(is_output=False)
+
+                    src_id = self._match_pattern_to_id(src_pattern, out_ports)
 
                     if src_id:
-                        # 1. Disconnect our tracks specifically
+                        # 1. Disconnect our specific project targets
                         for track in self.sequencer.song.tracks:
                             if is_midi_track(track) and track.input_port_name:
-                                dest_id = self._get_pw_id(track.input_port_name, is_output=False)
+                                dest_id = self._match_pattern_to_id(track.input_port_name, in_ports)
                                 if dest_id:
                                     self._pw_link_disconnect(src_id, dest_id)
 
-                        # 2. Aggressively disconnect ANY link from our source port
-                        # that might have been made by external tools
+                        # 2. Aggressively disconnect ANY link currently coming from our source keyboard
                         try:
-                            # pw-link -l lists links. With -I it includes IDs.
-                            result = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True)
-                            for line in result.stdout.splitlines():
+                            # Format of pw-link -l -I: "src_id -> dest_id"
+                            res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=0.5)
+                            for line in res.stdout.splitlines():
                                 parts = line.split()
-                                # Format is: "src_id dest_id"
-                                if len(parts) >= 2 and parts[0] == str(src_id):
-                                    linked_dest_id = parts[1]
+                                if len(parts) >= 3 and parts[0] == str(src_id) and parts[1] == "->":
+                                    linked_dest_id = parts[2]
                                     self._pw_link_disconnect(src_id, linked_dest_id)
-                        except: pass
+                        except Exception as e:
+                            print(f"[Conductor] Startup cleanup warning: {e}")
 
                     # Specifically ensure project instruments are silent
                     self.silence_all_midi_notes()
@@ -413,37 +417,41 @@ class JackManager:
 
                     if src_id and dest_id:
                         # Detection of routing change: either port change or target track index change.
-                        # We must detect target_idx change even if ports are identical (e.g. tracks sharing a port but on different channels).
                         if src_id != self._last_connected_src_id or dest_id != self._last_connected_dest_id or target_idx != self._last_routing_target_idx:
                             # Target changed
-                            print(f"[Conductor] Routing change detected: target_idx {self._last_routing_target_idx} -> {target_idx}")
+                            print(f"[Conductor] Routing change detected: {self._last_routing_target_idx} -> {target_idx}")
 
-                            # --- 1. NUCLEAR DISCONNECT ---
-                            # We disconnect ALL existing links from our source keyboard ID.
-                            # pw-link -l lists links. With -I it includes IDs.
+                            # --- 1. EXPLICIT DISCONNECT ---
+                            # Always attempt to disconnect the last known link first
+                            if self._last_connected_src_id and self._last_connected_dest_id:
+                                self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+
+                            # --- 1b. NUCLEAR DISCONNECT (Safety Net) ---
+                            # Disconnect ALL physical links from the source keyboard to avoid "double routing"
                             try:
-                                result = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True)
-                                for line in result.stdout.splitlines():
+                                # Format of pw-link -l -I: "src_id -> dest_id"
+                                res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=0.5)
+                                for line in res.stdout.splitlines():
                                     parts = line.split()
-                                    # Format is: "src_id dest_id"
-                                    if len(parts) >= 2 and parts[0] == str(src_id):
-                                        linked_dest_id = parts[1]
+                                    if len(parts) >= 3 and parts[0] == str(src_id) and parts[1] == "->":
+                                        linked_dest_id = parts[2]
                                         self._pw_link_disconnect(src_id, linked_dest_id)
-                            except Exception as e:
-                                print(f"[Conductor] Error during nuclear disconnect: {e}", file=sys.stderr)
+                            except: pass
 
                             # --- 2. WAIT A BIT ---
-                            # Short delay to ensure links are fully severed in the kernel/driver.
-                            time.sleep(0.1)
+                            time.sleep(0.02)
 
-                            # --- 3. THEN SILENCE PREVIOUS ---
-                            # We silence the PREVIOUS target track to cut its hanging keyboard notes.
+                            # --- 3. NUCLEAR SILENCE ---
+                            # Silence both the previous and the new instrument for a clean slate.
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
 
-                            # --- 4. ADDITIONAL LATENCY ---
-                            # Allow plugins to process silence commands and release buffers (Organs, etc.)
-                            time.sleep(0.4)
+                            if target_idx is not None and target_idx != self._last_routing_target_idx:
+                                self._silence_instrument_at_index(target_idx)
+
+                            # --- 4. SETTLING DELAY ---
+                            # Allow plugins to clear internal voice buffers.
+                            time.sleep(0.08)
 
                             # Connect new
                             print(f"[Conductor] New Route Detected: {src_pattern} -> {dest_pattern}")
@@ -723,6 +731,10 @@ class JackManager:
         # Reset the state
         self.is_running = False
         self._active_notes.clear()
+        self._routing_initialized = False
+        self._last_connected_src_id = None
+        self._last_connected_dest_id = None
+        self._last_routing_target_idx = -1
 
     def get_current_beat(self) -> float:
         """Retourne la position actuelle du transport en beats."""
@@ -1456,47 +1468,50 @@ class JackManager:
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
 
-    def _get_pw_id(self, pattern: str, is_output: bool = False) -> Optional[str]:
+    def _get_all_pw_ports_with_ids(self, is_output: bool = False) -> List[Dict]:
         """
-        Uses pw-link to find the ID of a port matching the given pattern.
-        Handles token-based matching to bridge ALSA/PipeWire discrepancies.
-        Example Match: 'MPK249:MPK249 Port A 32:0' -> 'Midi-Bridge:MPK249 4:(capture_0) MPK249 Port A'
+        Retrieves all PipeWire ports (input or output) with their IDs and full names.
+        Returns a list of dicts: [{'id': '123', 'name': 'Full Port Name'}]
         """
-        if not pattern:
-            return None
-
-        # 1. Clean and tokenize the pattern
-        # Remove ALSA indices (e.g., " 32:0" or ":0")
-        clean_pattern = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
-        # Extract alphanumeric tokens
-        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
-        if not tokens:
-            return None
-        unique_tokens = set(tokens)
-
+        ports = []
         mode = "-o" if is_output else "-i"
         try:
-            # We use a slightly longer timeout for robustness
-            cmd = f"timeout 0.2s pw-link -m {mode} -I"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-
+            # -I includes IDs, -m shows monitor/bridge ports
+            cmd = ["pw-link", "-m", mode, "-I"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=0.5)
             for line in result.stdout.splitlines():
-                line_lower = line.lower()
-                # Check if all pattern tokens are present in this candidate line
-                if all(token in line_lower for token in unique_tokens):
-                    parts = line.split()
-                    # Handle formats like "= 147 ..." or "147 ..."
-                    if len(parts) >= 2:
-                        if parts[0] == "=":
-                            return parts[1]
-                        elif parts[0].isdigit():
-                            return parts[0]
-                        elif parts[1].isdigit():
-                            return parts[1]
-            return None
+                parts = line.split()
+                if len(parts) >= 2:
+                    if parts[0] == "=":
+                        # Format: "= 123 Full Name"
+                        ports.append({'id': parts[1], 'name': " ".join(parts[2:])})
+                    elif parts[0].isdigit():
+                        # Format: "123 Full Name"
+                        ports.append({'id': parts[0], 'name': " ".join(parts[1:])})
         except Exception as e:
-            print(f"[Conductor] Error getting pw-id for {pattern}: {e}", file=sys.stderr)
-            return None
+            print(f"[Conductor] Error listing pw ports: {e}", file=sys.stderr)
+        return ports
+
+    def _match_pattern_to_id(self, pattern: str, port_list: List[Dict]) -> Optional[str]:
+        """Matches a pattern against a list of ports and returns the ID."""
+        if not pattern: return None
+
+        # Clean and tokenize the pattern
+        clean_pattern = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
+        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
+        if not tokens: return None
+        unique_tokens = set(tokens)
+
+        for port in port_list:
+            name_lower = port['name'].lower()
+            if all(token in name_lower for token in unique_tokens):
+                return port['id']
+        return None
+
+    def _get_pw_id(self, pattern: str, is_output: bool = False) -> Optional[str]:
+        """Legacy helper for single ID resolution."""
+        ports = self._get_all_pw_ports_with_ids(is_output)
+        return self._match_pattern_to_id(pattern, ports)
 
     def _pw_link_connect(self, src_id: str, dest_id: str):
         if not src_id or not dest_id:
@@ -1566,15 +1581,17 @@ class JackManager:
 
             for p_name, port in ports_to_process.items():
                 if port and not port.closed:
-                    # 1. Kill everything on ALL 16 channels of this port
+                    # 1. Targeted Silencing: Clear CCs on all 16 channels
                     for ch in range(16):
                         port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                         port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
-                        port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset All Controllers
+                        port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
                         port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
 
-                    # 1b. Nuclear Silencing: Individual Note Offs for all pitches on ALL 16 channels.
-                    for ch in range(16):
+                    # 1b. Nuclear Silencing: Only sweep most likely channels to avoid buffer overflow.
+                    # Channel 1 (0) is common for keyboards; track.channel is the destination.
+                    likely_channels = {0, target_chan}
+                    for ch in likely_channels:
                         for pitch in range(128):
                             port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
 

@@ -85,6 +85,9 @@ class JackManager:
         self._last_routing_target_idx = -1
         self._manual_routing_override = -1
         self._routing_initialized = False
+        self._pw_out_port_cache = []
+        self._pw_in_port_cache = []
+        self._last_pw_cache_update = 0
         
         # --- Diagnostics (RT Safe) ---
         #self._diag_clavier_in = 0
@@ -381,7 +384,7 @@ class JackManager:
                         # 2. Aggressively disconnect ANY link currently coming from our source keyboard
                         try:
                             # Format of pw-link -l -I: "src_id -> dest_id"
-                            res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=0.5)
+                            res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=2.0)
                             for line in res.stdout.splitlines():
                                 parts = line.split()
                                 if len(parts) >= 3 and parts[0] == str(src_id) and parts[1] == "->":
@@ -430,7 +433,7 @@ class JackManager:
                             # Disconnect ALL physical links from the source keyboard to avoid "double routing"
                             try:
                                 # Format of pw-link -l -I: "src_id -> dest_id"
-                                res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=0.5)
+                                res = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True, timeout=2.0)
                                 for line in res.stdout.splitlines():
                                     parts = line.split()
                                     if len(parts) >= 3 and parts[0] == str(src_id) and parts[1] == "->":
@@ -1468,6 +1471,16 @@ class JackManager:
         except Exception as e:
             print(f"\nError in JACK process callback: {e}")
 
+    def _refresh_pw_port_cache(self, force=False):
+        """Periodically refreshes the PipeWire port ID caches."""
+        now = time.time()
+        if not force and (now - self._last_pw_cache_update < 2.0):
+            return
+
+        self._pw_out_port_cache = self._get_all_pw_ports_with_ids(is_output=True)
+        self._pw_in_port_cache = self._get_all_pw_ports_with_ids(is_output=False)
+        self._last_pw_cache_update = now
+
     def _get_all_pw_ports_with_ids(self, is_output: bool = False) -> List[Dict]:
         """
         Retrieves all PipeWire ports (input or output) with their IDs and full names.
@@ -1476,9 +1489,9 @@ class JackManager:
         ports = []
         mode = "-o" if is_output else "-i"
         try:
-            # -I includes IDs, -m shows monitor/bridge ports
+            # Increased timeout to 2.0s for robustness on slow systems
             cmd = ["pw-link", "-m", mode, "-I"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=0.5)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0)
             for line in result.stdout.splitlines():
                 parts = line.split()
                 if len(parts) >= 2:
@@ -1489,7 +1502,11 @@ class JackManager:
                         # Format: "123 Full Name"
                         ports.append({'id': parts[0], 'name': " ".join(parts[1:])})
         except Exception as e:
-            print(f"[Conductor] Error listing pw ports: {e}", file=sys.stderr)
+            # We don't print the error every time to avoid flooding the console
+            # if PipeWire is temporarily busy.
+            if not hasattr(self, '_last_pw_error_time') or (time.time() - self._last_pw_error_time > 10):
+                print(f"[Conductor] Error listing pw ports: {e}", file=sys.stderr)
+                self._last_pw_error_time = time.time()
         return ports
 
     def _match_pattern_to_id(self, pattern: str, port_list: List[Dict]) -> Optional[str]:
@@ -1509,9 +1526,19 @@ class JackManager:
         return None
 
     def _get_pw_id(self, pattern: str, is_output: bool = False) -> Optional[str]:
-        """Legacy helper for single ID resolution."""
-        ports = self._get_all_pw_ports_with_ids(is_output)
-        return self._match_pattern_to_id(pattern, ports)
+        """Uses cached port lists to find an ID matching the given pattern."""
+        self._refresh_pw_port_cache()
+        ports = self._pw_out_port_cache if is_output else self._pw_in_port_cache
+
+        found_id = self._match_pattern_to_id(pattern, ports)
+
+        # If not found, maybe our cache is stale. Try one forced refresh.
+        if not found_id and (time.time() - self._last_pw_cache_update > 0.5):
+            self._refresh_pw_port_cache(force=True)
+            ports = self._pw_out_port_cache if is_output else self._pw_in_port_cache
+            found_id = self._match_pattern_to_id(pattern, ports)
+
+        return found_id
 
     def _pw_link_connect(self, src_id: str, dest_id: str):
         if not src_id or not dest_id:

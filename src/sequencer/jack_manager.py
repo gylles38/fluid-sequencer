@@ -397,9 +397,12 @@ class JackManager:
                                     except: pass
 
                         # 2. Aggressively disconnect ANY existing connections from this source
-                        for connection in src_port.connections:
-                            try: self.jack_client.disconnect(src_port, connection)
-                            except: pass
+                        try:
+                            connections = self.jack_client.get_all_connections(src_port)
+                            for connection in connections:
+                                try: self.jack_client.disconnect(src_port, connection)
+                                except: pass
+                        except Exception: pass
 
                     self.silence_all_midi_notes()
                     self._routing_initialized = True
@@ -429,9 +432,12 @@ class JackManager:
                             print(f"[Conductor] Routing change detected: {self._last_routing_target_idx} -> {target_idx}")
 
                             # --- 1. DISCONNECT ---
-                            for connection in src_port.connections:
-                                try: self.jack_client.disconnect(src_port, connection)
-                                except: pass
+                            try:
+                                connections = self.jack_client.get_all_connections(src_port)
+                                for connection in connections:
+                                    try: self.jack_client.disconnect(src_port, connection)
+                                    except: pass
+                            except Exception: pass
 
                             # --- 2. WAIT A BIT ---
                             time.sleep(0.02)
@@ -462,9 +468,12 @@ class JackManager:
                             # Cleanup all from source
                             src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
                             if src_port_to_clean:
-                                for conn in src_port_to_clean.connections:
-                                    try: self.jack_client.disconnect(src_port_to_clean, conn)
-                                    except: pass
+                                try:
+                                    connections = self.jack_client.get_all_connections(src_port_to_clean)
+                                    for conn in connections:
+                                        try: self.jack_client.disconnect(src_port_to_clean, conn)
+                                        except: pass
+                                except Exception: pass
 
                             self._last_connected_src_id = None
                             self._last_connected_dest_id = None
@@ -478,9 +487,12 @@ class JackManager:
 
                          src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
                          if src_port_to_clean:
-                             for conn in src_port_to_clean.connections:
-                                 try: self.jack_client.disconnect(src_port_to_clean, conn)
-                                 except: pass
+                             try:
+                                 connections = self.jack_client.get_all_connections(src_port_to_clean)
+                                 for conn in connections:
+                                     try: self.jack_client.disconnect(src_port_to_clean, conn)
+                                     except: pass
+                             except Exception: pass
 
                          self._last_connected_src_id = None
                          self._last_connected_dest_id = None

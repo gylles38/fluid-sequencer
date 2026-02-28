@@ -190,7 +190,7 @@ class JackManager:
             print("Erreur: commande 'jack_lsp' introuvable.", file=sys.stderr)
             return []
 
-    def open_midi_port(self, port_name: str):
+    def open_midi_port(self, port_name: str, verbose=False):
         """Opens a MIDI port if it's not already open."""
         if port_name in self.open_ports and not self.open_ports[port_name].closed:
             return  # Port is already open
@@ -201,9 +201,9 @@ class JackManager:
         else:
             try:
                 self.open_ports[port_name] = mido.open_output(port_name)
-                print(f"Successfully opened MIDI port '{port_name}'")
+                if verbose: print(f"Successfully opened MIDI port '{port_name}'")
             except Exception as e:
-                print(f"Could not open MIDI port '{port_name}': {e}")
+                if verbose: print(f"Could not open MIDI port '{port_name}': {e}")
 
     def close_midi_port(self, port_name: str):
         """Closes a MIDI port if it's open and not used by other tracks."""
@@ -376,15 +376,14 @@ class JackManager:
                         # 2. Aggressively disconnect ANY link from our source port
                         # that might have been made by external tools
                         try:
-                            # pw-link -l lists links. We grep for our source ID and disconnect them.
-                            # Format is: "src_id dest_id"
-                            cmd = f"pw-link -l | grep '^{src_id} '"
-                            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                            # pw-link -l lists links. With -I it includes IDs.
+                            result = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True)
                             for line in result.stdout.splitlines():
                                 parts = line.split()
-                                if len(parts) >= 2:
-                                    dest_id = parts[1]
-                                    self._pw_link_disconnect(src_id, dest_id)
+                                # Format is: "src_id dest_id"
+                                if len(parts) >= 2 and parts[0] == str(src_id):
+                                    linked_dest_id = parts[1]
+                                    self._pw_link_disconnect(src_id, linked_dest_id)
                         except: pass
 
                     # Specifically ensure project instruments are silent
@@ -413,24 +412,38 @@ class JackManager:
                     dest_id = self._get_pw_id(dest_pattern, is_output=False)
 
                     if src_id and dest_id:
-                        if src_id != self._last_connected_src_id or dest_id != self._last_connected_dest_id:
-                            # Target changed, disconnect previous
-                            if self._last_connected_src_id and self._last_connected_dest_id:
-                                # --- 1. DISCONNECT FIRST ---
-                                # This stops keyboard notes from reaching the old instrument immediately.
-                                self._pw_link_disconnect(self._last_connected_src_id, self._last_connected_dest_id)
+                        # Detection of routing change: either port change or target track index change.
+                        # We must detect target_idx change even if ports are identical (e.g. tracks sharing a port but on different channels).
+                        if src_id != self._last_connected_src_id or dest_id != self._last_connected_dest_id or target_idx != self._last_routing_target_idx:
+                            # Target changed
+                            print(f"[Conductor] Routing change detected: target_idx {self._last_routing_target_idx} -> {target_idx}")
 
-                                # --- 2. WAIT A BIT ---
-                                # Short delay to ensure the link is fully severed in the kernel/driver.
-                                time.sleep(0.1)
+                            # --- 1. NUCLEAR DISCONNECT ---
+                            # We disconnect ALL existing links from our source keyboard ID.
+                            # pw-link -l lists links. With -I it includes IDs.
+                            try:
+                                result = subprocess.run(["pw-link", "-l", "-I"], capture_output=True, text=True)
+                                for line in result.stdout.splitlines():
+                                    parts = line.split()
+                                    # Format is: "src_id dest_id"
+                                    if len(parts) >= 2 and parts[0] == str(src_id):
+                                        linked_dest_id = parts[1]
+                                        self._pw_link_disconnect(src_id, linked_dest_id)
+                            except Exception as e:
+                                print(f"[Conductor] Error during nuclear disconnect: {e}", file=sys.stderr)
 
-                                # --- 3. THEN SILENCE ---
-                                if self._last_routing_target_idx != -1:
-                                    self._silence_instrument_at_index(self._last_routing_target_idx)
+                            # --- 2. WAIT A BIT ---
+                            # Short delay to ensure links are fully severed in the kernel/driver.
+                            time.sleep(0.1)
 
-                                # --- 4. ADDITIONAL LATENCY ---
-                                # Allow plugins to process silence commands and release buffers (Organs, etc.)
-                                time.sleep(0.4)
+                            # --- 3. THEN SILENCE PREVIOUS ---
+                            # We silence the PREVIOUS target track to cut its hanging keyboard notes.
+                            if self._last_routing_target_idx != -1:
+                                self._silence_instrument_at_index(self._last_routing_target_idx)
+
+                            # --- 4. ADDITIONAL LATENCY ---
+                            # Allow plugins to process silence commands and release buffers (Organs, etc.)
+                            time.sleep(0.4)
 
                             # Connect new
                             print(f"[Conductor] New Route Detected: {src_pattern} -> {dest_pattern}")
@@ -520,7 +533,16 @@ class JackManager:
 
                 # --- MIDI Port Setup ---
                 self.open_ports.clear()
-                required_ports = {track.output_port_name for track in tracks if isinstance(track, MidiTrack) and track.output_port_name}
+                required_ports = set()
+                for track in tracks:
+                    if is_midi_track(track):
+                        # Port used by the sequencer for playback
+                        if track.output_port_name:
+                            required_ports.add(track.output_port_name)
+                        # Port used as destination for live routing (instrument)
+                        if track.input_port_name:
+                            required_ports.add(track.input_port_name)
+
                 if self.sequencer.song.metronome_port_name:
                     required_ports.add(self.sequencer.song.metronome_port_name)
 
@@ -733,17 +755,20 @@ class JackManager:
         """
         unique_ports = set()
         for track in self.sequencer.song.tracks:
-            if is_midi_track(track) and track.output_port_name in self.open_ports:
-                unique_ports.add(self.open_ports[track.output_port_name])
+            if is_midi_track(track):
+                if track.output_port_name in self.open_ports:
+                    unique_ports.add(self.open_ports[track.output_port_name])
+                if track.input_port_name and track.input_port_name in self.open_ports:
+                    unique_ports.add(self.open_ports[track.input_port_name])
 
         for port in unique_ports:
             if port and not port.closed:
                 for ch in range(16):
-                    port.send(mido.Message('control_change', channel=ch, control=123, value=0))
-                    port.send(mido.Message('control_change', channel=ch, control=120, value=0))
-                    port.send(mido.Message('control_change', channel=ch, control=64, value=0))
-                # Individual note offs on all common channels
-                for ch in range(16):
+                    port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
+                    port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
+                    port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset All Controllers
+                    port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
+                    # Individual Note Offs
                     for pitch in range(128):
                         port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
 
@@ -1353,6 +1378,9 @@ class JackManager:
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
+                    # Reset manual routing override when playback starts
+                    self._manual_routing_override = -1
+
                     # Selective unpause: only tracks that should be playing now
                     # NOTE: We access active_audio_processes without lock for RT safety.
                     # It's only modified in main thread during track add/start/stop.
@@ -1522,46 +1550,43 @@ class JackManager:
         """
         Sends targeted Note Offs to the specified track to cut keyboard notes
         without interrupting notes currently played by the sequencer.
-        Uses CC 123 (All Notes Off) for efficiency and then restores sequencer notes.
+        Targets BOTH the sequencer port and the destination instrument port for 100% reliability.
         """
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
-            if is_midi_track(track) and track.output_port_name in self.open_ports:
-                port = self.open_ports[track.output_port_name]
+            if not is_midi_track(track):
+                return
+
+            # Collect unique ports related to this track to ensure 100% silencing coverage
+            ports_to_process = {}
+            if track.output_port_name in self.open_ports:
+                ports_to_process[track.output_port_name] = self.open_ports[track.output_port_name]
+            if track.input_port_name and track.input_port_name in self.open_ports:
+                ports_to_process[track.input_port_name] = self.open_ports[track.input_port_name]
+
+            for p_name, port in ports_to_process.items():
                 if port and not port.closed:
-                    target_port_name = track.output_port_name
-                    target_chan = track.channel
-
                     # 1. Kill everything on ALL 16 channels of this port
-                    # This is much safer as some plugins (like Organs) might respond
-                    # to different channels or we might have overlapping mappings.
                     for ch in range(16):
-                        port.send(mido.Message('control_change', channel=ch, control=123, value=0))
-                        port.send(mido.Message('control_change', channel=ch, control=120, value=0))
-                        port.send(mido.Message('control_change', channel=ch, control=64, value=0))
+                        port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
+                        port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
+                        port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset All Controllers
+                        port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
 
-                    # 1b. Extra Brutal Silencing for Organ plugins:
-                    # Individual Note Offs for all pitches on the target channel.
-                    # Some plugins ignore CC 123/120.
-                    # We also send CC 123/120 again AFTER the note offs for good measure.
-                    for pitch in range(128):
-                        port.send(mido.Message('note_off', channel=target_chan, note=pitch, velocity=0))
+                    # 1b. Nuclear Silencing: Individual Note Offs for all pitches on ALL 16 channels.
+                    for ch in range(16):
+                        for pitch in range(128):
+                            port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
 
-                    # Repeated silence commands to ensure arrival
-                    for _ in range(2):
-                        port.send(mido.Message('control_change', channel=target_chan, control=123, value=0))
-                        port.send(mido.Message('control_change', channel=target_chan, control=120, value=0))
-                        port.send(mido.Message('control_change', channel=target_chan, control=64, value=0))
-
-                    # 1c. Clear sustained note tracking for this port to ensure new routing is clean
+                    # 1c. Clear sustained note tracking for this track
                     with self.sync_lock:
                         self._sustained_notes = {p for p in self._sustained_notes if p[0] != track_idx}
 
-                    # 2. Identify all tracks sharing this port to restore their state
-                    tracks_on_port = []
+                    # 2. Identify all tracks that might be playing through this specific port
+                    tracks_to_restore = []
                     for i, t in enumerate(self.sequencer.song.tracks):
-                        if is_midi_track(t) and t.output_port_name == target_port_name:
-                            tracks_on_port.append((i, t))
+                        if is_midi_track(t) and (t.output_port_name == p_name or t.input_port_name == p_name):
+                            tracks_to_restore.append((i, t))
 
                     # 3. Restore sequencer notes (Note On) for those currently active
                     restored_count = 0
@@ -1569,34 +1594,30 @@ class JackManager:
                         active_notes_copy = list(self._active_notes.items())
 
                     for (t_idx, pitch), (end_beat, velocity) in active_notes_copy:
-                        for port_track_idx, port_track in tracks_on_port:
-                            if t_idx == port_track_idx:
+                        for restore_idx, restore_track in tracks_to_restore:
+                            if t_idx == restore_idx:
                                 # Re-trigger the sequencer note on its correct channel
-                                port.send(mido.Message('note_on', channel=port_track.channel, note=pitch, velocity=velocity))
+                                port.send(mido.Message('note_on', channel=restore_track.channel, note=pitch, velocity=velocity))
                                 restored_count += 1
 
-                    # 4. Restore state (Volume, Pan, Sustain) for all tracks on this port
+                    # 4. Restore state (Volume, Pan, Sustain)
                     current_beat = self.last_beat
-                    for port_track_idx, port_track in tracks_on_port:
-                        primed_params = self._prime_automation_at_beat_for_track(port_track_idx, current_beat)
+                    for restore_idx, restore_track in tracks_to_restore:
+                        # Priming handles the automatic update for output_port_name
+                        self._prime_automation_at_beat_for_track(restore_idx, current_beat)
 
-                        # Volume
-                        if (port_track_idx, 'vol') not in primed_params:
-                            midi_volume = int(port_track.volume * 127)
-                            port.send(mido.Message('control_change', channel=port_track.channel, control=7, value=midi_volume))
-                        # Pan
-                        if (port_track_idx, 'pan') not in primed_params:
-                            midi_pan = int((port_track.pan + 1.0) / 2.0 * 127)
-                            port.send(mido.Message('control_change', channel=port_track.channel, control=10, value=midi_pan))
+                        # If we just silenced the direct instrument port, we must re-prime it specifically
+                        if p_name == restore_track.input_port_name:
+                            midi_volume = int(restore_track.volume * 127)
+                            port.send(mido.Message('control_change', channel=restore_track.channel, control=7, value=midi_volume))
+                            midi_pan = int((restore_track.pan + 1.0) / 2.0 * 127)
+                            port.send(mido.Message('control_change', channel=restore_track.channel, control=10, value=midi_pan))
+                            with self.sync_lock:
+                                last_sustain = self._last_cc_values.get((restore_idx, 64))
+                                if last_sustain is not None:
+                                    port.send(mido.Message('control_change', channel=restore_track.channel, control=64, value=last_sustain))
 
-                        # Restore Sustain (CC 64) if it's not automated but was recently active
-                        if (port_track_idx, 'cc64') not in primed_params:
-                             with self.sync_lock:
-                                 last_sustain = self._last_cc_values.get((port_track_idx, 64))
-                                 if last_sustain is not None:
-                                     port.send(mido.Message('control_change', channel=port_track.channel, control=64, value=last_sustain))
-
-                    print(f"[Conductor] Silenced all channels on port {target_port_name} (restored {restored_count} sequencer notes across {len(tracks_on_port)} tracks)")
+                    print(f"[Conductor] Silenced port {p_name} (restored {restored_count} sequencer notes across {len(tracks_to_restore)} tracks)")
 
     def _prime_automation_at_beat_for_track(self, track_index: int, beat: float) -> set:
         """

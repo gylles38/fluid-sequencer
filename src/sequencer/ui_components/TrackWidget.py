@@ -752,11 +752,6 @@ class TrackWidget(BoxLayout):
             # and the sequencer is stopped, we select this track.
             seq = self.sequencer_layout.sequencer
             if seq.playback_state == "stopped":
-                # Before changing track, silence the previous instrument if needed.
-                current_target = seq.jack_manager._get_input_routing_value(seq.current_beat)
-                if current_target is not None and current_target != self.track_index:
-                    seq.jack_manager._silence_instrument_at_index(current_target)
-
                 # Manual override of the MIDI routing for the instrument selection.
                 # We tell the JackManager to target this track specifically.
                 seq.jack_manager._manual_routing_override = self.track_index

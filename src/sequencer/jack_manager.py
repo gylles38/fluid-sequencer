@@ -790,30 +790,63 @@ class JackManager:
     def silence_all_midi_notes(self):
         """
         Hard reset for all MIDI sound across all ports and channels.
-        Used for Panic and project transitions.
+        Used for Panic, stop, and project transitions.
         """
-        unique_ports = set()
-        for track in self.sequencer.song.tracks:
-            if is_midi_track(track):
-                if track.output_port_name in self.open_ports:
-                    unique_ports.add(self.open_ports[track.output_port_name])
-                if track.input_port_name and track.input_port_name in self.open_ports:
-                    unique_ports.add(self.open_ports[track.input_port_name])
-
-        for port in unique_ports:
-            if port and not port.closed:
-                for ch in range(16):
-                    port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
-                    port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
-                    port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset All Controllers
-                    port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
-                    # Individual Note Offs
-                    for pitch in range(128):
-                        port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
-
+        # 1. First, snapshot and clear internal tracking under lock
         with self.sync_lock:
+            active_notes_snapshot = list(self._active_notes.items())
             self._active_notes.clear()
             self._sustained_notes.clear()
+
+        # 2. Map ports to channels used in the project
+        port_to_channels = {}
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if is_midi_track(track):
+                # Check output port (sequencer generated notes)
+                out_name = track.output_port_name
+                if out_name in self.open_ports:
+                    ch_set = port_to_channels.setdefault(self.open_ports[out_name], set())
+                    ch_set.add(track.channel)
+
+                # Check input port (routing destination for live keyboard)
+                in_name = track.input_port_name
+                if in_name in self.open_ports:
+                    ch_set = port_to_channels.setdefault(self.open_ports[in_name], set())
+                    ch_set.add(track.channel)
+                    # Keyboard usually sends on channel 0 or track channel
+                    ch_set.add(0)
+
+        # Ensure metronome port is included
+        m_port_name = self.sequencer.song.metronome_port_name
+        if m_port_name in self.open_ports:
+            ch_set = port_to_channels.setdefault(self.open_ports[m_port_name], set())
+            ch_set.add(self.sequencer.metronome_channel)
+
+        # 3. Perform surgical silencing
+        for port, channels in port_to_channels.items():
+            if not port or port.closed: continue
+
+            # Send CC resets to ALL channels (broad but fast)
+            for ch in range(16):
+                port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
+                port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
+                port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
+                port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
+
+            # Targeted individual Note Off sweep for relevant channels
+            # This is critical for instruments that ignore CC 123 (like some organs)
+            for ch in channels:
+                for pitch in range(128):
+                    port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+
+        # 4. Specifically cut notes from the snapshot to be absolutely sure
+        for (track_idx, pitch), (end_beat, velocity) in active_notes_snapshot:
+            try:
+                track = self.sequencer.song.tracks[track_idx]
+                if is_midi_track(track) and track.output_port_name in self.open_ports:
+                    port = self.open_ports[track.output_port_name]
+                    port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+            except: pass
 
     def _queue_ipc_command(self, socket_path, command_data):
         """Queues an IPC command for the worker thread to send (RT safe)."""

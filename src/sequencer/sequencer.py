@@ -2852,6 +2852,7 @@ class Sequencer(EventDispatcher):
 
             # Reposition JACK transport
             target_frame = int((new_beat / beats_per_second) * samplerate)
+            _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
             pos_struct.frame = target_frame
             self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
 

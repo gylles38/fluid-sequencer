@@ -3,6 +3,7 @@ from kivy.lang import Builder
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler
+from .ui_utils import is_any_text_input_focused
 from sequencer.models import AutomationTrack, MidiTrack, AutomationPoint
 import copy
 from kivy.core.window import Window
@@ -13,6 +14,7 @@ from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.boxlayout import BoxLayout
 from .HoverBehavior import HoverableButton
 from kivy.graphics import Color, Line, Rectangle, Mesh
 from kivy.metrics import dp
@@ -178,6 +180,7 @@ class EditableRoutingGrid(RelativeLayout):
 
         self.selected_point = clicked_point
         self.draw_curve_and_points()
+        self.editor.update_status_bar(clicked_point)
 
         if edit_mode == 'insert':
             quantized_beat = round(clicked_beat * 4) / 4
@@ -215,6 +218,7 @@ class EditableRoutingGrid(RelativeLayout):
 
             self.editor.is_dirty = True
             self.draw_curve_and_points()
+            self.editor.update_status_bar(self._dragged_point)
             return True
         return super().on_touch_move(touch)
 
@@ -404,6 +408,25 @@ Builder.load_string("""
                 tooltip_text: "Stop"
                 on_press: root.stop_pressed()
 
+            Widget:
+                size_hint_x: 0.5
+
+            Label:
+                text: "Pos:"
+                size_hint_x: None
+                width: self.texture_size[0]
+
+            TextInput:
+                id: pos_label
+                text: "1:1"
+                size_hint_x: None
+                size_hint_y: None
+                height: dp(30)
+                pos_hint: {"center_y": .5}
+                width: dp(70)
+                multiline: False
+                on_text_validate: root.seek_from_input(self.text)
+
         Ruler:
             id: ruler
             size_hint: 1, None
@@ -439,25 +462,33 @@ Builder.load_string("""
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
-                # Utiliser un RelativeLayout direct pour le contenu scrollable
-                RelativeLayout:
+                # Utiliser un FloatLayout pour superposer le contenu et la playhead
+                FloatLayout:
                     id: scroll_content
                     size_hint: None, 1
                     width: grid.width
 
-                    # Grille d'automation (Routing)
-                    EditableRoutingGrid:
-                        id: grid
-                        editor: root
-                        size_hint: None, 1
-                        width: root.total_beats * root.pixels_per_beat
-                        points: root.track_copy.points
-                        total_beats: root.total_beats
-                        pixels_per_beat: root.pixels_per_beat
-                        midi_tracks: root.midi_tracks
-                        beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
-                        active_index: root.current_routing_index
-                        pos: 0, dp(15)
+                    BoxLayout:
+                        orientation: 'vertical'
+                        size_hint: (1, 1)
+                        padding: [0, 0, 0, dp(15)]
+
+                        # Grille d'automation (Routing)
+                        EditableRoutingGrid:
+                            id: grid
+                            editor: root
+                            size_hint: None, 1
+                            width: root.total_beats * root.pixels_per_beat
+                            points: root.track_copy.points
+                            total_beats: root.total_beats
+                            pixels_per_beat: root.pixels_per_beat
+                            midi_tracks: root.midi_tracks
+                            beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
+                            active_index: root.current_routing_index
+
+                        Widget:
+                            size_hint_y: None
+                            height: dp(18)
 
                     # Playhead
                     Widget:
@@ -478,6 +509,32 @@ Builder.load_string("""
             padding: dp(8)
             spacing: dp(8)
             md_bg_color: 0.2, 0.2, 0.2, 1
+
+            MDBoxLayout:
+                id: edit_zone
+                adaptive_width: True
+                spacing: dp(10)
+                opacity: 0
+
+                MDLabel:
+                    text: "Beat:"
+                    adaptive_width: True
+                TextInput:
+                    id: input_beat
+                    size_hint: None, None
+                    size: dp(60), dp(30)
+                    multiline: False
+                    on_text_validate: root.apply_manual_edit()
+
+                MDLabel:
+                    text: "Track Idx:"
+                    adaptive_width: True
+                TextInput:
+                    id: input_value
+                    size_hint: None, None
+                    size: dp(60), dp(30)
+                    multiline: False
+                    on_text_validate: root.apply_manual_edit()
 
             Widget:
                 size_hint_x: 1
@@ -513,6 +570,7 @@ class InputRoutingEditor(FloatingWindow):
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
     history = ObjectProperty(None)
+    selected_point = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kwargs):
         self.history = EditHistoryManager()
@@ -544,6 +602,7 @@ class InputRoutingEditor(FloatingWindow):
         self.ids.ruler.scroll_view.bind(scroll_x=self.sync_horizontal_scroll)
         self.ids.timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         self._record_state()
+        Window.bind(on_key_down=self._on_key_down)
 
     def update_midi_tracks(self):
         self.midi_tracks = [
@@ -568,11 +627,16 @@ class InputRoutingEditor(FloatingWindow):
         scroll_view.scroll_x = max(0, min(1, new_scroll_x))
 
     def update_playhead(self, dt):
+        if 'playhead' not in self.ids: return
         sequencer = self.sequencer_layout.sequencer
         current_beat = sequencer.current_beat
 
         # Déplacement de la barre rouge
         self.ids.playhead.x = current_beat * self.pixels_per_beat
+
+        # Mise à jour du texte M:B
+        if not self.ids.pos_label.focus:
+            self.ids.pos_label.text = sequencer._format_beats_to_position(current_beat)
 
         # Auto-scroll uniquement en lecture
         if sequencer.playback_state == 'playing':
@@ -605,14 +669,21 @@ class InputRoutingEditor(FloatingWindow):
         new_point = AutomationPoint(start_time=beat, value=value, parameter='input_routing', curve='none')
         self.track_copy.points.append(new_point)
         self.track_copy.points.sort(key=lambda p: p.start_time)
-        self.ids.grid.draw_curve_and_points()
+        self.ids.grid.points = list(self.track_copy.points)
+        self.ids.grid.draw()
         self._record_state()
         self.is_dirty = True
 
     def delete_point(self, point):
         if point in self.track_copy.points:
             self.track_copy.points.remove(point)
-            self.ids.grid.draw_curve_and_points()
+            if self.selected_point == point:
+                self.selected_point = None
+            if self.ids.grid.selected_point == point:
+                self.ids.grid.selected_point = None
+            self.update_status_bar(None)
+            self.ids.grid.points = list(self.track_copy.points)
+            self.ids.grid.draw()
             self._record_state()
             self.is_dirty = True
 
@@ -632,7 +703,8 @@ class InputRoutingEditor(FloatingWindow):
 
     def _apply_state(self, state):
         self.track_copy.points = [AutomationPoint(**d) for d in state]
-        self.ids.grid.draw_curve_and_points()
+        self.ids.grid.points = list(self.track_copy.points)
+        self.ids.grid.draw()
         self.is_dirty = True
 
     def zoom_in(self): self._apply_zoom(self.pixels_per_beat * 1.25)
@@ -694,6 +766,65 @@ class InputRoutingEditor(FloatingWindow):
     def stop_pressed(self): self.sequencer_layout.sequencer.process_transport_command("stop")
     def rewind_pressed(self): self.sequencer_layout.sequencer._resync_all_at_beat(0)
 
+    def seek_from_input(self, text):
+        try:
+            seq = self.sequencer_layout.sequencer
+            target_beat = seq.parse_position_to_beats(text)
+            if target_beat is not None:
+                target_beat = max(0, min(self.total_beats, target_beat))
+                seq.current_beat = target_beat
+                seq._resync_all_at_beat(target_beat)
+                self.ids.playhead.x = target_beat * self.pixels_per_beat
+                self._scroll_to_logic(target_beat)
+            self.ids.pos_label.focus = False
+        except:
+            self.ids.pos_label.focus = False
+
+    def update_status_bar(self, point):
+        if point:
+            self.ids.edit_zone.opacity = 1
+            self.ids.input_beat.text = f"{point.start_time:.2f}"
+            self.ids.input_value.text = f"{int(point.value)}"
+        else:
+            self.ids.edit_zone.opacity = 0
+
+    def apply_manual_edit(self):
+        if not self.ids.grid.selected_point: return
+        point = self.ids.grid.selected_point
+        try:
+            new_beat = float(self.ids.input_beat.text)
+            new_val = int(float(self.ids.input_value.text))
+
+            # Validation: Check if the track index exists and is a MIDI track
+            valid_indices = [t[0] for t in self.midi_tracks]
+            if new_val not in valid_indices:
+                # Reverting to the previous value if invalid
+                self.update_status_bar(point)
+                self.ids.input_beat.focus = False
+                self.ids.input_value.focus = False
+                return
+
+            point.start_time = max(0, min(self.total_beats, new_beat))
+            point.value = new_val
+            self.ids.grid.draw()
+            self.update_status_bar(point)
+            self.is_dirty = True
+            self._record_state()
+            self.ids.input_beat.focus = False
+            self.ids.input_value.focus = False
+        except ValueError:
+            self.update_status_bar(point)
+
+    def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
+        if is_any_text_input_focused(): return False
+        if keyboard == 32: # Space
+            self.play_pressed()
+            return True
+        if keyboard == 278: # Home
+            self.rewind_pressed()
+            return True
+        return False
+
     def on_playback_state_change(self, instance, state):
         play_btn = self.ids.play_button
         pause_btn = self.ids.pause_button
@@ -714,8 +845,15 @@ class InputRoutingEditor(FloatingWindow):
             pause_btn.icon = 'pause'
             pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
 
+    def on_open(self):
+        self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
+        self.ids.ruler.total_beats = self.total_beats
+        self.ids.ruler.redraw()
+        self.ids.grid.draw()
+
     def on_dismiss(self):
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+        Window.unbind(on_key_down=self._on_key_down)
         super(InputRoutingEditor, self).on_dismiss()
 
     def dismiss(self, action=None, *args):

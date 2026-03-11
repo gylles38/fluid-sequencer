@@ -373,7 +373,7 @@ class SequencerLayout(BoxLayout):
         self.bridge_activity_dot.bind(pos=lambda *a: setattr(self.bridge_dot_rect, 'pos', self.bridge_activity_dot.pos))
 
         self.bridge_label = MDLabel(
-            text="Bridge: -",
+            text="Conductor: -",
             size_hint_x=None,
             width=dp(180),
             size_hint_y=None,
@@ -521,17 +521,33 @@ class SequencerLayout(BoxLayout):
             md_bg_color=[0.1, 0.1, 0.1, 1]
         )
 
+        self.panic_button = TooltipMDIconButton(
+            icon='alert-octagon-outline',
+            tooltip_text='Panic (Reset MIDI)',
+            size_hint_x=None,
+            pos_hint={'center_y': 0.5},
+            width=dp(40),
+            size_hint_y=None,
+            height=common_height,
+            theme_icon_color="Custom",
+            icon_color=[1, 0.6, 0, 1],
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 1]
+        )
+
         transport_card.add_widget(self.play_button)
         transport_card.add_widget(self.loop_button)
         transport_card.add_widget(self.pause_button)
         transport_card.add_widget(self.stop_button)
         transport_card.add_widget(self.record_button)
+        transport_card.add_widget(self.panic_button)
 
         self.play_button.bind(on_press=self.play_pressed)
         self.loop_button.bind(on_press=self.loop_pressed)
         self.pause_button.bind(on_press=self.pause_pressed)
         self.stop_button.bind(on_press=self.stop_pressed)
         self.record_button.bind(on_press=self.record_pressed)
+        self.panic_button.bind(on_press=self.panic_pressed)
         
         # Espace flexible à droite
         transport_card.add_widget(Widget(size_hint_x=1))
@@ -747,8 +763,15 @@ class SequencerLayout(BoxLayout):
         """
         Callback for when the song's structure (e.g., notes in a track) changes
         in a way that requires a full UI redraw.
+        Debounced to avoid lagging during heavy updates (like recording or bulk edits).
         """
-        Logger.info("UI: Song structure changed, forcing full UI refresh.")
+        # Longer debounce during recording to prioritize MIDI thread
+        debounce_time = 1.0 if (self.sequencer and self.sequencer.is_recording) else 0.3
+        Clock.unschedule(self._debounced_refresh_ui)
+        Clock.schedule_once(self._debounced_refresh_ui, debounce_time)
+
+    def _debounced_refresh_ui(self, dt):
+        Logger.info("UI: Song structure changed, performing debounced UI refresh.")
         self.update_status_display()
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
@@ -852,10 +875,10 @@ class SequencerLayout(BoxLayout):
                     import mido
                     input_ports = mido.get_input_names()
                     if port_name not in input_ports:
-                        self.show_error_popup("Invalid Port", 
+                        self.show_error_popup("Invalid Port",
                                             f"Port '{port_name}' is not available.")
                         return
-                    
+
                     self.process_command_ui(f'setrecordport "{port_name}"')
                     self.show_info_popup("Success", f"MIDI input port set to:\n{port_name}")
                     
@@ -1661,37 +1684,26 @@ class SequencerLayout(BoxLayout):
             self.show_midi_settings()
             return False
 
-        # Trouver la piste armée
-        armed_track_index = None
-        for i, track in enumerate(self.sequencer.song.tracks):
-            if isinstance(track, MidiTrack) and track.record_mode != 'OFF':
-                if armed_track_index is not None:
-                    self.show_error_popup("Multiple Tracks Armed",
-                                        "Multiple tracks are armed for recording.\nPlease arm only one track.")
-                    return False
-                armed_track_index = i
+        # Dynamic Routing Support: Check if any track is armed or if routing track is present
+        any_armed = any(isinstance(t, MidiTrack) and t.record_mode != 'OFF' for t in self.sequencer.song.tracks)
+        has_routing = self.sequencer.song.input_routing and self.sequencer.song.input_routing.points
 
-        if armed_track_index is None:
+        if not any_armed and not has_routing:
             self.show_error_popup("No Track Armed",
-                                "No track is armed for recording.\nPlease arm a MIDI track first.")
+                                "No track is armed and no MIDI routing is defined.\nPlease arm a MIDI track or set up routing.")
             return False
 
         # Récupérer la position de départ
         start_pos_text = self.start_pos_input.text.strip()
-        if not start_pos_text:
-            start_pos_text = "1:1"  # Par défaut
-
-        # Convertir en beats
-        start_beat = self.sequencer.parse_position_to_beats(start_pos_text)
+        start_beat = self.sequencer.parse_position_to_beats(start_pos_text or "1:1")
         if start_beat is None:
-            self.show_error_popup("Invalid Start Position",
-                                f"Invalid start position: {start_pos_text}")
+            self.show_error_popup("Invalid Start Position", f"Invalid start position: {start_pos_text}")
             return False
 
-        # Démarrer l'enregistrement
+        # Démarrer l'enregistrement (track_idx=None for dynamic)
         try:
             result = self.sequencer.record_track(
-                track_idx=armed_track_index,
+                track_idx=None,
                 start_beat=start_beat,
                 inport_name=self.sequencer.default_record_port
             )
@@ -1714,6 +1726,9 @@ class SequencerLayout(BoxLayout):
 
     def record_pressed(self, instance):
         self.sequencer.process_transport_command("record")
+
+    def panic_pressed(self, instance):
+        self.sequencer.panic()
 
     def get_armed_track(self) -> Optional[int]:
         """Retourne l'index de la piste armée, ou None si aucune piste n'est armée."""
@@ -1933,31 +1948,54 @@ class SequencerLayout(BoxLayout):
                 if hasattr(window, 'source_track') and window.source_track not in self.sequencer.song.tracks:
                     window.dismiss()
 
-        self.track_list_layout.clear_widgets()
-        self.track_widgets.clear()
-
         final_total_beats = self.sequencer.get_song_length_in_beats()
-
-        # Update the main ruler's properties
         self.ruler.total_beats = final_total_beats
         self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
 
-        for i, track in enumerate(self.sequencer.song.tracks):
-            if isinstance(track, MidiTrack) and track.is_metronome:
-                continue
+        # Optimization: Reuse existing TrackWidget instances to avoid expensive reconstruction
+        # Create a mapping of current tracks to their widgets using id(track) for hashability
+        existing_widgets = {id(w.track): w for w in self.track_widgets}
 
-            track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
-            track_widget.total_beats = final_total_beats
-            track_widget.pixels_per_beat = self.pixels_per_beat
-            track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
-            self.track_widgets.append(track_widget)
-            # Force l'appel de la mise à jour graphique une fois que tout est rendu
-            Clock.schedule_once(track_widget._update_graphics, 0)
-            
-            if hasattr(track_widget, 'timeline_scroll'):
-                    track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
-                    
-            self.track_list_layout.add_widget(track_widget)            
+        new_track_widgets = []
+        tracks_to_show = [t for t in self.sequencer.song.tracks if not (isinstance(t, MidiTrack) and t.is_metronome)]
+
+        # Determine if we need to clear and re-add widgets (e.g., if order or count changed)
+        current_tracks_in_widgets = [w.track for w in self.track_widgets]
+        if current_tracks_in_widgets != tracks_to_show:
+            self.track_list_layout.clear_widgets()
+            for i, track in enumerate(tracks_to_show):
+                if id(track) in existing_widgets:
+                    track_widget = existing_widgets[id(track)]
+                    track_widget.track_index = i
+                else:
+                    track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
+                    if hasattr(track_widget, 'timeline_scroll'):
+                        track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
+
+                track_widget.total_beats = final_total_beats
+                track_widget.pixels_per_beat = self.pixels_per_beat
+                track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
+
+                new_track_widgets.append(track_widget)
+                self.track_list_layout.add_widget(track_widget)
+                Clock.schedule_once(track_widget._update_graphics, 0)
+        else:
+            # Order is the same, just update properties of existing widgets
+            for i, track_widget in enumerate(self.track_widgets):
+                track_widget.track_index = i
+                track_widget.total_beats = final_total_beats
+                track_widget.pixels_per_beat = self.pixels_per_beat
+                track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
+                new_track_widgets.append(track_widget)
+
+                # Redraw only the piano roll or measure grid if notes changed.
+                # We use redraw() which is debounced.
+                if hasattr(track_widget, 'piano_roll'):
+                    track_widget.piano_roll.redraw()
+                elif hasattr(track_widget, 'measure_grid'):
+                    track_widget.measure_grid.redraw()
+
+        self.track_widgets = new_track_widgets
 
         # Bind ruler spacer widths and timeline width
         if self.track_widgets:
@@ -1996,25 +2034,25 @@ class SequencerLayout(BoxLayout):
             
     def update_bridge_label(self, instance, value):
         if not self.sequencer.jack_manager.is_running:
-            self.bridge_label.text = "Bridge: NO JACK"
+            self.bridge_label.text = "Conductor: NO JACK"
             self.bridge_label.text_color = [0.8, 0.2, 0.2, 1]
         elif value == -1:
             # Vérifier si c'est parce qu'il n'y a aucune piste MIDI
             has_midi = any(isinstance(t, MidiTrack) for t in self.sequencer.song.tracks)
             if not has_midi:
-                self.bridge_label.text = "Bridge: No MIDI Tracks"
+                self.bridge_label.text = "Conductor: No MIDI Tracks"
             else:
-                self.bridge_label.text = "Bridge: OFF (No Route)"
+                self.bridge_label.text = "Conductor: OFF (No Route)"
             self.bridge_label.text_color = [0.5, 0.5, 0.5, 1]
         else:
             try:
                 track_name = self.sequencer.song.tracks[value].name
                 # Display both index and a shortened name
                 short_name = (track_name[:12] + '..') if len(track_name) > 12 else track_name
-                self.bridge_label.text = f"Bridge -> [{value}] {short_name}"
+                self.bridge_label.text = f"Conductor -> [{value}] {short_name}"
                 self.bridge_label.text_color = [0.2, 0.8, 1.0, 1]
             except (IndexError, AttributeError):
-                self.bridge_label.text = "Bridge: ?"
+                self.bridge_label.text = "Conductor: ?"
                 self.bridge_label.text_color = [1, 0.5, 0, 1]
 
     def update_status_display(self):

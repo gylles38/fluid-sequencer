@@ -40,14 +40,11 @@ class ThreeStateRecordButton(TooltipMDIconButton):
         self.update_appearance()
         
     def on_press(self):
-        """Cycle through the 3 states on press avec gestion d'exclusivité"""
+        """Cycle through the 3 states on press."""
         old_mode = self.track.record_mode
         
         # Si on essaie d'activer une piste (passer de OFF à OVERWRITE/KEEP)
         if old_mode == 'OFF':
-            # Désactiver toutes les autres pistes MIDI
-            self._disable_other_tracks()
-            # Activer cette piste
             self.track.record_mode = 'OVERWRITE'
             
         # Si on est déjà activé, cycler entre OVERWRITE et KEEP
@@ -67,20 +64,22 @@ class ThreeStateRecordButton(TooltipMDIconButton):
         if self.callback:
             self.callback(self.track)
     
-    def _disable_other_tracks(self):
-        """Désactive toutes les autres pistes MIDI"""
-        print(f"DEBUG: Disabling other MIDI tracks...")
-        for i, track in enumerate(self.sequencer_layout.sequencer.song.tracks):
-            if (isinstance(track, MidiTrack) and 
-                i != self.track_index and 
-                track.record_mode != 'OFF'):
-                
-                print(f"DEBUG: Disabling track {i} (was {track.record_mode})")
-                track.record_mode = 'OFF'
-    
     def update_appearance(self):
-        """Update button appearance and tooltip based on current state"""
-        state_config = self.states[self.track.record_mode]
+        """Update button appearance and tooltip based on current state and routing."""
+        mode = self.track.record_mode
+        state_config = self.states[mode].copy()
+
+        # Visual feedback for dynamic recording
+        is_recording = self.sequencer_layout.sequencer.is_recording
+        is_playing = self.sequencer_layout.sequencer.playback_state != 'stopped'
+        is_target = self.sequencer_layout.sequencer.current_routing_index == self.track_index
+
+        if is_recording and is_playing and is_target:
+            # Solid bright red background when this track is actively receiving recorded input
+            # We highlight it even if mode is 'OFF' because routing forces recording
+            state_config['bg_color'] = [0.8, 0, 0, 1]
+            state_config['icon_color'] = [1, 1, 1, 1]
+
         self.icon = state_config['icon']
         self.tooltip_text = state_config['tooltip']
         self.icon_color = state_config['icon_color']

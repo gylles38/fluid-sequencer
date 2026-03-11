@@ -2,7 +2,8 @@ from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, ListProperty
 from kivy.metrics import dp
-from kivy.graphics import Color, Rectangle, Line
+from kivy.graphics import Color, Rectangle, Line, Mesh
+from kivy.clock import Clock
 from sequencer.models import MidiTrack
 
 class PianoRoll(Widget):
@@ -23,13 +24,15 @@ class PianoRoll(Widget):
         self.size_hint = (None, None)
         self.height = 128 * self.note_height
 
-        self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width,
-                  track=self.draw, pos=self.draw, size=self.draw)
-        self._update_width()
+        self.bind(total_beats=self.redraw, pixels_per_beat=self.redraw,
+                  track=self.redraw, pos=self.redraw, size=self.redraw)
+        self.redraw()
 
-    def _update_width(self, *args):
+    def redraw(self, *args):
+        """Debounced redraw of grid and notes."""
         self.width = self.total_beats * self.pixels_per_beat
-        self.draw()
+        Clock.unschedule(self.draw)
+        Clock.schedule_once(self.draw, 0)
 
     def _velocity_to_color(self, velocity):
         """Converts MIDI velocity (0-127) to a color for visualization."""
@@ -47,33 +50,48 @@ class PianoRoll(Widget):
             Color(0.1, 0.1, 0.12, 1)
             Rectangle(pos=self.pos, size=self.size)
 
-            # --- Grid ---
+            # --- Optimized Grid using Mesh ---
+            black_keys_vertices = []
+            white_keys_vertices = []
+            octave_vertices = []
+
             for i in range(128):
-                # Y-coordinate is now proportional to pitch (bottom-up)
                 note_y = i * self.note_height
-                if (i % 12) in [1, 3, 6, 8, 10]: Color(0.15, 0.15, 0.17, 1) # Black keys
-                else: Color(0.2, 0.2, 0.22, 1) # White keys
-
-                # Draw horizontal lines for note separation
-                Line(points=[0, note_y, self.width, note_y], width=0.6)
-
-                # Draw thicker lines to mark octaves (after B notes)
-                if (i % 12) == 11:
-                    Color(0.8, 0.8, 0.8, 0.6)
-                    # Draw octave line at the TOP of the B key row, to separate from C
-                    octave_line_y = note_y + self.note_height
-                    Line(points=[0, octave_line_y, self.width, octave_line_y], width=1.2)
-
-            current_beat = 0
-            while current_beat <= self.total_beats:
-                x_pos = current_beat * self.pixels_per_beat
-                if current_beat % self.beat_per_measure == 0:
-                    Color(0.8, 0.8, 0.8, 0.8)
-                    Line(points=[x_pos, 0, x_pos, self.height], width=1.5)
+                if (i % 12) in [1, 3, 6, 8, 10]:
+                    black_keys_vertices.extend([0, note_y, 0, 0, self.width, note_y, 0, 0])
                 else:
-                    Color(0.5, 0.5, 0.5, 0.4)
-                    Line(points=[x_pos, 0, x_pos, self.height], width=0.5)
-                current_beat += 1
+                    white_keys_vertices.extend([0, note_y, 0, 0, self.width, note_y, 0, 0])
+
+                if (i % 12) == 11:
+                    octave_line_y = note_y + self.note_height
+                    octave_vertices.extend([0, octave_line_y, 0, 0, self.width, octave_line_y, 0, 0])
+
+            if black_keys_vertices:
+                Color(0.15, 0.15, 0.17, 1)
+                Mesh(vertices=black_keys_vertices, indices=list(range(len(black_keys_vertices)//4)), mode='lines')
+            if white_keys_vertices:
+                Color(0.2, 0.2, 0.22, 1)
+                Mesh(vertices=white_keys_vertices, indices=list(range(len(white_keys_vertices)//4)), mode='lines')
+            if octave_vertices:
+                Color(0.8, 0.8, 0.8, 0.6)
+                Mesh(vertices=octave_vertices, indices=list(range(len(octave_vertices)//4)), mode='lines')
+
+            # Vertical grid lines
+            major_vertices = []
+            minor_vertices = []
+            for i in range(int(self.total_beats) + 1):
+                x_pos = i * self.pixels_per_beat
+                if i % self.beat_per_measure == 0:
+                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                else:
+                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+
+            if major_vertices:
+                Color(0.8, 0.8, 0.8, 0.8)
+                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
+            if minor_vertices:
+                Color(0.5, 0.5, 0.5, 0.4)
+                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
 
         # --- Notes ---
         if isinstance(self.track, MidiTrack):

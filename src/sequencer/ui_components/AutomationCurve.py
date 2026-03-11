@@ -3,6 +3,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Mesh, Line
 from kivy.properties import ListProperty, NumericProperty
 from kivy.metrics import dp
+from kivy.clock import Clock
 
 # --- Fonctions d'interpolation (Easing) ---
 def _interp_linear(t):
@@ -39,8 +40,13 @@ class AutomationCurveWidget(Widget):
         super().__init__(**kwargs)
         # Initialisé par TrackWidget lors de la création
         self.param_type = "vol" 
-        self.bind(pos=self.draw_curve, size=self.draw_curve, points=self.draw_curve,
-                  pixels_per_beat=self.draw_curve, total_beats=self.draw_curve)
+        self.bind(pos=self.redraw, size=self.redraw, points=self.redraw,
+                  pixels_per_beat=self.redraw, total_beats=self.redraw)
+
+    def redraw(self, *args):
+        """Debounced redraw of the curve."""
+        Clock.unschedule(self.draw_curve)
+        Clock.schedule_once(self.draw_curve, 0)
 
     def _get_interp_func(self, curve_type):
         if curve_type == "linear": return _interp_linear

@@ -620,7 +620,8 @@ class TrackWidget(BoxLayout):
         # Liaison avec le séquenceur pour la mise à jour en temps réel
         self.sequencer_layout.sequencer.bind(
             current_beat=lambda instance, val: self.update_sliders_from_automation(val),
-            current_routing_index=lambda inst, val: self._sync_routing_status(inst, val)
+            current_routing_index=lambda inst, val: self._sync_routing_status(inst, val),
+            is_recording=lambda inst, val: self._sync_recording_status(inst, val)
         )
         
         # Appel initial pour régler les sliders au chargement du projet
@@ -682,12 +683,12 @@ class TrackWidget(BoxLayout):
             self.piano_roll.beat_per_measure = self.beats_per_measure
             # ----------------------
             
-            self.piano_roll.draw()
+            # Redraw is handled by property bindings in PianoRoll
         else:
             # For other tracks (unchanged)
             content_width = self.total_beats * self.pixels_per_beat
             self.timeline_container.width = content_width
-            # Vous le faisiez déjà ici pour measure_grid, mais pas pour piano_roll !
+            # Redraw is handled by property bindings in MeasureGrid
             self.measure_grid.total_beats = self.total_beats
             self.measure_grid.pixels_per_beat = self.pixels_per_beat
             self.measure_grid.beat_per_measure = self.beats_per_measure
@@ -709,7 +710,14 @@ class TrackWidget(BoxLayout):
         is_active = (self.track_index == value)
         if is_active != self.is_active_routing:
             self.is_active_routing = is_active
-            self._update_bg_color() # Appel direct sans passer par un bind supplémentaire
+            self._update_bg_color()
+
+        if hasattr(self, 'record_mode_button'):
+            self.record_mode_button.update_appearance()
+
+    def _sync_recording_status(self, instance, value):
+        if hasattr(self, 'record_mode_button'):
+            self.record_mode_button.update_appearance()
 
     def _update_bg_color(self, *args):
         """
@@ -727,6 +735,30 @@ class TrackWidget(BoxLayout):
             self.bg_color.rgba = [0.1, 0.1, 0.1, 1]
         else:
             self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
+
+    def on_touch_down(self, touch):
+        """
+        Handle touch events for track selection.
+        If the sequencer is stopped and the user clicks on the track (but not on a control),
+        select this track's instrument.
+        """
+        if self.collide_point(*touch.pos):
+            # We let the default Kivy processing happen first for buttons/sliders.
+            # super().on_touch_down(touch) returns True if a child consumed the touch.
+            if super().on_touch_down(touch):
+                return True
+
+            # If the touch wasn't consumed by a child (button, slider, etc.)
+            # and the sequencer is stopped, we select this track.
+            seq = self.sequencer_layout.sequencer
+            if seq.playback_state == "stopped":
+                # Manual override of the MIDI routing for the instrument selection.
+                # We tell the JackManager to target this track specifically.
+                seq.jack_manager._manual_routing_override = self.track_index
+                # We need to refresh the UI to show the new routing.
+                seq.current_routing_index = self.track_index
+                return True
+        return False
 
     def on_automation_selection_change(self, selected_param) -> None:
         """

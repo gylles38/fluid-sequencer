@@ -6,7 +6,7 @@ from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.uix.scrollview import ScrollView
 from kivy.effects.scroll import ScrollEffect
-from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate
+from kivy.graphics import Color, Rectangle, Line, Mesh, PushMatrix, PopMatrix, Translate
 from kivy.core.text import Label as CoreLabel # On utilise CoreLabel pour dessiner sur le canvas
 
 class RulerContent(RelativeLayout):
@@ -78,6 +78,11 @@ class RulerContent(RelativeLayout):
         self._redraw_event = Clock.schedule_once(self.redraw, 0)
         
     def redraw(self, *args):
+        """Debounced redraw of the ruler content."""
+        Clock.unschedule(self._do_redraw)
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
         # On calcule la largeur cible
         target_width = self.total_beats * self.pixels_per_beat
         self.width = target_width # Met à jour le widget pour le ScrollView
@@ -117,26 +122,37 @@ class RulerContent(RelativeLayout):
                     x = end_beat * self.pixels_per_beat
                     Rectangle(pos=(x - dp(3), 0), size=(dp(3), self.height))
 
-            # On s'assure que la boucle couvre bien tout avec int() + 1
+            # --- Optimized Grid Lines using Mesh ---
+            major_vertices = []
+            minor_vertices = []
+
             for beat in range(int(self.total_beats) + 1):
                 x = beat * self.pixels_per_beat
-                
                 if beat % self.beats_per_measure == 0:
-                    Color(*c_measure)
-                    Line(points=[x, 0, x, self.height], width=1.2)
-                    
+                    major_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
+                else:
+                    minor_vertices.extend([x, self.height * 0.4, 0, 0, x, self.height * 0.6, 0, 0])
+
+            if major_vertices:
+                Color(*c_measure)
+                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
+
+            if minor_vertices:
+                Color(*c_beat)
+                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
+
+            # --- Labels ---
+            for beat in range(int(self.total_beats) + 1):
+                if beat % self.beats_per_measure == 0:
+                    x = beat * self.pixels_per_beat
                     measure_num = (beat // self.beats_per_measure) + 1
                     texture = self.get_measure_texture(measure_num)
-                    
                     Color(*c_white)
                     Rectangle(
                         texture=texture,
                         pos=(int(x + self.label_padding_x), int(self.height * 0.2)),
                         size=texture.size
                     )
-                else:
-                    Color(*c_beat)
-                    Line(points=[x, self.height * 0.4, x, self.height * 0.6], width=1)
 
 class Ruler(BoxLayout):
     total_beats = NumericProperty(16)

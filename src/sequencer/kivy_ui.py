@@ -669,7 +669,9 @@ class SequencerLayout(BoxLayout):
 
         # Conteneur pour la liste des pistes avec défilement
         # On désactive do_scroll_x pour garder les panneaux de gauche fixes.
-        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False)
+        # On restreint le scroll aux barres pour éviter les conflits avec le drag'n'drop des pistes.
+        # La molette de la souris continuera de fonctionner normalement.
+        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False, scroll_type=['bars'])
         # 2. Le Layout qui contient les pistes
         # On le laisse à size_hint_x=1 pour qu'il s'adapte à la largeur de l'écran.
         self.track_list_layout = BoxLayout(

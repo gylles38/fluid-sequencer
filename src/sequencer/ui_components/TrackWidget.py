@@ -145,6 +145,7 @@ class TrackWidget(BoxLayout):
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
     is_active_routing = BooleanProperty(False)    
+    track_index = NumericProperty(0)
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         self.spacing = dp(12)
@@ -181,7 +182,20 @@ class TrackWidget(BoxLayout):
         self.bind(pos=self._update_graphics, size=self._update_graphics)
         
         # --- Left Section: Track Info ---
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[dp(10), dp(2), dp(10), dp(2)])
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(4), padding=[dp(4), dp(2), dp(10), dp(2)])
+
+        # Drag handle
+        self.drag_handle = TooltipMDIconButton(
+            icon='drag-variant',
+            tooltip_text='Drag to reorder',
+            pos_hint={'center_y': 0.5},
+            theme_icon_color="Custom",
+            icon_color=[0.6, 0.6, 0.6, 1],
+            size_hint=(None, None),
+            size=(dp(24), dp(24))
+        )
+        self.drag_handle.bind(on_touch_down=self.on_drag_handle_touch_down)
+        self.info_section.add_widget(self.drag_handle)
 
         labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
         # Non-editable track index
@@ -194,9 +208,7 @@ class TrackWidget(BoxLayout):
             bold=True,
             size_hint_x=None,
             width=dp(30),
-            # Ajoute ceci :
-            padding=labelPadding,          # ← top=2dp → descend le texte de 2 pixels
-            # ou inverse si tu veux monter : padding=[0, 0, 0, dp(2)] pour bottom
+            padding=labelPadding,
         )
         self.info_section.add_widget(self.index_label)
 
@@ -616,6 +628,7 @@ class TrackWidget(BoxLayout):
         self.update_timeline_size()
 
         self.track.bind(is_solo=self.on_solo_changed)
+        self.bind(track_index=self._on_track_index_change)
         
         # Liaison avec le séquenceur pour la mise à jour en temps réel
         self.sequencer_layout.sequencer.bind(
@@ -705,6 +718,10 @@ class TrackWidget(BoxLayout):
     def on_solo_changed(self, instance, value) -> None:
         self.update_mute_solo_appearance()
 
+    def _on_track_index_change(self, instance, value):
+        self.index_label.text = f"[{int(value)}]"
+        self._update_bg_color()
+
     def _sync_routing_status(self, instance, value):
         # On met à jour l'état et on force la couleur IMMEDIATEMENT
         is_active = (self.track_index == value)
@@ -735,6 +752,30 @@ class TrackWidget(BoxLayout):
             self.bg_color.rgba = [0.1, 0.1, 0.1, 1]
         else:
             self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
+
+    def on_drag_handle_touch_down(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            # Start dragging
+            touch.grab(self)
+            if hasattr(self.sequencer_layout, 'on_track_drag_start'):
+                self.sequencer_layout.on_track_drag_start(self, touch)
+            return True
+        return False
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            if hasattr(self.sequencer_layout, 'on_track_drag_move'):
+                self.sequencer_layout.on_track_drag_move(self, touch)
+            return True
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            if hasattr(self.sequencer_layout, 'on_track_drag_end'):
+                self.sequencer_layout.on_track_drag_end(self, touch)
+            return True
+        return super().on_touch_up(touch)
 
     def on_touch_down(self, touch):
         """

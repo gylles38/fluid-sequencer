@@ -768,6 +768,19 @@ class Sequencer(EventDispatcher):
                 return {"status": "cancelled", "message": "Deletion cancelled."}
 
         self.song.tracks.pop(track_index)
+
+        # Update display order: remove the index and decrement all higher indices
+        if track_index in self.song.track_display_order:
+            self.song.track_display_order.remove(track_index)
+
+        new_display_order = []
+        for idx in self.song.track_display_order:
+            if idx > track_index:
+                new_display_order.append(idx - 1)
+            else:
+                new_display_order.append(idx)
+        self.song.track_display_order = new_display_order
+
         self.is_dirty = True
         self.invalidate_song_length_cache()
         
@@ -895,6 +908,19 @@ class Sequencer(EventDispatcher):
         self.song.tracks[track_index].name = new_name
         self.is_dirty = True
         return {"status": "success", "message": f"Track '{old_name}' renamed to '{new_name}'."}
+
+    def move_track_display_order(self, old_display_index: int, new_display_index: int):
+        """Moves a track's position in the visual display order."""
+        if not (0 <= old_display_index < len(self.song.track_display_order)):
+            return
+        if not (0 <= new_display_index < len(self.song.track_display_order)):
+            return
+
+        # Pop the track index from its old position and insert it into the new one
+        track_idx = self.song.track_display_order.pop(old_display_index)
+        self.song.track_display_order.insert(new_display_index, track_idx)
+        self.is_dirty = True
+        self.song_structure_changed += 1
 
     def move_track_section(self, source_track_idx: int, confirmation_handler=None) -> str:
         if not 0 <= source_track_idx < len(self.song.tracks):

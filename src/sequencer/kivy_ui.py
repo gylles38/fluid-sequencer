@@ -1791,9 +1791,11 @@ class SequencerLayout(BoxLayout):
         self.sequencer.toggle_mute(track_index)
 
         # 2. Find the corresponding widget and update its appearance
-        if 0 <= track_index < len(self.track_widgets):
-            track_widget = self.track_widgets[track_index]
-            track_widget.update_mute_solo_appearance()
+        # We search by track_index property because self.track_widgets matches display order
+        for track_widget in self.track_widgets:
+            if track_widget.track_index == track_index:
+                track_widget.update_mute_solo_appearance()
+                break
 
     def toggle_track_solo(self, track_index):
         """Toggles solo state for a track and updates others without a full UI refresh."""
@@ -1809,13 +1811,14 @@ class SequencerLayout(BoxLayout):
         """Met à jour l'apparence des boutons record des pistes"""
         if track_index is not None:
             # Mettre à jour une piste spécifique
-            if track_index < len(self.track_list_layout.children):
-                track_widget = self.track_list_layout.children[-(track_index + 1)]
-                if hasattr(track_widget, 'record_mode_button'):
-                    track_widget.record_mode_button.update_appearance()
+            for track_widget in self.track_widgets:
+                if track_widget.track_index == track_index:
+                    if hasattr(track_widget, 'record_mode_button'):
+                        track_widget.record_mode_button.update_appearance()
+                    break
         else:
-            # Mettre à jour toutes les pistes - CORRECTION ICI
-            for i, track_widget in enumerate(self.track_list_layout.children):
+            # Mettre à jour toutes les pistes
+            for track_widget in self.track_widgets:
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 

@@ -826,16 +826,19 @@ class JackManager:
         for port, channels in port_to_channels.items():
             if not port or port.closed: continue
 
-            # Send CC resets to ALL channels (broad but fast)
+            # --- Pass 1: CC Resets ---
+            # Broad but fast. We do CC 64 (Sustain Off) FIRST.
             for ch in range(16):
+                port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
                 port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                 port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
-                port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
                 port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
 
-            # Targeted individual Note Off sweep for relevant channels
-            # This is critical for instruments that ignore CC 123 (like some organs)
-            for ch in channels:
+            # --- Pass 2: Targeted Note Off sweep ---
+            # This is critical for instruments that ignore CC 123 or have sustained notes.
+            # We prioritize project channels, then we do a full sweep if time permits.
+            # Actually, to BE SURE, we sweep all 16 channels for plugins (almost instant).
+            for ch in range(16):
                 for pitch in range(128):
                     port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
 
@@ -1479,7 +1482,11 @@ class JackManager:
                             track = self.sequencer.song.tracks[track_idx]
                             if is_midi_track(track) and track.output_port_name in self.open_ports:
                                 port = self.open_ports[track.output_port_name]
+                                # Cut the note
                                 port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                                # Sustain and All notes off to be sure
+                                port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))
+                                port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
                         self._active_notes.clear()
                     self._sustained_notes.clear()
                     return

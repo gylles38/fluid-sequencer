@@ -2690,14 +2690,15 @@ class Sequencer(EventDispatcher):
             self.playback_state = "stopped"
             return
 
-        if self.jack_manager.jack_client.transport_state == jack.ROLLING:
-            self.jack_manager.silence_all_midi_notes()
-            time.sleep(0.01)
-
         try:
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                 self.jack_manager.jack_client.transport_stop()
                 print("JACK transport stopped.")
+                # Give a tiny bit of time for the engine to register the stop
+                time.sleep(0.02)
+
+            # Silence EVERYTHING immediately after stopping transport
+            self.jack_manager.silence_all_midi_notes()
 
             beats_per_second = self.song.tempo / 60.0
             samplerate = self.jack_manager.jack_client.samplerate

@@ -813,6 +813,10 @@ class TrackWidget(BoxLayout):
             if super().on_touch_down(touch):
                 return True
 
+            # Ignore mouse wheel events for track selection
+            if hasattr(touch, 'button') and touch.button in ('scrollup', 'scrolldown', 'scrollleft', 'scrollright'):
+                return False
+
             # If the touch wasn't consumed by a child (button, slider, etc.)
             # and the sequencer is stopped, we select this track.
             seq = self.sequencer_layout.sequencer

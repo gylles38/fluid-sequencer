@@ -1975,10 +1975,16 @@ class Sequencer(EventDispatcher):
             return f"Error creating virtual port: {e}"
 
     def close_virtual_ports(self):
+        """Cleanly shutdown all sequencer resources, including engine and external processes."""
+        if self.jack_manager:
+            self.jack_manager.stop()
+            print("JACK engine stopped.")
+
         for port in self.virtual_ports:
             if not port.closed:
                 port.close()
         print("Virtual ports closed.")
+
         self._stop_carla_process()
         """Assure la fermeture propre des processus audio mpv à la sortie du séquenceur."""
         try:

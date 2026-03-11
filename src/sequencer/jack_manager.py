@@ -728,20 +728,23 @@ class JackManager:
         self._last_connected_src_id = None
         self._last_connected_dest_id = None
 
+        # Shut down all external audio player processes FIRST.
+        # They depend on JACK, so they should be closed while the server is still reachable.
+        self._shutdown_audio_processes()
+        print("Audio processes terminated.")
+
         # Deactivate and close the JACK client
         if self.jack_client:
             try:
+                # Deactivate first to stop the process callback
                 self.jack_client.deactivate()
+                # Then close the client connection
                 self.jack_client.close()
                 print("JACK client deactivated and closed.")
             except jack.JackError as e:
                 print(f"Error during JACK client shutdown: {e}", file=sys.stderr)
             finally:
                 self.jack_client = None
-
-        # Shut down all external audio player processes
-        self._shutdown_audio_processes()
-        print("Audio processes terminated.")
 
         # Close all open MIDI ports
         for name, port in self.open_ports.items():

@@ -361,6 +361,10 @@ class Sequencer(EventDispatcher):
                                     Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
                                 elif control == self.midi_config.get_transport_cc("record_arm"):
                                     Clock.schedule_once(lambda dt: self.process_transport_command("record"))
+                                elif control == self.midi_config.get_transport_cc("rewind"):
+                                    Clock.schedule_once(lambda dt: self.seek("-1m"))
+                                elif control == self.midi_config.get_transport_cc("forward"):
+                                    Clock.schedule_once(lambda dt: self.seek("+1m"))
 
                             # --- Handle Volume Sliders & Solo Buttons ---
                             for i in range(len(self.song.tracks)):

@@ -29,6 +29,46 @@ from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.graphics import Translate, PushMatrix, PopMatrix
 
+class DragHandle(Widget):
+    """A vertical drag handle that spans the full height of the track."""
+    def __init__(self, track_widget, **kwargs):
+        super().__init__(**kwargs)
+        self.track_widget = track_widget
+        self.size_hint_x = None
+        self.width = dp(12)
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        with self.canvas:
+            self.bg_color = Color(0.15, 0.15, 0.15, 1)
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+
+            # Grip indicators (dots or lines)
+            self.grip_color = Color(0.4, 0.4, 0.4, 1)
+            self.grips = []
+            for _ in range(3):
+                self.grips.append(Rectangle(size=(dp(4), dp(2))))
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
+        # Center grips vertically
+        center_x = self.x + self.width / 2 - dp(2)
+        spacing = dp(6)
+        total_height = 2 * spacing
+        start_y = self.y + self.height / 2 - total_height / 2
+
+        for i, grip in enumerate(self.grips):
+            grip.pos = (center_x, start_y + i * spacing)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.grab(self.track_widget)
+            if hasattr(self.track_widget.sequencer_layout, 'on_track_drag_start'):
+                self.track_widget.sequencer_layout.on_track_drag_start(self.track_widget, touch)
+            return True
+        return False
+
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -182,19 +222,11 @@ class TrackWidget(BoxLayout):
         self.bind(pos=self._update_graphics, size=self._update_graphics)
         
         # --- Left Section: Track Info ---
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(4), padding=[dp(4), dp(2), dp(10), dp(2)])
+        # Set padding to 0 top/bottom to allow DragHandle to take full height
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0])
 
-        # Drag handle
-        self.drag_handle = TooltipMDIconButton(
-            icon='drag-variant',
-            tooltip_text='Drag to reorder',
-            pos_hint={'center_y': 0.5},
-            theme_icon_color="Custom",
-            icon_color=[0.6, 0.6, 0.6, 1],
-            size_hint=(None, None),
-            size=(dp(24), dp(24))
-        )
-        self.drag_handle.bind(on_touch_down=self.on_drag_handle_touch_down)
+        # Drag handle (far left)
+        self.drag_handle = DragHandle(track_widget=self)
         self.info_section.add_widget(self.drag_handle)
 
         labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
@@ -753,14 +785,6 @@ class TrackWidget(BoxLayout):
         else:
             self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
 
-    def on_drag_handle_touch_down(self, instance, touch):
-        if instance.collide_point(*touch.pos):
-            # Start dragging
-            touch.grab(self)
-            if hasattr(self.sequencer_layout, 'on_track_drag_start'):
-                self.sequencer_layout.on_track_drag_start(self, touch)
-            return True
-        return False
 
     def on_touch_move(self, touch):
         if touch.grab_current is self:

@@ -2446,7 +2446,9 @@ class SequencerLayout(BoxLayout):
         if not self._dragged_widget:
             return
 
-        # Localize touch to track_list_layout
+        # Localize touch to track_list_layout.
+        # Since the touch is grabbed, touch.pos is in window coordinates.
+        # to_widget() with relative=False (default) converts from window to local.
         lx, ly = self.track_list_layout.to_widget(*touch.pos)
 
         # Find where the line should be drawn
@@ -2467,7 +2469,9 @@ class SequencerLayout(BoxLayout):
         if not self._dragged_widget:
             return
 
+        # Localize touch to track_list_layout
         lx, ly = self.track_list_layout.to_widget(*touch.pos)
+
         target_display_idx = self._get_drag_insertion_index(ly)
 
         # Current display index of the dragged widget
@@ -2497,15 +2501,24 @@ class SequencerLayout(BoxLayout):
         if num_children == 0:
             return 0
 
-        # Iterate through visual order from top to bottom
-        for i in range(num_children):
-            # child_idx in children list (from top)
-            child_idx = num_children - 1 - i
-            child = self.track_list_layout.children[child_idx]
+        # visual_indices are 0, 1, 2, ..., num_children-1
+        # positions are y_top, y_center_0, y_center_1, ..., y_bottom
 
-            # If our Y position is above the center of this child, we want this index
-            if ly > child.center_y:
-                return i
+        # Check if we are above the center of the first child (visual index 0)
+        top_child = self.track_list_layout.children[-1]
+        if ly > top_child.center_y:
+            return 0
+
+        # Check between centers of children
+        for i in range(num_children - 1):
+            # child_i is visual index i
+            child_i = self.track_list_layout.children[num_children - 1 - i]
+            # child_next is visual index i + 1
+            child_next = self.track_list_layout.children[num_children - 1 - (i + 1)]
+
+            # If touch is between center of i and center of i+1
+            if child_i.center_y >= ly > child_next.center_y:
+                return i + 1
 
         # If we are below the center of the last child
         return num_children

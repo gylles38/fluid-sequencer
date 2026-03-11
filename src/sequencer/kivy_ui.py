@@ -49,6 +49,7 @@ from sequencer.ui_components.PreferencesPopup import PreferencesPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.ui_components.Ruler import Ruler
 from sequencer.ui_components.ui_utils import is_any_text_input_focused
+from sequencer.ui_components.priority_scroll_view import PriorityScrollView
 # ============================================
 
 from sequencer.sequencer import Sequencer
@@ -671,7 +672,7 @@ class SequencerLayout(BoxLayout):
         # On désactive do_scroll_x pour garder les panneaux de gauche fixes.
         # On restreint le scroll aux barres pour éviter les conflits avec le drag'n'drop des pistes.
         # La molette de la souris continuera de fonctionner normalement.
-        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False, scroll_type=['bars'])
+        self.scroll_view = PriorityScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False, scroll_type=['bars'])
         # 2. Le Layout qui contient les pistes
         # On le laisse à size_hint_x=1 pour qu'il s'adapte à la largeur de l'écran.
         self.track_list_layout = BoxLayout(

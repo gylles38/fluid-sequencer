@@ -431,7 +431,8 @@ class JackManager:
                         if src_port.name != self._last_connected_src_id or dest_port.name != self._last_connected_dest_id or target_idx != self._last_routing_target_idx:
                             print(f"[Conductor] Routing change detected: {self._last_routing_target_idx} -> {target_idx}")
 
-                            # --- 1. DISCONNECT ---
+                            # --- 1. DISCONNECT PHYSICAL LINKS ---
+                            # Stop any new input from the keyboard reaching ANY instrument immediately.
                             try:
                                 connections = self.jack_client.get_all_connections(src_port)
                                 for connection in connections:
@@ -439,22 +440,24 @@ class JackManager:
                                     except: pass
                             except Exception: pass
 
-                            # --- 2. WAIT A BIT ---
-                            # Let the instrument settle after disconnection
+                            # --- 2. WAIT FOR RELEASE ---
+                            # Let the user's keyboard Note On/Off queue and plugin buffers settle.
                             time.sleep(0.1)
 
-                            # --- 3. NUCLEAR SILENCE ---
-                            # Silence both old and new tracks to ensure a clean slate
+                            # --- 3. SURGICAL SILENCE ---
+                            # Silence both the previous and new tracks. This is critical for instruments
+                            # that don't receive the Note Off from the keyboard after routing changed.
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
 
-                            if target_idx != self._last_routing_target_idx and target_idx != -1:
-                                # Small gap between silencing different tracks to avoid MIDI congestion
-                                time.sleep(0.05)
+                            if target_idx != -1 and target_idx != self._last_routing_target_idx:
+                                # Ensure the new target is also clean before establishing the link.
+                                time.sleep(0.1)
                                 self._silence_instrument_at_index(target_idx)
 
                             # --- 4. SETTLING DELAY ---
-                            time.sleep(0.25)
+                            # Allow complex plugins (organs) time to fully digest the silence pass.
+                            time.sleep(0.4)
 
                             # Connect new
                             print(f"[Conductor] New Route: {src_port.name} -> {dest_port.name}")
@@ -817,21 +820,24 @@ class JackManager:
         for port in unique_ports:
             if not port or getattr(port, 'closed', False): continue
 
-            # --- Pass 1: CC Resets (All 16 Channels) ---
-            # Broad and fast. CC 64 (Sustain Off) MUST be FIRST.
+            # --- Step A: Sustain Off (MUST be FIRST) ---
             for ch in range(16):
-                port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
+                port.send(mido.Message('control_change', channel=ch, control=64, value=0))
+
+            time.sleep(0.01)
+
+            # --- Step B: CC Resets ---
+            for ch in range(16):
                 port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                 port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
                 port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
 
-            # --- Pass 2: Full Note Off sweep (All 16 Channels) ---
-            # In batches to avoid buffer overflow
-            for ch_batch in [range(0, 4), range(4, 8), range(8, 12), range(12, 16)]:
-                for ch in ch_batch:
-                    for pitch in range(128):
-                        port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
-                time.sleep(0.05)
+            # --- Step C: Nuclear Note Off sweep (All 16 Channels) ---
+            # Methodology sweep to catch ANY note held by ANY input.
+            for ch in range(16):
+                for pitch in range(128):
+                    port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+                if ch % 4 == 0: time.sleep(0.02)
 
         # 4. Specifically cut notes from the snapshot to be absolutely sure
         for (track_idx, pitch), (end_beat, velocity) in active_notes_snapshot:
@@ -1560,9 +1566,8 @@ class JackManager:
 
     def _silence_instrument_at_index(self, track_idx: int):
         """
-        Surgically silences an instrument by sending Note Offs and CC resets.
-        Ensures silence is sent to both the sequencer's output and the instrument directly.
-        Optimized to avoid MIDI buffer overflows while ensuring keyboard-held notes are cut.
+        Surgically silences an instrument by sending individual Note Offs and CC resets.
+        Ensures silence is delivered to both the sequencer's output and the instrument directly.
         """
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
@@ -1571,54 +1576,65 @@ class JackManager:
             # 1. Identify all ports that could reach this instrument
             unique_ports = set()
             out_port_name = track.output_port_name
+            dest_port_name = track.input_port_name
 
-            # Fallback for out_port if not assigned to this specific track
-            if not out_port_name or out_port_name not in self.open_ports:
+            # Target 1: The instrument's input port (persistent Carla/plugin input)
+            if dest_port_name and dest_port_name in self.open_ports:
+                unique_ports.add(self.open_ports[dest_port_name])
+
+            # Target 2: The sequencer's dedicated output for this track
+            if out_port_name and out_port_name in self.open_ports:
+                unique_ports.add(self.open_ports[out_port_name])
+
+            # Fallback for out_port if not assigned
+            if not out_port_name:
                 out_port_name = next((n for n in self.open_ports), None)
-
-            if out_port_name: unique_ports.add(self.open_ports[out_port_name])
-
-            # Instrument port itself (routing destination)
-            if track.input_port_name in self.open_ports: unique_ports.add(self.open_ports[track.input_port_name])
+                if out_port_name: unique_ports.add(self.open_ports[out_port_name])
 
             # 2. Force a connection to deliver silence if needed
-            if track.input_port_name and track.output_port_name:
-                dest_jack = self._find_jack_port(track.input_port_name, is_output=False)
-                src_jack = self._find_jack_port(track.output_port_name, is_output=True)
+            # Ensures silence from the sequencer reaches the instrument even if linked bypass Jules.
+            if dest_port_name and out_port_name:
+                dest_jack = self._find_jack_port(dest_port_name, is_output=False)
+                src_jack = self._find_jack_port(out_port_name, is_output=True)
                 if dest_jack and src_jack:
                     try: self.jack_client.connect(src_jack, dest_jack)
                     except jack.JackError: pass # already connected
-                    time.sleep(0.05) # Small delay for connection to be active
+                    time.sleep(0.1) # Wait for link to propagate
 
-            # 3. Deliver robust silence across all relevant ports
+            # 3. Deliver robust surgical silence across all relevant ports
             for port in unique_ports:
                 if not port or getattr(port, 'closed', False): continue
 
-                # --- Tier 1: CC Resets (All Channels) ---
-                # Sustain Off (CC 64) MUST be FIRST.
-                for ch in range(16):
-                    port.send(mido.Message('control_change', channel=ch, control=64, value=0))
+                # --- Step A: Immediate Sustain Kill (Critical for organs) ---
+                # We send Sustain OFF (64) multiple times on all channels.
+                for _ in range(2):
+                    for ch in range(16):
+                        port.send(mido.Message('control_change', channel=ch, control=64, value=0))
+                    time.sleep(0.01)
 
-                time.sleep(0.01) # Small gap for processing
-
+                # --- Step B: Aggressive Reset ---
                 for ch in range(16):
                     port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                     port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
-                    port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # Double tap
-                    port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset All Controllers
+                    port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
 
-                # --- Tier 2: Targeted Note Off sweep (Likely channels) ---
-                likely_channels = {0, 1, 9, track.channel}
-                for ch in likely_channels:
+                time.sleep(0.05)
+
+                # --- Step C: The "Organ Buster" Note Off Sweep ---
+                # We sweep ALL 128 notes on ALL 16 channels to cut any note held via routing.
+                # We prioritize the track's primary channel and common keyboard channels (0, 1, 9).
+                priority_channels = {0, 1, 9, track.channel}
+
+                # Pass 1: Priority Channels
+                for ch in priority_channels:
                     for pitch in range(128):
                         port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
 
-                # --- Tier 3: Full Note Off sweep (Remaining channels) ---
-                # To be absolutely sure keyboard-held notes are cut regardless of channel/split.
-                # Use small sleeps to prevent MIDI buffer overflow in the plugin.
                 time.sleep(0.05)
+
+                # Pass 2: Remaining Channels (methodical to prevent MIDI buffer overflow)
                 for ch in range(16):
-                    if ch in likely_channels: continue
+                    if ch in priority_channels: continue
                     for pitch in range(128):
                         port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
                     time.sleep(0.01)

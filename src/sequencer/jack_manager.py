@@ -824,7 +824,7 @@ class JackManager:
 
         # 3. Perform surgical silencing
         for port, channels in port_to_channels.items():
-            if not port or port.closed: continue
+            if not port or getattr(port, 'closed', False): continue
 
             # --- Pass 1: CC Resets ---
             # Broad but fast. We do CC 64 (Sustain Off) FIRST.
@@ -1578,10 +1578,14 @@ class JackManager:
 
             # 1. Identify all ports that could reach this instrument
             unique_ports = set()
+            out_port_name = track.output_port_name
 
-            # Sequencer port assigned to this track
-            if track.output_port_name in self.open_ports:
-                unique_ports.add(self.open_ports[track.output_port_name])
+            # Fallback for out_port if not assigned to this specific track
+            if not out_port_name or out_port_name not in self.open_ports:
+                out_port_name = next((n for n in self.open_ports), None)
+
+            if out_port_name:
+                unique_ports.add(self.open_ports[out_port_name])
 
             # Instrument port itself (if opened directly by JackManager for this purpose)
             if track.input_port_name in self.open_ports:
@@ -1597,7 +1601,7 @@ class JackManager:
 
             # 3. Silence Pass across all relevant ports
             for port in unique_ports:
-                if not port or port.closed: continue
+                if not port or getattr(port, 'closed', False): continue
 
                 # Sustain Off FIRST
                 for ch in range(16):
@@ -1614,34 +1618,36 @@ class JackManager:
             # 4. Cleanup internal state tracking
             with self.sync_lock:
                 self._sustained_notes = {p for p in self._sustained_notes if p[0] != track_idx}
-
-            # 5. Restore Sequencer Playback for tracks sharing this output port
-            with self.sync_lock:
                 active_notes_copy = list(self._active_notes.items())
 
+            # 5. Restore Sequencer Playback and Controllers for tracks sharing this output port
             restored_count = 0
-            for (t_idx, pitch), (end_beat, velocity) in active_notes_copy:
-                t = self.sequencer.song.tracks[t_idx]
-                if is_midi_track(t) and t.output_port_name == out_port_name:
-                    out_port.send(mido.Message('note_on', channel=t.channel, note=pitch, velocity=velocity))
-                    restored_count += 1
+            if out_port_name and out_port_name in self.open_ports:
+                out_port = self.open_ports[out_port_name]
 
-            # 6. Restore Controller States (Vol, Pan, Sustain)
-            current_beat = self.last_beat
-            for i, t in enumerate(self.sequencer.song.tracks):
-                if is_midi_track(t) and t.output_port_name == out_port_name:
-                    primed_params = self._prime_automation_at_beat_for_track(i, current_beat)
-                    if (i, 'vol') not in primed_params:
-                        out_port.send(mido.Message('control_change', channel=t.channel, control=7, value=int(t.volume * 127)))
-                    if (i, 'pan') not in primed_params:
-                        out_port.send(mido.Message('control_change', channel=t.channel, control=10, value=int((t.pan + 1.0) / 2.0 * 127)))
-                    if (i, 'cc64') not in primed_params:
-                         with self.sync_lock:
-                             last_sustain = self._last_cc_values.get((i, 64))
-                             if last_sustain is not None:
-                                 out_port.send(mido.Message('control_change', channel=t.channel, control=64, value=last_sustain))
+                # Restore Notes
+                for (t_idx, pitch), (end_beat, velocity) in active_notes_copy:
+                    t = self.sequencer.song.tracks[t_idx]
+                    if is_midi_track(t) and t.output_port_name == out_port_name:
+                        out_port.send(mido.Message('note_on', channel=t.channel, note=pitch, velocity=velocity))
+                        restored_count += 1
 
-            print(f"[Conductor] Silenced instrument via {out_port_name} (restored {restored_count} sequencer notes)")
+                # Restore Controllers (Vol, Pan, Sustain)
+                current_beat = self.last_beat
+                for i, t in enumerate(self.sequencer.song.tracks):
+                    if is_midi_track(t) and t.output_port_name == out_port_name:
+                        primed_params = self._prime_automation_at_beat_for_track(i, current_beat)
+                        if (i, 'vol') not in primed_params:
+                            out_port.send(mido.Message('control_change', channel=t.channel, control=7, value=int(t.volume * 127)))
+                        if (i, 'pan') not in primed_params:
+                            out_port.send(mido.Message('control_change', channel=t.channel, control=10, value=int((t.pan + 1.0) / 2.0 * 127)))
+                        if (i, 'cc64') not in primed_params:
+                             with self.sync_lock:
+                                 last_sustain = self._last_cc_values.get((i, 64))
+                                 if last_sustain is not None:
+                                     out_port.send(mido.Message('control_change', channel=t.channel, control=64, value=last_sustain))
+
+            print(f"[Conductor] Silenced instrument. Port: {out_port_name} (restored {restored_count} sequencer notes)")
 
     def _prime_automation_at_beat_for_track(self, track_index: int, beat: float) -> set:
         """

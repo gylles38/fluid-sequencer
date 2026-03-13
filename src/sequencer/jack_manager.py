@@ -1570,47 +1570,46 @@ class JackManager:
     def _silence_instrument_at_index(self, track_idx: int):
         """
         Surgically silences an instrument by sending Note Offs and CC resets.
-        Ensures the sequencer's output port is connected to the instrument's input.
-        Optimized to avoid MIDI buffer overflows.
+        Ensures silence is sent to both the sequencer's output and the instrument directly.
         """
         if 0 <= track_idx < len(self.sequencer.song.tracks):
             track = self.sequencer.song.tracks[track_idx]
             if not is_midi_track(track): return
 
-            # 1. Identify destination instrument and local output port
-            dest_pattern = track.input_port_name
-            out_port_name = track.output_port_name
+            # 1. Identify all ports that could reach this instrument
+            unique_ports = set()
 
-            # Fallback for out_port if not assigned to this specific track
-            if not out_port_name or out_port_name not in self.open_ports:
-                out_port_name = next((n for n in self.open_ports), None)
+            # Sequencer port assigned to this track
+            if track.output_port_name in self.open_ports:
+                unique_ports.add(self.open_ports[track.output_port_name])
 
-            if not out_port_name: return
-            out_port = self.open_ports[out_port_name]
+            # Instrument port itself (if opened directly by JackManager for this purpose)
+            if track.input_port_name in self.open_ports:
+                unique_ports.add(self.open_ports[track.input_port_name])
 
-            # 2. Ensure the sequencer is connected to the destination to deliver silence
-            if dest_pattern:
-                dest_jack = self._find_jack_port(dest_pattern, is_output=False)
-                src_jack = self._find_jack_port(out_port_name, is_output=True)
+            # 2. Force a connection to deliver silence if needed
+            if track.input_port_name and track.output_port_name:
+                dest_jack = self._find_jack_port(track.input_port_name, is_output=False)
+                src_jack = self._find_jack_port(track.output_port_name, is_output=True)
                 if dest_jack and src_jack:
                     try: self.jack_client.connect(src_jack, dest_jack)
                     except jack.JackError: pass # already connected
 
-            # 3. Targeted Nuclear Silence Pass
-            target_chan = track.channel
+            # 3. Silence Pass across all relevant ports
+            for port in unique_ports:
+                if not port or port.closed: continue
 
-            # Broad but efficient: CC resets on all 16 channels
-            for ch in range(16):
-                out_port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
-                out_port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
-                out_port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
-                out_port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
+                # Sustain Off FIRST
+                for ch in range(16):
+                    port.send(mido.Message('control_change', channel=ch, control=64, value=0))
+                    port.send(mido.Message('control_change', channel=ch, control=123, value=0))
+                    port.send(mido.Message('control_change', channel=ch, control=120, value=0))
+                    port.send(mido.Message('control_change', channel=ch, control=121, value=0))
 
-            # Targeted Note Off sweep: only most likely channels to prevent buffer overflow
-            # Channel 1 (0) and the track's configured channel
-            for ch in {0, target_chan}:
-                for pitch in range(128):
-                    out_port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+                # Note Off sweep - 16 channels to BE SURE (mostly software plugins anyway)
+                for ch in range(16):
+                    for pitch in range(128):
+                        port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
 
             # 4. Cleanup internal state tracking
             with self.sync_lock:

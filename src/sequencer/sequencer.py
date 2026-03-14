@@ -2146,8 +2146,8 @@ class Sequencer(EventDispatcher):
                                         if is_midi_track(track) and track.output_port_name in self.open_ports:
                                             self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
                         
-                        if (num_beats_to_record and recording_start_beat and
-                                current_beat >= (recording_start_beat + num_beats_to_record)):
+                        if (num_beats_to_record is not None and
+                                current_beat >= (start_beat + num_beats_to_record)):
                             Clock.schedule_once(lambda dt: self._stop_playback_transport())
                             self._stop_event.set()
                             break
@@ -2305,8 +2305,8 @@ class Sequencer(EventDispatcher):
 
             # track_idx is None means we follow dynamic MIDI Routing
             # self.last_record_settings is checked for record_bis
-            if (track_idx is not None or start_beat is not None or inport_name is not None or
-                self.last_record_settings is None or 'start_beat' not in self.last_record_settings):
+            # We refresh settings to ensure UI Start/End positions are always respected
+            if True:
                 # NEW SESSION
                 if inport_name is None:
                     if self.default_record_port:

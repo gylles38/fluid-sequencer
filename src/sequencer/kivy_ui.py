@@ -739,7 +739,7 @@ class SequencerLayout(BoxLayout):
         self.move_to_beat(0)
 
     def go_to_last_measure_start(self):
-        """Déplace au début de la dernière mesure"""
+        """Définit la fin du morceau au début de la dernière mesure et déplace la tête de lecture."""
         total_beats = self.sequencer.get_song_length_in_beats()
         beats_per_measure = getattr(self.sequencer.song, 'time_signature_numerator', 4)
 
@@ -750,7 +750,18 @@ class SequencerLayout(BoxLayout):
             last_measure_index = (total_beats - 1) // beats_per_measure
             target_beat = last_measure_index * beats_per_measure
 
-        self.move_to_beat(target_beat)
+        new_pos_str = self.sequencer._format_beats_to_position(target_beat)
+
+        # --- FIX: Update End field instead of Start field ---
+        self.sequencer.ui_end_pos_str = new_pos_str
+        self.end_pos_input.text = new_pos_str
+        self.end_pos_manual_override = True
+
+        # Synchronisation moteur et JACK (visual feedback)
+        self.sequencer._resync_all_at_beat(target_beat)
+
+        # Ajustement du défilement de la grille
+        self.scroll_to_beat(target_beat)
 
     def sync_scroll_from_track(self, instance, value):
         """Appelé quand l'utilisateur fait glisser une grille de piste à la main"""

@@ -1083,7 +1083,7 @@ class AutomationEditor(FloatingWindow):
             sequencer._resync_all_at_beat(0)
             return True
 
-        # END : Aller à la fin
+        # END : Aller à la fin (définit la fin du morceau)
         if keyboard == 279:
             ts_num = getattr(sequencer.song, 'time_signature_numerator', 4)
             target_beat = max(0, self.total_beats - ts_num)
@@ -1092,9 +1092,11 @@ class AutomationEditor(FloatingWindow):
             self.ids.playhead.x = target_beat * self.pixels_per_beat
             self.ids.timeline_scroll.scroll_x = 1.0
             
-            sequencer.ui_start_pos_str = pos_str
-            if hasattr(self.sequencer_layout, 'start_pos_input'):
-                self.sequencer_layout.start_pos_input.text = pos_str
+            # --- FIX: Update End field instead of Start field ---
+            sequencer.ui_end_pos_str = pos_str
+            if hasattr(self.sequencer_layout, 'end_pos_input'):
+                self.sequencer_layout.end_pos_input.text = pos_str
+                self.sequencer_layout.end_pos_manual_override = True
             
             sequencer.current_beat = target_beat
             sequencer._resync_all_at_beat(target_beat)

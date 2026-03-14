@@ -1146,7 +1146,7 @@ class PianoRollEditor(FloatingWindow):
         self.move_to_beat(0)
 
     def go_to_last_measure_start(self) -> None:
-        """Déplace au début de la dernière mesure"""
+        """Définit la fin du morceau au début de la dernière mesure."""
         total_beats = self.total_beats
         # On récupère le numérateur de la signature temporelle (défaut 4)
         beats_per_measure: copy.Any | int = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
@@ -1158,7 +1158,16 @@ class PianoRollEditor(FloatingWindow):
             last_measure_index = (total_beats - 1) // beats_per_measure
             target_beat = last_measure_index * beats_per_measure
 
-        self.move_to_beat(target_beat)
+        new_pos_str = self.sequencer_layout.sequencer._format_beats_to_position(target_beat)
+
+        # --- FIX: Update End field instead of Start field ---
+        self.sequencer_layout.sequencer.ui_end_pos_str = new_pos_str
+        self.sequencer_layout.end_pos_input.text = new_pos_str
+        self.sequencer_layout.end_pos_manual_override = True
+
+        # Visual feedback: seek playhead
+        self.sequencer_layout.sequencer._resync_all_at_beat(target_beat)
+        self.scroll_to_beat(target_beat)
 
     def scroll_to_beat(self, beat) -> None:
         # ... (votre fonction actuelle reste inchangée) ...

@@ -547,15 +547,6 @@ class Sequencer(EventDispatcher):
             duration_ms = len(audio)
             
             duration_beats = (duration_ms * self.song.tempo) / 60000.0
-            
-            print("--- DEBUG AUDIO CONVERSION ---")
-            print(f"  - Fichier: {os.path.basename(track.filepath)}")
-            print(f"  - Tempo du morceau (BPM): {self.song.tempo}")
-            print(f"  - Durée Audio (ms): {duration_ms}")
-            print(f"  - Durée Audio (sec): {duration_ms / 1000.0}")
-            print(f"  - Résultat (Beats): {duration_beats}")
-            print("------------------------------")
-            
             track.duration_beats = duration_beats
             
             return duration_beats

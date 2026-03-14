@@ -110,41 +110,41 @@ class EditableMidiGrid(PianoRoll):
         local_pos = self.to_local(*touch.pos)
         
         if self._drag_mode == 'move' and self._dragged_note:
-            new_x = local_pos[0] - self._drag_offset[0]
-            new_beat = new_x / self.pixels_per_beat
+            # Multi-move logic (handles single notes too if they are in the selection)
+            if hasattr(self, '_multi_drag_data') and self._multi_drag_data:
+                new_x = local_pos[0] - self._drag_offset[0]
+                new_beat = new_x / self.pixels_per_beat
 
-            try:
-                master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
-            except (StopIteration, AttributeError):
-                print("Error: Drag data desynchronized. Cancelling drag.")
-                touch.ungrab(self)
-                self._dragged_note = None
-                self._drag_mode = None
+                try:
+                    master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+                except (StopIteration, AttributeError):
+                    return True
+
+                raw_delta_beat = new_beat - master_data['original_start']
+                # Quantize delta_beat to 16th notes for snappy live dragging
+                delta_beat = round(raw_delta_beat * 4) / 4
+
+                new_pitch = int(local_pos[1] / self.note_height)
+                delta_pitch = new_pitch - master_data['original_pitch']
+
+                earliest_start = min(item['original_start'] for item in self._multi_drag_data)
+                if earliest_start + delta_beat < 0:
+                    delta_beat = -earliest_start
+
+                for item in self._multi_drag_data:
+                    target_new_beat = item['original_start'] + delta_beat
+                    target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
+
+                    # Update the model live. We store the new parent to ensure subsequent moves
+                    # within the same drag can reliably remove the note from its previous location.
+                    new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
+                    item['parent_event'] = new_parent
+
+                # Sort events once after moving everything to ensure consistency
+                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
+                self.editor.is_dirty = True
+                self.draw()
                 return True
-
-            raw_delta_beat = new_beat - master_data['original_start']
-            # Quantize delta_beat to 16th notes for snappy live dragging
-            delta_beat = round(raw_delta_beat * 4) / 4
-
-            new_pitch = int(local_pos[1] / self.note_height)
-            delta_pitch = new_pitch - master_data['original_pitch']
-
-            earliest_start = min(item['original_start'] for item in self._multi_drag_data)
-            if earliest_start + delta_beat < 0:
-                delta_beat = -earliest_start
-
-            for item in self._multi_drag_data:
-                target_new_beat = item['original_start'] + delta_beat
-                target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
-
-                # Update the model live. We store the new parent to ensure subsequent moves
-                # within the same drag can reliably remove the note from its previous location.
-                new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
-                item['parent_event'] = new_parent               
-
-            self.editor.is_dirty = True
-            self.draw()
-            return True 
         
         if self._drag_mode == 'select':
             if self._selection_rect:
@@ -212,15 +212,17 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = target_event
 
             elif self._drag_mode == 'move':
+                # This block is for cases where _multi_drag_data might be missing
+                # but we are in move mode. Fallback to basic move.
                 new_x = local_pos[0] - self._drag_offset[0]
                 new_y = local_pos[1] - self._drag_offset[1]
 
-                # Quantize to 16th notes (4 positions per beat), same as resizing
                 new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
                 new_pitch: int = max(0, min(127, int(new_y / self.note_height)))
 
                 self._drag_event.start_time = new_beat
                 self._dragged_note.pitch = new_pitch
+                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
 
             self.editor.is_dirty = True
             self.draw()
@@ -251,7 +253,7 @@ class EditableMidiGrid(PianoRoll):
         else:
             new_event = Event(start_time=new_beat, notes=[note])
             track.events.append(new_event)
-            track.events.sort(key=lambda e: e.start_time)
+            # Sorting removed from here; caller must sort at the end of the loop
             return new_event
 
     def _store_selection_states_if_needed(self, dragged_note) -> None:
@@ -474,30 +476,25 @@ class EditableMidiGrid(PianoRoll):
         if not dragged_note_final_event:
             return
 
-        # --- Calculer les deltas ---
-        pitch_delta = self._dragged_note.pitch - dragged_note_initial_state['pitch']
+        # --- Movement is now handled LIVE in on_touch_move ---
+        if self._drag_mode == 'move':
+            return
+
+        # --- Calculate deltas for resizing ---
         time_delta = dragged_note_final_event.start_time - dragged_note_initial_state['start_time']
         new_duration = self._dragged_note.duration
 
-        # --- Appliquer les transformations aux autres notes ---
+        # --- Apply the transformation to other notes in the selection ---
         for note_id, initial_state in self._selection_initial_states.items():
             if note_id == dragged_note_id:
-                continue # Déjà modifié par l'interaction directe
+                continue
 
             note = initial_state['note_obj']
-
-            # Appliquer les deltas
-            new_pitch = initial_state['pitch'] + pitch_delta
             new_start_time = initial_state['start_time'] + time_delta
 
-            if self._drag_mode == 'move':
-                note.pitch = max(0, min(127, new_pitch))
-                # Déplacer la note vers un nouvel événement
-                self._move_note_to_new_time(note, initial_state['event'], new_start_time)
-            elif self._drag_mode == 'resize_end':
+            if self._drag_mode == 'resize_end':
                 note.duration = new_duration
             elif self._drag_mode == 'resize_start':
-                # Pour un redimensionnement par le début, la durée et la position changent.
                 note.duration = new_duration
                 self._move_note_to_new_time(note, initial_state['event'], new_start_time)
 

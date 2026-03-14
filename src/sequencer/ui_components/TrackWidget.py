@@ -198,14 +198,11 @@ class TrackWidget(BoxLayout):
         
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        if isinstance(track, MidiTrack):
-            self.height = dp(128)
-        else:
-            self.height = dp(112)
+        # Increase track height for better visibility, matching MIDI tracks
+        self.height = dp(160)
         self.spacing = dp(12)
         
-        #self.padding = [dp(12), 0, dp(12), 0]
-        self.padding = [0, 0, 0, 0] # REMISE À ZÉRO POUR TESTS          
+        self.padding = [0, 0, 0, 0]
         
         with self.canvas.before:
             self.bg_color = Color(0, 0, 0, 1)
@@ -582,7 +579,13 @@ class TrackWidget(BoxLayout):
             self.icon_layout.add_widget(icon)
             self.icon_layout.add_widget(Widget()) # Bottom spacer
 
-            self.timeline_scroll = ScrollView(size_hint_x=1, do_scroll_x=True, do_scroll_y=False)
+            self.timeline_scroll = ScrollView(
+                size_hint=(1, 1),
+                do_scroll_x=True,
+                do_scroll_y=False,
+                bar_width=dp(4),
+                scroll_type=['bars']
+            )
             # Add to main layout
             self.add_widget(self.icon_layout)
             self.add_widget(self.timeline_scroll)
@@ -590,6 +593,9 @@ class TrackWidget(BoxLayout):
 
             # A ScrollView must have a single child.
             self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
+            # Ensure container follows TrackWidget height perfectly
+            self.bind(height=self.timeline_container.setter('height'))
+            self.timeline_container.height = self.height
             # AJOUT : Préparation de la translation GPU
             with self.timeline_container.canvas.before:
                 PushMatrix()
@@ -604,6 +610,24 @@ class TrackWidget(BoxLayout):
                 pixels_per_beat=self.pixels_per_beat
             )
             self.timeline_container.add_widget(self.measure_grid)
+
+            if isinstance(self.track, AudioTrack):
+                self.waveform = AudioWaveform(
+                    filepath=self.track.filepath,
+                    pixels_per_beat=self.pixels_per_beat,
+                    total_beats=self.total_beats,
+                    start_time=self.track.start_time,
+                    tempo=self.sequencer_layout.sequencer.tempo,
+                    size_hint=(None, 1), # Full height hint
+                    pos_hint={'y': 0}
+                )
+                self.waveform.width = self.total_beats * self.pixels_per_beat
+
+                # Bindings for zoom, length and tempo
+                self.bind(pixels_per_beat=self._update_waveform_size)
+                self.bind(total_beats=self._update_waveform_size)
+                self.sequencer_layout.sequencer.bind(tempo=self.waveform.setter('tempo'))
+                self.timeline_container.add_widget(self.waveform)
 
             if isinstance(self.track, AutomationTrack):
                 # --- ÉTAPE 1 : IDENTIFIER LES PARAMÈTRES ---
@@ -779,11 +803,11 @@ class TrackWidget(BoxLayout):
             *args: Variable length argument list (typically used for Kivy event callbacks).
         """
         if self.is_active_routing:
-            self.bg_color.rgba = [0.1, 0.3, 0.5, 1] # More visible blue highlight for active routing
+            self.bg_color.rgba = [0.15, 0.35, 0.55, 1] # More visible blue highlight for active routing
         elif self.track_index % 2 == 0:
-            self.bg_color.rgba = [0.1, 0.1, 0.1, 1]
+            self.bg_color.rgba = [0.08, 0.08, 0.08, 1]
         else:
-            self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
+            self.bg_color.rgba = [0.11, 0.11, 0.11, 1]
 
 
     def on_touch_move(self, touch):
@@ -862,6 +886,12 @@ class TrackWidget(BoxLayout):
             else:
                 curve.opacity = 0
                 curve.disabled = True
+
+    def _update_waveform_size(self, *args):
+        if hasattr(self, 'waveform'):
+            self.waveform.pixels_per_beat = self.pixels_per_beat
+            self.waveform.total_beats = self.total_beats
+            self.waveform.width = self.total_beats * self.pixels_per_beat
 
     def set_playback_position(self, current_beat: float) -> None:
         if self.playback_line:

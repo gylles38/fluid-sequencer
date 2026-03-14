@@ -45,11 +45,13 @@ class Sequencer(EventDispatcher):
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
     song_structure_changed = NumericProperty(0)
+    tempo = NumericProperty(120)
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
         self.gui_mode = gui_mode
+        self.tempo = tempo
         self.song = Song(name="New Song", tempo=tempo)
         self.config_manager = ConfigManager()
         self.midi_config = MidiConfig("config/midi_mappings.json")
@@ -545,15 +547,6 @@ class Sequencer(EventDispatcher):
             duration_ms = len(audio)
             
             duration_beats = (duration_ms * self.song.tempo) / 60000.0
-            
-            print("--- DEBUG AUDIO CONVERSION ---")
-            print(f"  - Fichier: {os.path.basename(track.filepath)}")
-            print(f"  - Tempo du morceau (BPM): {self.song.tempo}")
-            print(f"  - Durée Audio (ms): {duration_ms}")
-            print(f"  - Durée Audio (sec): {duration_ms / 1000.0}")
-            print(f"  - Résultat (Beats): {duration_beats}")
-            print("------------------------------")
-            
             track.duration_beats = duration_beats
             
             return duration_beats
@@ -651,6 +644,7 @@ class Sequencer(EventDispatcher):
         if tempo <= 0:
             return "Error: Tempo must be positive."
         self.song.tempo = tempo
+        self.tempo = tempo
         self.is_dirty = True
         self.invalidate_song_length_cache()
         if self.jack_manager.is_running:
@@ -1729,6 +1723,7 @@ class Sequencer(EventDispatcher):
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
             self.song = project_data.get("song", Song(name="New Song"))
+            self.tempo = self.song.tempo
             self.last_record_settings = None
 
 
@@ -2142,8 +2137,8 @@ class Sequencer(EventDispatcher):
                                         if is_midi_track(track) and track.output_port_name in self.open_ports:
                                             self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
                         
-                        if (num_beats_to_record and recording_start_beat and
-                                current_beat >= (recording_start_beat + num_beats_to_record)):
+                        if (num_beats_to_record is not None and
+                                current_beat >= (start_beat + num_beats_to_record)):
                             Clock.schedule_once(lambda dt: self._stop_playback_transport())
                             self._stop_event.set()
                             break
@@ -2301,8 +2296,8 @@ class Sequencer(EventDispatcher):
 
             # track_idx is None means we follow dynamic MIDI Routing
             # self.last_record_settings is checked for record_bis
-            if (track_idx is not None or start_beat is not None or inport_name is not None or
-                self.last_record_settings is None or 'start_beat' not in self.last_record_settings):
+            # We refresh settings to ensure UI Start/End positions are always respected
+            if True:
                 # NEW SESSION
                 if inport_name is None:
                     if self.default_record_port:

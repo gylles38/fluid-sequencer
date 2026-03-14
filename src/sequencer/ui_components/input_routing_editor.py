@@ -823,6 +823,22 @@ class InputRoutingEditor(FloatingWindow):
         if keyboard == 278: # Home
             self.rewind_pressed()
             return True
+
+        if keyboard == 279: # End
+            ts_num = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
+            target_beat = max(0, self.total_beats - ts_num)
+            pos_str = self.sequencer_layout.sequencer._format_beats_to_position(target_beat)
+
+            # Update End field
+            self.sequencer_layout.sequencer.ui_end_pos_str = pos_str
+            self.sequencer_layout.end_pos_input.text = pos_str
+            self.sequencer_layout.end_pos_manual_override = True
+
+            # Sync
+            self.sequencer_layout.sequencer._resync_all_at_beat(target_beat)
+            self.scroll_to_beat(target_beat)
+            return True
+
         return False
 
     def on_playback_state_change(self, instance, state):

@@ -13,6 +13,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.gridlayout import GridLayout
+from kivy.uix.stencilview import StencilView
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, BooleanProperty
@@ -298,12 +299,20 @@ class TrackWidget(BoxLayout):
         self.add_widget(self.resize_handle)
 
         # --- Left Section: Track Info ---
-        # Set padding to 0 top/bottom to allow DragHandle to take full height
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0])
+        # Fixed-height wrapper for info elements (except DragHandle)
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8))
 
-        # Drag handle (far left)
+        # Drag handle (far left) - Remains full height
         self.drag_handle = DragHandle(track_widget=self)
         self.info_section.add_widget(self.drag_handle)
+
+        # Container for other info elements - Fixed at top, clipped if track is too small
+        self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
+        self.info_float = FloatLayout(size_hint=(1, 1))
+        self.info_clipped_wrapper.add_widget(self.info_float)
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint_y=None, height=dp(160), pos_hint={'top': 1})
+        self.info_float.add_widget(self.info_top_bar)
+        self.info_section.add_widget(self.info_clipped_wrapper)
 
         labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
         # Non-editable track index
@@ -318,7 +327,7 @@ class TrackWidget(BoxLayout):
             width=dp(30),
             padding=labelPadding,
         )
-        self.info_section.add_widget(self.index_label)
+        self.info_top_bar.add_widget(self.index_label)
 
         # Editable track name
         self.name_label = EditableLabel(
@@ -330,7 +339,7 @@ class TrackWidget(BoxLayout):
             padding=[0, 0, 0, dp(1)] #bottom=1dp → monte le texte de 1 pixel
         )
         self.name_label.bind(on_text_validated=self.on_name_validated)
-        self.info_section.add_widget(self.name_label)
+        self.info_top_bar.add_widget(self.name_label)
 
         # AJOUT : Section pour les pistes d'automation
         if isinstance(self.track, AutomationTrack):
@@ -345,10 +354,15 @@ class TrackWidget(BoxLayout):
                 on_release=self.open_change_target_popup,
                 width=dp(24)
             )
-            self.info_section.add_widget(self.target_indicator_icon)
+            self.info_top_bar.add_widget(self.target_indicator_icon)
          
         # --- Middle Section: Controls ---
-        self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
+        # Fixed height for controls, clipped if track is too small
+        self.controls_wrapper = StencilView(size_hint_x=None, width=self.controls_width, size_hint_y=1)
+        self.controls_float = FloatLayout(size_hint=(1, 1))
+        self.controls_wrapper.add_widget(self.controls_float)
+        self.controls_section = BoxLayout(size_hint_x=1, size_hint_y=None, height=dp(160), pos_hint={'top': 1}, spacing=dp(8))
+        self.controls_float.add_widget(self.controls_section)
 
         # --- Solo Button (not for Automation tracks) ---
         if not isinstance(track, AutomationTrack):
@@ -535,7 +549,7 @@ class TrackWidget(BoxLayout):
             spacing=dp(12)
         )
         self.left_panel.add_widget(self.info_section)
-        self.left_panel.add_widget(self.controls_section)
+        self.left_panel.add_widget(self.controls_wrapper)
         self.left_panel.width = self.info_width + self.controls_width + dp(12)
         self.main_row.add_widget(self.left_panel)
 
@@ -629,12 +643,19 @@ class TrackWidget(BoxLayout):
             self.main_row.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
-            # Create a layout for the track type icon, replacing the old spacer
+            # Create a layout for the track type icon, fixed height at top
+            self.icon_wrapper = StencilView(size_hint_x=None, width=dp(40), size_hint_y=1)
+            self.icon_float = FloatLayout(size_hint=(1, 1))
+            self.icon_wrapper.add_widget(self.icon_float)
+
             self.icon_layout = BoxLayout(
-                size_hint_x=None,
-                width=dp(40),
+                size_hint_x=1,
+                size_hint_y=None,
+                height=dp(160),
+                pos_hint={'top': 1},
                 orientation='vertical'
             )
+            self.icon_float.add_widget(self.icon_layout)
 
             track_type_icon = "help-circle"
             track_type_color = [0.5, 0.5, 0.5, 1]
@@ -666,7 +687,7 @@ class TrackWidget(BoxLayout):
                 scroll_type=['bars']
             )
             # Add to main layout
-            self.main_row.add_widget(self.icon_layout)
+            self.main_row.add_widget(self.icon_wrapper)
             self.main_row.add_widget(self.timeline_scroll)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
 

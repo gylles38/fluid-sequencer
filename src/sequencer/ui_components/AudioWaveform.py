@@ -12,7 +12,7 @@ class AudioWaveform(Widget):
     """
     Widget that renders an audio waveform.
     It calculates min/max peaks in a background thread and caches the result.
-    It automatically normalizes the peaks for visual consistency.
+    It automatically normalizes the peaks for visual consistency and fills the available height.
     """
     filepath = StringProperty("")
     pixels_per_beat = NumericProperty(dp(100))
@@ -83,7 +83,6 @@ class AudioWaveform(Widget):
                     peaks = data['peaks']
                     self._duration_seconds = data.get('duration_seconds', 0)
                     # Normalize peaks immediately after loading from cache
-                    # This ensures legacy caches are also normalized
                     self._peaks = self._normalize_peaks(peaks)
                 self.redraw()
                 return
@@ -99,7 +98,6 @@ class AudioWaveform(Widget):
 
     def _load_peaks_worker(self, cache_path):
         try:
-            # Deferred imports to prevent crash if dependencies are missing at startup
             import numpy as np
             from pydub import AudioSegment
 
@@ -109,7 +107,6 @@ class AudioWaveform(Widget):
 
             samples = np.array(audio.get_array_of_samples())
 
-            # Improved bit-depth handling
             if audio.sample_width == 2: # 16-bit
                 samples = samples.astype(np.float32) / 32768.0
             elif audio.sample_width == 1: # 8-bit
@@ -119,10 +116,10 @@ class AudioWaveform(Widget):
             elif audio.sample_width == 3: # 24-bit
                 samples = samples.astype(np.float32) / 8388608.0
 
-            target_resolution = 200 # peaks per beat
+            target_resolution = 300
             duration_beats = (len(audio) * self.tempo) / 60000.0
             num_peaks = int(duration_beats * target_resolution)
-            if num_peaks < 100: num_peaks = 100
+            if num_peaks < 200: num_peaks = 200
 
             duration_seconds = len(audio) / 1000.0
 
@@ -135,7 +132,6 @@ class AudioWaveform(Widget):
                 if len(chunk) == 0: continue
                 peaks.append([float(np.min(chunk)), float(np.max(chunk))])
 
-            # Save raw peaks to cache
             if cache_path:
                 try:
                     with open(cache_path, 'w') as f:
@@ -146,7 +142,6 @@ class AudioWaveform(Widget):
                 except Exception as e:
                     print(f"Error saving cache: {e}")
 
-            # Normalize peaks for visual display
             self._peaks = self._normalize_peaks(peaks)
             self._duration_seconds = duration_seconds
 
@@ -166,35 +161,40 @@ class AudioWaveform(Widget):
 
         with self.canvas:
             # 1. Subtle background for the audio track span
-            Color(0.2, 0.2, 0.25, 0.2)
+            Color(0.2, 0.2, 0.25, 0.15)
             Rectangle(pos=(self.x + x_start, self.y), size=(waveform_width, self.height))
 
             if self._peaks is not None:
                 # 2. Waveform peaks
-                Color(0.4, 0.7, 1.0, 0.9)
+                Color(0.3, 0.8, 1.0, 1.0) # Slightly more vibrant blue
 
                 num_peaks = len(self._peaks)
                 center_y = self.y + self.height / 2
-                # Maximize vertical utilization (98%)
-                half_height = (self.height / 2) * 0.98
+                # Use 98% of height for the waveform, giving 1% margin top and bottom
+                half_height = (self.height * 0.98) / 2
 
                 vertices = []
                 indices = []
 
-                # Dynamic step to avoid millions of lines
-                step = max(1, num_peaks // 4000)
+                step = max(1, num_peaks // 8000)
 
                 for i in range(0, num_peaks, step):
+                    if step > 1:
+                        chunk = self._peaks[i : min(i + step, num_peaks)]
+                        p_min = min(p[0] for p in chunk)
+                        p_max = max(p[1] for p in chunk)
+                    else:
+                        p_min, p_max = self._peaks[i]
+
                     rel_x = i / num_peaks
                     x = self.x + x_start + rel_x * waveform_width
 
-                    min_p, max_p = self._peaks[i]
-                    y_min = center_y + min_p * half_height
-                    y_max = center_y + max_p * half_height
+                    y_min = center_y + p_min * half_height
+                    y_max = center_y + p_max * half_height
 
-                    # Ensure at least 1px height
-                    if abs(y_max - y_min) < 1:
-                        y_max = y_min + 1
+                    if abs(y_max - y_min) < 1.0:
+                        y_max = center_y + 0.5
+                        y_min = center_y - 0.5
 
                     v_idx = len(vertices) // 4
                     vertices.extend([float(x), float(y_min), 0, 0,

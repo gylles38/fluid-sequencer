@@ -12,6 +12,7 @@ class AudioWaveform(Widget):
     """
     Widget that renders an audio waveform.
     It calculates min/max peaks in a background thread and caches the result.
+    It automatically normalizes the peaks for visual consistency.
     """
     filepath = StringProperty("")
     pixels_per_beat = NumericProperty(dp(100))
@@ -58,14 +59,32 @@ class AudioWaveform(Widget):
         os.makedirs(cache_dir, exist_ok=True)
         return os.path.join(cache_dir, f"{cache_key}.json")
 
+    def _normalize_peaks(self, peaks):
+        """Helper to normalize peaks to the [-1.0, 1.0] range."""
+        if not peaks:
+            return peaks
+        try:
+            import numpy as np
+            peaks_arr = np.array(peaks)
+            abs_max = np.max(np.abs(peaks_arr))
+            if abs_max > 0:
+                peaks_arr = peaks_arr / abs_max
+            return peaks_arr.tolist()
+        except Exception as e:
+            print(f"Error normalizing peaks: {e}")
+            return peaks
+
     def _start_loading_peaks(self):
         cache_path = self._get_cache_path()
         if cache_path and os.path.exists(cache_path):
             try:
                 with open(cache_path, 'r') as f:
                     data = json.load(f)
-                    self._peaks = data['peaks'] # peaks are lists now
+                    peaks = data['peaks']
                     self._duration_seconds = data.get('duration_seconds', 0)
+                    # Normalize peaks immediately after loading from cache
+                    # This ensures legacy caches are also normalized
+                    self._peaks = self._normalize_peaks(peaks)
                 self.redraw()
                 return
             except Exception:
@@ -96,11 +115,8 @@ class AudioWaveform(Widget):
             elif audio.sample_width == 1: # 8-bit
                 samples = samples.astype(np.float32) / 128.0 - 1.0
             elif audio.sample_width == 4: # 32-bit int or float
-                # We assume 32-bit signed int for now, pydub usually converts to int
                 samples = samples.astype(np.float32) / 2147483648.0
             elif audio.sample_width == 3: # 24-bit
-                # 24-bit is tricky with numpy, pydub should have converted it to 32-bit ints if using get_array_of_samples
-                # but let's check. If it's 24-bit, we might need to normalize by 2^23
                 samples = samples.astype(np.float32) / 8388608.0
 
             target_resolution = 200 # peaks per beat
@@ -119,22 +135,20 @@ class AudioWaveform(Widget):
                 if len(chunk) == 0: continue
                 peaks.append([float(np.min(chunk)), float(np.max(chunk))])
 
-            # Visual normalization: Scale peaks so the loudest part reaches 1.0
-            peaks_arr = np.array(peaks)
-            abs_max = np.max(np.abs(peaks_arr))
-            if abs_max > 0:
-                peaks_arr = peaks_arr / abs_max
-            peaks = peaks_arr.tolist()
-
-            self._peaks = peaks # Store as list of lists for easy JSON serialization
-            self._duration_seconds = duration_seconds
-
+            # Save raw peaks to cache
             if cache_path:
-                with open(cache_path, 'w') as f:
-                    json.dump({
-                        'peaks': peaks,
-                        'duration_seconds': duration_seconds
-                    }, f)
+                try:
+                    with open(cache_path, 'w') as f:
+                        json.dump({
+                            'peaks': peaks,
+                            'duration_seconds': duration_seconds
+                        }, f)
+                except Exception as e:
+                    print(f"Error saving cache: {e}")
+
+            # Normalize peaks for visual display
+            self._peaks = self._normalize_peaks(peaks)
+            self._duration_seconds = duration_seconds
 
             Clock.schedule_once(self.redraw)
         except Exception as e:
@@ -144,26 +158,25 @@ class AudioWaveform(Widget):
         self.canvas.clear()
 
         duration_beats = (self._duration_seconds * self.tempo) / 60.0 if self._duration_seconds > 0 else 0
-        if duration_beats == 0 and self._peaks is None:
+        if duration_beats == 0 or self._peaks is None or not self._peaks:
             return
 
         waveform_width = duration_beats * self.pixels_per_beat
-        # In a RelativeLayout (used in TrackWidget), x=0 is the start of the timeline section
         x_start = self.start_time * self.pixels_per_beat
 
         with self.canvas:
             # 1. Subtle background for the audio track span
-            Color(0.2, 0.2, 0.25, 0.3)
-            # Use self.pos (self.x, self.y) for absolute positioning compatibility
+            Color(0.2, 0.2, 0.25, 0.2)
             Rectangle(pos=(self.x + x_start, self.y), size=(waveform_width, self.height))
 
             if self._peaks is not None:
                 # 2. Waveform peaks
-                Color(0.4, 0.7, 1.0, 0.8)
+                Color(0.4, 0.7, 1.0, 0.9)
 
                 num_peaks = len(self._peaks)
                 center_y = self.y + self.height / 2
-                half_height = self.height / 2 * 0.95
+                # Maximize vertical utilization (98%)
+                half_height = (self.height / 2) * 0.98
 
                 vertices = []
                 indices = []
@@ -178,6 +191,10 @@ class AudioWaveform(Widget):
                     min_p, max_p = self._peaks[i]
                     y_min = center_y + min_p * half_height
                     y_max = center_y + max_p * half_height
+
+                    # Ensure at least 1px height
+                    if abs(y_max - y_min) < 1:
+                        y_max = y_min + 1
 
                     v_idx = len(vertices) // 4
                     vertices.extend([float(x), float(y_min), 0, 0,

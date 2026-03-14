@@ -1,4 +1,3 @@
-from turtle import position
 from .floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.app import App
@@ -20,7 +19,6 @@ from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
-import copy
 import mido
 from sequencer.ui_components.HoverBehavior import HoverableButton
 

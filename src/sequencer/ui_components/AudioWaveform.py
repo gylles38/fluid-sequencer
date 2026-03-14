@@ -119,6 +119,13 @@ class AudioWaveform(Widget):
                 if len(chunk) == 0: continue
                 peaks.append([float(np.min(chunk)), float(np.max(chunk))])
 
+            # Visual normalization: Scale peaks so the loudest part reaches 1.0
+            peaks_arr = np.array(peaks)
+            abs_max = np.max(np.abs(peaks_arr))
+            if abs_max > 0:
+                peaks_arr = peaks_arr / abs_max
+            peaks = peaks_arr.tolist()
+
             self._peaks = peaks # Store as list of lists for easy JSON serialization
             self._duration_seconds = duration_seconds
 
@@ -156,7 +163,7 @@ class AudioWaveform(Widget):
 
                 num_peaks = len(self._peaks)
                 center_y = self.y + self.height / 2
-                half_height = self.height / 2 * 0.85
+                half_height = self.height / 2 * 0.95
 
                 vertices = []
                 indices = []

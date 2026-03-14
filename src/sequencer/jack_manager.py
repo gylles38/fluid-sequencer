@@ -369,6 +369,16 @@ class JackManager:
                 return port
         return None
 
+    def _get_managed_instrument_ports(self) -> set[str]:
+        """Returns a set of full JACK port names managed by the project's MIDI tracks."""
+        managed_ports = set()
+        for track in self.sequencer.song.tracks:
+            if is_midi_track(track) and track.input_port_name:
+                port = self._find_jack_port(track.input_port_name, is_output=False)
+                if port:
+                    managed_ports.add(port.name)
+        return managed_ports
+
     def _routing_worker_loop(self):
         """
         Background loop managing the dynamic MIDI routing using native JACK API.
@@ -379,29 +389,25 @@ class JackManager:
                     time.sleep(1.0)
                     continue
 
-                # 0. Initial "Clean Slate" - Disconnect everything before starting routing
+                # 0. Initial "Clean Slate" - Disconnect project instruments before starting routing
                 if not self._routing_initialized:
                     time.sleep(1.5)
-                    print("[Conductor] Initializing routing: Disconnecting ALL project instrument links...")
+                    print("[Conductor] Initializing routing: Disconnecting project instrument links...")
 
                     src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
                     src_port = self._find_jack_port(src_pattern, is_output=True)
 
                     if src_port:
-                        # 1. Disconnect specific project targets
-                        for track in self.sequencer.song.tracks:
-                            if is_midi_track(track) and track.input_port_name:
-                                dest_port = self._find_jack_port(track.input_port_name, is_output=False)
-                                if dest_port:
-                                    try: self.jack_client.disconnect(src_port, dest_port)
-                                    except: pass
+                        managed_dest_ports = self._get_managed_instrument_ports()
 
-                        # 2. Aggressively disconnect ANY existing connections from this source
+                        # 1. Disconnect only managed project targets from this source
                         try:
                             connections = self.jack_client.get_all_connections(src_port)
                             for connection in connections:
-                                try: self.jack_client.disconnect(src_port, connection)
-                                except: pass
+                                if connection.name in managed_dest_ports:
+                                    print(f"[Conductor] Clean Slate: Disconnecting managed instrument {connection.name}")
+                                    try: self.jack_client.disconnect(src_port, connection)
+                                    except: pass
                         except Exception: pass
 
                     self.silence_all_midi_notes()
@@ -431,12 +437,15 @@ class JackManager:
                         if src_port.name != self._last_connected_src_id or dest_port.name != self._last_connected_dest_id or target_idx != self._last_routing_target_idx:
                             print(f"[Conductor] Routing change detected: {self._last_routing_target_idx} -> {target_idx}")
 
-                            # --- 1. DISCONNECT ---
+                            # --- 1. DISCONNECT (SELECTIVE) ---
                             try:
+                                managed_dest_ports = self._get_managed_instrument_ports()
                                 connections = self.jack_client.get_all_connections(src_port)
                                 for connection in connections:
-                                    try: self.jack_client.disconnect(src_port, connection)
-                                    except: pass
+                                    if connection.name in managed_dest_ports:
+                                        print(f"[Conductor] Routing Change: Disconnecting managed instrument {connection.name}")
+                                        try: self.jack_client.disconnect(src_port, connection)
+                                        except: pass
                             except Exception: pass
 
                             # --- 2. WAIT A BIT ---
@@ -465,14 +474,16 @@ class JackManager:
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
 
-                            # Cleanup all from source
+                            # Cleanup only managed project instruments from source
                             src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
                             if src_port_to_clean:
                                 try:
+                                    managed_dest_ports = self._get_managed_instrument_ports()
                                     connections = self.jack_client.get_all_connections(src_port_to_clean)
                                     for conn in connections:
-                                        try: self.jack_client.disconnect(src_port_to_clean, conn)
-                                        except: pass
+                                        if conn.name in managed_dest_ports:
+                                            try: self.jack_client.disconnect(src_port_to_clean, conn)
+                                            except: pass
                                 except Exception: pass
 
                             self._last_connected_src_id = None
@@ -488,10 +499,12 @@ class JackManager:
                          src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
                          if src_port_to_clean:
                              try:
+                                 managed_dest_ports = self._get_managed_instrument_ports()
                                  connections = self.jack_client.get_all_connections(src_port_to_clean)
                                  for conn in connections:
-                                     try: self.jack_client.disconnect(src_port_to_clean, conn)
-                                     except: pass
+                                     if conn.name in managed_dest_ports:
+                                         try: self.jack_client.disconnect(src_port_to_clean, conn)
+                                         except: pass
                              except Exception: pass
 
                          self._last_connected_src_id = None
@@ -714,15 +727,17 @@ class JackManager:
             self._routing_thread.join(timeout=1.0)
             self._routing_thread = None
 
-        # Cleanup physical keyboard connections
+        # Cleanup project instrument connections from physical keyboard
         try:
             src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
             src_port = self._find_jack_port(src_pattern, is_output=True)
             if src_port:
+                managed_dest_ports = self._get_managed_instrument_ports()
                 connections = self.jack_client.get_all_connections(src_port)
                 for conn in connections:
-                    try: self.jack_client.disconnect(src_port, conn)
-                    except: pass
+                    if conn.name in managed_dest_ports:
+                        try: self.jack_client.disconnect(src_port, conn)
+                        except: pass
         except: pass
 
         self._last_connected_src_id = None

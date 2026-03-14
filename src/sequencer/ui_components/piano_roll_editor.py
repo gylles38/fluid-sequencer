@@ -1073,7 +1073,7 @@ class PianoRollEditor(FloatingWindow):
             if keyboard in (276, 275): # Left, Right
                 timeline_scroll = self.ids.timeline_scroll
                 grid = self.ids.grid_viewer.grid
-                beats_per_measure: copy.Any | int = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
+                beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
                 measure_width_pixels = beats_per_measure * self.pixels_per_beat
                 max_scroll_pixels = grid.width - timeline_scroll.width
                 if max_scroll_pixels > 0:
@@ -1149,7 +1149,7 @@ class PianoRollEditor(FloatingWindow):
         """Définit la fin du morceau au début de la dernière mesure."""
         total_beats = self.total_beats
         # On récupère le numérateur de la signature temporelle (défaut 4)
-        beats_per_measure: copy.Any | int = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
+        beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
         
         if total_beats <= 0:
             target_beat = 0
@@ -1470,7 +1470,7 @@ class PianoRollEditor(FloatingWindow):
 
     def _set_editor_cursor(self) -> None:
         """Gère l'apparence du curseur selon le mode d'édition"""
-        mode: copy.Any | str = getattr(self, 'edit_mode', 'select')
+        mode = getattr(self, 'edit_mode', 'select')
         if mode == 'insert': Window.set_system_cursor('crosshair')
         elif mode == 'delete': Window.set_system_cursor('no')
         elif mode == 'move': Window.set_system_cursor('hand')

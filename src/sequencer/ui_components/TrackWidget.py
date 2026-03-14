@@ -14,6 +14,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.stencilview import StencilView
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, BooleanProperty
@@ -258,19 +259,16 @@ class TrackWidget(BoxLayout):
     track_index = NumericProperty(0)
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
-        kwargs['orientation'] = 'vertical'
+        kwargs.setdefault('orientation', 'vertical')
         super(TrackWidget, self).__init__(**kwargs)
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
         # Initialisez une liste pour stocker les widgets de courbes pour les pistes d'automation
         self.automation_curves = []
-        
-        # We change to vertical orientation to stack the main content and the resize handle
-        self.orientation = 'vertical'
         self.size_hint_y = None
         # Increase track height for better visibility, matching MIDI tracks
-        self.height = dp(160)
+        self.height = dp(172)
         self.spacing = 0 # No spacing between content and resize handle
         
         self.padding = [0, 0, 0, 0]
@@ -308,10 +306,11 @@ class TrackWidget(BoxLayout):
 
         # Container for other info elements - Fixed at top, clipped if track is too small
         self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
-        self.info_float = FloatLayout(size_hint=(1, 1))
-        self.info_clipped_wrapper.add_widget(self.info_float)
-        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint_y=None, height=dp(160), pos_hint={'top': 1})
-        self.info_float.add_widget(self.info_top_bar)
+        self.info_clipped_float = FloatLayout(size_hint=(1, 1))
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'top': 1})
+
+        self.info_clipped_float.add_widget(self.info_top_bar)
+        self.info_clipped_wrapper.add_widget(self.info_clipped_float)
         self.info_section.add_widget(self.info_clipped_wrapper)
 
         labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
@@ -360,9 +359,10 @@ class TrackWidget(BoxLayout):
         # Fixed height for controls, clipped if track is too small
         self.controls_wrapper = StencilView(size_hint_x=None, width=self.controls_width, size_hint_y=1)
         self.controls_float = FloatLayout(size_hint=(1, 1))
-        self.controls_wrapper.add_widget(self.controls_float)
-        self.controls_section = BoxLayout(size_hint_x=1, size_hint_y=None, height=dp(160), pos_hint={'top': 1}, spacing=dp(8))
+        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'top': 1})
+
         self.controls_float.add_widget(self.controls_section)
+        self.controls_wrapper.add_widget(self.controls_float)
 
         # --- Solo Button (not for Automation tracks) ---
         if not isinstance(track, AutomationTrack):
@@ -646,16 +646,14 @@ class TrackWidget(BoxLayout):
             # Create a layout for the track type icon, fixed height at top
             self.icon_wrapper = StencilView(size_hint_x=None, width=dp(40), size_hint_y=1)
             self.icon_float = FloatLayout(size_hint=(1, 1))
-            self.icon_wrapper.add_widget(self.icon_float)
-
             self.icon_layout = BoxLayout(
-                size_hint_x=1,
-                size_hint_y=None,
+                size_hint=(1, None),
                 height=dp(160),
-                pos_hint={'top': 1},
-                orientation='vertical'
+                orientation='vertical',
+                pos_hint={'top': 1}
             )
             self.icon_float.add_widget(self.icon_layout)
+            self.icon_wrapper.add_widget(self.icon_float)
 
             track_type_icon = "help-circle"
             track_type_color = [0.5, 0.5, 0.5, 1]

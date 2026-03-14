@@ -1,5 +1,0 @@
-loadproject test_project
-y
-list
-save test_export.mid
-quit

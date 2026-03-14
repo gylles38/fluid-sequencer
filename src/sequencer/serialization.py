@@ -26,6 +26,7 @@ class CustomSongEncoder(json.JSONEncoder):
                 'carla_project_path': o.carla_project_path,
                 'aj_snapshot_path': o.aj_snapshot_path,
                 'input_routing': o.input_routing,
+                'track_display_order': o.track_display_order,
             }
         if isinstance(o, MidiTrack):
             return {

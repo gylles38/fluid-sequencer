@@ -49,6 +49,7 @@ from sequencer.ui_components.PreferencesPopup import PreferencesPopup
 from sequencer.ui_components.TrackWidget import TrackWidget
 from sequencer.ui_components.Ruler import Ruler
 from sequencer.ui_components.ui_utils import is_any_text_input_focused
+from sequencer.ui_components.priority_scroll_view import PriorityScrollView
 # ============================================
 
 from sequencer.sequencer import Sequencer
@@ -107,6 +108,8 @@ class SequencerLayout(BoxLayout):
         self.display_beat = 0.0
                 
         self.track_widgets = [] # Initialisation de la liste des widgets de piste                
+        self._dragged_widget = None
+        self._drag_indicator = None
 
         menu_bar = BoxLayout(size_hint_y=None, height=40, padding=5)
 
@@ -667,7 +670,8 @@ class SequencerLayout(BoxLayout):
 
         # Conteneur pour la liste des pistes avec défilement
         # On désactive do_scroll_x pour garder les panneaux de gauche fixes.
-        self.scroll_view = ScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False)
+        # La molette de la souris continuera de fonctionner normalement.
+        self.scroll_view = PriorityScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False, scroll_type=['bars', 'content'])
         # 2. Le Layout qui contient les pistes
         # On le laisse à size_hint_x=1 pour qu'il s'adapte à la largeur de l'écran.
         self.track_list_layout = BoxLayout(
@@ -1787,9 +1791,11 @@ class SequencerLayout(BoxLayout):
         self.sequencer.toggle_mute(track_index)
 
         # 2. Find the corresponding widget and update its appearance
-        if 0 <= track_index < len(self.track_widgets):
-            track_widget = self.track_widgets[track_index]
-            track_widget.update_mute_solo_appearance()
+        # We search by track_index property because self.track_widgets matches display order
+        for track_widget in self.track_widgets:
+            if track_widget.track_index == track_index:
+                track_widget.update_mute_solo_appearance()
+                break
 
     def toggle_track_solo(self, track_index):
         """Toggles solo state for a track and updates others without a full UI refresh."""
@@ -1805,13 +1811,14 @@ class SequencerLayout(BoxLayout):
         """Met à jour l'apparence des boutons record des pistes"""
         if track_index is not None:
             # Mettre à jour une piste spécifique
-            if track_index < len(self.track_list_layout.children):
-                track_widget = self.track_list_layout.children[-(track_index + 1)]
-                if hasattr(track_widget, 'record_mode_button'):
-                    track_widget.record_mode_button.update_appearance()
+            for track_widget in self.track_widgets:
+                if track_widget.track_index == track_index:
+                    if hasattr(track_widget, 'record_mode_button'):
+                        track_widget.record_mode_button.update_appearance()
+                    break
         else:
-            # Mettre à jour toutes les pistes - CORRECTION ICI
-            for i, track_widget in enumerate(self.track_list_layout.children):
+            # Mettre à jour toutes les pistes
+            for track_widget in self.track_widgets:
                 if hasattr(track_widget, 'record_mode_button'):
                     track_widget.record_mode_button.update_appearance()
 
@@ -1952,23 +1959,46 @@ class SequencerLayout(BoxLayout):
         self.ruler.total_beats = final_total_beats
         self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
 
-        # Optimization: Reuse existing TrackWidget instances to avoid expensive reconstruction
-        # Create a mapping of current tracks to their widgets using id(track) for hashability
+        # Optimization: Reuse existing TrackWidget instances
         existing_widgets = {id(w.track): w for w in self.track_widgets}
 
-        new_track_widgets = []
-        tracks_to_show = [t for t in self.sequencer.song.tracks if not (isinstance(t, MidiTrack) and t.is_metronome)]
+        # Filtering tracks to show (excluding metronome)
+        tracks_indices_to_show = []
+        for i, track in enumerate(self.sequencer.song.tracks):
+            if not (isinstance(track, MidiTrack) and track.is_metronome):
+                tracks_indices_to_show.append(i)
 
-        # Determine if we need to clear and re-add widgets (e.g., if order or count changed)
+        # Get the visual order from the song model
+        display_order = self.sequencer.song.track_display_order
+
+        # Filter display_order to only include existing tracks that are not metronome
+        ordered_indices = [idx for idx in display_order if idx in tracks_indices_to_show]
+
+        # Add any missing indices (e.g. newly added tracks)
+        for idx in tracks_indices_to_show:
+            if idx not in ordered_indices:
+                ordered_indices.append(idx)
+
+        # Synchronize model if needed
+        if self.sequencer.song.track_display_order != ordered_indices:
+            self.sequencer.song.track_display_order = ordered_indices
+
+        tracks_to_show = [self.sequencer.song.tracks[idx] for idx in ordered_indices]
+
+        # Determine if we need to clear and re-add widgets
         current_tracks_in_widgets = [w.track for w in self.track_widgets]
         if current_tracks_in_widgets != tracks_to_show:
             self.track_list_layout.clear_widgets()
-            for i, track in enumerate(tracks_to_show):
+            new_track_widgets = []
+            for track in tracks_to_show:
+                # Find the real track index in the full song.tracks list
+                actual_track_index = self.sequencer.song.tracks.index(track)
+
                 if id(track) in existing_widgets:
                     track_widget = existing_widgets[id(track)]
-                    track_widget.track_index = i
+                    track_widget.track_index = actual_track_index
                 else:
-                    track_widget = TrackWidget(track=track, track_index=i, sequencer_layout=self)
+                    track_widget = TrackWidget(track=track, track_index=actual_track_index, sequencer_layout=self)
                     if hasattr(track_widget, 'timeline_scroll'):
                         track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
 
@@ -1979,23 +2009,20 @@ class SequencerLayout(BoxLayout):
                 new_track_widgets.append(track_widget)
                 self.track_list_layout.add_widget(track_widget)
                 Clock.schedule_once(track_widget._update_graphics, 0)
+            self.track_widgets = new_track_widgets
         else:
-            # Order is the same, just update properties of existing widgets
+            # Order is the same, just update properties
             for i, track_widget in enumerate(self.track_widgets):
-                track_widget.track_index = i
+                actual_track_index = self.sequencer.song.tracks.index(track_widget.track)
+                track_widget.track_index = actual_track_index
                 track_widget.total_beats = final_total_beats
                 track_widget.pixels_per_beat = self.pixels_per_beat
                 track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
-                new_track_widgets.append(track_widget)
 
-                # Redraw only the piano roll or measure grid if notes changed.
-                # We use redraw() which is debounced.
                 if hasattr(track_widget, 'piano_roll'):
                     track_widget.piano_roll.redraw()
                 elif hasattr(track_widget, 'measure_grid'):
                     track_widget.measure_grid.redraw()
-
-        self.track_widgets = new_track_widgets
 
         # Bind ruler spacer widths and timeline width
         if self.track_widgets:
@@ -2410,6 +2437,96 @@ class SequencerLayout(BoxLayout):
             else:
                 # Fin de l'animation
                 self.stop_beat_pulse_animation()
+
+    def on_track_drag_start(self, track_widget, touch):
+        self._dragged_widget = track_widget
+        # Initial indicator
+        if not self._drag_indicator:
+            from kivy.graphics import Color, Line
+            with self.track_list_layout.canvas.after:
+                self._drag_indicator_color = Color(1, 1, 1, 1)
+                self._drag_indicator = Line(points=[], width=dp(2))
+
+    def on_track_drag_move(self, track_widget, touch):
+        if not self._dragged_widget:
+            return
+
+        # Localize touch to track_list_layout.
+        # Since the touch is grabbed, touch.pos is in window coordinates.
+        # to_widget() with relative=False (default) converts from window to local.
+        lx, ly = self.track_list_layout.to_widget(*touch.pos)
+
+        # Find where the line should be drawn
+        target_idx = self._get_drag_insertion_index(ly)
+
+        # Draw the line at the target index
+        if target_idx < len(self.track_list_layout.children):
+            # Children are in reverse order of display in BoxLayout(vertical)
+            child = self.track_list_layout.children[-(target_idx + 1)]
+            y = child.top + self.track_list_layout.spacing / 2
+        else:
+            child = self.track_list_layout.children[0]
+            y = child.y - self.track_list_layout.spacing / 2
+
+        self._drag_indicator.points = [self.track_list_layout.x, y, self.track_list_layout.right, y]
+
+    def on_track_drag_end(self, track_widget, touch):
+        if not self._dragged_widget:
+            return
+
+        # Localize touch to track_list_layout
+        lx, ly = self.track_list_layout.to_widget(*touch.pos)
+
+        target_display_idx = self._get_drag_insertion_index(ly)
+
+        # Current display index of the dragged widget
+        try:
+            old_display_idx = self.track_widgets.index(self._dragged_widget)
+
+            # If target is AFTER old_idx, the insertion shift needs adjustment
+            if target_display_idx > old_display_idx:
+                target_display_idx -= 1
+
+            if old_display_idx != target_display_idx:
+                self.sequencer.move_track_display_order(old_display_idx, target_display_idx)
+        except ValueError:
+            pass
+
+        # Cleanup
+        self._dragged_widget = None
+        if self._drag_indicator:
+            self._drag_indicator.points = []
+
+    def _get_drag_insertion_index(self, ly):
+        """Returns the display index where the track should be inserted based on y coordinate."""
+        # In Kivy's vertical BoxLayout, children[0] is at the bottom, children[-1] is at the top.
+        # Visual display order is 0 (top) to N-1 (bottom).
+
+        num_children = len(self.track_list_layout.children)
+        if num_children == 0:
+            return 0
+
+        # visual_indices are 0, 1, 2, ..., num_children-1
+        # positions are y_top, y_center_0, y_center_1, ..., y_bottom
+
+        # Check if we are above the center of the first child (visual index 0)
+        top_child = self.track_list_layout.children[-1]
+        if ly > top_child.center_y:
+            return 0
+
+        # Check between centers of children
+        for i in range(num_children - 1):
+            # child_i is visual index i
+            child_i = self.track_list_layout.children[num_children - 1 - i]
+            # child_next is visual index i + 1
+            child_next = self.track_list_layout.children[num_children - 1 - (i + 1)]
+
+            # If touch is between center of i and center of i+1
+            if child_i.center_y >= ly > child_next.center_y:
+                return i + 1
+
+        # If we are below the center of the last child
+        return num_children
 
     def _synchronize_scroll(self, instance, value):
         """

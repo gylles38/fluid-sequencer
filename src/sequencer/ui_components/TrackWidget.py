@@ -29,6 +29,46 @@ from kivymd.uix.button import MDIconButton, MDButton, MDButtonText
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivy.graphics import Translate, PushMatrix, PopMatrix
 
+class DragHandle(Widget):
+    """A vertical drag handle that spans the full height of the track."""
+    def __init__(self, track_widget, **kwargs):
+        super().__init__(**kwargs)
+        self.track_widget = track_widget
+        self.size_hint_x = None
+        self.width = dp(12)
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        with self.canvas:
+            self.bg_color = Color(0.15, 0.15, 0.15, 1)
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+
+            # Grip indicators (dots or lines)
+            self.grip_color = Color(0.4, 0.4, 0.4, 1)
+            self.grips = []
+            for _ in range(3):
+                self.grips.append(Rectangle(size=(dp(4), dp(2))))
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
+        # Center grips vertically
+        center_x = self.x + self.width / 2 - dp(2)
+        spacing = dp(6)
+        total_height = 2 * spacing
+        start_y = self.y + self.height / 2 - total_height / 2
+
+        for i, grip in enumerate(self.grips):
+            grip.pos = (center_x, start_y + i * spacing)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.grab(self.track_widget)
+            if hasattr(self.track_widget.sequencer_layout, 'on_track_drag_start'):
+                self.track_widget.sequencer_layout.on_track_drag_start(self.track_widget, touch)
+            return True
+        return False
+
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -145,6 +185,7 @@ class TrackWidget(BoxLayout):
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
     is_active_routing = BooleanProperty(False)    
+    track_index = NumericProperty(0)
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         self.spacing = dp(12)
@@ -181,7 +222,12 @@ class TrackWidget(BoxLayout):
         self.bind(pos=self._update_graphics, size=self._update_graphics)
         
         # --- Left Section: Track Info ---
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[dp(10), dp(2), dp(10), dp(2)])
+        # Set padding to 0 top/bottom to allow DragHandle to take full height
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0])
+
+        # Drag handle (far left)
+        self.drag_handle = DragHandle(track_widget=self)
+        self.info_section.add_widget(self.drag_handle)
 
         labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
         # Non-editable track index
@@ -194,9 +240,7 @@ class TrackWidget(BoxLayout):
             bold=True,
             size_hint_x=None,
             width=dp(30),
-            # Ajoute ceci :
-            padding=labelPadding,          # ← top=2dp → descend le texte de 2 pixels
-            # ou inverse si tu veux monter : padding=[0, 0, 0, dp(2)] pour bottom
+            padding=labelPadding,
         )
         self.info_section.add_widget(self.index_label)
 
@@ -616,6 +660,7 @@ class TrackWidget(BoxLayout):
         self.update_timeline_size()
 
         self.track.bind(is_solo=self.on_solo_changed)
+        self.bind(track_index=self._on_track_index_change)
         
         # Liaison avec le séquenceur pour la mise à jour en temps réel
         self.sequencer_layout.sequencer.bind(
@@ -705,6 +750,10 @@ class TrackWidget(BoxLayout):
     def on_solo_changed(self, instance, value) -> None:
         self.update_mute_solo_appearance()
 
+    def _on_track_index_change(self, instance, value):
+        self.index_label.text = f"[{int(value)}]"
+        self._update_bg_color()
+
     def _sync_routing_status(self, instance, value):
         # On met à jour l'état et on force la couleur IMMEDIATEMENT
         is_active = (self.track_index == value)
@@ -736,6 +785,22 @@ class TrackWidget(BoxLayout):
         else:
             self.bg_color.rgba = [0.12, 0.12, 0.12, 1]
 
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            if hasattr(self.sequencer_layout, 'on_track_drag_move'):
+                self.sequencer_layout.on_track_drag_move(self, touch)
+            return True
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            if hasattr(self.sequencer_layout, 'on_track_drag_end'):
+                self.sequencer_layout.on_track_drag_end(self, touch)
+            return True
+        return super().on_touch_up(touch)
+
     def on_touch_down(self, touch):
         """
         Handle touch events for track selection.
@@ -747,6 +812,10 @@ class TrackWidget(BoxLayout):
             # super().on_touch_down(touch) returns True if a child consumed the touch.
             if super().on_touch_down(touch):
                 return True
+
+            # Ignore mouse wheel events for track selection
+            if hasattr(touch, 'button') and touch.button in ('scrollup', 'scrolldown', 'scrollleft', 'scrollright'):
+                return False
 
             # If the touch wasn't consumed by a child (button, slider, etc.)
             # and the sequencer is stopped, we select this track.

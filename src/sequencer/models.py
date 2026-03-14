@@ -272,7 +272,13 @@ class Song:
     metronome_pan: float = 0.0
     carla_project_path: Optional[str] = None
     aj_snapshot_path: Optional[str] = None
-    input_routing: Optional[AutomationTrack] = None    
+    input_routing: Optional[AutomationTrack] = None
+    track_display_order: List[int] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Initialize display order if empty (e.g. on new song or loading legacy project)
+        if not self.track_display_order and self.tracks:
+            self.track_display_order = list(range(len(self.tracks)))
 
     def add_track(self, track: AnyTrack):
         """Adds a track to the song, assigning a default channel if it's a MIDI track."""
@@ -283,4 +289,5 @@ class Song:
                 track.channel = midi_track_count
             else:
                 track.channel = 15 # Default to last channel if more than 16 tracks
+        self.track_display_order.append(len(self.tracks))
         self.tracks.append(track)

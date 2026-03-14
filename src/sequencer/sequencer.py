@@ -361,6 +361,10 @@ class Sequencer(EventDispatcher):
                                     Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
                                 elif control == self.midi_config.get_transport_cc("record_arm"):
                                     Clock.schedule_once(lambda dt: self.process_transport_command("record"))
+                                elif control == self.midi_config.get_transport_cc("rewind"):
+                                    Clock.schedule_once(lambda dt: self.seek("-1m"))
+                                elif control == self.midi_config.get_transport_cc("forward"):
+                                    Clock.schedule_once(lambda dt: self.seek("+1m"))
 
                             # --- Handle Volume Sliders & Solo Buttons ---
                             for i in range(len(self.song.tracks)):
@@ -608,28 +612,6 @@ class Sequencer(EventDispatcher):
         if self.jack_manager:
             self.jack_manager.silence_all_midi_notes()
 
-        for port in self.open_ports.values():
-            if port and not port.closed:
-                for channel in range(16):
-                    # CC 123: All Notes Off
-                    # CC 120: All Sound Off
-                    # CC 121: Reset All Controllers
-                    # CC 64: Sustain Off
-                    port.send(mido.Message('control_change', channel=channel, control=123, value=0))
-                    port.send(mido.Message('control_change', channel=channel, control=120, value=0))
-                    port.send(mido.Message('control_change', channel=channel, control=121, value=0))
-                    port.send(mido.Message('control_change', channel=channel, control=64, value=0))
-
-        # Also send to JackManager's open ports if they differ
-        if self.jack_manager and self.jack_manager.is_running:
-             for port in self.jack_manager.open_ports.values():
-                 if port and not port.closed:
-                     for channel in range(16):
-                         port.send(mido.Message('control_change', channel=channel, control=123, value=0))
-                         port.send(mido.Message('control_change', channel=channel, control=120, value=0))
-                         port.send(mido.Message('control_change', channel=channel, control=121, value=0))
-                         port.send(mido.Message('control_change', channel=channel, control=64, value=0))
-
     def _all_notes_off(self):
         self.panic()
 
@@ -768,6 +750,19 @@ class Sequencer(EventDispatcher):
                 return {"status": "cancelled", "message": "Deletion cancelled."}
 
         self.song.tracks.pop(track_index)
+
+        # Update display order: remove the index and decrement all higher indices
+        if track_index in self.song.track_display_order:
+            self.song.track_display_order.remove(track_index)
+
+        new_display_order = []
+        for idx in self.song.track_display_order:
+            if idx > track_index:
+                new_display_order.append(idx - 1)
+            else:
+                new_display_order.append(idx)
+        self.song.track_display_order = new_display_order
+
         self.is_dirty = True
         self.invalidate_song_length_cache()
         
@@ -895,6 +890,19 @@ class Sequencer(EventDispatcher):
         self.song.tracks[track_index].name = new_name
         self.is_dirty = True
         return {"status": "success", "message": f"Track '{old_name}' renamed to '{new_name}'."}
+
+    def move_track_display_order(self, old_display_index: int, new_display_index: int):
+        """Moves a track's position in the visual display order."""
+        if not (0 <= old_display_index < len(self.song.track_display_order)):
+            return
+        if not (0 <= new_display_index < len(self.song.track_display_order)):
+            return
+
+        # Pop the track index from its old position and insert it into the new one
+        track_idx = self.song.track_display_order.pop(old_display_index)
+        self.song.track_display_order.insert(new_display_index, track_idx)
+        self.is_dirty = True
+        self.song_structure_changed += 1
 
     def move_track_section(self, source_track_idx: int, confirmation_handler=None) -> str:
         if not 0 <= source_track_idx < len(self.song.tracks):
@@ -1945,10 +1953,16 @@ class Sequencer(EventDispatcher):
             return f"Error creating virtual port: {e}"
 
     def close_virtual_ports(self):
+        """Cleanly shutdown all sequencer resources, including engine and external processes."""
+        if self.jack_manager:
+            self.jack_manager.stop()
+            print("JACK engine stopped.")
+
         for port in self.virtual_ports:
             if not port.closed:
                 port.close()
         print("Virtual ports closed.")
+
         self._stop_carla_process()
         """Assure la fermeture propre des processus audio mpv à la sortie du séquenceur."""
         try:
@@ -2676,14 +2690,15 @@ class Sequencer(EventDispatcher):
             self.playback_state = "stopped"
             return
 
-        if self.jack_manager.jack_client.transport_state == jack.ROLLING:
-            self.jack_manager.silence_all_midi_notes()
-            time.sleep(0.01)
-
         try:
             if self.jack_manager.jack_client.transport_state == jack.ROLLING:
                 self.jack_manager.jack_client.transport_stop()
                 print("JACK transport stopped.")
+                # Give a tiny bit of time for the engine to register the stop
+                time.sleep(0.02)
+
+            # Silence EVERYTHING immediately after stopping transport
+            self.jack_manager.silence_all_midi_notes()
 
             beats_per_second = self.song.tempo / 60.0
             samplerate = self.jack_manager.jack_client.samplerate
@@ -2822,6 +2837,7 @@ class Sequencer(EventDispatcher):
 
             # Reposition JACK transport
             target_frame = int((new_beat / beats_per_second) * samplerate)
+            _, pos_struct = self.jack_manager.jack_client.transport_query_struct()
             pos_struct.frame = target_frame
             self.jack_manager.jack_client.transport_reposition_struct(pos_struct)
 

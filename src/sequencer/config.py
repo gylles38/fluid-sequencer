@@ -3,6 +3,8 @@ import os
 
 DEFAULT_MIDI_MAPPINGS = {
     "transport": {
+        "rewind": 115,
+        "forward": 116,
         "stop": 117,
         "play_pause": 118,
         "record_arm": 119

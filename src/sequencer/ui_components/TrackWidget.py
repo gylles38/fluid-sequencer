@@ -309,8 +309,8 @@ class TrackWidget(BoxLayout):
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
         self.info_clipped_wrapper.bind(pos=self.info_clipped_rel.setter('pos'), size=self.info_clipped_rel.setter('size'))
 
-        # Header bar for name and index - Pinned to TOP
-        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'top': 1})
+        # Header bar for name and index - Centered vertically
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'center_y': 0.5})
         self.info_clipped_rel.add_widget(self.info_top_bar)
 
         self.info_section.add_widget(self.info_clipped_wrapper)
@@ -364,7 +364,7 @@ class TrackWidget(BoxLayout):
         self.controls_wrapper.add_widget(self.controls_clipped_rel)
         self.controls_wrapper.bind(pos=self.controls_clipped_rel.setter('pos'), size=self.controls_clipped_rel.setter('size'))
 
-        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'top': 1})
+        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'center_y': 0.5})
         self.controls_clipped_rel.add_widget(self.controls_section)
 
         # --- Solo Button (not for Automation tracks) ---
@@ -373,7 +373,7 @@ class TrackWidget(BoxLayout):
                 icon='alpha-s-box' if track.is_solo else 'alpha-s-box-outline',
                 tooltip_text='Solo' if not track.is_solo else 'Unsolo',
                 on_press=self.on_solo_toggle,
-                pos_hint={'top': 1},
+                pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
                 icon_color=[1, 1, 0, 1] if track.is_solo else [1, 1, 1, 0.8],
                 md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8],
@@ -395,7 +395,7 @@ class TrackWidget(BoxLayout):
             self.automation_controls.size_hint=(None, None)
             self.automation_controls.height = dp(36)
             self.automation_controls.width = dp(100)
-            self.automation_controls.pos_hint = {'top': 1}
+            self.automation_controls.pos_hint = {'center_y': 0.5}
             
             # On l'ajoute directement dans la colonne de gauche
             self.controls_section.add_widget(self.automation_controls)
@@ -408,12 +408,13 @@ class TrackWidget(BoxLayout):
                 icon='piano',
                 tooltip_text='Open Piano Roll Editor',
                 on_press=self.open_piano_roll_editor,
-                pos_hint={'top': 1},
+                pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
                 icon_color=[1, 1, 1, 0.8],
                 size_hint=(None, None),
                 size=(dp(36), dp(36))
             )
+            self.piano_roll_button.pos_hint = {'center_y': 0.5}
             self.controls_section.add_widget(self.piano_roll_button)
 
             self.record_mode_button = ThreeStateRecordButton(
@@ -422,7 +423,7 @@ class TrackWidget(BoxLayout):
                 sequencer_layout=sequencer_layout,
                 callback=self.on_record_mode_change
             )
-            self.record_mode_button.pos_hint = {'top': 1}
+            self.record_mode_button.pos_hint = {'center_y': 0.5}
             self.record_mode_button.size_hint = (None, None)
             self.record_mode_button.size = (dp(36), dp(36))
             self.controls_section.add_widget(self.record_mode_button)
@@ -437,7 +438,7 @@ class TrackWidget(BoxLayout):
             height=dp(160),
             width=dp(170),  # Increased width
             spacing=0,
-            pos_hint={'top': 1}
+            pos_hint={'center_y': 0.5}
         )
 
         if isinstance(track, MidiTrack):
@@ -492,6 +493,7 @@ class TrackWidget(BoxLayout):
                 pos_hint={'center_x': 0.5} # Center the button
             )
 
+            midi_controls_layout.add_widget(Widget(size_hint_y=1)) # Top spacer
             midi_controls_layout.add_widget(top_controls)
             midi_controls_layout.add_widget(self.port_selector_button)
             midi_controls_layout.add_widget(self.input_selector_button)
@@ -502,14 +504,14 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'top': 1})
+        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
 
         mute_button_container = BoxLayout(size_hint_y=None, height=dp(36), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
             on_press=self.on_mute_toggle,
-            pos_hint={'center_x': 0.5, 'top': 1},
+            pos_hint={'center_x': 0.5, 'center_y': 0.5},
             theme_icon_color="Custom",
             icon_color = [0.8, 0.3, 0, 1] if track.is_muted else [1, 0.6, 0, 1],
             md_bg_color = [0.4, 0.2, 0.1, 0.8] if track.is_muted else [0.3, 0.2, 0.1, 0.8],
@@ -536,10 +538,10 @@ class TrackWidget(BoxLayout):
 
         # --- Pan Controls ---
         if not isinstance(track, AutomationTrack):
-            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'top': 1})
+            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
 
             pan_icon_container = BoxLayout(size_hint_y=None, height=dp(36))
-            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'top': 1})
+            pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'center_y': 0.5})
             pan_icon_container.add_widget(pan_icon)
 
             self.pan_slider = HoverableSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
@@ -665,7 +667,7 @@ class TrackWidget(BoxLayout):
                 size_hint=(1, None),
                 height=dp(160),
                 orientation='vertical',
-                pos_hint={'top': 1}
+                pos_hint={'center_y': 0.5}
             )
             self.icon_clipped_rel.add_widget(self.icon_layout)
 
@@ -687,9 +689,10 @@ class TrackWidget(BoxLayout):
                 valign='center',
                 size_hint=(1, None),
                 height=dp(40),
-                pos_hint={'top': 1}
+                pos_hint={'center_y': 0.5}
             )
 
+            self.icon_layout.add_widget(Widget(size_hint_y=1)) # Top spacer
             self.icon_layout.add_widget(icon)
             self.icon_layout.add_widget(Widget(size_hint_y=1)) # Bottom spacer
 

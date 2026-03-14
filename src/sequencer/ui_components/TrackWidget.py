@@ -69,6 +69,75 @@ class DragHandle(Widget):
             return True
         return False
 
+    def on_touch_move(self, touch):
+        return False # No default move handling
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self.track_widget:
+            touch.ungrab(self.track_widget)
+            return True
+        return False
+
+class ResizeHandle(Widget):
+    """A horizontal handle at the bottom of the track for vertical resizing."""
+    def __init__(self, track_widget, **kwargs):
+        super().__init__(**kwargs)
+        self.track_widget = track_widget
+        self.size_hint_y = None
+        self.height = dp(12)
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        with self.canvas:
+            self.bg_color = Color(0.15, 0.15, 0.15, 1)
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+
+            # Grip indicators (matching DragHandle aesthetic but horizontal)
+            self.grip_color = Color(0.4, 0.4, 0.4, 1)
+            self.grips = []
+            for _ in range(3):
+                self.grips.append(Rectangle(size=(dp(2), dp(4))))
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
+        # Center grips horizontally
+        center_x = self.x + self.width / 2 - dp(1)
+        spacing = dp(6)
+        total_width = 2 * spacing
+        start_x = center_x - total_width / 2
+        center_y = self.y + self.height / 2 - dp(2)
+
+        for i, grip in enumerate(self.grips):
+            grip.pos = (start_x + i * spacing, center_y)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.grab(self)
+            self._initial_height = self.track_widget.height
+            self._initial_touch_y = touch.y
+            return True
+        return False
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            # When dragging down, touch.y decreases, delta_y increases height
+            delta_y = self._initial_touch_y - touch.y
+            new_height = self._initial_height + delta_y
+
+            # Constraints: 0.5x to 2x of 160dp (80dp to 320dp)
+            min_h = dp(80)
+            max_h = dp(320)
+            self.track_widget.height = max(min_h, min(max_h, new_height))
+            return True
+        return False
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            return True
+        return False
+
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -188,7 +257,7 @@ class TrackWidget(BoxLayout):
     track_index = NumericProperty(0)
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
-        self.spacing = dp(12)
+        kwargs['orientation'] = 'vertical'
         super(TrackWidget, self).__init__(**kwargs)
         self.track = track
         self.track_index = track_index
@@ -196,11 +265,12 @@ class TrackWidget(BoxLayout):
         # Initialisez une liste pour stocker les widgets de courbes pour les pistes d'automation
         self.automation_curves = []
         
-        self.orientation = 'horizontal'
+        # We change to vertical orientation to stack the main content and the resize handle
+        self.orientation = 'vertical'
         self.size_hint_y = None
         # Increase track height for better visibility, matching MIDI tracks
         self.height = dp(160)
-        self.spacing = dp(12)
+        self.spacing = 0 # No spacing between content and resize handle
         
         self.padding = [0, 0, 0, 0]
         
@@ -217,7 +287,16 @@ class TrackWidget(BoxLayout):
 
         # Assurez-vous que le fond (background_rect) est bien défini dans canvas.before
         self.bind(pos=self._update_graphics, size=self._update_graphics)
+        self.bind(height=self._on_height_changed)
         
+        # Main row for track content (info, controls, timeline)
+        self.main_row = BoxLayout(orientation='horizontal', size_hint_y=1, spacing=dp(12))
+        self.add_widget(self.main_row)
+
+        # Bottom resize handle
+        self.resize_handle = ResizeHandle(track_widget=self)
+        self.add_widget(self.resize_handle)
+
         # --- Left Section: Track Info ---
         # Set padding to 0 top/bottom to allow DragHandle to take full height
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0])
@@ -453,12 +532,12 @@ class TrackWidget(BoxLayout):
         self.left_panel = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
-            spacing=self.spacing
+            spacing=dp(12)
         )
         self.left_panel.add_widget(self.info_section)
         self.left_panel.add_widget(self.controls_section)
-        self.left_panel.width = self.info_width + self.controls_width + self.spacing
-        self.add_widget(self.left_panel)
+        self.left_panel.width = self.info_width + self.controls_width + dp(12)
+        self.main_row.add_widget(self.left_panel)
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
@@ -546,8 +625,8 @@ class TrackWidget(BoxLayout):
             Clock.schedule_once(set_default_scroll)
 
             # Add to main layout
-            self.add_widget(self.keyboard_sv)
-            self.add_widget(self.timeline_scroll)
+            self.main_row.add_widget(self.keyboard_sv)
+            self.main_row.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
             # Create a layout for the track type icon, replacing the old spacer
@@ -587,15 +666,15 @@ class TrackWidget(BoxLayout):
                 scroll_type=['bars']
             )
             # Add to main layout
-            self.add_widget(self.icon_layout)
-            self.add_widget(self.timeline_scroll)
+            self.main_row.add_widget(self.icon_layout)
+            self.main_row.add_widget(self.timeline_scroll)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
 
             # A ScrollView must have a single child.
             self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
-            # Ensure container follows TrackWidget height perfectly
-            self.bind(height=self.timeline_container.setter('height'))
-            self.timeline_container.height = self.height
+            # Ensure container follows main_row height perfectly
+            self.main_row.bind(height=self.timeline_container.setter('height'))
+            self.timeline_container.height = self.main_row.height
             # AJOUT : Préparation de la translation GPU
             with self.timeline_container.canvas.before:
                 PushMatrix()
@@ -778,6 +857,16 @@ class TrackWidget(BoxLayout):
         self.index_label.text = f"[{int(value)}]"
         self._update_bg_color()
 
+    def _on_height_changed(self, instance, value):
+        """Called when the TrackWidget's height changes."""
+        # Force redraw of editors/grids that might depend on height
+        if hasattr(self, 'piano_roll'):
+            self.piano_roll.redraw()
+        if hasattr(self, 'measure_grid'):
+            self.measure_grid.redraw()
+        if hasattr(self, 'waveform'):
+            self.waveform.redraw()
+
     def _sync_routing_status(self, instance, value):
         # On met à jour l'état et on force la couleur IMMEDIATEMENT
         is_active = (self.track_index == value)
@@ -815,6 +904,8 @@ class TrackWidget(BoxLayout):
             if hasattr(self.sequencer_layout, 'on_track_drag_move'):
                 self.sequencer_layout.on_track_drag_move(self, touch)
             return True
+        if self.resize_handle.collide_point(*touch.pos):
+             return self.resize_handle.on_touch_move(touch)
         return super().on_touch_move(touch)
 
     def on_touch_up(self, touch):
@@ -823,6 +914,8 @@ class TrackWidget(BoxLayout):
             if hasattr(self.sequencer_layout, 'on_track_drag_end'):
                 self.sequencer_layout.on_track_drag_end(self, touch)
             return True
+        if self.resize_handle.collide_point(*touch.pos):
+             return self.resize_handle.on_touch_up(touch)
         return super().on_touch_up(touch)
 
     def on_touch_down(self, touch):
@@ -832,6 +925,10 @@ class TrackWidget(BoxLayout):
         select this track's instrument.
         """
         if self.collide_point(*touch.pos):
+            # Special case for ResizeHandle which is a direct child but we want to let it grab the touch
+            if hasattr(self, 'resize_handle') and self.resize_handle.collide_point(*touch.pos):
+                 return self.resize_handle.on_touch_down(touch)
+
             # We let the default Kivy processing happen first for buttons/sliders.
             # super().on_touch_down(touch) returns True if a child consumed the touch.
             if super().on_touch_down(touch):
@@ -920,13 +1017,13 @@ class TrackWidget(BoxLayout):
             # On cherche le point de séparation le plus fiable
             # On utilise le bord droit du left_panel pour placer le séparateur
             if hasattr(self, 'left_panel'):
-                split_x = self.left_panel.right + self.spacing / 2
+                split_x = self.left_panel.right + dp(6)
             else:
                 # Fallback basé sur les largeurs connues
-                split_x = self.x + self.info_width + self.controls_width + self.spacing / 2
+                split_x = self.x + self.info_width + self.controls_width + dp(6)
 
-            self.vert_separator.pos = (split_x - dp(1), self.y)
-            self.vert_separator.size = (dp(2), self.height)
+            self.vert_separator.pos = (split_x - dp(1), self.main_row.y)
+            self.vert_separator.size = (dp(2), self.main_row.height)
 
     def _update_type_icon_bg(self, *args) -> None:
         """Updates the background of the track type icon."""

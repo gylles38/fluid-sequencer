@@ -45,11 +45,13 @@ class Sequencer(EventDispatcher):
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
     song_structure_changed = NumericProperty(0)
+    tempo = NumericProperty(120)
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
 
     def __init__(self, tempo: int = 120, gui_mode=False):
         super().__init__()
         self.gui_mode = gui_mode
+        self.tempo = tempo
         self.song = Song(name="New Song", tempo=tempo)
         self.config_manager = ConfigManager()
         self.midi_config = MidiConfig("config/midi_mappings.json")
@@ -651,6 +653,7 @@ class Sequencer(EventDispatcher):
         if tempo <= 0:
             return "Error: Tempo must be positive."
         self.song.tempo = tempo
+        self.tempo = tempo
         self.is_dirty = True
         self.invalidate_song_length_cache()
         if self.jack_manager.is_running:
@@ -1729,6 +1732,7 @@ class Sequencer(EventDispatcher):
             with open(project_filepath, 'r') as f:
                 project_data = json.load(f, object_hook=song_decoder)
             self.song = project_data.get("song", Song(name="New Song"))
+            self.tempo = self.song.tempo
             self.last_record_settings = None
 
 

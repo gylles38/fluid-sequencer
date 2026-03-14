@@ -605,6 +605,24 @@ class TrackWidget(BoxLayout):
             )
             self.timeline_container.add_widget(self.measure_grid)
 
+            if isinstance(self.track, AudioTrack):
+                self.waveform = AudioWaveform(
+                    filepath=self.track.filepath,
+                    pixels_per_beat=self.pixels_per_beat,
+                    total_beats=self.total_beats,
+                    start_time=self.track.start_time,
+                    tempo=self.sequencer_layout.sequencer.tempo,
+                    size_hint=(1, 1)
+                )
+                # Position it based on start_time
+                self.waveform.x = 0 # Drawing handles offset now
+
+                # Bindings for zoom, length and tempo
+                self.bind(pixels_per_beat=self.waveform.setter('pixels_per_beat'))
+                self.bind(total_beats=self.waveform.setter('total_beats'))
+                self.sequencer_layout.sequencer.bind(tempo=self.waveform.setter('tempo'))
+                self.timeline_container.add_widget(self.waveform)
+
             if isinstance(self.track, AutomationTrack):
                 # --- ÉTAPE 1 : IDENTIFIER LES PARAMÈTRES ---
                 # On définit les paramètres par défaut + ceux présents dans les points

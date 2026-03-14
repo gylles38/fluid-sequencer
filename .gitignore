@@ -4,6 +4,11 @@
 # Ignorer le dossier __pycache__
 #__pycache__/
 src/sequencer/__pycache__/
+**/__pycache__/
 
 venv/
 *.log
+
+# Caches et fichiers de test
+.cache/
+test_data/

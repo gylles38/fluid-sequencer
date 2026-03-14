@@ -112,7 +112,6 @@ class EditableMidiGrid(PianoRoll):
         if self._drag_mode == 'move' and self._dragged_note:
             new_x = local_pos[0] - self._drag_offset[0]
             new_beat = new_x / self.pixels_per_beat
-            new_pitch = int(local_pos[1] / self.note_height)
 
             try:
                 master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
@@ -122,7 +121,12 @@ class EditableMidiGrid(PianoRoll):
                 self._dragged_note = None
                 self._drag_mode = None
                 return True
-            delta_beat = new_beat - master_data['original_start']
+
+            raw_delta_beat = new_beat - master_data['original_start']
+            # Quantize delta_beat to 16th notes for snappy live dragging
+            delta_beat = round(raw_delta_beat * 4) / 4
+
+            new_pitch = int(local_pos[1] / self.note_height)
             delta_pitch = new_pitch - master_data['original_pitch']
 
             earliest_start = min(item['original_start'] for item in self._multi_drag_data)
@@ -133,8 +137,8 @@ class EditableMidiGrid(PianoRoll):
                 target_new_beat = item['original_start'] + delta_beat
                 target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
 
-                # MODIFICATION ICI : On récupère le nouvel événement parent
-                # et on utilise l'identité 'is' pour être certain de ne pas se tromper de note
+                # Update the model live. We store the new parent to ensure subsequent moves
+                # within the same drag can reliably remove the note from its previous location.
                 new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
                 item['parent_event'] = new_parent               
 
@@ -500,21 +504,33 @@ class EditableMidiGrid(PianoRoll):
         self.editor.is_dirty = True
 
     def _move_note_to_new_time(self, note, original_event, new_start_time) -> None:
-        # Retirer la note de l'événement d'origine par identité
-        if original_event and note in original_event.notes:
-            original_event.notes = [n for n in original_event.notes if n is not note]
-            if not original_event.notes and not original_event.cc_messages:
-                if original_event in self.editor.track_copy.events:
-                    self.editor.track_copy.events.remove(original_event)
+        """
+        Moves a note to a new start time, ensuring it is removed from any existing event
+        first to prevent duplicates.
+        """
+        track = self.editor.track_copy
 
-        target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_time) < 0.001), None)
+        # 1. Robust removal: Search the entire track for the note instance.
+        # This is necessary because the note might have been moved during drag
+        # and is no longer in the 'original_event' passed from initial state.
+        for event in list(track.events):
+            if any(n is note for n in event.notes):
+                event.notes = [n for n in event.notes if n is not note]
+                if not event.notes and not event.cc_messages:
+                    track.events.remove(event)
+                # Assuming a note exists only once in the track
+                break
+
+        # 2. Placement at new time
+        target_event = next((e for e in track.events if abs(e.start_time - new_start_time) < 0.001), None)
         if target_event:
-            # CORRECTION : Empêcher l'ajout si l'instance est déjà là
+            # Double check to prevent duplicates in the same event
             if not any(n is note for n in target_event.notes):
                 target_event.notes.append(note)
         else:
             new_event = Event(start_time=new_start_time, notes=[note])
-            self.editor.track_copy.add_event(new_event)
+            track.events.append(new_event)
+            # Re-sort is handled at the end of the move operation in on_touch_up
 
 class EditablePianoRollViewer(ScrollView):
     editor = ObjectProperty()

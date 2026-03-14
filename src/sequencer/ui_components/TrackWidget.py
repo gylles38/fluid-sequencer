@@ -142,7 +142,7 @@ class ResizeHandle(Widget):
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.track_widget: Any = track_widget
+        self.track_widget = track_widget
 
     def on_touch_down(self, touch) -> None | bool:
         if self.collide_point(*touch.pos) and touch.is_double_tap:

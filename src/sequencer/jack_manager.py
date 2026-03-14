@@ -200,7 +200,7 @@ class JackManager:
             self.open_ports[port_name] = vp
         else:
             try:
-                self.open_ports[port_name] = mido.open_output(port_name)
+                self.open_ports[port_name] = mido.open_output(port_name, client_name="JulesSequencer")
                 if verbose: print(f"Successfully opened MIDI port '{port_name}'")
             except Exception as e:
                 if verbose: print(f"Could not open MIDI port '{port_name}': {e}")
@@ -431,8 +431,38 @@ class JackManager:
                         if src_port.name != self._last_connected_src_id or dest_port.name != self._last_connected_dest_id or target_idx != self._last_routing_target_idx:
                             print(f"[Conductor] Routing change detected: {self._last_routing_target_idx} -> {target_idx}")
 
-                            # --- 1. DISCONNECT PHYSICAL LINKS ---
-                            # Stop any new input from the keyboard reaching ANY instrument immediately.
+                            # --- 1. TOTAL ISOLATION ---
+                            # Stop any new input from reaching target instruments immediately.
+                            # We disconnect ALL sources from BOTH the previous and new target ports.
+                            # IMPORTANT: We EXEMPT Jules' own sequencer ports from isolation so silence can still be delivered.
+                            targets_to_isolate = []
+                            if self._last_routing_target_idx != -1:
+                                prev_t = self.sequencer.song.tracks[self._last_routing_target_idx]
+                                if is_midi_track(prev_t) and prev_t.input_port_name:
+                                    targets_to_isolate.append(prev_t.input_port_name)
+
+                            curr_t = self.sequencer.song.tracks[target_idx]
+                            if is_midi_track(curr_t) and curr_t.input_port_name:
+                                targets_to_isolate.append(curr_t.input_port_name)
+
+                            # Robust identification of sequencer's own ports (Direct or Mido)
+                            # We exempt anything containing "Jules" or our official client name.
+                            sequencer_signature = f"{self.jack_client.name}"
+                            mido_signature = "JulesSequencer"
+
+                            for pattern in targets_to_isolate:
+                                p = self._find_jack_port(pattern, is_output=False)
+                                if p:
+                                    try:
+                                        conns = self.jack_client.get_all_connections(p)
+                                        for c in conns:
+                                            is_self = (sequencer_signature in c.name) or (mido_signature in c.name)
+                                            if is_self: continue # Don't cut our own silence path!
+                                            try: self.jack_client.disconnect(c, p)
+                                            except: pass
+                                    except: pass
+
+                            # Also disconnect the source keyboard from everything
                             try:
                                 connections = self.jack_client.get_all_connections(src_port)
                                 for connection in connections:
@@ -440,24 +470,21 @@ class JackManager:
                                     except: pass
                             except Exception: pass
 
-                            # --- 2. WAIT FOR RELEASE ---
-                            # Let the user's keyboard Note On/Off queue and plugin buffers settle.
+                            # --- 2. SETTLING PERIOD ---
                             time.sleep(0.1)
 
                             # --- 3. SURGICAL SILENCE ---
-                            # Silence both the previous and new tracks. This is critical for instruments
-                            # that don't receive the Note Off from the keyboard after routing changed.
+                            # Silence both the previous and new targets.
                             if self._last_routing_target_idx != -1:
                                 self._silence_instrument_at_index(self._last_routing_target_idx)
 
                             if target_idx != -1 and target_idx != self._last_routing_target_idx:
-                                # Ensure the new target is also clean before establishing the link.
-                                time.sleep(0.1)
+                                time.sleep(0.05)
                                 self._silence_instrument_at_index(target_idx)
 
                             # --- 4. SETTLING DELAY ---
-                            # Allow complex plugins (organs) time to fully digest the silence pass.
-                            time.sleep(0.4)
+                            # Crucial for complex organ plugins to fully process the silence passes.
+                            time.sleep(0.55)
 
                             # Connect new
                             print(f"[Conductor] New Route: {src_port.name} -> {dest_port.name}")
@@ -584,7 +611,9 @@ class JackManager:
                         self.open_ports[name] = vp
                     else:
                         try:
-                            self.open_ports[name] = mido.open_output(name)
+                            # We use a consistent client name for all MIDI outputs to help isolation logic identify us.
+                            # Mido will append indices if multiple clients are opened with the same name.
+                            self.open_ports[name] = mido.open_output(name, client_name="JulesSequencer")
                         except Exception as e:
                             print(f"Could not open MIDI port '{name}': {e}")
 
@@ -816,28 +845,26 @@ class JackManager:
         m_port_name = self.sequencer.song.metronome_port_name
         if m_port_name in self.open_ports: unique_ports.add(self.open_ports[m_port_name])
 
-        # 3. Perform robust silencing pass
+        # 3. Perform aggressive tiered silencing pass
         for port in unique_ports:
             if not port or getattr(port, 'closed', False): continue
 
-            # --- Step A: Sustain Off (MUST be FIRST) ---
+            # --- Pass 1: Global Panic Reset ---
+            # Sustain Off (CC 64) MUST be FIRST.
             for ch in range(16):
                 port.send(mido.Message('control_change', channel=ch, control=64, value=0))
-
-            time.sleep(0.01)
-
-            # --- Step B: CC Resets ---
-            for ch in range(16):
                 port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                 port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
                 port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
 
-            # --- Step C: Nuclear Note Off sweep (All 16 Channels) ---
-            # Methodology sweep to catch ANY note held by ANY input.
+            time.sleep(0.01)
+
+            # --- Pass 2: Methodical Note Off Sweep ---
             for ch in range(16):
                 for pitch in range(128):
                     port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
-                if ch % 4 == 0: time.sleep(0.02)
+                    port.send(mido.Message('note_on', channel=ch, note=pitch, velocity=0)) # Compatibility sweep
+                if ch % 4 == 0: time.sleep(0.01)
 
         # 4. Specifically cut notes from the snapshot to be absolutely sure
         for (track_idx, pitch), (end_beat, velocity) in active_notes_snapshot:
@@ -1566,78 +1593,77 @@ class JackManager:
 
     def _silence_instrument_at_index(self, track_idx: int):
         """
-        Surgically silences an instrument by sending individual Note Offs and CC resets.
-        Ensures silence is delivered to both the sequencer's output and the instrument directly.
+        Nuclear surgical silence pass for an instrument.
+        Ensures absolute silence by connecting directly to the instrument's input
+        and performing multiple CC resets and a full 16-channel Note Off/Note On(0) sweep.
         """
-        if 0 <= track_idx < len(self.sequencer.song.tracks):
-            track = self.sequencer.song.tracks[track_idx]
-            if not is_midi_track(track): return
+        if not (0 <= track_idx < len(self.sequencer.song.tracks)):
+            return
 
-            # 1. Identify all ports that could reach this instrument
-            unique_ports = set()
-            out_port_name = track.output_port_name
-            dest_port_name = track.input_port_name
+        track = self.sequencer.song.tracks[track_idx]
+        if not is_midi_track(track): return
 
-            # Target 1: The instrument's input port (persistent Carla/plugin input)
-            if dest_port_name and dest_port_name in self.open_ports:
-                unique_ports.add(self.open_ports[dest_port_name])
+        # 1. Identify all direct ports to reach this instrument
+        # We also look in mido's global output list just in case.
+        unique_ports = set()
+        out_port_name = track.output_port_name
+        dest_port_name = track.input_port_name
 
-            # Target 2: The sequencer's dedicated output for this track
-            if out_port_name and out_port_name in self.open_ports:
-                unique_ports.add(self.open_ports[out_port_name])
+        if dest_port_name and dest_port_name in self.open_ports:
+            unique_ports.add(self.open_ports[dest_port_name])
+        if out_port_name and out_port_name in self.open_ports:
+            unique_ports.add(self.open_ports[out_port_name])
 
-            # Fallback for out_port if not assigned
-            if not out_port_name:
-                out_port_name = next((n for n in self.open_ports), None)
-                if out_port_name: unique_ports.add(self.open_ports[out_port_name])
+        # 2. Establish authoritative silence link
+        # We connect Jules' output to the instrument's input to ensure commands are delivered.
+        if dest_port_name and out_port_name:
+            dest_jack = self._find_jack_port(dest_port_name, is_output=False)
+            src_jack = self._find_jack_port(out_port_name, is_output=True)
+            if dest_jack and src_jack:
+                try:
+                    self.jack_client.connect(src_jack, dest_jack)
+                    # Verify connection
+                    conns = self.jack_client.get_all_connections(src_jack)
+                    if not any(c.name == dest_jack.name for c in conns):
+                         print(f"[Conductor] Warning: Failed to establish silence link to {dest_port_name}")
+                except Exception as e:
+                    print(f"[Conductor] Silence link error: {e}")
+                time.sleep(0.12) # Essential settling time for JACK link
 
-            # 2. Force a connection to deliver silence if needed
-            # Ensures silence from the sequencer reaches the instrument even if linked bypass Jules.
-            if dest_port_name and out_port_name:
-                dest_jack = self._find_jack_port(dest_port_name, is_output=False)
-                src_jack = self._find_jack_port(out_port_name, is_output=True)
-                if dest_jack and src_jack:
-                    try: self.jack_client.connect(src_jack, dest_jack)
-                    except jack.JackError: pass # already connected
-                    time.sleep(0.1) # Wait for link to propagate
+        # 3. Aggressive Silence Pass
+        for port in unique_ports:
+            if not port or getattr(port, 'closed', False): continue
 
-            # 3. Deliver robust surgical silence across all relevant ports
-            for port in unique_ports:
-                if not port or getattr(port, 'closed', False): continue
-
-                # --- Step A: Immediate Sustain Kill (Critical for organs) ---
-                # We send Sustain OFF (64) multiple times on all channels.
-                for _ in range(2):
-                    for ch in range(16):
-                        port.send(mido.Message('control_change', channel=ch, control=64, value=0))
-                    time.sleep(0.01)
-
-                # --- Step B: Aggressive Reset ---
+            # --- Pass A: Nuclear Reset (CC 120, 121, 123, 64) ---
+            # Sustain OFF MUST be FIRST. We do multiple passes for reliability.
+            for _ in range(4):
                 for ch in range(16):
+                    port.send(mido.Message('control_change', channel=ch, control=64, value=0))
                     port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                     port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
                     port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
+                time.sleep(0.01)
 
-                time.sleep(0.05)
+            time.sleep(0.05)
 
-                # --- Step C: The "Organ Buster" Note Off Sweep ---
-                # We sweep ALL 128 notes on ALL 16 channels to cut any note held via routing.
-                # We prioritize the track's primary channel and common keyboard channels (0, 1, 9).
-                priority_channels = {0, 1, 9, track.channel}
+            # --- Pass B: Full Note Off / Note On(0) Sweep (All 16 Channels) ---
+            # Essential for multitimbral organs or plugins that ignore CC 123.
+            # We prioritize likely channels (0, 1, 9, track.channel).
+            priority_channels = {0, 1, 9, track.channel}
+            for ch in priority_channels:
+                for pitch in range(128):
+                    port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+                    port.send(mido.Message('note_on', channel=ch, note=pitch, velocity=0))
 
-                # Pass 1: Priority Channels
-                for ch in priority_channels:
-                    for pitch in range(128):
-                        port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+            time.sleep(0.05)
 
-                time.sleep(0.05)
-
-                # Pass 2: Remaining Channels (methodical to prevent MIDI buffer overflow)
-                for ch in range(16):
-                    if ch in priority_channels: continue
-                    for pitch in range(128):
-                        port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
-                    time.sleep(0.01)
+            # Full sweep of remaining channels in batches
+            for ch in range(16):
+                if ch in priority_channels: continue
+                for pitch in range(128):
+                    port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+                    port.send(mido.Message('note_on', channel=ch, note=pitch, velocity=0))
+                if ch % 4 == 0: time.sleep(0.01)
 
             # 4. Cleanup internal state tracking under lock
             with self.sync_lock:

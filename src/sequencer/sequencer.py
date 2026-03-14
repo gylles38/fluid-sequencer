@@ -510,6 +510,19 @@ class Sequencer(EventDispatcher):
         if self.song.input_routing:
             return self.song.input_routing
 
+        # Legacy Migration: Check if routing track exists in main tracks list
+        legacy_idx = -1
+        for i, t in enumerate(self.song.tracks):
+            if isinstance(t, AutomationTrack) and t.target_track_index == -1:
+                legacy_idx = i
+                break
+
+        if legacy_idx != -1:
+            print(f"Migrating legacy input routing track from index {legacy_idx}")
+            self.song.input_routing = self.song.tracks.pop(legacy_idx)
+            self.is_dirty = True
+            return self.song.input_routing
+
         # Create it if not found
         track = AutomationTrack(name="Input Routing", target_track_index=-1) # -1 means Global
 
@@ -750,6 +763,25 @@ class Sequencer(EventDispatcher):
                 return {"status": "cancelled", "message": "Deletion cancelled."}
 
         self.song.tracks.pop(track_index)
+
+        # Update target_track_index for all remaining automation tracks
+        for t in self.song.tracks:
+            if isinstance(t, AutomationTrack):
+                if t.target_track_index == track_index:
+                    t.target_track_index = -2 # Mark as orphaned/invalid
+                elif t.target_track_index > track_index:
+                    t.target_track_index -= 1
+
+        # Also update the global input routing track if it exists
+        if self.song.input_routing:
+            # We don't change target_track_index because it's always -1
+            # But we might need to update the values of its points if they refer to track indices
+            for p in self.song.input_routing.points:
+                if p.parameter == 'input_routing':
+                    if p.value == track_index:
+                        p.value = -1 # Or some other invalid value
+                    elif p.value > track_index:
+                        p.value -= 1
 
         # Update display order: remove the index and decrement all higher indices
         if track_index in self.song.track_display_order:
@@ -1945,7 +1977,8 @@ class Sequencer(EventDispatcher):
 
     def create_virtual_port(self, name: str) -> str:
         try:
-            port = open_output(name, virtual=True)
+            # Consistent client name for isolation bypass
+            port = open_output(name, virtual=True, client_name="JulesSequencer")
             self.virtual_ports.append(port)
             self.is_dirty = True
             return f"Created virtual MIDI port: '{name}'"
@@ -2860,7 +2893,8 @@ class Sequencer(EventDispatcher):
         is_temp_port = False
         if not port:
             try:
-                port = open_output(port_name)
+                # Consistent client name for isolation bypass
+                port = open_output(port_name, client_name="JulesSequencer")
                 is_temp_port = True
             except Exception as e:
                 return f"Error: Could not open MIDI port '{port_name}': {e}"

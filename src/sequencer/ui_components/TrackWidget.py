@@ -944,7 +944,9 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.drag_handle.width = 0
 
             self.info_section.size_hint_x = 1
+            self.info_section.width = 100 # Dummy value as size_hint_x is 1
             self.info_clipped_wrapper.size_hint_x = 1
+            self.info_clipped_wrapper.width = 100 # Dummy
             self.info_clipped_wrapper.x = 0
 
             # Adjust top bar for minimized state
@@ -959,9 +961,11 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.controls_wrapper.opacity = 0
             self.controls_wrapper.disabled = True
             self.controls_wrapper.width = 0
+            self.controls_wrapper.size_hint_x = None
 
             self.left_panel.spacing = 0
             self.left_panel.size_hint_x = 1
+            self.left_panel.width = 100 # Dummy
 
             self.timeline_scroll.opacity = 0
             self.timeline_scroll.disabled = True
@@ -972,10 +976,12 @@ class TrackWidget(BoxLayout, HoverBehavior):
                 self.keyboard_sv.opacity = 0
                 self.keyboard_sv.disabled = True
                 self.keyboard_sv.width = 0
+                self.keyboard_sv.size_hint_x = None
             if hasattr(self, 'icon_wrapper'):
                 self.icon_wrapper.opacity = 0
                 self.icon_wrapper.disabled = True
                 self.icon_wrapper.width = 0
+                self.icon_wrapper.size_hint_x = None
         else:
             # Restore to previous height or at least 80dp
             self.height = max(dp(80), self.previous_height)
@@ -1009,6 +1015,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.controls_wrapper.opacity = 1
             self.controls_wrapper.disabled = False
             self.controls_wrapper.width = self.controls_width
+            self.controls_wrapper.size_hint_x = None
 
             self.left_panel.spacing = dp(12)
             self.left_panel.size_hint_x = None
@@ -1022,10 +1029,12 @@ class TrackWidget(BoxLayout, HoverBehavior):
                 self.keyboard_sv.opacity = 1
                 self.keyboard_sv.disabled = False
                 self.keyboard_sv.width = dp(40)
+                self.keyboard_sv.size_hint_x = None
             if hasattr(self, 'icon_wrapper'):
                 self.icon_wrapper.opacity = 1
                 self.icon_wrapper.disabled = False
                 self.icon_wrapper.width = dp(40)
+                self.icon_wrapper.size_hint_x = None
 
     def _on_track_index_change(self, instance, value):
         self.index_label.text = f"[{int(value)}]"

@@ -2467,32 +2467,38 @@ class SequencerLayout(BoxLayout):
         if not self._dragged_widget:
             return
 
-        # Localize touch to track_list_layout to find insertion index
-        lx, ly = self.track_list_layout.to_widget(*touch.pos)
-        target_idx = self._get_drag_insertion_index(ly)
+        # Find insertion index using absolute Window coordinate
+        target_idx = self._get_drag_insertion_index(touch.y)
 
-        # Find relative y in layout
-        if target_idx < len(self.track_list_layout.children):
-            child = self.track_list_layout.children[-(target_idx + 1)]
-            ry = child.top + self.track_list_layout.spacing / 2
-        else:
-            child = self.track_list_layout.children[0]
-            ry = child.y - self.track_list_layout.spacing / 2
+        # Find Window y-coordinate for the line
+        num_children = len(self.track_list_layout.children)
+        if num_children > 0:
+            if target_idx < num_children:
+                child = self.track_list_layout.children[num_children - 1 - target_idx]
+                # Draw line above the target child (visual top)
+                _, wy = child.to_window(0, child.height)
+                # wy is the top of the child in Window coords.
+                # Add half spacing to be between tracks.
+                wy += (self.track_list_layout.spacing / 2)
+            else:
+                # Draw line below the last child (visual bottom)
+                child = self.track_list_layout.children[0]
+                _, wy = child.to_window(0, 0)
+                wy -= (self.track_list_layout.spacing / 2)
 
-        # Convert to Window coordinates for drawing
-        wx, wy = self.track_list_layout.to_window(0, ry)
-        w_right, _ = self.track_list_layout.to_window(self.track_list_layout.width, ry)
+            # Draw across the layout's window horizontal bounds
+            wx, _ = self.track_list_layout.to_window(0, 0)
+            w_right, _ = self.track_list_layout.to_window(self.track_list_layout.width, 0)
 
-        self._drag_indicator_color.rgba = [1, 1, 1, 1]
-        self._drag_indicator.points = [wx, wy, w_right, wy]
+            self._drag_indicator_color.rgba = [1, 1, 1, 1]
+            self._drag_indicator.points = [wx, wy, w_right, wy]
 
     def on_track_drag_end(self, track_widget, touch):
         if not self._dragged_widget:
             return
 
-        # Localize touch to track_list_layout
-        lx, ly = self.track_list_layout.to_widget(*touch.pos)
-        target_display_idx = self._get_drag_insertion_index(ly)
+        # Use absolute Window coordinate for logic consistency
+        target_display_idx = self._get_drag_insertion_index(touch.y)
 
         try:
             old_display_idx = self.track_widgets.index(self._dragged_widget)
@@ -2510,35 +2516,22 @@ class SequencerLayout(BoxLayout):
                 Window.canvas.after.remove(self._drag_indicator_group)
             self._drag_indicator.points = []
 
-    def _get_drag_insertion_index(self, ly):
-        """Returns the display index where the track should be inserted based on y coordinate."""
-        # In Kivy's vertical BoxLayout, children[0] is at the bottom, children[-1] is at the top.
-        # Visual display order is 0 (top) to N-1 (bottom).
-
+    def _get_drag_insertion_index(self, window_y):
+        """Returns the display index based on absolute Window y coordinate, making it scroll-proof."""
         num_children = len(self.track_list_layout.children)
         if num_children == 0:
             return 0
 
-        # visual_indices are 0, 1, 2, ..., num_children-1
-        # positions are y_top, y_center_0, y_center_1, ..., y_bottom
+        # Children are indexed bottom-to-top visually (children[0] is bottom).
+        # We iterate from visual top (index 0) to bottom.
+        for i in range(num_children):
+            child = self.track_list_layout.children[num_children - 1 - i]
+            # Get child's center in Window coordinates
+            _, cy = child.to_window(0, child.height / 2)
 
-        # Check if we are above the center of the first child (visual index 0)
-        top_child = self.track_list_layout.children[-1]
-        if ly > top_child.center_y:
-            return 0
+            if window_y > cy:
+                return i
 
-        # Check between centers of children
-        for i in range(num_children - 1):
-            # child_i is visual index i
-            child_i = self.track_list_layout.children[num_children - 1 - i]
-            # child_next is visual index i + 1
-            child_next = self.track_list_layout.children[num_children - 1 - (i + 1)]
-
-            # If touch is between center of i and center of i+1
-            if child_i.center_y >= ly > child_next.center_y:
-                return i + 1
-
-        # If we are below the center of the last child
         return num_children
 
     def _synchronize_scroll(self, instance, value):

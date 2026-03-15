@@ -2,7 +2,7 @@ from . import *  # Importe tous les imports communs
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
-from .HoverBehavior import HoverBehavior, HoverableMDButton
+from .HoverBehavior import HoverBehavior, HoverableMDButton, HoverableButton
 from .TooltipMDIconButton import TooltipMDIconButton
 from kivymd.uix.slider import MDSlider
 from .automation_editor import AutomationEditor
@@ -35,6 +35,8 @@ class DragHandle(Widget):
     def __init__(self, track_widget, **kwargs):
         super().__init__(**kwargs)
         self.track_widget = track_widget
+        self.size_hint_x = None
+        self.width = dp(12)
         self.bind(pos=self._update_canvas, size=self._update_canvas)
 
         with self.canvas:
@@ -51,6 +53,11 @@ class DragHandle(Widget):
         self.bg_rect.pos = self.pos
         self.bg_rect.size = self.size
 
+        if self.height < dp(20) or self.track_widget.is_minimized: # Hide if minimized
+            for grip in self.grips:
+                grip.size = (0, 0)
+            return
+
         # Center grips vertically
         center_x = self.x + self.width / 2 - dp(2)
         spacing = dp(6)
@@ -59,7 +66,13 @@ class DragHandle(Widget):
         start_y = self.y + self.height / 2 - total_height / 2
 
         for i, grip in enumerate(self.grips):
-            grip.pos = (center_x, start_y + i * spacing)
+            grip_y = start_y + i * spacing
+            # Hide grips if they are outside the handle area (especially when minimized)
+            if grip_y < self.y + dp(1) or grip_y + dp(2) > self.top - dp(1):
+                grip.size = (0, 0)
+            else:
+                grip.pos = (center_x, grip_y)
+                grip.size = (dp(4), dp(2))
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
@@ -172,7 +185,7 @@ class MidiInputSelectorPopup(Popup):
         self.dismiss()
 
 
-class TrackWidget(BoxLayout, HoverBehavior):
+class TrackWidget(HoverBehavior, BoxLayout):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
     a timeline for its content (which can be a piano roll for MIDI or a waveform for audio),
@@ -225,33 +238,38 @@ class TrackWidget(BoxLayout, HoverBehavior):
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0])
 
         # Handle container for DragHandle and MinimizeButton
-        self.handle_container = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(24))
+        self.handle_container = RelativeLayout(size_hint=(None, 1), width=dp(12))
         with self.handle_container.canvas.before:
             Color(0.15, 0.15, 0.15, 1)
             self.handle_bg_rect = Rectangle()
         self.handle_container.bind(pos=self._update_handle_bg, size=self._update_handle_bg)
 
-        # Drag handle (far left)
+        # Drag handle (takes full height in background)
         self.drag_handle = DragHandle(track_widget=self)
-        self.drag_handle.size_hint_x = 1
+        self.drag_handle.size_hint = (1, 1)
+        self.drag_handle.pos_hint = {'x': 0, 'y': 0}
         self.handle_container.add_widget(self.drag_handle)
 
-        # Minimize button (initially hidden, shown on hover)
-        self.minimize_button = TooltipMDIconButton(
-            icon='minus' if not self.is_minimized else 'plus',
-            tooltip_text='Réduire' if not self.is_minimized else 'Restaurer',
-            on_press=self.toggle_minimize,
+        # Minimize button (anchored at the bottom)
+        self.minimize_button = HoverableButton(
+            text="-" if not self.is_minimized else "+",
             size_hint=(None, None),
-            size=(dp(24), dp(24)),
-            pos_hint={'center_x': 0.5},
-            opacity=0,
-            disabled=True,
-            theme_icon_color="Custom",
-            icon_color=[0.9, 0.9, 0.9, 0.8],
-            theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 0.0]
+            size=(dp(12), dp(20)),
+            pos_hint={'x': 0, 'y': 0},
+            background_normal='',
+            background_color=(0, 0, 0, 0),
+            color=[1, 1, 1, 0.6],
+            font_size=dp(16),
+            bold=True,
+            padding=[0, 0],
+            halign='center',
+            valign='middle',
+            opacity=0  # Hidden by default
         )
+        self.minimize_button.bind(size=self.minimize_button.setter('text_size'))
+        self.minimize_button.bind(on_press=self.toggle_minimize)
         self.handle_container.add_widget(self.minimize_button)
+        self.bind(is_minimized=self._update_minimize_button_text)
 
         self.info_section.add_widget(self.handle_container)
 
@@ -264,7 +282,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
             theme_text_color="Custom",
             text_color=[0.7, 0.7, 0.7, 1],
             bold=True,
-            size_hint_x=None,
+            size_hint=(None, 1),
             width=dp(30),
             padding=labelPadding,
         )
@@ -278,8 +296,8 @@ class TrackWidget(BoxLayout, HoverBehavior):
             color=[0.9, 0.9, 0.9, 1],
             pos_hint={'center_y': 0.5},
             padding=[0, 0, 0, dp(1)], #bottom=1dp → monte le texte de 1 pixel
-            adaptive_width=False,
-            size_hint_x=1
+            adaptive_width=True,
+            size_hint=(1, 1)
         )
         self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_section.add_widget(self.name_label)
@@ -826,13 +844,11 @@ class TrackWidget(BoxLayout, HoverBehavior):
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""
         self.minimize_button.opacity = 1
-        self.minimize_button.disabled = False
         Window.set_system_cursor('hand')
 
     def on_leave(self, *args):
         """Called when the mouse leaves the widget area."""
         self.minimize_button.opacity = 0
-        self.minimize_button.disabled = True
         Window.set_system_cursor('arrow')
 
     def _update_handle_bg(self, instance, value):
@@ -840,82 +856,89 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.handle_bg_rect.pos = instance.pos
             self.handle_bg_rect.size = instance.size
 
+    def _update_minimize_button_text(self, instance, value):
+        self.minimize_button.text = '+' if value else '-'
+
     def toggle_minimize(self, instance=None):
         self.is_minimized = not self.is_minimized
 
         if self.is_minimized:
             self.full_height = self.height
             self.height = dp(40)
-            self.minimize_button.icon = 'plus'
-            self.minimize_button.tooltip_text = 'Restaurer'
 
-            # Hide sections
+            # Save timeline widgets to remove them
+            self._temp_timeline_widgets = []
+            if hasattr(self, 'keyboard_sv'):
+                self._temp_timeline_widgets.append(self.keyboard_sv)
+            if hasattr(self, 'icon_layout'):
+                self._temp_timeline_widgets.append(self.icon_layout)
+            self._temp_timeline_widgets.append(self.timeline_scroll)
+
+            for w in self._temp_timeline_widgets:
+                if w in self.children:
+                    self.remove_widget(w)
+
             self.controls_section.opacity = 0
             self.controls_section.disabled = True
             self.controls_section.size_hint_x = None
             self.controls_section.width = 0
 
-            if hasattr(self, 'keyboard_sv'):
-                self.keyboard_sv.opacity = 0
-                self.keyboard_sv.disabled = True
-                self.keyboard_sv.size_hint_x = None
-                self.keyboard_sv.width = 0
-
-            if hasattr(self, 'icon_layout'):
-                self.icon_layout.opacity = 0
-                self.icon_layout.disabled = True
-                self.icon_layout.size_hint_x = None
-                self.icon_layout.width = 0
-
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 0
                 self.target_indicator_icon.disabled = True
+                self.target_indicator_icon.size_hint_x = None
                 self.target_indicator_icon.width = 0
 
-            self.timeline_scroll.opacity = 0
-            self.timeline_scroll.disabled = True
-            self.timeline_scroll.size_hint_x = None
-            self.timeline_scroll.width = 0
-
+            # Allow left_panel and info_section to fill width
+            self.spacing = 0
             self.left_panel.spacing = 0
-            self.left_panel.width = self.info_width
+            self.left_panel.size_hint_x = 1
+
+            self.info_section.size_hint_x = 1
+            self.info_section.padding = [0, 0, dp(4), 0]
+
+            self.name_label.adaptive_width = False
+            self.name_label.size_hint_x = 1
 
             if hasattr(self, 'vert_separator'):
                 self.vert_separator.size = (0, 0)
         else:
             self.height = self.full_height
-            self.minimize_button.icon = 'minus'
-            self.minimize_button.tooltip_text = 'Réduire'
 
-            # Show sections
+            # Restore sections
             self.controls_section.opacity = 1
             self.controls_section.disabled = False
             self.controls_section.size_hint_x = None
             self.controls_section.width = self.controls_width
 
-            if hasattr(self, 'keyboard_sv'):
-                self.keyboard_sv.opacity = 1
-                self.keyboard_sv.disabled = False
-                self.keyboard_sv.size_hint_x = None
-                self.keyboard_sv.width = dp(40)
-
-            if hasattr(self, 'icon_layout'):
-                self.icon_layout.opacity = 1
-                self.icon_layout.disabled = False
-                self.icon_layout.size_hint_x = None
-                self.icon_layout.width = dp(40)
-
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 1
                 self.target_indicator_icon.disabled = False
+                self.target_indicator_icon.size_hint_x = None
                 self.target_indicator_icon.width = dp(24)
 
-            self.timeline_scroll.opacity = 1
-            self.timeline_scroll.disabled = False
-            self.timeline_scroll.size_hint_x = 1
+            # Re-add timeline widgets in correct order
+            if hasattr(self, 'keyboard_sv'):
+                if self.keyboard_sv not in self.children:
+                    self.add_widget(self.keyboard_sv)
+            elif hasattr(self, 'icon_layout'):
+                if self.icon_layout not in self.children:
+                    self.add_widget(self.icon_layout)
 
-            self.left_panel.spacing = self.spacing
+            if self.timeline_scroll not in self.children:
+                self.add_widget(self.timeline_scroll)
+
+            self.spacing = dp(12)
+            self.left_panel.spacing = dp(12)
+            self.left_panel.size_hint_x = None
             self.left_panel.width = self.info_width + self.controls_width + self.spacing
+
+            self.info_section.size_hint_x = None
+            self.info_section.width = self.info_width
+            self.info_section.padding = [0, 0, dp(10), 0]
+
+            self.name_label.adaptive_width = True
+            self.name_label.size_hint_x = 1
 
             if hasattr(self, 'vert_separator'):
                 # Size will be updated in _update_graphics

@@ -50,7 +50,7 @@ class EditableLabel(BoxLayout):
             halign=self.halign,
             valign=self.valign,
             size_hint_y=1,
-            shorten=True,
+            shorten=not self.adaptive_width,
             shorten_from='right'
         )
         
@@ -129,6 +129,16 @@ class EditableLabel(BoxLayout):
 
     def on_text_validated(self, *args):
         pass
+
+    def on_adaptive_width(self, instance, value):
+        if value:
+            self.size_hint_x = None
+        else:
+            self.size_hint_x = 1
+
+        if hasattr(self, 'label') and self.label:
+            # We need to re-setup to update label's adaptive_width and size_hint
+            self._setup_view_mode()
 
     def on_text(self, instance, value):
         if not self.edit_mode:

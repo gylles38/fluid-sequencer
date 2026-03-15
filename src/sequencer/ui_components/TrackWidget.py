@@ -3,6 +3,7 @@ import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
 from .HoverBehavior import HoverBehavior, HoverableMDButton
+from .TooltipMDIconButton import TooltipMDIconButton
 from kivymd.uix.slider import MDSlider
 from .automation_editor import AutomationEditor
 from .AutomationCurve import AutomationCurveWidget
@@ -34,8 +35,6 @@ class DragHandle(Widget):
     def __init__(self, track_widget, **kwargs):
         super().__init__(**kwargs)
         self.track_widget = track_widget
-        self.size_hint_x = None
-        self.width = dp(12)
         self.bind(pos=self._update_canvas, size=self._update_canvas)
 
         with self.canvas:
@@ -55,7 +54,8 @@ class DragHandle(Widget):
         # Center grips vertically
         center_x = self.x + self.width / 2 - dp(2)
         spacing = dp(6)
-        total_height = 2 * spacing
+        num_grips = len(self.grips)
+        total_height = (num_grips - 1) * spacing
         start_y = self.y + self.height / 2 - total_height / 2
 
         for i, grip in enumerate(self.grips):
@@ -172,7 +172,7 @@ class MidiInputSelectorPopup(Popup):
         self.dismiss()
 
 
-class TrackWidget(BoxLayout):
+class TrackWidget(BoxLayout, HoverBehavior):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
     a timeline for its content (which can be a piano roll for MIDI or a waveform for audio),
@@ -186,6 +186,8 @@ class TrackWidget(BoxLayout):
     controls_width = NumericProperty(dp(430))
     is_active_routing = BooleanProperty(False)    
     track_index = NumericProperty(0)
+    is_minimized = BooleanProperty(False)
+    full_height = NumericProperty(dp(160))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         self.spacing = dp(12)
@@ -222,9 +224,36 @@ class TrackWidget(BoxLayout):
         # Set padding to 0 top/bottom to allow DragHandle to take full height
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0])
 
+        # Handle container for DragHandle and MinimizeButton
+        self.handle_container = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(24))
+        with self.handle_container.canvas.before:
+            Color(0.15, 0.15, 0.15, 1)
+            self.handle_bg_rect = Rectangle()
+        self.handle_container.bind(pos=self._update_handle_bg, size=self._update_handle_bg)
+
         # Drag handle (far left)
         self.drag_handle = DragHandle(track_widget=self)
-        self.info_section.add_widget(self.drag_handle)
+        self.drag_handle.size_hint_x = 1
+        self.handle_container.add_widget(self.drag_handle)
+
+        # Minimize button (initially hidden, shown on hover)
+        self.minimize_button = TooltipMDIconButton(
+            icon='minus' if not self.is_minimized else 'plus',
+            tooltip_text='Réduire' if not self.is_minimized else 'Restaurer',
+            on_press=self.toggle_minimize,
+            size_hint=(None, None),
+            size=(dp(24), dp(24)),
+            pos_hint={'center_x': 0.5},
+            opacity=0,
+            disabled=True,
+            theme_icon_color="Custom",
+            icon_color=[0.9, 0.9, 0.9, 0.8],
+            theme_bg_color="Custom",
+            md_bg_color=[0.1, 0.1, 0.1, 0.0]
+        )
+        self.handle_container.add_widget(self.minimize_button)
+
+        self.info_section.add_widget(self.handle_container)
 
         labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
         # Non-editable track index
@@ -248,7 +277,9 @@ class TrackWidget(BoxLayout):
             bold=True,
             color=[0.9, 0.9, 0.9, 1],
             pos_hint={'center_y': 0.5},
-            padding=[0, 0, 0, dp(1)] #bottom=1dp → monte le texte de 1 pixel
+            padding=[0, 0, 0, dp(1)], #bottom=1dp → monte le texte de 1 pixel
+            adaptive_width=False,
+            size_hint_x=1
         )
         self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_section.add_widget(self.name_label)
@@ -792,6 +823,107 @@ class TrackWidget(BoxLayout):
         if hasattr(self, 'record_mode_button'):
             self.record_mode_button.update_appearance()
 
+    def on_enter(self, *args):
+        """Called when the mouse enters the widget area."""
+        self.minimize_button.opacity = 1
+        self.minimize_button.disabled = False
+        Window.set_system_cursor('hand')
+
+    def on_leave(self, *args):
+        """Called when the mouse leaves the widget area."""
+        self.minimize_button.opacity = 0
+        self.minimize_button.disabled = True
+        Window.set_system_cursor('arrow')
+
+    def _update_handle_bg(self, instance, value):
+        if hasattr(self, 'handle_bg_rect'):
+            self.handle_bg_rect.pos = instance.pos
+            self.handle_bg_rect.size = instance.size
+
+    def toggle_minimize(self, instance=None):
+        self.is_minimized = not self.is_minimized
+
+        if self.is_minimized:
+            self.full_height = self.height
+            self.height = dp(40)
+            self.minimize_button.icon = 'plus'
+            self.minimize_button.tooltip_text = 'Restaurer'
+
+            # Hide sections
+            self.controls_section.opacity = 0
+            self.controls_section.disabled = True
+            self.controls_section.size_hint_x = None
+            self.controls_section.width = 0
+
+            if hasattr(self, 'keyboard_sv'):
+                self.keyboard_sv.opacity = 0
+                self.keyboard_sv.disabled = True
+                self.keyboard_sv.size_hint_x = None
+                self.keyboard_sv.width = 0
+
+            if hasattr(self, 'icon_layout'):
+                self.icon_layout.opacity = 0
+                self.icon_layout.disabled = True
+                self.icon_layout.size_hint_x = None
+                self.icon_layout.width = 0
+
+            if hasattr(self, 'target_indicator_icon'):
+                self.target_indicator_icon.opacity = 0
+                self.target_indicator_icon.disabled = True
+                self.target_indicator_icon.width = 0
+
+            self.timeline_scroll.opacity = 0
+            self.timeline_scroll.disabled = True
+            self.timeline_scroll.size_hint_x = None
+            self.timeline_scroll.width = 0
+
+            self.left_panel.spacing = 0
+            self.left_panel.width = self.info_width
+
+            if hasattr(self, 'vert_separator'):
+                self.vert_separator.size = (0, 0)
+        else:
+            self.height = self.full_height
+            self.minimize_button.icon = 'minus'
+            self.minimize_button.tooltip_text = 'Réduire'
+
+            # Show sections
+            self.controls_section.opacity = 1
+            self.controls_section.disabled = False
+            self.controls_section.size_hint_x = None
+            self.controls_section.width = self.controls_width
+
+            if hasattr(self, 'keyboard_sv'):
+                self.keyboard_sv.opacity = 1
+                self.keyboard_sv.disabled = False
+                self.keyboard_sv.size_hint_x = None
+                self.keyboard_sv.width = dp(40)
+
+            if hasattr(self, 'icon_layout'):
+                self.icon_layout.opacity = 1
+                self.icon_layout.disabled = False
+                self.icon_layout.size_hint_x = None
+                self.icon_layout.width = dp(40)
+
+            if hasattr(self, 'target_indicator_icon'):
+                self.target_indicator_icon.opacity = 1
+                self.target_indicator_icon.disabled = False
+                self.target_indicator_icon.width = dp(24)
+
+            self.timeline_scroll.opacity = 1
+            self.timeline_scroll.disabled = False
+            self.timeline_scroll.size_hint_x = 1
+
+            self.left_panel.spacing = self.spacing
+            self.left_panel.width = self.info_width + self.controls_width + self.spacing
+
+            if hasattr(self, 'vert_separator'):
+                # Size will be updated in _update_graphics
+                pass
+
+        # Update visual separator and other graphics
+        self._update_graphics()
+
     def _update_bg_color(self, *args):
         """
         Update the background color of the track widget based on its state.
@@ -917,6 +1049,10 @@ class TrackWidget(BoxLayout):
         self.background_rect.size = self.size
 
         if hasattr(self, 'vert_separator'):
+            if self.is_minimized:
+                self.vert_separator.size = (0, 0)
+                return
+
             # On cherche le point de séparation le plus fiable
             # On utilise le bord droit du left_panel pour placer le séparateur
             if hasattr(self, 'left_panel'):

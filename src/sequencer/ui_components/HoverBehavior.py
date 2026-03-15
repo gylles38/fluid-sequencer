@@ -11,7 +11,35 @@ class HoverBehavior:
     def __init__(self, *args, **kwargs):
         self.register_event_type('on_enter')
         self.register_event_type('on_leave')
+        self.hovered = False
         super().__init__(*args, **kwargs)
+        Window.bind(mouse_pos=self._on_mouse_pos)
+        self.bind(on_parent=self._on_hover_parent)
+
+    def _on_hover_parent(self, instance, parent):
+        Window.unbind(mouse_pos=self._on_mouse_pos)
+        if parent is not None:
+            Window.bind(mouse_pos=self._on_mouse_pos)
+
+    def _on_mouse_pos(self, *args):
+        if not self.get_root_window():
+            if self.hovered:
+                self.hovered = False
+                self.dispatch('on_leave')
+            return
+
+        pos = args[1]
+        # Use absolute window coordinates for robust collision detection
+        wx, wy = self.to_window(0, 0)
+        inside = (wx <= pos[0] <= wx + self.width) and \
+                 (wy <= pos[1] <= wy + self.height)
+
+        if inside and not self.hovered:
+            self.hovered = True
+            self.dispatch('on_enter')
+        elif not inside and self.hovered:
+            self.hovered = False
+            self.dispatch('on_leave')
 
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""

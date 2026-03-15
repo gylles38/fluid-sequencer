@@ -946,6 +946,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
             # Adjust top bar for minimized state
             self.info_top_bar.height = self.height
             self.info_top_bar.pos_hint = {'top': 1}
+            self.info_top_bar.padding = [dp(35), 0, dp(10), 0]
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 0
@@ -974,6 +975,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
         else:
             # Restore to previous height or at least 80dp
             self.height = max(dp(80), self.previous_height)
+            self.info_top_bar.padding = [0, 0, dp(10), 0]
             self.minimize_button.icon = 'arrow-collapse-vertical'
 
             # Show components

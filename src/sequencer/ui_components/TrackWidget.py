@@ -301,21 +301,23 @@ class TrackWidget(BoxLayout, HoverBehavior):
         self.add_widget(self.resize_handle)
 
         # --- Left Section: Track Info ---
-        # Fixed-height wrapper for info elements (except DragHandle)
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8))
+        # Use RelativeLayout for flexible positioning of handles and buttons
+        self.info_section = RelativeLayout(size_hint_x=None, width=self.info_width)
 
         # Drag handle (far left) - Remains full height
         self.drag_handle = DragHandle(track_widget=self)
+        self.drag_handle.pos = (0, 0)
         self.info_section.add_widget(self.drag_handle)
 
         # Container for other info elements - Fixed at top, clipped if track is too small
-        self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
+        self.info_clipped_wrapper = StencilView(size_hint_x=None, size_hint_y=1, width=self.info_width - dp(12))
+        self.info_clipped_wrapper.x = dp(12)
         self.info_clipped_rel = RelativeLayout(size_hint=(None, None))
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
         self.info_clipped_wrapper.bind(pos=self.info_clipped_rel.setter('pos'), size=self.info_clipped_rel.setter('size'))
 
         # Header bar for name and index - Pinned at top
-        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'top': 1})
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[dp(20), 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'top': 1})
         self.info_clipped_rel.add_widget(self.info_top_bar)
 
         self.info_section.add_widget(self.info_clipped_wrapper)
@@ -584,8 +586,9 @@ class TrackWidget(BoxLayout, HoverBehavior):
         self.left_panel.add_widget(self.controls_wrapper)
         self.left_panel.width = self.info_width + self.controls_width + dp(12)
 
-        # Ensure the minimize button is on top by adding it last to the info_clipped_rel
-        self.info_clipped_rel.add_widget(self.minimize_button)
+        # Ensure the minimize button is on top by adding it last to the info_section
+        # It sits at the very bottom left corner (0, 0)
+        self.info_section.add_widget(self.minimize_button)
         self.main_row.add_widget(self.left_panel)
 
         # --- Right Section: Timeline ---
@@ -940,8 +943,9 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.drag_handle.opacity = 0
             self.drag_handle.width = 0
 
-            self.info_section.spacing = 0
-            self.info_section.width = self.info_width - dp(12)
+            self.info_section.size_hint_x = 1
+            self.info_clipped_wrapper.size_hint_x = 1
+            self.info_clipped_wrapper.x = 0
 
             # Adjust top bar for minimized state
             self.info_top_bar.height = self.height
@@ -957,7 +961,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.controls_wrapper.width = 0
 
             self.left_panel.spacing = 0
-            self.left_panel.width = self.info_section.width
+            self.left_panel.size_hint_x = 1
 
             self.timeline_scroll.opacity = 0
             self.timeline_scroll.disabled = True
@@ -975,7 +979,6 @@ class TrackWidget(BoxLayout, HoverBehavior):
         else:
             # Restore to previous height or at least 80dp
             self.height = max(dp(80), self.previous_height)
-            self.info_top_bar.padding = [0, 0, dp(10), 0]
             self.minimize_button.icon = 'arrow-collapse-vertical'
 
             # Show components
@@ -988,12 +991,16 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.drag_handle.opacity = 1
             self.drag_handle.width = dp(12)
 
-            self.info_section.spacing = dp(8)
+            self.info_section.size_hint_x = None
             self.info_section.width = self.info_width
+            self.info_clipped_wrapper.size_hint_x = None
+            self.info_clipped_wrapper.width = self.info_width - dp(12)
+            self.info_clipped_wrapper.x = dp(12)
 
             # Restore original heights/proportions
             self.info_top_bar.height = dp(160)
             self.info_top_bar.pos_hint = {'top': 1}
+            self.info_top_bar.padding = [dp(20), 0, dp(10), 0]
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 1
@@ -1004,6 +1011,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.controls_wrapper.width = self.controls_width
 
             self.left_panel.spacing = dp(12)
+            self.left_panel.size_hint_x = None
             self.left_panel.width = self.info_width + self.controls_width + dp(12)
 
             self.timeline_scroll.opacity = 1

@@ -51,13 +51,15 @@ class EditableLabel(BoxLayout):
             valign=self.valign,
             size_hint_y=1,
             shorten=not self.adaptive_width,
-            shorten_from='right'
+            shorten_from='right',
+            max_lines=1
         )
         
         if self.adaptive_width:
             self.label.bind(texture_size=self._update_container_width)
         else:
             self.label.size_hint_x = 1
+            self.label.bind(size=self._update_text_size)
 
         self.label.bind(on_touch_down=self._enter_edit_mode)
         self.add_widget(self.label)
@@ -65,6 +67,10 @@ class EditableLabel(BoxLayout):
     def _update_container_width(self, instance, size):
         if not self.edit_mode and self.adaptive_width:
             self.width = size[0]
+
+    def _update_text_size(self, instance, size):
+        if not self.adaptive_width:
+            instance.text_size = size
 
     def _enter_edit_mode(self, instance, touch):
         if instance.collide_point(*touch.pos) and not self.edit_mode:

@@ -264,7 +264,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             padding=[0, 0],
             halign='center',
             valign='middle',
-            opacity=0  # Hidden by default
+            opacity=1
         )
         self.minimize_button.bind(size=self.minimize_button.setter('text_size'))
         self.minimize_button.bind(on_press=self.toggle_minimize)
@@ -843,12 +843,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""
-        self.minimize_button.opacity = 1
         Window.set_system_cursor('hand')
 
     def on_leave(self, *args):
         """Called when the mouse leaves the widget area."""
-        self.minimize_button.opacity = 0
         Window.set_system_cursor('arrow')
 
     def _update_handle_bg(self, instance, value):

@@ -885,16 +885,42 @@ class Sequencer(EventDispatcher):
         self.is_dirty = True
         return {"status": "success", "message": f"Track '{old_name}' renamed to '{new_name}'."}
 
-    def move_track_display_order(self, old_display_index: int, new_display_index: int):
-        """Moves a track's position in the visual display order."""
-        if not (0 <= old_display_index < len(self.song.track_display_order)):
-            return
-        if not (0 <= new_display_index < len(self.song.track_display_order)):
+    def move_track_display_order(self, old_visual_idx: int, target_visual_idx: int):
+        """
+        Moves a track's position in the visual display order.
+        target_visual_idx is the insertion index in the visible list.
+        """
+        # Identify currently visible tracks (excluding metronome)
+        visible_indices = [i for i, track in enumerate(self.song.tracks)
+                          if not (isinstance(track, MidiTrack) and track.is_metronome)]
+
+        # Get the subset of display_order that contains these visible indices
+        ordered_visible = [idx for idx in self.song.track_display_order if idx in visible_indices]
+
+        if not (0 <= old_visual_idx < len(ordered_visible)):
             return
 
-        # Pop the track index from its old position and insert it into the new one
-        track_idx = self.song.track_display_order.pop(old_display_index)
-        self.song.track_display_order.insert(new_display_index, track_idx)
+        # Ensure target is within bounds for insertion
+        target_visual_idx = max(0, min(target_visual_idx, len(ordered_visible)))
+
+        # Pop from visual list and insert at target
+        track_idx = ordered_visible.pop(old_visual_idx)
+
+        # Ensure target is within bounds for insertion into the now-shortened list
+        target_visual_idx = max(0, min(target_visual_idx, len(ordered_visible)))
+        ordered_visible.insert(target_visual_idx, track_idx)
+
+        # Reconstruct the full display_order list maintaining relative order of non-visible tracks
+        new_order = []
+        visible_ptr = 0
+        for idx in self.song.track_display_order:
+            if idx in visible_indices:
+                new_order.append(ordered_visible[visible_ptr])
+                visible_ptr += 1
+            else:
+                new_order.append(idx)
+
+        self.song.track_display_order = new_order
         self.is_dirty = True
         self.song_structure_changed += 1
 

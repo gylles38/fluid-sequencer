@@ -352,14 +352,13 @@ class TrackWidget(BoxLayout, HoverBehavior):
             icon='arrow-collapse-vertical',
             pos_hint={'x': 0, 'y': 0},
             size_hint=(None, None),
-            size=(dp(24), dp(24)),
-            opacity=0,
+            size=(dp(30), dp(30)),
+            opacity=0.2, # Slightly visible even when not hovered
             theme_icon_color="Custom",
-            icon_color=[1, 1, 1, 0.8],
-            md_bg_color=[0, 0, 0, 0.5]
+            icon_color=[1, 1, 1, 1],
+            md_bg_color=[0, 0, 0, 0.6]
         )
         self.minimize_button.bind(on_release=self.toggle_minimize)
-        self.info_clipped_rel.add_widget(self.minimize_button)
 
         # AJOUT : Section pour les pistes d'automation
         if isinstance(self.track, AutomationTrack):
@@ -584,6 +583,9 @@ class TrackWidget(BoxLayout, HoverBehavior):
         self.left_panel.add_widget(self.info_section)
         self.left_panel.add_widget(self.controls_wrapper)
         self.left_panel.width = self.info_width + self.controls_width + dp(12)
+
+        # Ensure the minimize button is on top by adding it last to the info_clipped_rel
+        self.info_clipped_rel.add_widget(self.minimize_button)
         self.main_row.add_widget(self.left_panel)
 
         # --- Right Section: Timeline ---
@@ -918,7 +920,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
     def on_leave(self, *args):
         super().on_leave(*args)
         if hasattr(self, 'minimize_button'):
-            self.minimize_button.opacity = 0
+            self.minimize_button.opacity = 0.2
 
     def toggle_minimize(self, *args):
         self.is_minimized = not self.is_minimized

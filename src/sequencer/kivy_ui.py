@@ -2451,39 +2451,40 @@ class SequencerLayout(BoxLayout):
 
     def on_track_drag_start(self, track_widget, touch):
         self._dragged_widget = track_widget
-        # Initial indicator
-        if not self._drag_indicator:
-            from kivy.graphics import Color, Line
-            with self.track_list_layout.canvas.after:
-                self._drag_indicator_color = Color(1, 1, 1, 1)
-                self._drag_indicator = Line(points=[], width=dp(2))
+        # Use Window.canvas.after to ensure visibility on top of everything
+        if not hasattr(self, '_drag_indicator_group'):
+            from kivy.graphics import InstructionGroup, Color, Line
+            self._drag_indicator_group = InstructionGroup()
+            self._drag_indicator_color = Color(1, 1, 1, 1)
+            self._drag_indicator = Line(points=[], width=dp(2))
+            self._drag_indicator_group.add(self._drag_indicator_color)
+            self._drag_indicator_group.add(self._drag_indicator)
+
+        if self._drag_indicator_group not in Window.canvas.after.children:
+            Window.canvas.after.add(self._drag_indicator_group)
 
     def on_track_drag_move(self, track_widget, touch):
         if not self._dragged_widget:
             return
 
-        # Localize touch to track_list_layout.
-        # to_widget converts from window to track_list_layout local coordinates
+        # Localize touch to track_list_layout to find insertion index
         lx, ly = self.track_list_layout.to_widget(*touch.pos)
-
-        # Find where the line should be drawn
         target_idx = self._get_drag_insertion_index(ly)
 
-        # Draw the line at the target index
+        # Find relative y in layout
         if target_idx < len(self.track_list_layout.children):
-            # Children are in reverse order of display in BoxLayout(vertical)
             child = self.track_list_layout.children[-(target_idx + 1)]
-            # We want the indicator to be ABOVE child (since we're counting from top)
-            y = child.top + self.track_list_layout.spacing / 2
+            ry = child.top + self.track_list_layout.spacing / 2
         else:
-            # If we're at the bottom
             child = self.track_list_layout.children[0]
-            y = child.y - self.track_list_layout.spacing / 2
+            ry = child.y - self.track_list_layout.spacing / 2
 
-        # The Line instruction is in track_list_layout.canvas.after.
+        # Convert to Window coordinates for drawing
+        wx, wy = self.track_list_layout.to_window(0, ry)
+        w_right, _ = self.track_list_layout.to_window(self.track_list_layout.width, ry)
+
         self._drag_indicator_color.rgba = [1, 1, 1, 1]
-        # We MUST use self.track_list_layout.x/right because it's not a RelativeLayout
-        self._drag_indicator.points = [self.track_list_layout.x, y, self.track_list_layout.right, y]
+        self._drag_indicator.points = [wx, wy, w_right, wy]
 
     def on_track_drag_end(self, track_widget, touch):
         if not self._dragged_widget:
@@ -2491,17 +2492,12 @@ class SequencerLayout(BoxLayout):
 
         # Localize touch to track_list_layout
         lx, ly = self.track_list_layout.to_widget(*touch.pos)
-
         target_display_idx = self._get_drag_insertion_index(ly)
 
-        # Current display index of the dragged widget
         try:
             old_display_idx = self.track_widgets.index(self._dragged_widget)
-
-            # If target is AFTER old_idx, the insertion shift needs adjustment
             if target_display_idx > old_display_idx:
                 target_display_idx -= 1
-
             if old_display_idx != target_display_idx:
                 self.sequencer.move_track_display_order(old_display_idx, target_display_idx)
         except ValueError:
@@ -2509,7 +2505,9 @@ class SequencerLayout(BoxLayout):
 
         # Cleanup
         self._dragged_widget = None
-        if self._drag_indicator:
+        if hasattr(self, '_drag_indicator_group'):
+            if self._drag_indicator_group in Window.canvas.after.children:
+                Window.canvas.after.remove(self._drag_indicator_group)
             self._drag_indicator.points = []
 
     def _get_drag_insertion_index(self, ly):

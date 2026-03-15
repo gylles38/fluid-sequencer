@@ -22,17 +22,22 @@ class HoverBehavior:
         if not self.get_root_window():
             return
 
-        # Check if the mouse position is within the widget's boundaries
-        # Use to_local to get coordinates relative to the widget's (0,0)
-        local_x, local_y = self.to_local(*pos)
-        if 0 <= local_x <= self.width and 0 <= local_y <= self.height:
-            if not self.hovered:
-                self.hovered = True
-                self.dispatch('on_enter')
-        else:
-            if self.hovered:
-                self.hovered = False
-                self.dispatch('on_leave')
+        try:
+            # Get widget's position in Window coordinates
+            wx, wy = self.to_window(0, 0)
+            mx, my = pos
+
+            # Check if mouse is within widget bounds
+            if wx <= mx <= wx + self.width and wy <= my <= wy + self.height:
+                if not self.hovered:
+                    self.hovered = True
+                    self.dispatch('on_enter')
+            else:
+                if self.hovered:
+                    self.hovered = False
+                    self.dispatch('on_leave')
+        except Exception:
+            pass
 
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""

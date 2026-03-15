@@ -2460,44 +2460,50 @@ class SequencerLayout(BoxLayout):
             self._drag_indicator_group.add(self._drag_indicator_color)
             self._drag_indicator_group.add(self._drag_indicator)
 
-        if self._drag_indicator_group not in Window.canvas.after.children:
-            Window.canvas.after.add(self._drag_indicator_group)
+        # Ensure it's on top and added
+        try:
+            Window.canvas.after.remove(self._drag_indicator_group)
+        except Exception:
+            pass
+        Window.canvas.after.add(self._drag_indicator_group)
 
     def on_track_drag_move(self, track_widget, touch):
         if not self._dragged_widget:
             return
 
+        # Use absolute window Y coordinate for robustness against scrolling
+        window_y = touch.y
+
         # Find insertion index using absolute Window coordinate
-        target_idx = self._get_drag_insertion_index(touch.y)
+        target_idx = self._get_drag_insertion_index(window_y)
 
         # Find Window y-coordinate for the line
         num_children = len(self.track_list_layout.children)
         if num_children > 0:
             if target_idx < num_children:
+                # Find the child that will be below the indicator
                 child = self.track_list_layout.children[num_children - 1 - target_idx]
-                # Draw line above the target child (visual top)
-                _, wy = child.to_window(0, child.height)
-                # wy is the top of the child in Window coords.
-                # Add half spacing to be between tracks.
-                wy += (self.track_list_layout.spacing / 2)
+                # Visual top of the child in Window coords
+                _, wy_line = child.to_window(0, child.height)
+                wy_line += (self.track_list_layout.spacing / 2)
             else:
                 # Draw line below the last child (visual bottom)
                 child = self.track_list_layout.children[0]
-                _, wy = child.to_window(0, 0)
-                wy -= (self.track_list_layout.spacing / 2)
+                _, wy_line = child.to_window(0, 0)
+                wy_line -= (self.track_list_layout.spacing / 2)
 
             # Draw across the layout's window horizontal bounds
-            wx, _ = self.track_list_layout.to_window(0, 0)
-            w_right, _ = self.track_list_layout.to_window(self.track_list_layout.width, 0)
+            wx_left, _ = self.track_list_layout.to_window(0, 0)
+            wx_right, _ = self.track_list_layout.to_window(self.track_list_layout.width, 0)
 
             self._drag_indicator_color.rgba = [1, 1, 1, 1]
-            self._drag_indicator.points = [wx, wy, w_right, wy]
+            self._drag_indicator.points = [wx_left, wy_line, wx_right, wy_line]
 
     def on_track_drag_end(self, track_widget, touch):
         if not self._dragged_widget:
             return
 
-        # Use absolute Window coordinate for logic consistency
+        # Use absolute Window y coordinate for drop calculation
         target_display_idx = self._get_drag_insertion_index(touch.y)
 
         try:

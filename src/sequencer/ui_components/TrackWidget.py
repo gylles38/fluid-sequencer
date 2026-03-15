@@ -358,7 +358,8 @@ class TrackWidget(BoxLayout, HoverBehavior):
             opacity=0.2, # Slightly visible even when not hovered
             theme_icon_color="Custom",
             icon_color=[1, 1, 1, 1],
-            md_bg_color=[0, 0, 0, 0.6]
+            md_bg_color=[0, 0, 0, 0.6],
+            padding=[dp(2), dp(2), dp(2), dp(2)]
         )
         self.minimize_button.bind(on_release=self.toggle_minimize)
 
@@ -982,6 +983,15 @@ class TrackWidget(BoxLayout, HoverBehavior):
                 self.icon_wrapper.disabled = True
                 self.icon_wrapper.width = 0
                 self.icon_wrapper.size_hint_x = None
+
+            # Final verification of main_row children to ensure full expansion
+            for child in self.main_row.children:
+                if child not in [self.left_panel]:
+                    child.opacity = 0
+                    child.disabled = True
+                    child.width = 0
+                    child.size_hint_x = None
+
         else:
             # Restore to previous height or at least 80dp
             self.height = max(dp(80), self.previous_height)

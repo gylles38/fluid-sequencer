@@ -122,11 +122,14 @@ class ResizeHandle(Widget):
 
     def on_touch_move(self, touch):
         if touch.grab_current is self:
+            if self.track_widget.is_minimized:
+                return False
+
             # When dragging down, touch.y decreases, delta_y increases height
             delta_y = self._initial_touch_y - touch.y
             new_height = self._initial_height + delta_y
 
-            # Constraints: 0.5x to 2x of 160dp (80dp to 320dp)
+            # Constraints: 80dp to 320dp
             min_h = dp(80)
             max_h = dp(320)
             self.track_widget.height = max(min_h, min(max_h, new_height))
@@ -242,7 +245,7 @@ class MidiInputSelectorPopup(Popup):
         self.dismiss()
 
 
-class TrackWidget(BoxLayout):
+class TrackWidget(BoxLayout, HoverBehavior):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
     a timeline for its content (which can be a piano roll for MIDI or a waveform for audio),
@@ -256,6 +259,8 @@ class TrackWidget(BoxLayout):
     controls_width = NumericProperty(dp(430))
     is_active_routing = BooleanProperty(False)    
     track_index = NumericProperty(0)
+    is_minimized = BooleanProperty(False)
+    previous_height = NumericProperty(dp(172))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         kwargs.setdefault('orientation', 'vertical')
@@ -309,8 +314,8 @@ class TrackWidget(BoxLayout):
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
         self.info_clipped_wrapper.bind(pos=self.info_clipped_rel.setter('pos'), size=self.info_clipped_rel.setter('size'))
 
-        # Header bar for name and index - Centered vertically
-        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'center_y': 0.5})
+        # Header bar for name and index - Pinned at top
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'top': 1})
         self.info_clipped_rel.add_widget(self.info_top_bar)
 
         self.info_section.add_widget(self.info_clipped_wrapper)
@@ -342,6 +347,20 @@ class TrackWidget(BoxLayout):
         self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_top_bar.add_widget(self.name_label)
 
+        # Minimize/Maximize button at bottom left of info section
+        self.minimize_button = MDIconButton(
+            icon='arrow-collapse-vertical',
+            pos_hint={'x': 0, 'y': 0},
+            size_hint=(None, None),
+            size=(dp(24), dp(24)),
+            opacity=0,
+            theme_icon_color="Custom",
+            icon_color=[1, 1, 1, 0.8],
+            md_bg_color=[0, 0, 0, 0.5]
+        )
+        self.minimize_button.bind(on_release=self.toggle_minimize)
+        self.info_clipped_rel.add_widget(self.minimize_button)
+
         # AJOUT : Section pour les pistes d'automation
         if isinstance(self.track, AutomationTrack):
             # 1. Icône de ciblage (flèche ou œil) avec tooltip explicatif
@@ -364,7 +383,7 @@ class TrackWidget(BoxLayout):
         self.controls_wrapper.add_widget(self.controls_clipped_rel)
         self.controls_wrapper.bind(pos=self.controls_clipped_rel.setter('pos'), size=self.controls_clipped_rel.setter('size'))
 
-        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'center_y': 0.5})
+        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'top': 1})
         self.controls_clipped_rel.add_widget(self.controls_section)
 
         # --- Solo Button (not for Automation tracks) ---
@@ -438,7 +457,7 @@ class TrackWidget(BoxLayout):
             height=dp(160),
             width=dp(170),  # Increased width
             spacing=0,
-            pos_hint={'center_y': 0.5}
+            pos_hint={'top': 1}
         )
 
         if isinstance(track, MidiTrack):
@@ -504,7 +523,7 @@ class TrackWidget(BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
+        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'top': 1})
 
         mute_button_container = BoxLayout(size_hint_y=None, height=dp(36), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
@@ -538,7 +557,7 @@ class TrackWidget(BoxLayout):
 
         # --- Pan Controls ---
         if not isinstance(track, AutomationTrack):
-            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
+            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'top': 1})
 
             pan_icon_container = BoxLayout(size_hint_y=None, height=dp(36))
             pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'center_y': 0.5})
@@ -667,7 +686,7 @@ class TrackWidget(BoxLayout):
                 size_hint=(1, None),
                 height=dp(160),
                 orientation='vertical',
-                pos_hint={'center_y': 0.5}
+                pos_hint={'top': 1}
             )
             self.icon_clipped_rel.add_widget(self.icon_layout)
 
@@ -891,6 +910,111 @@ class TrackWidget(BoxLayout):
     def on_solo_changed(self, instance, value) -> None:
         self.update_mute_solo_appearance()
 
+    def on_enter(self, *args):
+        super().on_enter(*args)
+        if hasattr(self, 'minimize_button'):
+            self.minimize_button.opacity = 1
+
+    def on_leave(self, *args):
+        super().on_leave(*args)
+        if hasattr(self, 'minimize_button'):
+            self.minimize_button.opacity = 0
+
+    def toggle_minimize(self, *args):
+        self.is_minimized = not self.is_minimized
+
+        if self.is_minimized:
+            self.previous_height = self.height
+            self.height = dp(40)
+            self.minimize_button.icon = 'arrow-expand-vertical'
+
+            # Hide components
+            self.resize_handle.opacity = 0
+            self.resize_handle.disabled = True
+            self.resize_handle.height = 0
+
+            self.main_row.spacing = 0
+
+            self.drag_handle.opacity = 0
+            self.drag_handle.width = 0
+
+            self.info_section.spacing = 0
+            self.info_section.width = self.info_width - dp(12)
+
+            # Adjust top bar for minimized state
+            self.info_top_bar.height = self.height
+            self.info_top_bar.pos_hint = {'top': 1}
+
+            if hasattr(self, 'target_indicator_icon'):
+                self.target_indicator_icon.opacity = 0
+                self.target_indicator_icon.disabled = True
+
+            self.controls_wrapper.opacity = 0
+            self.controls_wrapper.disabled = True
+            self.controls_wrapper.width = 0
+
+            self.left_panel.spacing = 0
+            self.left_panel.width = self.info_section.width
+
+            self.timeline_scroll.opacity = 0
+            self.timeline_scroll.disabled = True
+            self.timeline_scroll.size_hint_x = None
+            self.timeline_scroll.width = 0
+
+            if hasattr(self, 'keyboard_sv'):
+                self.keyboard_sv.opacity = 0
+                self.keyboard_sv.disabled = True
+                self.keyboard_sv.width = 0
+            if hasattr(self, 'icon_wrapper'):
+                self.icon_wrapper.opacity = 0
+                self.icon_wrapper.disabled = True
+                self.icon_wrapper.width = 0
+        else:
+            # Restore to previous height or at least 80dp
+            self.height = max(dp(80), self.previous_height)
+            self.minimize_button.icon = 'arrow-collapse-vertical'
+
+            # Show components
+            self.resize_handle.opacity = 1
+            self.resize_handle.disabled = False
+            self.resize_handle.height = dp(12)
+
+            self.main_row.spacing = dp(12)
+
+            self.drag_handle.opacity = 1
+            self.drag_handle.width = dp(12)
+
+            self.info_section.spacing = dp(8)
+            self.info_section.width = self.info_width
+
+            # Restore original heights/proportions
+            self.info_top_bar.height = dp(160)
+            self.info_top_bar.pos_hint = {'top': 1}
+
+            if hasattr(self, 'target_indicator_icon'):
+                self.target_indicator_icon.opacity = 1
+                self.target_indicator_icon.disabled = False
+
+            self.controls_wrapper.opacity = 1
+            self.controls_wrapper.disabled = False
+            self.controls_wrapper.width = self.controls_width
+
+            self.left_panel.spacing = dp(12)
+            self.left_panel.width = self.info_width + self.controls_width + dp(12)
+
+            self.timeline_scroll.opacity = 1
+            self.timeline_scroll.disabled = False
+            self.timeline_scroll.size_hint_x = 1
+
+            if hasattr(self, 'keyboard_sv'):
+                self.keyboard_sv.opacity = 1
+                self.keyboard_sv.disabled = False
+                self.keyboard_sv.width = dp(40)
+            if hasattr(self, 'icon_wrapper'):
+                self.icon_wrapper.opacity = 1
+                self.icon_wrapper.disabled = False
+                self.icon_wrapper.width = dp(40)
+
     def _on_track_index_change(self, instance, value):
         self.index_label.text = f"[{int(value)}]"
         self._update_bg_color()
@@ -1052,16 +1176,19 @@ class TrackWidget(BoxLayout):
         self.background_rect.size = self.size
 
         if hasattr(self, 'vert_separator'):
-            # On cherche le point de séparation le plus fiable
-            # On utilise le bord droit du left_panel pour placer le séparateur
-            if hasattr(self, 'left_panel'):
-                split_x = self.left_panel.right + dp(6)
+            if self.is_minimized:
+                self.vert_separator.size = (0, 0)
             else:
-                # Fallback basé sur les largeurs connues
-                split_x = self.x + self.info_width + self.controls_width + dp(6)
+                # On cherche le point de séparation le plus fiable
+                # On utilise le bord droit du left_panel pour placer le séparateur
+                if hasattr(self, 'left_panel'):
+                    split_x = self.left_panel.right + dp(6)
+                else:
+                    # Fallback basé sur les largeurs connues
+                    split_x = self.x + self.info_width + self.controls_width + dp(6)
 
-            self.vert_separator.pos = (split_x - dp(1), self.main_row.y)
-            self.vert_separator.size = (dp(2), self.main_row.height)
+                self.vert_separator.pos = (split_x - dp(1), self.main_row.y)
+                self.vert_separator.size = (dp(2), self.main_row.height)
 
     def _update_type_icon_bg(self, *args) -> None:
         """Updates the background of the track type icon."""

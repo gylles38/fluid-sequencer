@@ -18,6 +18,7 @@ class EditableLabel(BoxLayout):
     color = ListProperty([1, 1, 1, 1])
     halign = StringProperty('left')
     valign = StringProperty('middle')
+    adaptive_width = BooleanProperty(True)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -29,7 +30,10 @@ class EditableLabel(BoxLayout):
 
     def _post_kv_init(self, *args):
         self.orientation = 'horizontal'
-        self.size_hint = (None, None)
+        if self.adaptive_width:
+            self.size_hint = (None, None)
+        else:
+            self.size_hint_y = None
         self.height = dp(36)
         self._setup_view_mode()
 
@@ -39,17 +43,19 @@ class EditableLabel(BoxLayout):
         
         self.label = MDLabel(
             text=self.text,
-            adaptive_width=True,
+            adaptive_width=self.adaptive_width,
             font_size=self.font_size,
             bold=self.bold,
             theme_text_color="Custom",
             text_color=self.color,
             halign=self.halign,
             valign=self.valign,
-            size_hint_y=1
+            size_hint_y=1,
+            size_hint_x=1 if not self.adaptive_width else None
         )
         
-        self.label.bind(texture_size=self._update_container_width)
+        if self.adaptive_width:
+            self.label.bind(texture_size=self._update_container_width)
         self.label.bind(on_touch_down=self._enter_edit_mode)
         self.add_widget(self.label)
 

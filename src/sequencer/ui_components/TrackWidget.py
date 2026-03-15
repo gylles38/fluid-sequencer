@@ -352,7 +352,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
         # Minimize/Maximize button at bottom left of info section
         self.minimize_button = MDIconButton(
             icon='arrow-collapse-vertical',
-            pos_hint={'x': 0, 'y': 0},
+            pos_hint={'x': 0, 'y': 0}, # Anchor at the very left edge
             size_hint=(None, None),
             size=(dp(30), dp(30)),
             opacity=0.2, # Slightly visible even when not hovered
@@ -945,15 +945,19 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.drag_handle.width = 0
 
             self.info_section.size_hint_x = 1
-            self.info_section.width = 100 # Dummy value as size_hint_x is 1
+            self.info_section.width = 100 # Placeholder for size_hint
             self.info_clipped_wrapper.size_hint_x = 1
-            self.info_clipped_wrapper.width = 100 # Dummy
+            self.info_clipped_wrapper.width = 100 # Placeholder
             self.info_clipped_wrapper.x = 0
 
             # Adjust top bar for minimized state
             self.info_top_bar.height = self.height
             self.info_top_bar.pos_hint = {'top': 1}
             self.info_top_bar.padding = [dp(35), 0, dp(10), 0]
+
+            # Expand name label to full width
+            self.name_label.adaptive_width = False
+            self.name_label.size_hint_x = 1
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 0
@@ -966,7 +970,7 @@ class TrackWidget(BoxLayout, HoverBehavior):
 
             self.left_panel.spacing = 0
             self.left_panel.size_hint_x = 1
-            self.left_panel.width = 100 # Dummy
+            self.left_panel.width = 100 # Placeholder
 
             self.timeline_scroll.opacity = 0
             self.timeline_scroll.disabled = True
@@ -984,9 +988,9 @@ class TrackWidget(BoxLayout, HoverBehavior):
                 self.icon_wrapper.width = 0
                 self.icon_wrapper.size_hint_x = None
 
-            # Final verification of main_row children to ensure full expansion
+            # Force collapse all siblings in main_row
             for child in self.main_row.children:
-                if child not in [self.left_panel]:
+                if child != self.left_panel:
                     child.opacity = 0
                     child.disabled = True
                     child.width = 0
@@ -1017,6 +1021,9 @@ class TrackWidget(BoxLayout, HoverBehavior):
             self.info_top_bar.height = dp(160)
             self.info_top_bar.pos_hint = {'top': 1}
             self.info_top_bar.padding = [dp(20), 0, dp(10), 0]
+
+            # Restore name label adaptive width
+            self.name_label.adaptive_width = True
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 1

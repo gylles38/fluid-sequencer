@@ -2471,23 +2471,23 @@ class SequencerLayout(BoxLayout):
         if not self._dragged_widget:
             return
 
-        # Use absolute window Y coordinate for robustness against scrolling
-        window_y = touch.y
+        # When inside a ScrollView, touch.pos is already in absolute window coordinates.
+        # However, to be extra safe with coordinate transformations, we use to_window.
+        _, wy_touch = self.track_list_layout.to_window(*touch.pos)
 
         # Find insertion index using absolute Window coordinate
-        target_idx = self._get_drag_insertion_index(window_y)
+        target_idx = self._get_drag_insertion_index(wy_touch)
 
         # Find Window y-coordinate for the line
         num_children = len(self.track_list_layout.children)
         if num_children > 0:
             if target_idx < num_children:
-                # Find the child that will be below the indicator
                 child = self.track_list_layout.children[num_children - 1 - target_idx]
                 # Visual top of the child in Window coords
                 _, wy_line = child.to_window(0, child.height)
                 wy_line += (self.track_list_layout.spacing / 2)
             else:
-                # Draw line below the last child (visual bottom)
+                # Below the bottom-most track
                 child = self.track_list_layout.children[0]
                 _, wy_line = child.to_window(0, 0)
                 wy_line -= (self.track_list_layout.spacing / 2)
@@ -2503,8 +2503,9 @@ class SequencerLayout(BoxLayout):
         if not self._dragged_widget:
             return
 
-        # Use absolute Window y coordinate for drop calculation
-        target_display_idx = self._get_drag_insertion_index(touch.y)
+        # Use absolute Window coordinate for drop calculation
+        _, wy_touch = self.track_list_layout.to_window(*touch.pos)
+        target_display_idx = self._get_drag_insertion_index(wy_touch)
 
         try:
             old_display_idx = self.track_widgets.index(self._dragged_widget)
@@ -2528,16 +2529,20 @@ class SequencerLayout(BoxLayout):
         if num_children == 0:
             return 0
 
-        # Children are indexed bottom-to-top visually (children[0] is bottom).
-        # We iterate from visual top (index 0) to bottom.
+        # Children are indexed bottom-to-top in Kivy (children[0] is at visual bottom).
+        # We iterate from visual top (last child) to visual bottom (first child).
         for i in range(num_children):
+            # Index i in visual display corresponds to child at index [num_children - 1 - i]
             child = self.track_list_layout.children[num_children - 1 - i]
-            # Get child's center in Window coordinates
+
+            # Get absolute center of the track in Window coordinates
             _, cy = child.to_window(0, child.height / 2)
 
+            # If our drag point is above this track's center, it belongs at this position
             if window_y > cy:
                 return i
 
+        # If it's below everyone's center, it goes at the end
         return num_children
 
     def _synchronize_scroll(self, instance, value):

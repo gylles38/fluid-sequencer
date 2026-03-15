@@ -16,7 +16,13 @@ class HoverBehavior:
         self.register_event_type('on_enter')
         self.register_event_type('on_leave')
         super().__init__(*args, **kwargs)
-        Window.bind(mouse_pos=self._check_hover)
+        self.bind(on_window=self._bind_mouse)
+
+    def _bind_mouse(self, instance, window):
+        if window:
+            Window.bind(mouse_pos=self._check_hover)
+        else:
+            Window.unbind(mouse_pos=self._check_hover)
 
     def _check_hover(self, instance, pos):
         if not self.get_root_window():

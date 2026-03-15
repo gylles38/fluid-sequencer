@@ -2463,8 +2463,7 @@ class SequencerLayout(BoxLayout):
             return
 
         # Localize touch to track_list_layout.
-        # Since the touch is grabbed, touch.pos is in window coordinates.
-        # to_widget() with relative=False (default) converts from window to local.
+        # to_widget converts from window to track_list_layout local coordinates
         lx, ly = self.track_list_layout.to_widget(*touch.pos)
 
         # Find where the line should be drawn
@@ -2474,11 +2473,16 @@ class SequencerLayout(BoxLayout):
         if target_idx < len(self.track_list_layout.children):
             # Children are in reverse order of display in BoxLayout(vertical)
             child = self.track_list_layout.children[-(target_idx + 1)]
+            # We want the indicator to be ABOVE child (since we're counting from top)
             y = child.top + self.track_list_layout.spacing / 2
         else:
+            # If we're at the bottom
             child = self.track_list_layout.children[0]
             y = child.y - self.track_list_layout.spacing / 2
 
+        # The Line instruction is in track_list_layout.canvas.after.
+        self._drag_indicator_color.rgba = [1, 1, 1, 1]
+        # We MUST use self.track_list_layout.x/right because it's not a RelativeLayout
         self._drag_indicator.points = [self.track_list_layout.x, y, self.track_list_layout.right, y]
 
     def on_track_drag_end(self, track_widget, touch):

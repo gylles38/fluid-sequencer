@@ -127,6 +127,8 @@ class ResizeHandle(Widget):
             grip.pos = (start_x + i * spacing, center_y)
 
     def on_touch_down(self, touch):
+        if self.disabled:
+            return False
         if self.collide_point(*touch.pos):
             touch.grab(self)
             self._initial_height = self.track_widget.height
@@ -997,8 +999,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self._temp_timeline_widgets = []
             if hasattr(self, 'keyboard_sv'):
                 self._temp_timeline_widgets.append(self.keyboard_sv)
-            if hasattr(self, 'icon_layout'):
-                self._temp_timeline_widgets.append(self.icon_layout)
+            if hasattr(self, 'icon_wrapper'):
+                self._temp_timeline_widgets.append(self.icon_wrapper)
             self._temp_timeline_widgets.append(self.timeline_scroll)
 
             for w in self._temp_timeline_widgets:
@@ -1033,6 +1035,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             # Disable resizing while minimized
             self.resize_handle.disabled = True
             self.resize_handle.opacity = 0
+            self.resize_handle.height = 0
         else:
             self.height = self.full_height
 
@@ -1078,6 +1081,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             # Re-enable resizing
             self.resize_handle.disabled = False
             self.resize_handle.opacity = 1
+            self.resize_handle.height = dp(12)
 
         # Update visual separator and other graphics
         self._update_graphics()

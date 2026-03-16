@@ -13,20 +13,34 @@ class HoverBehavior:
         self.register_event_type('on_leave')
         self.hovered = False
         super().__init__(*args, **kwargs)
-        Window.bind(mouse_pos=self._on_mouse_pos)
         self.bind(on_parent=self._on_hover_parent)
 
     def _on_hover_parent(self, instance, parent):
         Window.unbind(mouse_pos=self._on_mouse_pos)
         if parent is not None:
             Window.bind(mouse_pos=self._on_mouse_pos)
+        else:
+            if self.hovered:
+                self.hovered = False
+                self.dispatch('on_leave')
 
     def _on_mouse_pos(self, *args):
-        if not self.get_root_window() or self.disabled or self.opacity == 0 or self.width <= 0 or self.height <= 0:
+        # Basic visibility and tree presence check
+        if not self.get_root_window() or getattr(self, 'disabled', False) or getattr(self, 'opacity', 1) < 0.01 or self.width <= 0 or self.height <= 0:
             if self.hovered:
                 self.hovered = False
                 self.dispatch('on_leave')
             return
+
+        # Deep visibility check: Ensure all ancestors are enabled and visible
+        p = self.parent
+        while p:
+            if getattr(p, 'disabled', False) or getattr(p, 'opacity', 1) < 0.01:
+                if self.hovered:
+                    self.hovered = False
+                    self.dispatch('on_leave')
+                return
+            p = p.parent
 
         pos = args[1]
         # Use absolute window coordinates for robust collision detection

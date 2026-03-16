@@ -355,6 +355,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # Container for other info elements - Centered, clipped if track is too small
         self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
         self.info_clipped_rel = RelativeLayout(size_hint=(1, 1))
+        self.info_clipped_wrapper.bind(size=self.info_clipped_rel.setter('size'), pos=self.info_clipped_rel.setter('pos'))
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
 
         # Header bar for name and index - Use size_hint_y=1 to fill main_row height
@@ -412,6 +413,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # Robust clipping container
         self.controls_wrapper = StencilView(size_hint_x=None, width=self.controls_width, size_hint_y=1)
         self.controls_clipped_rel = RelativeLayout(size_hint=(1, 1))
+        self.controls_wrapper.bind(size=self.controls_clipped_rel.setter('size'), pos=self.controls_clipped_rel.setter('pos'))
         self.controls_wrapper.add_widget(self.controls_clipped_rel)
 
         self.controls_section = BoxLayout(size_hint=(1, 1), spacing=dp(8))
@@ -708,6 +710,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             # Create a layout for the track type icon
             self.icon_wrapper = StencilView(size_hint_x=None, width=dp(40), size_hint_y=1)
             self.icon_clipped_rel = RelativeLayout(size_hint=(1, 1))
+            self.icon_wrapper.bind(size=self.icon_clipped_rel.setter('size'), pos=self.icon_clipped_rel.setter('pos'))
             self.icon_wrapper.add_widget(self.icon_clipped_rel)
 
             self.icon_layout = BoxLayout(

@@ -9,6 +9,9 @@ def import_gp(filepath: str) -> Song:
     try:
         gp_song = guitarpro.parse(filepath)
     except Exception as e:
+        msg = str(e)
+        if "unsupported version" in msg.lower():
+            raise ValueError(f"GuitarPro version not supported by current library: {msg}. (GP7/GP8 files might need to be exported to GP5 first)")
         raise ValueError(f"Failed to parse GuitarPro file: {e}")
 
     # GuitarPro tempo is in BPM.
@@ -21,7 +24,7 @@ def import_gp(filepath: str) -> Song:
         first_measure = gp_song.tracks[0].measures[0]
         if first_measure.timeSignature:
             time_sig_num = first_measure.timeSignature.numerator
-            time_sig_den = first_measure.timeSignature.denominator
+            time_sig_den = first_measure.timeSignature.denominator.value if hasattr(first_measure.timeSignature.denominator, 'value') else first_measure.timeSignature.denominator
 
     song = Song(
         name=os.path.basename(filepath).rsplit('.', 1)[0],
@@ -31,7 +34,7 @@ def import_gp(filepath: str) -> Song:
     )
 
     for gp_track in gp_song.tracks:
-        track_name = gp_track.name or f"Track {gp_track.index}"
+        track_name = gp_track.name or f"Track {gp_track.number}"
         midi_track = MidiTrack(
             name=track_name,
             channel=gp_track.channel.channel - 1 if gp_track.channel else 0,
@@ -48,7 +51,9 @@ def import_gp(filepath: str) -> Song:
             # Note: our current Song model only has one global time signature.
             # For now we'll use the song's global one or the first one found.
 
-            measure_duration_beats = (gp_measure.timeSignature.numerator * 4.0) / gp_measure.timeSignature.denominator
+            # Fix: Ensure denominator is a number. In some GP versions it's a Duration object.
+            denom = gp_measure.timeSignature.denominator.value if hasattr(gp_measure.timeSignature.denominator, 'value') else gp_measure.timeSignature.denominator
+            measure_duration_beats = (gp_measure.timeSignature.numerator * 4.0) / denom
 
             for voice in gp_measure.voices:
                 beat_start_in_measure = 0.0

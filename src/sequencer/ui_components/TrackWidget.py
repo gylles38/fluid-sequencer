@@ -355,9 +355,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         # Container for other info elements - Fixed at top, clipped if track is too small
         self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
-        self.info_clipped_rel = RelativeLayout(size_hint=(None, None))
+        self.info_clipped_rel = RelativeLayout(size_hint=(None, None), pos=(0, 0))
+        self.info_clipped_wrapper.bind(size=self.info_clipped_rel.setter('size'))
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
-        self.info_clipped_wrapper.bind(pos=self.info_clipped_rel.setter('pos'), size=self.info_clipped_rel.setter('size'))
 
         # Header bar for name and index - Fills height
         self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, 1))
@@ -412,9 +412,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # --- Middle Section: Controls ---
         # Robust clipping container
         self.controls_wrapper = StencilView(size_hint_x=None, width=self.controls_width, size_hint_y=1)
-        self.controls_clipped_rel = RelativeLayout(size_hint=(None, None))
+        self.controls_clipped_rel = RelativeLayout(size_hint=(None, None), pos=(0, 0))
+        self.controls_wrapper.bind(size=self.controls_clipped_rel.setter('size'))
         self.controls_wrapper.add_widget(self.controls_clipped_rel)
-        self.controls_wrapper.bind(pos=self.controls_clipped_rel.setter('pos'), size=self.controls_clipped_rel.setter('size'))
 
         self.controls_section = BoxLayout(size_hint=(1, 1), spacing=dp(8))
         self.controls_clipped_rel.add_widget(self.controls_section)
@@ -709,9 +709,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
             # Create a layout for the track type icon, fixed height at top
             self.icon_wrapper = StencilView(size_hint_x=None, width=dp(40), size_hint_y=1)
-            self.icon_clipped_rel = RelativeLayout(size_hint=(None, None))
+            self.icon_clipped_rel = RelativeLayout(size_hint=(None, None), pos=(0, 0))
+            self.icon_wrapper.bind(size=self.icon_clipped_rel.setter('size'))
             self.icon_wrapper.add_widget(self.icon_clipped_rel)
-            self.icon_wrapper.bind(pos=self.icon_clipped_rel.setter('pos'), size=self.icon_clipped_rel.setter('size'))
 
             self.icon_layout = BoxLayout(
                 size_hint=(1, 1),

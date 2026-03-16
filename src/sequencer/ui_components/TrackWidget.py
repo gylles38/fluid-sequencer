@@ -1002,8 +1002,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self._temp_timeline_widgets.append(self.timeline_scroll)
 
             for w in self._temp_timeline_widgets:
-                if w in self.children:
-                    self.remove_widget(w)
+                if w in self.main_row.children:
+                    self.main_row.remove_widget(w)
 
             self.controls_section.opacity = 0
             self.controls_section.disabled = True
@@ -1029,6 +1029,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             if hasattr(self, 'vert_separator'):
                 self.vert_separator.size = (0, 0)
+
+            # Disable resizing while minimized
+            self.resize_handle.disabled = True
+            self.resize_handle.opacity = 0
         else:
             self.height = self.full_height
 
@@ -1046,14 +1050,14 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             # Re-add timeline widgets in correct order
             if hasattr(self, 'keyboard_sv'):
-                if self.keyboard_sv not in self.children:
-                    self.add_widget(self.keyboard_sv)
-            elif hasattr(self, 'icon_layout'):
-                if self.icon_layout not in self.children:
-                    self.add_widget(self.icon_layout)
+                if self.keyboard_sv not in self.main_row.children:
+                    self.main_row.add_widget(self.keyboard_sv)
+            elif hasattr(self, 'icon_wrapper'): # Changed from icon_layout to icon_wrapper
+                if self.icon_wrapper not in self.main_row.children:
+                    self.main_row.add_widget(self.icon_wrapper)
 
-            if self.timeline_scroll not in self.children:
-                self.add_widget(self.timeline_scroll)
+            if self.timeline_scroll not in self.main_row.children:
+                self.main_row.add_widget(self.timeline_scroll)
 
             self.spacing = dp(12)
             self.left_panel.spacing = dp(12)
@@ -1070,6 +1074,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
             if hasattr(self, 'vert_separator'):
                 # Size will be updated in _update_graphics
                 pass
+
+            # Re-enable resizing
+            self.resize_handle.disabled = False
+            self.resize_handle.opacity = 1
 
         # Update visual separator and other graphics
         self._update_graphics()

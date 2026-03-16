@@ -65,7 +65,9 @@ def import_gp(filepath: str) -> Song:
                     if beat.duration.isDotted:
                         duration_beats *= 1.5
                     # Tuplets
-                    if beat.duration.tuplet.enter > 0:
+                    if hasattr(beat.duration.tuplet, 'enters') and beat.duration.tuplet.enters > 0:
+                        duration_beats = duration_beats * beat.duration.tuplet.times / beat.duration.tuplet.enters
+                    elif hasattr(beat.duration.tuplet, 'enter') and beat.duration.tuplet.enter > 0:
                         duration_beats = duration_beats * beat.duration.tuplet.times / beat.duration.tuplet.enter
 
                     notes = []

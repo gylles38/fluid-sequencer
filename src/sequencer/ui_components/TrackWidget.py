@@ -14,6 +14,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.gridlayout import GridLayout
+from kivy.uix.stencilview import StencilView
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, BooleanProperty
@@ -83,10 +84,79 @@ class DragHandle(Widget):
             return True
         return False
 
+    def on_touch_move(self, touch):
+        return False # No default move handling
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self.track_widget:
+            touch.ungrab(self.track_widget)
+            return True
+        return False
+
+class ResizeHandle(Widget):
+    """A horizontal handle at the bottom of the track for vertical resizing."""
+    def __init__(self, track_widget, **kwargs):
+        super().__init__(**kwargs)
+        self.track_widget = track_widget
+        self.size_hint_y = None
+        self.height = dp(12)
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        with self.canvas:
+            self.bg_color = Color(0.15, 0.15, 0.15, 1)
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+
+            # Grip indicators (matching DragHandle aesthetic but horizontal)
+            self.grip_color = Color(0.4, 0.4, 0.4, 1)
+            self.grips = []
+            for _ in range(3):
+                self.grips.append(Rectangle(size=(dp(2), dp(4))))
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+
+        # Center grips horizontally
+        center_x = self.x + self.width / 2 - dp(1)
+        spacing = dp(6)
+        total_width = 2 * spacing
+        start_x = center_x - total_width / 2
+        center_y = self.y + self.height / 2 - dp(2)
+
+        for i, grip in enumerate(self.grips):
+            grip.pos = (start_x + i * spacing, center_y)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.grab(self)
+            self._initial_height = self.track_widget.height
+            self._initial_touch_y = touch.y
+            return True
+        return False
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            # When dragging down, touch.y decreases, delta_y increases height
+            delta_y = self._initial_touch_y - touch.y
+            new_height = self._initial_height + delta_y
+
+            # Constraints: 0.5x to 2x of 160dp (80dp to 320dp)
+            min_h = dp(80)
+            max_h = dp(320)
+            self.track_widget.height = max(min_h, min(max_h, new_height))
+            return True
+        return False
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            return True
+        return False
+
 class AutomationGrid(RelativeLayout):
     def __init__(self, track_widget, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.track_widget: Any = track_widget
+        self.track_widget = track_widget
 
     def on_touch_down(self, touch) -> None | bool:
         if self.collide_point(*touch.pos) and touch.is_double_tap:
@@ -204,19 +274,17 @@ class TrackWidget(HoverBehavior, BoxLayout):
     full_height = NumericProperty(dp(160))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
-        self.spacing = dp(12)
+        kwargs.setdefault('orientation', 'vertical')
         super(TrackWidget, self).__init__(**kwargs)
         self.track = track
         self.track_index = track_index
         self.sequencer_layout = sequencer_layout
         # Initialisez une liste pour stocker les widgets de courbes pour les pistes d'automation
         self.automation_curves = []
-        
-        self.orientation = 'horizontal'
         self.size_hint_y = None
         # Increase track height for better visibility, matching MIDI tracks
-        self.height = dp(160)
-        self.spacing = dp(12)
+        self.height = dp(172)
+        self.spacing = 0 # No spacing between content and resize handle
         
         self.padding = [0, 0, 0, 0]
         
@@ -233,10 +301,19 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         # Assurez-vous que le fond (background_rect) est bien défini dans canvas.before
         self.bind(pos=self._update_graphics, size=self._update_graphics)
+        self.bind(height=self._on_height_changed)
         
+        # Main row for track content (info, controls, timeline)
+        self.main_row = BoxLayout(orientation='horizontal', size_hint_y=1, spacing=dp(12))
+        self.add_widget(self.main_row)
+
+        # Bottom resize handle
+        self.resize_handle = ResizeHandle(track_widget=self)
+        self.add_widget(self.resize_handle)
+
         # --- Left Section: Track Info ---
-        # Set padding to 0 top/bottom to allow DragHandle to take full height
-        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0])
+        # Fixed-height wrapper for info elements (except DragHandle)
+        self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8))
 
         # Handle container for DragHandle and MinimizeButton
         self.handle_container = RelativeLayout(size_hint=(None, 1), width=dp(12))
@@ -274,6 +351,18 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         self.info_section.add_widget(self.handle_container)
 
+        # Container for other info elements - Fixed at top, clipped if track is too small
+        self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
+        self.info_clipped_rel = RelativeLayout(size_hint=(None, None))
+        self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
+        self.info_clipped_wrapper.bind(pos=self.info_clipped_rel.setter('pos'), size=self.info_clipped_rel.setter('size'))
+
+        # Header bar for name and index - Centered vertically
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'center_y': 0.5})
+        self.info_clipped_rel.add_widget(self.info_top_bar)
+
+        self.info_section.add_widget(self.info_clipped_wrapper)
+
         labelPadding = [0, dp(1), 0, 0] if isinstance(self.track, AutomationTrack) else [0, dp(2), 0, 0]
         # Non-editable track index
         self.index_label = MDLabel(
@@ -287,7 +376,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             width=dp(30),
             padding=labelPadding,
         )
-        self.info_section.add_widget(self.index_label)
+        self.info_top_bar.add_widget(self.index_label)
 
         # Editable track name
         self.name_label = EditableLabel(
@@ -301,7 +390,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             size_hint=(1, 1)
         )
         self.name_label.bind(on_text_validated=self.on_name_validated)
-        self.info_section.add_widget(self.name_label)
+        self.info_top_bar.add_widget(self.name_label)
 
         # AJOUT : Section pour les pistes d'automation
         if isinstance(self.track, AutomationTrack):
@@ -316,10 +405,17 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 on_release=self.open_change_target_popup,
                 width=dp(24)
             )
-            self.info_section.add_widget(self.target_indicator_icon)
+            self.info_top_bar.add_widget(self.target_indicator_icon)
          
         # --- Middle Section: Controls ---
-        self.controls_section = BoxLayout(size_hint_x=None, width=self.controls_width, spacing=dp(8))
+        # Robust clipping container
+        self.controls_wrapper = StencilView(size_hint_x=None, width=self.controls_width, size_hint_y=1)
+        self.controls_clipped_rel = RelativeLayout(size_hint=(None, None))
+        self.controls_wrapper.add_widget(self.controls_clipped_rel)
+        self.controls_wrapper.bind(pos=self.controls_clipped_rel.setter('pos'), size=self.controls_clipped_rel.setter('size'))
+
+        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'center_y': 0.5})
+        self.controls_clipped_rel.add_widget(self.controls_section)
 
         # --- Solo Button (not for Automation tracks) ---
         if not isinstance(track, AutomationTrack):
@@ -330,7 +426,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
                 icon_color=[1, 1, 0, 1] if track.is_solo else [1, 1, 1, 0.8],
-                md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8]
+                md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8],
+                size_hint=(None, None),
+                size=(dp(36), dp(36))
             )
             self.controls_section.add_widget(self.solo_button)
         elif isinstance(track, AutomationTrack):
@@ -344,8 +442,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
             )
             # Liez l'événement personnalisé à la méthode de mise à jour
             self.automation_controls.bind(on_selection_change=self.update_automation_visibility)
-            self.automation_controls.size_hint_y = None
+            self.automation_controls.size_hint=(None, None)
             self.automation_controls.height = dp(36)
+            self.automation_controls.width = dp(100)
             self.automation_controls.pos_hint = {'center_y': 0.5}
             
             # On l'ajoute directement dans la colonne de gauche
@@ -362,9 +461,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 pos_hint={'center_y': 0.5},
                 theme_icon_color="Custom",
                 icon_color=[1, 1, 1, 0.8],
-                size_hint_x=None,
-                width=dp(36)
+                size_hint=(None, None),
+                size=(dp(36), dp(36))
             )
+            self.piano_roll_button.pos_hint = {'center_y': 0.5}
             self.controls_section.add_widget(self.piano_roll_button)
 
             self.record_mode_button = ThreeStateRecordButton(
@@ -373,6 +473,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 sequencer_layout=sequencer_layout,
                 callback=self.on_record_mode_change
             )
+            self.record_mode_button.pos_hint = {'center_y': 0.5}
+            self.record_mode_button.size_hint = (None, None)
+            self.record_mode_button.size = (dp(36), dp(36))
             self.controls_section.add_widget(self.record_mode_button)
         else:
             # Pour les pistes Audio standards, on garde l'espaceur de 44dp
@@ -381,9 +484,11 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # --- MIDI Specific Controls (Channel, Program) ---
         midi_controls_layout = BoxLayout(
             orientation='vertical',
-            size_hint_x=None,
+            size_hint=(None, None),
+            height=dp(160),
             width=dp(170),  # Increased width
-            spacing=0
+            spacing=0,
+            pos_hint={'center_y': 0.5}
         )
 
         if isinstance(track, MidiTrack):
@@ -438,20 +543,20 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 pos_hint={'center_x': 0.5} # Center the button
             )
 
-            midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Top spacer
+            midi_controls_layout.add_widget(Widget(size_hint_y=1)) # Top spacer
             midi_controls_layout.add_widget(top_controls)
             midi_controls_layout.add_widget(self.port_selector_button)
             midi_controls_layout.add_widget(self.input_selector_button)
-            midi_controls_layout.add_widget(Widget(size_hint_y=0.1)) # Bottom spacer
+            midi_controls_layout.add_widget(Widget(size_hint_y=1)) # Bottom spacer
         else:
             midi_controls_layout.add_widget(Widget())
             
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
+        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
 
-        mute_button_container = BoxLayout(size_hint_y=None, height=dp(30), pos_hint={'center_x': 0.5})
+        mute_button_container = BoxLayout(size_hint_y=None, height=dp(36), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
             icon='volume-off' if track.is_muted else 'volume-high',
             tooltip_text='Mute' if not track.is_muted else 'Unmute',
@@ -459,7 +564,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
             pos_hint={'center_x': 0.5, 'center_y': 0.5},
             theme_icon_color="Custom",
             icon_color = [0.8, 0.3, 0, 1] if track.is_muted else [1, 0.6, 0, 1],
-            md_bg_color = [0.4, 0.2, 0.1, 0.8] if track.is_muted else [0.3, 0.2, 0.1, 0.8]            
+            md_bg_color = [0.4, 0.2, 0.1, 0.8] if track.is_muted else [0.3, 0.2, 0.1, 0.8],
+            size_hint=(None, None),
+            size=(dp(36), dp(36))
         )
         mute_button_container.add_widget(self.mute_button)
 
@@ -481,9 +588,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         # --- Pan Controls ---
         if not isinstance(track, AutomationTrack):
-            pan_layout = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(50), spacing=0)
+            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
 
-            pan_icon_container = BoxLayout(size_hint_y=None, height=dp(30))
+            pan_icon_container = BoxLayout(size_hint_y=None, height=dp(36))
             pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'center_y': 0.5})
             pan_icon_container.add_widget(pan_icon)
 
@@ -503,12 +610,12 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.left_panel = BoxLayout(
             orientation='horizontal',
             size_hint_x=None,
-            spacing=self.spacing
+            spacing=dp(12)
         )
         self.left_panel.add_widget(self.info_section)
-        self.left_panel.add_widget(self.controls_section)
-        self.left_panel.width = self.info_width + self.controls_width + self.spacing
-        self.add_widget(self.left_panel)
+        self.left_panel.add_widget(self.controls_wrapper)
+        self.left_panel.width = self.info_width + self.controls_width + dp(12)
+        self.main_row.add_widget(self.left_panel)
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
@@ -596,16 +703,23 @@ class TrackWidget(HoverBehavior, BoxLayout):
             Clock.schedule_once(set_default_scroll)
 
             # Add to main layout
-            self.add_widget(self.keyboard_sv)
-            self.add_widget(self.timeline_scroll)
+            self.main_row.add_widget(self.keyboard_sv)
+            self.main_row.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
-            # Create a layout for the track type icon, replacing the old spacer
+            # Create a layout for the track type icon, fixed height at top
+            self.icon_wrapper = StencilView(size_hint_x=None, width=dp(40), size_hint_y=1)
+            self.icon_clipped_rel = RelativeLayout(size_hint=(None, None))
+            self.icon_wrapper.add_widget(self.icon_clipped_rel)
+            self.icon_wrapper.bind(pos=self.icon_clipped_rel.setter('pos'), size=self.icon_clipped_rel.setter('size'))
+
             self.icon_layout = BoxLayout(
-                size_hint_x=None,
-                width=dp(40),
-                orientation='vertical'
+                size_hint=(1, None),
+                height=dp(160),
+                orientation='vertical',
+                pos_hint={'center_y': 0.5}
             )
+            self.icon_clipped_rel.add_widget(self.icon_layout)
 
             track_type_icon = "help-circle"
             track_type_color = [0.5, 0.5, 0.5, 1]
@@ -622,12 +736,15 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 theme_text_color="Custom",
                 text_color=track_type_color,
                 halign='center',
-                valign='center'
+                valign='center',
+                size_hint=(1, None),
+                height=dp(40),
+                pos_hint={'center_y': 0.5}
             )
 
-            self.icon_layout.add_widget(Widget()) # Top spacer
+            self.icon_layout.add_widget(Widget(size_hint_y=1)) # Top spacer
             self.icon_layout.add_widget(icon)
-            self.icon_layout.add_widget(Widget()) # Bottom spacer
+            self.icon_layout.add_widget(Widget(size_hint_y=1)) # Bottom spacer
 
             self.timeline_scroll = ScrollView(
                 size_hint=(1, 1),
@@ -637,15 +754,15 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 scroll_type=['bars']
             )
             # Add to main layout
-            self.add_widget(self.icon_layout)
-            self.add_widget(self.timeline_scroll)
+            self.main_row.add_widget(self.icon_wrapper)
+            self.main_row.add_widget(self.timeline_scroll)
             self.timeline_scroll.effect_x = ScrollEffect()  # Bounded, no bounce
 
             # A ScrollView must have a single child.
             self.timeline_container = AutomationGrid(track_widget=self, size_hint=(None, 1))
-            # Ensure container follows TrackWidget height perfectly
-            self.bind(height=self.timeline_container.setter('height'))
-            self.timeline_container.height = self.height
+            # Ensure container follows main_row height perfectly
+            self.main_row.bind(height=self.timeline_container.setter('height'))
+            self.timeline_container.height = self.main_row.height
             # AJOUT : Préparation de la translation GPU
             with self.timeline_container.canvas.before:
                 PushMatrix()
@@ -828,6 +945,16 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.index_label.text = f"[{int(value)}]"
         self._update_bg_color()
 
+    def _on_height_changed(self, instance, value):
+        """Called when the TrackWidget's height changes."""
+        # Force redraw of editors/grids that might depend on height
+        if hasattr(self, 'piano_roll'):
+            self.piano_roll.redraw()
+        if hasattr(self, 'measure_grid'):
+            self.measure_grid.redraw()
+        if hasattr(self, 'waveform'):
+            self.waveform.redraw()
+
     def _sync_routing_status(self, instance, value):
         # On met à jour l'état et on force la couleur IMMEDIATEMENT
         is_active = (self.track_index == value)
@@ -970,6 +1097,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
             if hasattr(self.sequencer_layout, 'on_track_drag_move'):
                 self.sequencer_layout.on_track_drag_move(self, touch)
             return True
+        if self.resize_handle.collide_point(*touch.pos):
+             return self.resize_handle.on_touch_move(touch)
         return super().on_touch_move(touch)
 
     def on_touch_up(self, touch):
@@ -978,6 +1107,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
             if hasattr(self.sequencer_layout, 'on_track_drag_end'):
                 self.sequencer_layout.on_track_drag_end(self, touch)
             return True
+        if self.resize_handle.collide_point(*touch.pos):
+             return self.resize_handle.on_touch_up(touch)
         return super().on_touch_up(touch)
 
     def on_touch_down(self, touch):
@@ -987,6 +1118,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
         select this track's instrument.
         """
         if self.collide_point(*touch.pos):
+            # Special case for ResizeHandle which is a direct child but we want to let it grab the touch
+            if hasattr(self, 'resize_handle') and self.resize_handle.collide_point(*touch.pos):
+                 return self.resize_handle.on_touch_down(touch)
+
             # We let the default Kivy processing happen first for buttons/sliders.
             # super().on_touch_down(touch) returns True if a child consumed the touch.
             if super().on_touch_down(touch):
@@ -1079,13 +1214,13 @@ class TrackWidget(HoverBehavior, BoxLayout):
             # On cherche le point de séparation le plus fiable
             # On utilise le bord droit du left_panel pour placer le séparateur
             if hasattr(self, 'left_panel'):
-                split_x = self.left_panel.right + self.spacing / 2
+                split_x = self.left_panel.right + dp(6)
             else:
                 # Fallback basé sur les largeurs connues
-                split_x = self.x + self.info_width + self.controls_width + self.spacing / 2
+                split_x = self.x + self.info_width + self.controls_width + dp(6)
 
-            self.vert_separator.pos = (split_x - dp(1), self.y)
-            self.vert_separator.size = (dp(2), self.height)
+            self.vert_separator.pos = (split_x - dp(1), self.main_row.y)
+            self.vert_separator.size = (dp(2), self.main_row.height)
 
     def _update_type_icon_bg(self, *args) -> None:
         """Updates the background of the track type icon."""

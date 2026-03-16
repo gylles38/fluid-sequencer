@@ -1,8 +1,0 @@
-vport testport
-add midi_track 1
-assign 0
-0
-addaudio audio_track test_audio.wav
-list
-saveproject test_project
-quit

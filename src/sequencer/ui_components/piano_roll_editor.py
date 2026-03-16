@@ -1,4 +1,3 @@
-from turtle import position
 from .floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.app import App
@@ -20,7 +19,6 @@ from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
-import copy
 import mido
 from sequencer.ui_components.HoverBehavior import HoverableButton
 
@@ -112,37 +110,41 @@ class EditableMidiGrid(PianoRoll):
         local_pos = self.to_local(*touch.pos)
         
         if self._drag_mode == 'move' and self._dragged_note:
-            new_x = local_pos[0] - self._drag_offset[0]
-            new_beat = new_x / self.pixels_per_beat
-            new_pitch = int(local_pos[1] / self.note_height)
+            # Multi-move logic (handles single notes too if they are in the selection)
+            if hasattr(self, '_multi_drag_data') and self._multi_drag_data:
+                new_x = local_pos[0] - self._drag_offset[0]
+                new_beat = new_x / self.pixels_per_beat
 
-            try:
-                master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
-            except (StopIteration, AttributeError):
-                print("Error: Drag data desynchronized. Cancelling drag.")
-                touch.ungrab(self)
-                self._dragged_note = None
-                self._drag_mode = None
+                try:
+                    master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+                except (StopIteration, AttributeError):
+                    return True
+
+                raw_delta_beat = new_beat - master_data['original_start']
+                # Quantize delta_beat to 16th notes for snappy live dragging
+                delta_beat = round(raw_delta_beat * 4) / 4
+
+                new_pitch = int(local_pos[1] / self.note_height)
+                delta_pitch = new_pitch - master_data['original_pitch']
+
+                earliest_start = min(item['original_start'] for item in self._multi_drag_data)
+                if earliest_start + delta_beat < 0:
+                    delta_beat = -earliest_start
+
+                for item in self._multi_drag_data:
+                    target_new_beat = item['original_start'] + delta_beat
+                    target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
+
+                    # Update the model live. We store the new parent to ensure subsequent moves
+                    # within the same drag can reliably remove the note from its previous location.
+                    new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
+                    item['parent_event'] = new_parent
+
+                # Sort events once after moving everything to ensure consistency
+                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
+                self.editor.is_dirty = True
+                self.draw()
                 return True
-            delta_beat = new_beat - master_data['original_start']
-            delta_pitch = new_pitch - master_data['original_pitch']
-
-            earliest_start = min(item['original_start'] for item in self._multi_drag_data)
-            if earliest_start + delta_beat < 0:
-                delta_beat = -earliest_start
-
-            for item in self._multi_drag_data:
-                target_new_beat = item['original_start'] + delta_beat
-                target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
-
-                # MODIFICATION ICI : On récupère le nouvel événement parent
-                # et on utilise l'identité 'is' pour être certain de ne pas se tromper de note
-                new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
-                item['parent_event'] = new_parent               
-
-            self.editor.is_dirty = True
-            self.draw()
-            return True 
         
         if self._drag_mode == 'select':
             if self._selection_rect:
@@ -210,15 +212,17 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = target_event
 
             elif self._drag_mode == 'move':
+                # This block is for cases where _multi_drag_data might be missing
+                # but we are in move mode. Fallback to basic move.
                 new_x = local_pos[0] - self._drag_offset[0]
                 new_y = local_pos[1] - self._drag_offset[1]
 
-                # Quantize to 16th notes (4 positions per beat), same as resizing
                 new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
                 new_pitch: int = max(0, min(127, int(new_y / self.note_height)))
 
                 self._drag_event.start_time = new_beat
                 self._dragged_note.pitch = new_pitch
+                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
 
             self.editor.is_dirty = True
             self.draw()
@@ -249,7 +253,7 @@ class EditableMidiGrid(PianoRoll):
         else:
             new_event = Event(start_time=new_beat, notes=[note])
             track.events.append(new_event)
-            track.events.sort(key=lambda e: e.start_time)
+            # Sorting removed from here; caller must sort at the end of the loop
             return new_event
 
     def _store_selection_states_if_needed(self, dragged_note) -> None:
@@ -472,51 +476,58 @@ class EditableMidiGrid(PianoRoll):
         if not dragged_note_final_event:
             return
 
-        # --- Calculer les deltas ---
-        pitch_delta = self._dragged_note.pitch - dragged_note_initial_state['pitch']
+        # --- Movement is now handled LIVE in on_touch_move ---
+        if self._drag_mode == 'move':
+            return
+
+        # --- Calculate deltas for resizing ---
         time_delta = dragged_note_final_event.start_time - dragged_note_initial_state['start_time']
         new_duration = self._dragged_note.duration
 
-        # --- Appliquer les transformations aux autres notes ---
+        # --- Apply the transformation to other notes in the selection ---
         for note_id, initial_state in self._selection_initial_states.items():
             if note_id == dragged_note_id:
-                continue # Déjà modifié par l'interaction directe
+                continue
 
             note = initial_state['note_obj']
-
-            # Appliquer les deltas
-            new_pitch = initial_state['pitch'] + pitch_delta
             new_start_time = initial_state['start_time'] + time_delta
 
-            if self._drag_mode == 'move':
-                note.pitch = max(0, min(127, new_pitch))
-                # Déplacer la note vers un nouvel événement
-                self._move_note_to_new_time(note, initial_state['event'], new_start_time)
-            elif self._drag_mode == 'resize_end':
+            if self._drag_mode == 'resize_end':
                 note.duration = new_duration
             elif self._drag_mode == 'resize_start':
-                # Pour un redimensionnement par le début, la durée et la position changent.
                 note.duration = new_duration
                 self._move_note_to_new_time(note, initial_state['event'], new_start_time)
 
         self.editor.is_dirty = True
 
     def _move_note_to_new_time(self, note, original_event, new_start_time) -> None:
-        # Retirer la note de l'événement d'origine par identité
-        if original_event and note in original_event.notes:
-            original_event.notes = [n for n in original_event.notes if n is not note]
-            if not original_event.notes and not original_event.cc_messages:
-                if original_event in self.editor.track_copy.events:
-                    self.editor.track_copy.events.remove(original_event)
+        """
+        Moves a note to a new start time, ensuring it is removed from any existing event
+        first to prevent duplicates.
+        """
+        track = self.editor.track_copy
 
-        target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_time) < 0.001), None)
+        # 1. Robust removal: Search the entire track for the note instance.
+        # This is necessary because the note might have been moved during drag
+        # and is no longer in the 'original_event' passed from initial state.
+        for event in list(track.events):
+            if any(n is note for n in event.notes):
+                event.notes = [n for n in event.notes if n is not note]
+                if not event.notes and not event.cc_messages:
+                    track.events.remove(event)
+                # Assuming a note exists only once in the track
+                break
+
+        # 2. Placement at new time
+        target_event = next((e for e in track.events if abs(e.start_time - new_start_time) < 0.001), None)
         if target_event:
-            # CORRECTION : Empêcher l'ajout si l'instance est déjà là
+            # Double check to prevent duplicates in the same event
             if not any(n is note for n in target_event.notes):
                 target_event.notes.append(note)
         else:
             new_event = Event(start_time=new_start_time, notes=[note])
-            self.editor.track_copy.add_event(new_event)
+            track.events.append(new_event)
+            # Re-sort is handled at the end of the move operation in on_touch_up
 
 class EditablePianoRollViewer(ScrollView):
     editor = ObjectProperty()
@@ -1073,7 +1084,7 @@ class PianoRollEditor(FloatingWindow):
             if keyboard in (276, 275): # Left, Right
                 timeline_scroll = self.ids.timeline_scroll
                 grid = self.ids.grid_viewer.grid
-                beats_per_measure: copy.Any | int = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
+                beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
                 measure_width_pixels = beats_per_measure * self.pixels_per_beat
                 max_scroll_pixels = grid.width - timeline_scroll.width
                 if max_scroll_pixels > 0:
@@ -1149,7 +1160,7 @@ class PianoRollEditor(FloatingWindow):
         """Définit la fin du morceau au début de la dernière mesure."""
         total_beats = self.total_beats
         # On récupère le numérateur de la signature temporelle (défaut 4)
-        beats_per_measure: copy.Any | int = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
+        beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
         
         if total_beats <= 0:
             target_beat = 0
@@ -1470,7 +1481,7 @@ class PianoRollEditor(FloatingWindow):
 
     def _set_editor_cursor(self) -> None:
         """Gère l'apparence du curseur selon le mode d'édition"""
-        mode: copy.Any | str = getattr(self, 'edit_mode', 'select')
+        mode = getattr(self, 'edit_mode', 'select')
         if mode == 'insert': Window.set_system_cursor('crosshair')
         elif mode == 'delete': Window.set_system_cursor('no')
         elif mode == 'move': Window.set_system_cursor('hand')

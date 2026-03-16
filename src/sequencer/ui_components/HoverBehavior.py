@@ -22,7 +22,7 @@ class HoverBehavior:
             Window.bind(mouse_pos=self._on_mouse_pos)
 
     def _on_mouse_pos(self, *args):
-        if not self.get_root_window():
+        if not self.get_root_window() or self.disabled or self.opacity == 0 or self.width <= 0 or self.height <= 0:
             if self.hovered:
                 self.hovered = False
                 self.dispatch('on_leave')

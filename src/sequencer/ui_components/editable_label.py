@@ -18,6 +18,7 @@ class EditableLabel(BoxLayout):
     color = ListProperty([1, 1, 1, 1])
     halign = StringProperty('left')
     valign = StringProperty('middle')
+    adaptive_width = BooleanProperty(True)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -29,7 +30,9 @@ class EditableLabel(BoxLayout):
 
     def _post_kv_init(self, *args):
         self.orientation = 'horizontal'
-        self.size_hint = (None, None)
+        if self.adaptive_width:
+            self.size_hint_x = None
+        self.size_hint_y = None
         self.height = dp(36)
         self._setup_view_mode()
 
@@ -39,23 +42,35 @@ class EditableLabel(BoxLayout):
         
         self.label = MDLabel(
             text=self.text,
-            adaptive_width=True,
+            adaptive_width=self.adaptive_width,
             font_size=self.font_size,
             bold=self.bold,
             theme_text_color="Custom",
             text_color=self.color,
             halign=self.halign,
             valign=self.valign,
-            size_hint_y=1
+            size_hint_y=1,
+            shorten=not self.adaptive_width,
+            shorten_from='right',
+            max_lines=1
         )
         
-        self.label.bind(texture_size=self._update_container_width)
+        if self.adaptive_width:
+            self.label.bind(texture_size=self._update_container_width)
+        else:
+            self.label.size_hint_x = 1
+            self.label.bind(size=self._update_text_size)
+
         self.label.bind(on_touch_down=self._enter_edit_mode)
         self.add_widget(self.label)
 
     def _update_container_width(self, instance, size):
-        if not self.edit_mode:
+        if not self.edit_mode and self.adaptive_width:
             self.width = size[0]
+
+    def _update_text_size(self, instance, size):
+        if not self.adaptive_width:
+            instance.text_size = size
 
     def _enter_edit_mode(self, instance, touch):
         if instance.collide_point(*touch.pos) and not self.edit_mode:
@@ -120,6 +135,16 @@ class EditableLabel(BoxLayout):
 
     def on_text_validated(self, *args):
         pass
+
+    def on_adaptive_width(self, instance, value):
+        if value:
+            self.size_hint_x = None
+        else:
+            self.size_hint_x = 1
+
+        if hasattr(self, 'label') and self.label:
+            # We need to re-setup to update label's adaptive_width and size_hint
+            self._setup_view_mode()
 
     def on_text(self, instance, value):
         if not self.edit_mode:

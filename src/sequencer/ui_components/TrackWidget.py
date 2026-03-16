@@ -2,7 +2,8 @@ from . import *  # Importe tous les imports communs
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
-from .HoverBehavior import HoverBehavior, HoverableMDButton
+from .HoverBehavior import HoverBehavior, HoverableMDButton, HoverableButton
+from .TooltipMDIconButton import TooltipMDIconButton
 from kivymd.uix.slider import MDSlider
 from .automation_editor import AutomationEditor
 from .AutomationCurve import AutomationCurveWidget
@@ -50,17 +51,30 @@ class DragHandle(Widget):
                 self.grips.append(Rectangle(size=(dp(4), dp(2))))
 
     def _update_canvas(self, *args):
-        self.bg_rect.pos = self.pos
+        # Coordinates are local because parent is a RelativeLayout
+        self.bg_rect.pos = (0, 0)
         self.bg_rect.size = self.size
 
-        # Center grips vertically
-        center_x = self.x + self.width / 2 - dp(2)
+        if self.height < dp(20) or self.track_widget.is_minimized: # Hide if minimized
+            for grip in self.grips:
+                grip.size = (0, 0)
+            return
+
+        # Center grips vertically using local coordinates
+        center_x = self.width / 2 - dp(2)
         spacing = dp(6)
-        total_height = 2 * spacing
-        start_y = self.y + self.height / 2 - total_height / 2
+        num_grips = len(self.grips)
+        total_height = (num_grips - 1) * spacing
+        start_y = self.height / 2 - total_height / 2
 
         for i, grip in enumerate(self.grips):
-            grip.pos = (center_x, start_y + i * spacing)
+            grip_y = start_y + i * spacing
+            # Hide grips if they are outside the handle area
+            if grip_y < dp(1) or grip_y + dp(2) > self.height - dp(1):
+                grip.size = (0, 0)
+            else:
+                grip.pos = (center_x, grip_y)
+                grip.size = (dp(4), dp(2))
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
@@ -242,7 +256,7 @@ class MidiInputSelectorPopup(Popup):
         self.dismiss()
 
 
-class TrackWidget(BoxLayout):
+class TrackWidget(HoverBehavior, BoxLayout):
     """
     Represents a single track in the sequencer UI. It contains the track's info,
     a timeline for its content (which can be a piano roll for MIDI or a waveform for audio),
@@ -256,6 +270,8 @@ class TrackWidget(BoxLayout):
     controls_width = NumericProperty(dp(430))
     is_active_routing = BooleanProperty(False)    
     track_index = NumericProperty(0)
+    is_minimized = BooleanProperty(False)
+    full_height = NumericProperty(dp(160))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         kwargs.setdefault('orientation', 'vertical')
@@ -299,9 +315,41 @@ class TrackWidget(BoxLayout):
         # Fixed-height wrapper for info elements (except DragHandle)
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8))
 
-        # Drag handle (far left) - Remains full height
+        # Handle container for DragHandle and MinimizeButton
+        self.handle_container = RelativeLayout(size_hint=(None, 1), width=dp(12))
+        with self.handle_container.canvas.before:
+            Color(0.15, 0.15, 0.15, 1)
+            self.handle_bg_rect = Rectangle()
+        self.handle_container.bind(pos=self._update_handle_bg, size=self._update_handle_bg)
+
+        # Drag handle (takes full height in background)
         self.drag_handle = DragHandle(track_widget=self)
-        self.info_section.add_widget(self.drag_handle)
+        self.drag_handle.size_hint = (1, 1)
+        self.drag_handle.pos_hint = {'x': 0, 'y': 0}
+        self.handle_container.add_widget(self.drag_handle)
+
+        # Minimize button (anchored at the bottom)
+        self.minimize_button = HoverableButton(
+            text="-" if not self.is_minimized else "+",
+            size_hint=(None, None),
+            size=(dp(12), dp(20)),
+            pos_hint={'x': 0, 'y': 0},
+            background_normal='',
+            background_color=(0, 0, 0, 0),
+            color=[1, 1, 1, 0.6],
+            font_size=dp(16),
+            bold=True,
+            padding=[0, 0],
+            halign='center',
+            valign='middle',
+            opacity=1
+        )
+        self.minimize_button.bind(size=self.minimize_button.setter('text_size'))
+        self.minimize_button.bind(on_press=self.toggle_minimize)
+        self.handle_container.add_widget(self.minimize_button)
+        self.bind(is_minimized=self._update_minimize_button_text)
+
+        self.info_section.add_widget(self.handle_container)
 
         # Container for other info elements - Fixed at top, clipped if track is too small
         self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
@@ -324,7 +372,7 @@ class TrackWidget(BoxLayout):
             theme_text_color="Custom",
             text_color=[0.7, 0.7, 0.7, 1],
             bold=True,
-            size_hint_x=None,
+            size_hint=(None, 1),
             width=dp(30),
             padding=labelPadding,
         )
@@ -337,7 +385,9 @@ class TrackWidget(BoxLayout):
             bold=True,
             color=[0.9, 0.9, 0.9, 1],
             pos_hint={'center_y': 0.5},
-            padding=[0, 0, 0, dp(1)] #bottom=1dp → monte le texte de 1 pixel
+            padding=[0, 0, 0, dp(1)], #bottom=1dp → monte le texte de 1 pixel
+            adaptive_width=True,
+            size_hint=(1, 1)
         )
         self.name_label.bind(on_text_validated=self.on_name_validated)
         self.info_top_bar.add_widget(self.name_label)
@@ -919,6 +969,111 @@ class TrackWidget(BoxLayout):
         if hasattr(self, 'record_mode_button'):
             self.record_mode_button.update_appearance()
 
+    def on_enter(self, *args):
+        """Called when the mouse enters the widget area."""
+        Window.set_system_cursor('hand')
+
+    def on_leave(self, *args):
+        """Called when the mouse leaves the widget area."""
+        Window.set_system_cursor('arrow')
+
+    def _update_handle_bg(self, instance, value):
+        if hasattr(self, 'handle_bg_rect'):
+            # RelativeLayout: (0,0) is the bottom-left of the container
+            self.handle_bg_rect.pos = (0, 0)
+            self.handle_bg_rect.size = instance.size
+
+    def _update_minimize_button_text(self, instance, value):
+        self.minimize_button.text = '+' if value else '-'
+
+    def toggle_minimize(self, instance=None):
+        self.is_minimized = not self.is_minimized
+
+        if self.is_minimized:
+            self.full_height = self.height
+            self.height = dp(40)
+
+            # Save timeline widgets to remove them
+            self._temp_timeline_widgets = []
+            if hasattr(self, 'keyboard_sv'):
+                self._temp_timeline_widgets.append(self.keyboard_sv)
+            if hasattr(self, 'icon_layout'):
+                self._temp_timeline_widgets.append(self.icon_layout)
+            self._temp_timeline_widgets.append(self.timeline_scroll)
+
+            for w in self._temp_timeline_widgets:
+                if w in self.children:
+                    self.remove_widget(w)
+
+            self.controls_section.opacity = 0
+            self.controls_section.disabled = True
+            self.controls_section.size_hint_x = None
+            self.controls_section.width = 0
+
+            if hasattr(self, 'target_indicator_icon'):
+                self.target_indicator_icon.opacity = 0
+                self.target_indicator_icon.disabled = True
+                self.target_indicator_icon.size_hint_x = None
+                self.target_indicator_icon.width = 0
+
+            # Allow left_panel and info_section to fill width
+            self.spacing = 0
+            self.left_panel.spacing = 0
+            self.left_panel.size_hint_x = 1
+
+            self.info_section.size_hint_x = 1
+            self.info_section.padding = [0, 0, dp(4), 0]
+
+            self.name_label.adaptive_width = False
+            self.name_label.size_hint_x = 1
+
+            if hasattr(self, 'vert_separator'):
+                self.vert_separator.size = (0, 0)
+        else:
+            self.height = self.full_height
+
+            # Restore sections
+            self.controls_section.opacity = 1
+            self.controls_section.disabled = False
+            self.controls_section.size_hint_x = None
+            self.controls_section.width = self.controls_width
+
+            if hasattr(self, 'target_indicator_icon'):
+                self.target_indicator_icon.opacity = 1
+                self.target_indicator_icon.disabled = False
+                self.target_indicator_icon.size_hint_x = None
+                self.target_indicator_icon.width = dp(24)
+
+            # Re-add timeline widgets in correct order
+            if hasattr(self, 'keyboard_sv'):
+                if self.keyboard_sv not in self.children:
+                    self.add_widget(self.keyboard_sv)
+            elif hasattr(self, 'icon_layout'):
+                if self.icon_layout not in self.children:
+                    self.add_widget(self.icon_layout)
+
+            if self.timeline_scroll not in self.children:
+                self.add_widget(self.timeline_scroll)
+
+            self.spacing = dp(12)
+            self.left_panel.spacing = dp(12)
+            self.left_panel.size_hint_x = None
+            self.left_panel.width = self.info_width + self.controls_width + self.spacing
+
+            self.info_section.size_hint_x = None
+            self.info_section.width = self.info_width
+            self.info_section.padding = [0, 0, dp(10), 0]
+
+            self.name_label.adaptive_width = True
+            self.name_label.size_hint_x = 1
+
+            if hasattr(self, 'vert_separator'):
+                # Size will be updated in _update_graphics
+                pass
+
+        # Update visual separator and other graphics
+        self._update_graphics()
+
     def _update_bg_color(self, *args):
         """
         Update the background color of the track widget based on its state.
@@ -1052,6 +1207,10 @@ class TrackWidget(BoxLayout):
         self.background_rect.size = self.size
 
         if hasattr(self, 'vert_separator'):
+            if self.is_minimized:
+                self.vert_separator.size = (0, 0)
+                return
+
             # On cherche le point de séparation le plus fiable
             # On utilise le bord droit du left_panel pour placer le séparateur
             if hasattr(self, 'left_panel'):

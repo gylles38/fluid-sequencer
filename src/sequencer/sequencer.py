@@ -1,5 +1,6 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
+from .gp_import import import_gp
 from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
 from .models import (AnyTrack, AudioTrack, AutomationTrack, AutomationPoint,
@@ -1666,6 +1667,26 @@ class Sequencer(EventDispatcher):
         new_point = AutomationPoint(start_time=current_beat, parameter=mapping.action, value=point_value, curve='linear')
         auto_track.add_point(new_point)
         self.is_dirty = True
+
+    def load_gp_file(self, filepath: str) -> str:
+        """Loads a GuitarPro file as a new project."""
+        try:
+            self.song = import_gp(filepath)
+            self.tempo = self.song.tempo
+            self.is_dirty = True
+            self.last_project_basename = None
+            self.invalidate_song_length_cache()
+            self.last_record_settings = None
+
+            if self.jack_manager:
+                self.jack_manager._manual_routing_override = -1
+                initial_idx = self.jack_manager._get_input_routing_value(0.0)
+                if initial_idx is not None:
+                    self.current_routing_index = initial_idx
+
+            return f"Successfully loaded GuitarPro file from '{filepath}'."
+        except Exception as e:
+            return f"Error loading GuitarPro file: {e}"
 
     def load_song(self, filepath: str) -> str:
         try:

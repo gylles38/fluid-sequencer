@@ -136,6 +136,7 @@ class SequencerLayout(BoxLayout):
             {"leading_icon": "folder-open", "text": "Load Project", "on_release": lambda: self.menu_action(self.load_project_popup)},
             {"leading_icon": "content-save", "text": "Save Project", "on_release": lambda: self.menu_action(self.save_project)},
             {"leading_icon": "file-import", "text": "Import MIDI file", "on_release": lambda: self.menu_action(self.import_midi_popup)},
+            {"leading_icon": "file-music", "text": "Import GuitarPro file", "on_release": lambda: self.menu_action(self.import_gp_popup)},
             {"leading_icon": "file-export", "text": "Export MIDI file...", "on_release": lambda: self.menu_action(self.export_midi_popup)},
             {"leading_icon": "content-save-edit", "text": "Save Project As...", "on_release": lambda: self.menu_action(self.save_project_as_popup)},
             {"leading_icon": "exit-to-app", "text": "Quit", "on_release": lambda: self.menu_action(lambda: self.process_command_ui('quit'))},
@@ -1248,6 +1249,40 @@ class SequencerLayout(BoxLayout):
         # Pour start_pos_input et end_pos_input
         # La gestion spécifique dépend de quel champ a changé
         pass
+
+    def import_gp_popup(self):
+        """Opens a file chooser to select a GuitarPro file to import as a new project."""
+        def file_chooser_callback(filepath):
+            if filepath:
+                # Need to handle unsaved changes confirmation
+                if self.sequencer.is_dirty:
+                    def on_confirm(choice):
+                        if choice.lower() == 'y':
+                            result = self.sequencer.load_gp_file(filepath)
+                            self.show_info_popup("GuitarPro Import", result)
+                            self.update_status_display()
+                            if hasattr(self, 'ruler'):
+                                self.ruler.redraw()
+
+                    popup = YesNoPopup(
+                        prompt_text="Loading a new file will discard unsaved changes. Continue? [y/N]",
+                        callback=on_confirm
+                    )
+                    popup.open()
+                else:
+                    result = self.sequencer.load_gp_file(filepath)
+                    self.show_info_popup("GuitarPro Import", result)
+                    self.update_status_display()
+                    if hasattr(self, 'ruler'):
+                        self.ruler.redraw()
+
+        popup = FileChooserPopup(
+            callback=file_chooser_callback,
+            title="Import GuitarPro File",
+            filters=['*.gp', '*.gp3', '*.gp4', '*.gp5', '*.gpx'],
+            path=self.sequencer.config_manager.get_setting('default_audio_files_dir')
+        )
+        popup.open()
 
     def import_midi_popup(self):
         """Opens a file chooser to select a MIDI file to import."""

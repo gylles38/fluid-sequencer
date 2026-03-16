@@ -1247,7 +1247,7 @@ class JackManager:
         Returns a set of (track_index, parameter_name) tuples that were primed.
         """
         primed_params = set()
-        param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
+        param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, "pitch": {"type": "pitch_bend"}, "pb": {"type": "pitch_bend"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
         for track in self.sequencer.song.tracks:
             if not isinstance(track, AutomationTrack):
@@ -1354,6 +1354,15 @@ class JackManager:
                     port = self.open_ports[target_track.output_port_name]
                     program_value = max(0, min(127, int(value)))
                     msg = mido.Message('program_change', channel=target_track.channel, program=program_value)
+                    port.send(msg)
+            elif param_config.get('type') == 'pitch_bend':
+                if target_track.output_port_name in self.open_ports:
+                    port = self.open_ports[target_track.output_port_name]
+                    # Pitch bend value is 14-bit: -8192 to 8191.
+                    # We assume 'value' is normalized -1.0 to 1.0 (or similar)
+                    pb_value = int(value * 8192)
+                    pb_value = max(-8192, min(8191, pb_value))
+                    msg = mido.Message('pitchwheel', channel=target_track.channel, pitch=pb_value)
                     port.send(msg)
             elif param_config.get('type') == 'velocity_multiplier':
                 target_track.velocity = float(value)
@@ -1668,6 +1677,8 @@ class JackManager:
             "pan": {"type": "midi_cc", "control": 10},
             "vel": {"type": "velocity_multiplier"},
             "prog": {"type": "program_change"},
+            "pitch": {"type": "pitch_bend"},
+            "pb": {"type": "pitch_bend"},
             **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}
         }
 

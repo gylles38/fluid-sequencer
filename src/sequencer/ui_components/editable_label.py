@@ -61,6 +61,8 @@ class EditableLabel(BoxLayout):
         else:
             self.label.size_hint_x = 1
             self.label.bind(size=self._update_text_size)
+            # Ensure text size is initialized correctly for non-adaptive mode
+            self.label.text_size = self.label.size
 
         self.label.bind(on_touch_down=self._enter_edit_mode)
         self.add_widget(self.label)

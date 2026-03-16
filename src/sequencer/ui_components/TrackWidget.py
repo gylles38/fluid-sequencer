@@ -314,7 +314,6 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.add_widget(self.resize_handle)
 
         # --- Left Section: Track Info ---
-        # Fixed-height wrapper for info elements (except DragHandle)
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8))
 
         # Handle container for DragHandle and MinimizeButton
@@ -353,13 +352,12 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         self.info_section.add_widget(self.handle_container)
 
-        # Container for other info elements - Fixed at top, clipped if track is too small
+        # Container for other info elements - Centered, clipped if track is too small
         self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
-        self.info_clipped_rel = RelativeLayout(size_hint=(None, None), pos=(0, 0))
-        self.info_clipped_wrapper.bind(size=self.info_clipped_rel.setter('size'))
+        self.info_clipped_rel = RelativeLayout(size_hint=(1, 1))
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
 
-        # Header bar for name and index - Fills height
+        # Header bar for name and index - Use size_hint_y=1 to fill main_row height
         self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, 1))
         self.info_clipped_rel.add_widget(self.info_top_bar)
 
@@ -378,6 +376,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             width=dp(30),
             padding=labelPadding,
         )
+        self.index_label.bind(size=self.index_label.setter('text_size'))
         self.info_top_bar.add_widget(self.index_label)
 
         # Editable track name
@@ -412,8 +411,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # --- Middle Section: Controls ---
         # Robust clipping container
         self.controls_wrapper = StencilView(size_hint_x=None, width=self.controls_width, size_hint_y=1)
-        self.controls_clipped_rel = RelativeLayout(size_hint=(None, None), pos=(0, 0))
-        self.controls_wrapper.bind(size=self.controls_clipped_rel.setter('size'))
+        self.controls_clipped_rel = RelativeLayout(size_hint=(1, 1))
         self.controls_wrapper.add_widget(self.controls_clipped_rel)
 
         self.controls_section = BoxLayout(size_hint=(1, 1), spacing=dp(8))
@@ -707,10 +705,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.main_row.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
-            # Create a layout for the track type icon, fixed height at top
+            # Create a layout for the track type icon
             self.icon_wrapper = StencilView(size_hint_x=None, width=dp(40), size_hint_y=1)
-            self.icon_clipped_rel = RelativeLayout(size_hint=(None, None), pos=(0, 0))
-            self.icon_wrapper.bind(size=self.icon_clipped_rel.setter('size'))
+            self.icon_clipped_rel = RelativeLayout(size_hint=(1, 1))
             self.icon_wrapper.add_widget(self.icon_clipped_rel)
 
             self.icon_layout = BoxLayout(
@@ -1003,10 +1000,11 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 if w in self.main_row.children:
                     self.main_row.remove_widget(w)
 
-            self.controls_section.opacity = 0
-            self.controls_section.disabled = True
-            self.controls_section.size_hint_x = None
-            self.controls_section.width = 0
+            # Properly hide controls section by hiding its wrapper
+            self.controls_wrapper.opacity = 0
+            self.controls_wrapper.disabled = True
+            self.controls_wrapper.size_hint_x = None
+            self.controls_wrapper.width = 0
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 0
@@ -1015,7 +1013,6 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 self.target_indicator_icon.width = 0
 
             # Allow left_panel and info_section to fill width
-            self.spacing = 0
             self.left_panel.spacing = 0
             self.left_panel.size_hint_x = 1
 
@@ -1036,10 +1033,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.height = self.full_height
 
             # Restore sections
-            self.controls_section.opacity = 1
-            self.controls_section.disabled = False
-            self.controls_section.size_hint_x = None
-            self.controls_section.width = self.controls_width
+            self.controls_wrapper.opacity = 1
+            self.controls_wrapper.disabled = False
+            self.controls_wrapper.size_hint_x = None
+            self.controls_wrapper.width = self.controls_width
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 1
@@ -1061,10 +1058,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 self.timeline_scroll.parent.remove_widget(self.timeline_scroll)
             self.main_row.add_widget(self.timeline_scroll)
 
-            self.spacing = dp(12)
             self.left_panel.spacing = dp(12)
             self.left_panel.size_hint_x = None
-            self.left_panel.width = self.info_width + self.controls_width + self.spacing
+            self.left_panel.width = self.info_width + self.controls_width + dp(12)
 
             self.info_section.size_hint_x = None
             self.info_section.width = self.info_width

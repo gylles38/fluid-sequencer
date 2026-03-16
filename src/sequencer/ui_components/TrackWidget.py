@@ -50,7 +50,8 @@ class DragHandle(Widget):
                 self.grips.append(Rectangle(size=(dp(4), dp(2))))
 
     def _update_canvas(self, *args):
-        self.bg_rect.pos = self.pos
+        # Coordinates are local because parent is a RelativeLayout
+        self.bg_rect.pos = (0, 0)
         self.bg_rect.size = self.size
 
         if self.height < dp(20) or self.track_widget.is_minimized: # Hide if minimized
@@ -58,17 +59,17 @@ class DragHandle(Widget):
                 grip.size = (0, 0)
             return
 
-        # Center grips vertically
-        center_x = self.x + self.width / 2 - dp(2)
+        # Center grips vertically using local coordinates
+        center_x = self.width / 2 - dp(2)
         spacing = dp(6)
         num_grips = len(self.grips)
         total_height = (num_grips - 1) * spacing
-        start_y = self.y + self.height / 2 - total_height / 2
+        start_y = self.height / 2 - total_height / 2
 
         for i, grip in enumerate(self.grips):
             grip_y = start_y + i * spacing
-            # Hide grips if they are outside the handle area (especially when minimized)
-            if grip_y < self.y + dp(1) or grip_y + dp(2) > self.top - dp(1):
+            # Hide grips if they are outside the handle area
+            if grip_y < dp(1) or grip_y + dp(2) > self.height - dp(1):
                 grip.size = (0, 0)
             else:
                 grip.pos = (center_x, grip_y)
@@ -851,7 +852,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
     def _update_handle_bg(self, instance, value):
         if hasattr(self, 'handle_bg_rect'):
-            self.handle_bg_rect.pos = instance.pos
+            # RelativeLayout: (0,0) is the bottom-left of the container
+            self.handle_bg_rect.pos = (0, 0)
             self.handle_bg_rect.size = instance.size
 
     def _update_minimize_button_text(self, instance, value):

@@ -995,6 +995,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.full_height = self.height
             self.height = dp(40)
 
+            # Reduce height of internal containers to match minimized height
+            self.info_top_bar.height = dp(40)
+            self.controls_section.height = dp(40)
+
             # Save timeline widgets to remove them
             self._temp_timeline_widgets = []
             if hasattr(self, 'keyboard_sv'):
@@ -1032,12 +1036,15 @@ class TrackWidget(HoverBehavior, BoxLayout):
             if hasattr(self, 'vert_separator'):
                 self.vert_separator.size = (0, 0)
 
-            # Disable resizing while minimized
-            self.resize_handle.disabled = True
-            self.resize_handle.opacity = 0
-            self.resize_handle.height = 0
+            # Remove resize handle when minimized to let main_row take full height
+            if self.resize_handle in self.children:
+                self.remove_widget(self.resize_handle)
         else:
             self.height = self.full_height
+
+            # Restore internal heights
+            self.info_top_bar.height = dp(160)
+            self.controls_section.height = dp(160)
 
             # Restore sections
             self.controls_section.opacity = 1
@@ -1078,10 +1085,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 # Size will be updated in _update_graphics
                 pass
 
-            # Re-enable resizing
-            self.resize_handle.disabled = False
-            self.resize_handle.opacity = 1
-            self.resize_handle.height = dp(12)
+            # Add resize handle back
+            if self.resize_handle not in self.children:
+                self.add_widget(self.resize_handle)
 
         # Update visual separator and other graphics
         self._update_graphics()

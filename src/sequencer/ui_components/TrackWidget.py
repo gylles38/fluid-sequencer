@@ -359,8 +359,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
         self.info_clipped_wrapper.bind(pos=self.info_clipped_rel.setter('pos'), size=self.info_clipped_rel.setter('size'))
 
-        # Header bar for name and index - Centered vertically
-        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'center_y': 0.5})
+        # Header bar for name and index - Fills height
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, 1))
         self.info_clipped_rel.add_widget(self.info_top_bar)
 
         self.info_section.add_widget(self.info_clipped_wrapper)
@@ -416,7 +416,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.controls_wrapper.add_widget(self.controls_clipped_rel)
         self.controls_wrapper.bind(pos=self.controls_clipped_rel.setter('pos'), size=self.controls_clipped_rel.setter('size'))
 
-        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'center_y': 0.5})
+        self.controls_section = BoxLayout(size_hint=(1, 1), spacing=dp(8))
         self.controls_clipped_rel.add_widget(self.controls_section)
 
         # --- Solo Button (not for Automation tracks) ---
@@ -486,11 +486,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # --- MIDI Specific Controls (Channel, Program) ---
         midi_controls_layout = BoxLayout(
             orientation='vertical',
-            size_hint=(None, None),
-            height=dp(160),
+            size_hint=(None, 1),
             width=dp(170),  # Increased width
-            spacing=0,
-            pos_hint={'center_y': 0.5}
+            spacing=0
         )
 
         if isinstance(track, MidiTrack):
@@ -556,7 +554,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
+        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, 1), width=dp(50), spacing=0)
 
         mute_button_container = BoxLayout(size_hint_y=None, height=dp(36), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
@@ -590,7 +588,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         # --- Pan Controls ---
         if not isinstance(track, AutomationTrack):
-            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
+            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, 1), width=dp(50), spacing=0)
 
             pan_icon_container = BoxLayout(size_hint_y=None, height=dp(36))
             pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'center_y': 0.5})
@@ -716,10 +714,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.icon_wrapper.bind(pos=self.icon_clipped_rel.setter('pos'), size=self.icon_clipped_rel.setter('size'))
 
             self.icon_layout = BoxLayout(
-                size_hint=(1, None),
-                height=dp(160),
-                orientation='vertical',
-                pos_hint={'center_y': 0.5}
+                size_hint=(1, 1),
+                orientation='vertical'
             )
             self.icon_clipped_rel.add_widget(self.icon_layout)
 
@@ -995,10 +991,6 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.full_height = self.height
             self.height = dp(40)
 
-            # Reduce height of internal containers to match minimized height
-            self.info_top_bar.height = dp(40)
-            self.controls_section.height = dp(40)
-
             # Save timeline widgets to remove them
             self._temp_timeline_widgets = []
             if hasattr(self, 'keyboard_sv'):
@@ -1036,15 +1028,12 @@ class TrackWidget(HoverBehavior, BoxLayout):
             if hasattr(self, 'vert_separator'):
                 self.vert_separator.size = (0, 0)
 
-            # Remove resize handle when minimized to let main_row take full height
-            if self.resize_handle in self.children:
-                self.remove_widget(self.resize_handle)
+            # Disable resizing while minimized
+            self.resize_handle.disabled = True
+            self.resize_handle.opacity = 0
+            self.resize_handle.height = 0
         else:
             self.height = self.full_height
-
-            # Restore internal heights
-            self.info_top_bar.height = dp(160)
-            self.controls_section.height = dp(160)
 
             # Restore sections
             self.controls_section.opacity = 1
@@ -1060,14 +1049,17 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             # Re-add timeline widgets in correct order
             if hasattr(self, 'keyboard_sv'):
-                if self.keyboard_sv not in self.main_row.children:
-                    self.main_row.add_widget(self.keyboard_sv)
-            elif hasattr(self, 'icon_wrapper'): # Changed from icon_layout to icon_wrapper
-                if self.icon_wrapper not in self.main_row.children:
-                    self.main_row.add_widget(self.icon_wrapper)
+                if self.keyboard_sv.parent:
+                    self.keyboard_sv.parent.remove_widget(self.keyboard_sv)
+                self.main_row.add_widget(self.keyboard_sv)
+            elif hasattr(self, 'icon_wrapper'):
+                if self.icon_wrapper.parent:
+                    self.icon_wrapper.parent.remove_widget(self.icon_wrapper)
+                self.main_row.add_widget(self.icon_wrapper)
 
-            if self.timeline_scroll not in self.main_row.children:
-                self.main_row.add_widget(self.timeline_scroll)
+            if self.timeline_scroll.parent:
+                self.timeline_scroll.parent.remove_widget(self.timeline_scroll)
+            self.main_row.add_widget(self.timeline_scroll)
 
             self.spacing = dp(12)
             self.left_panel.spacing = dp(12)
@@ -1085,9 +1077,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 # Size will be updated in _update_graphics
                 pass
 
-            # Add resize handle back
-            if self.resize_handle not in self.children:
-                self.add_widget(self.resize_handle)
+            # Re-enable resizing
+            self.resize_handle.disabled = False
+            self.resize_handle.opacity = 1
+            self.resize_handle.height = dp(12)
 
         # Update visual separator and other graphics
         self._update_graphics()

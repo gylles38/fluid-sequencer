@@ -32,8 +32,9 @@ class EditableLabel(BoxLayout):
         self.orientation = 'horizontal'
         if self.adaptive_width:
             self.size_hint_x = None
-        self.size_hint_y = None
-        self.height = dp(36)
+        # Respect size_hint_y if it was set during initialization (defaults to 1 if not set)
+        if self.size_hint_y is None:
+            self.height = dp(36)
         self._setup_view_mode()
 
     def _setup_view_mode(self):

@@ -1669,8 +1669,16 @@ class Sequencer(EventDispatcher):
         self.is_dirty = True
 
     def load_gp_file(self, filepath: str) -> str:
-        """Loads a GuitarPro file as a new project."""
+        """Loads a GuitarPro file as a new project and sets up virtual ports."""
         try:
+            if self.playback_state != "stopped":
+                self.stop()
+
+            # Close and clear existing virtual ports
+            self.close_virtual_ports()
+            self.virtual_ports = []
+
+            # Perform the import
             self.song = import_gp(filepath)
             self.tempo = self.song.tempo
             self.is_dirty = True
@@ -1678,13 +1686,25 @@ class Sequencer(EventDispatcher):
             self.invalidate_song_length_cache()
             self.last_record_settings = None
 
+            # Create virtual ports for each MIDI track and assign them
+            for track in self.song.tracks:
+                if is_midi_track(track):
+                    port_name = track.name
+                    # Make sure the port name is unique if needed, but for now we use the track name
+                    self.create_virtual_port(port_name)
+                    track.output_port_name = port_name
+
+            # Restart Jack Manager to register new ports and handle routing
             if self.jack_manager:
+                self.jack_manager.stop()
+                self.jack_manager.start()
+
                 self.jack_manager._manual_routing_override = -1
                 initial_idx = self.jack_manager._get_input_routing_value(0.0)
                 if initial_idx is not None:
                     self.current_routing_index = initial_idx
 
-            return f"Successfully loaded GuitarPro file from '{filepath}'."
+            return f"Successfully loaded GuitarPro file from '{filepath}' and created virtual ports."
         except Exception as e:
             return f"Error loading GuitarPro file: {e}"
 

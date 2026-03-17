@@ -2569,7 +2569,7 @@ class Sequencer(EventDispatcher):
         generated_events.sort(key=lambda e: e['time'])
         return generated_events
 
-    def _resync_all_at_beat(self, beat: float, force_play: bool = False):
+    def _resync_all_at_beat(self, beat: float, force_play: bool = False, synchronous: bool = False):
         """
         Resynchronizes all tracks to a specific beat.
         If JACK is running, it repositions the master transport. Otherwise, it just
@@ -2621,7 +2621,7 @@ class Sequencer(EventDispatcher):
 
             # 4. Synchroniser les lecteurs externes avec la nouvelle position (l'état interne est déjà à jour)
             print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
-            self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
+            self.jack_manager.seek_audio_to_beat(beat, synchronous=synchronous)
             print("[DIAGNOSTIC] Audio track seek complete.")
 
             # 5. Régénérer les événements d'automation pour refléter le nouvel état (solo/mute)

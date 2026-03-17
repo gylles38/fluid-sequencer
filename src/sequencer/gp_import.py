@@ -31,7 +31,7 @@ def import_gp(filepath: str) -> Song:
         # 1. Create the MIDI track
         track_name = gp_track.name if gp_track.name else f"Track {gp_track.number}"
         midi_track = MidiTrack(name=track_name)
-        midi_track.channel = max(0, min(15, gp_track.channel.number - 1))
+        midi_track.channel = max(0, min(15, gp_track.channel.channel - 1))
         midi_track.instrument = max(0, min(127, gp_track.channel.instrument))
 
         # 2. Extract notes and bends

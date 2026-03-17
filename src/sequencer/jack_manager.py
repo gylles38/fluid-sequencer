@@ -1490,7 +1490,7 @@ class JackManager:
                     self._metronome_notes_to_turn_off.clear()
 
                 if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:
-                    if self._active_notes:
+                    if self._active_notes or self._sustained_notes:
                         for (track_idx, pitch), (end_beat, velocity) in list(self._active_notes.items()):
                             track = self.sequencer.song.tracks[track_idx]
                             if is_midi_track(track) and track.output_port_name in self.open_ports:
@@ -1500,8 +1500,18 @@ class JackManager:
                                 # Sustain and All notes off to be sure
                                 port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))
                                 port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
+                        # Handle sustained notes that might not be in _active_notes
+                        for (track_idx, pitch) in list(self._sustained_notes):
+                            track = self.sequencer.song.tracks[track_idx]
+                            if is_midi_track(track) and track.output_port_name in self.open_ports:
+                                port = self.open_ports[track.output_port_name]
+                                port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))
+                                port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                                port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+
                         self._active_notes.clear()
-                    self._sustained_notes.clear()
+                        self._sustained_notes.clear()
                     return
 
                 start_beat_of_block = self.last_beat

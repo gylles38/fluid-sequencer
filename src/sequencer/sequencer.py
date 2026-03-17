@@ -2707,6 +2707,10 @@ class Sequencer(EventDispatcher):
                 current_beat = self._get_current_beat()
                 print(f"\n[DIAGNOSTIC] --- PAUSING at beat {current_beat:.6f} ---")
                 self.jack_manager.jack_client.transport_stop()
+
+                # Silence all MIDI notes to prevent hanging notes during pause
+                self.jack_manager.silence_all_midi_notes()
+
                 self.playback_state = "paused"
                 # Store the precise beat for resume
                 self.pause_beat = current_beat

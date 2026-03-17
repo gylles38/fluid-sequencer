@@ -805,8 +805,8 @@ class JackManager:
     def silence_all_midi_notes(self):
         """
         TOTAL NUCLEAR SURGICAL SILENCE for all MIDI sound across all ports and channels.
-        Used for Panic, stop, and project transitions.
-        Specifically optimized for stubborn organ plugins like Collab3/Carla.
+        Optimized to avoid buffer overflow by pacing messages channel by channel.
+        Specifically optimized for organ plugins like Collab3/Carla.
         """
         # 1. Snapshot and clear internal tracking under lock
         with self.sync_lock:
@@ -854,6 +854,7 @@ class JackManager:
                     port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
                     port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                     port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
+                time.sleep(0.01) # Small delay to prevent MIDI buffer overflow
 
             # --- PASS 2: TOTAL 16-CHANNEL NOTE SWEEP ---
             # Exhaustive 128-note sweep on EVERY channel.
@@ -862,6 +863,7 @@ class JackManager:
                     port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
                     # Some plugins respond better to Note On velocity 0
                     port.send(mido.Message('note_on', channel=ch, note=pitch, velocity=0))
+                time.sleep(0.005) # Pacing between channels to prevent buffer drops
 
             # --- PASS 3: RESTORE AUDIBILITY ---
             # Restore Volume so it's not silent for next playback
@@ -1689,12 +1691,14 @@ class JackManager:
                     port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                     port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
                     port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
+                time.sleep(0.01) # Pacing
 
                 # Targeted individual Note Off sweep for relevant channels
                 # Covers common keyboard outputs and track-specific channel.
                 for ch in {0, 1, 9, track.channel}:
                     for pitch in range(128):
                         port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+                    time.sleep(0.005) # Pacing between channels
 
             # 4. Cleanup internal state tracking under lock
             with self.sync_lock:

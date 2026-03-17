@@ -88,7 +88,8 @@ def import_gp(filepath: str) -> Song:
                                     rel_pos = point.position / 60.0
                                     abs_beat = voice_beat_time + (rel_pos * beat_duration)
                                     # Normalization for internal pitch bend (-1.0 to 1.0, assuming 2 semitones range)
-                                    norm_val = point.value / 8.0
+                                    # GP point.value is in quarter tones. 4 quarter tones = 2 semitones (Standard MIDI Range).
+                                    norm_val = point.value / 4.0
                                     bend_points.append((abs_beat, norm_val))
 
                         if event.notes:

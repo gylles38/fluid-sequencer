@@ -18,8 +18,9 @@ def import_gp(filepath: str) -> Song:
                 if header == b'Kpro':
                      raise ValueError("GP7/GP8 files (.gp) are not supported by pyguitarpro. Please export them to GP5 first.")
         except ValueError as ve:
-             raise ve
-        except: pass
+            raise ve
+        except:
+            pass
         raise ValueError(f"Error parsing GuitarPro file: {e}")
 
     song = Song(name=gp_song.title or os.path.basename(filepath), tempo=gp_song.tempo)
@@ -64,7 +65,7 @@ def import_gp(filepath: str) -> Song:
                         enters = getattr(beat.duration.tuplet, 'enters', getattr(beat.duration.tuplet, 'enter', 1))
                         times = beat.duration.tuplet.times
                         if enters > 0:
-                             beat_duration = beat_duration * times / enters
+                            beat_duration = beat_duration * times / enters
 
                     if beat.notes:
                         event = Event(start_time=voice_beat_time)

@@ -88,7 +88,7 @@ class EditableMidiGrid(PianoRoll):
         if hasattr(self, 'canvas'):
             with self.canvas.after:
                 Color(1, 0, 0, 0.8)
-                self.playback_rect = Rectangle(pos=(self.playback_line_x, 0), size=(dp(2), self.height))
+                self.playback_rect = Rectangle(pos=(self.x + self.playback_line_x, self.y), size=(dp(2), self.height))
 
                 # Re-add selection rectangle if in selection mode
                 if self._selection_group:
@@ -101,7 +101,7 @@ class EditableMidiGrid(PianoRoll):
     def set_playback_line_x(self, x):
         self.playback_line_x = x
         if self.playback_rect:
-            self.playback_rect.pos = (x, 0)
+            self.playback_rect.pos = (self.x + x, self.y)
 
     def on_touch_move(self, touch) -> None | bool:
         if touch.grab_current is not self:

@@ -24,13 +24,14 @@ class PianoRoll(Widget):
         self.size_hint = (None, None)
         self.height = 128 * self.note_height
 
-        self.bind(total_beats=self.redraw, pixels_per_beat=self.redraw,
+        self.bind(total_beats=self.redraw, pixels_per_beat=self.redraw, note_height=self.redraw,
                   track=self.redraw, pos=self.redraw, size=self.redraw)
         self.redraw()
 
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""
         self.width = self.total_beats * self.pixels_per_beat
+        self.height = 128 * self.note_height
         Clock.unschedule(self.draw)
         Clock.schedule_once(self.draw, 0)
 
@@ -58,13 +59,13 @@ class PianoRoll(Widget):
             for i in range(128):
                 note_y = i * self.note_height
                 if (i % 12) in [1, 3, 6, 8, 10]:
-                    black_keys_vertices.extend([0, note_y, 0, 0, self.width, note_y, 0, 0])
+                    black_keys_vertices.extend([self.x, self.y + note_y, 0, 0, self.x + self.width, self.y + note_y, 0, 0])
                 else:
-                    white_keys_vertices.extend([0, note_y, 0, 0, self.width, note_y, 0, 0])
+                    white_keys_vertices.extend([self.x, self.y + note_y, 0, 0, self.x + self.width, self.y + note_y, 0, 0])
 
                 if (i % 12) == 11:
-                    octave_line_y = note_y + self.note_height
-                    octave_vertices.extend([0, octave_line_y, 0, 0, self.width, octave_line_y, 0, 0])
+                    octave_line_y = self.y + note_y + self.note_height
+                    octave_vertices.extend([self.x, octave_line_y, 0, 0, self.x + self.width, octave_line_y, 0, 0])
 
             if black_keys_vertices:
                 Color(0.15, 0.15, 0.17, 1)
@@ -82,9 +83,9 @@ class PianoRoll(Widget):
             for i in range(int(self.total_beats) + 1):
                 x_pos = i * self.pixels_per_beat
                 if i % self.beat_per_measure == 0:
-                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    major_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
                 else:
-                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    minor_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
 
             if major_vertices:
                 Color(0.8, 0.8, 0.8, 0.8)
@@ -98,8 +99,8 @@ class PianoRoll(Widget):
             with self.canvas:
                 for event in self.track.events:
                     for note in event.notes:
-                        note_x = event.start_time * self.pixels_per_beat
-                        note_y = note.pitch * self.note_height
+                        note_x = self.x + event.start_time * self.pixels_per_beat
+                        note_y = self.y + note.pitch * self.note_height
                         note_width = note.duration * self.pixels_per_beat
                         note_color = self._velocity_to_color(note.velocity)
 

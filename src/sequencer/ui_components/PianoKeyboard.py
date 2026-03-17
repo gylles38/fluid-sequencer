@@ -10,7 +10,10 @@ class PianoKeyboard(FloatLayout):
     A widget that draws a vertical piano keyboard.
     """
     note_height = NumericProperty(dp(14))
-    highlighted_note = NumericProperty(-1)  # -1 means no note is highlighted
+    highlighted_note = NumericProperty(-1)
+
+    def on_note_height(self, instance, value):
+        self.height = 128 * value
 
     def __init__(self, **kwargs):
         super(PianoKeyboard, self).__init__(**kwargs)
@@ -18,7 +21,7 @@ class PianoKeyboard(FloatLayout):
         self.height = 128 * self.note_height
         self.width = dp(40)
 
-        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule,
+        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule, note_height=self._redraw_on_schedule,
                   highlighted_note=self._redraw_on_schedule)
         self._redraw_on_schedule()
 

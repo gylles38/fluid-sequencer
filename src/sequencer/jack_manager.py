@@ -1718,6 +1718,7 @@ class JackManager:
                     # 5. RESTORE AUDIBILITY
                     time.sleep(0.1)
                     if self.sequencer.playback_state == "stopped":
+                        from kivy.clock import Clock
                         Clock.schedule_once(lambda dt: self.sequencer.prime_all_tracks())
                     else:
                         for i, t in enumerate(self.sequencer.song.tracks):

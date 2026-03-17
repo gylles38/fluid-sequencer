@@ -81,8 +81,8 @@ def import_gp(filepath: str) -> Song:
                             event.notes.append(midi_note)
 
                             # Handle Bends
-                            if gp_note.bend:
-                                for point in gp_note.bend.points:
+                            if gp_note.effect.bend:
+                                for point in gp_note.effect.bend.points:
                                     # gp point.position is 0-60
                                     # point.value is in 1/4 tones (8 points = 1 whole tone)
                                     rel_pos = point.position / 60.0

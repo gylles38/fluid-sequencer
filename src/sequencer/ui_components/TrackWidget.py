@@ -1032,6 +1032,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.resize_handle.disabled = True
             self.resize_handle.opacity = 0
             self.resize_handle.height = 0
+            if self.resize_handle in self.children:
+                self.remove_widget(self.resize_handle)
         else:
             self.height = self.full_height
 
@@ -1080,6 +1082,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.resize_handle.disabled = False
             self.resize_handle.opacity = 1
             self.resize_handle.height = dp(12)
+            if self.resize_handle not in self.children:
+                self.add_widget(self.resize_handle)
 
         # Update visual separator and other graphics
         self._update_graphics()

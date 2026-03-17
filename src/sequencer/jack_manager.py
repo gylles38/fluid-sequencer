@@ -804,8 +804,9 @@ class JackManager:
 
     def silence_all_midi_notes(self):
         """
-        Nuclear surgical silence for all MIDI sound across all ports and channels.
+        TOTAL NUCLEAR SURGICAL SILENCE for all MIDI sound across all ports and channels.
         Used for Panic, stop, and project transitions.
+        Specifically optimized for stubborn organ plugins like Collab3/Carla.
         """
         # 1. Snapshot and clear internal tracking under lock
         with self.sync_lock:
@@ -824,37 +825,51 @@ class JackManager:
                         try: self.jack_client.connect(src_jack, dest_jack)
                         except: pass
 
-        # 3. Identify all MIDI ports and channels
+        # 3. Identify all MIDI ports (Sequencer-managed and Instrument-managed)
         unique_ports = set()
-        managed_channels = {0, 1, 9}
         for track in self.sequencer.song.tracks:
             if is_midi_track(track):
                 if track.output_port_name in self.open_ports: unique_ports.add(self.open_ports[track.output_port_name])
                 if track.input_port_name in self.open_ports: unique_ports.add(self.open_ports[track.input_port_name])
-                managed_channels.add(track.channel)
+
+        # Add any other open ports just in case
+        for port in list(self.open_ports.values()) + getattr(self.sequencer, 'virtual_ports', []):
+             if port and not getattr(port, 'closed', False):
+                 unique_ports.add(port)
 
         m_port_name = self.sequencer.song.metronome_port_name
         if m_port_name in self.open_ports: unique_ports.add(self.open_ports[m_port_name])
 
-        # 4. Deliver robust silence across all relevant ports
+        # 4. Deliver ABSOLUTE silence across all channels of all ports
         for port in unique_ports:
             if not port or getattr(port, 'closed', False): continue
 
-            # Pass 1: CC Resets (All 16 Channels) - Multiple passes for buffer reliability
+            # --- PASS 1: AGGRESSIVE CC RESET & VOLUME KILL (All 16 Channels) ---
+            # Sustain (64) is crucial for organs. Volume (7) and Expression (11) kill immediate sound.
             for _ in range(4):
                 for ch in range(16):
                     port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
+                    port.send(mido.Message('control_change', channel=ch, control=7, value=0))   # Volume 0
+                    port.send(mido.Message('control_change', channel=ch, control=11, value=0))  # Expression 0
                     port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # All Sound Off
                     port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # All Notes Off
                     port.send(mido.Message('control_change', channel=ch, control=121, value=0)) # Reset Controllers
 
-            # Pass 2: Note Off sweep on managed channels
-            for ch in managed_channels:
+            # --- PASS 2: TOTAL 16-CHANNEL NOTE SWEEP ---
+            # Exhaustive 128-note sweep on EVERY channel.
+            for ch in range(16):
                 for pitch in range(128):
                     port.send(mido.Message('note_off', channel=ch, note=pitch, velocity=0))
+                    # Some plugins respond better to Note On velocity 0
                     port.send(mido.Message('note_on', channel=ch, note=pitch, velocity=0))
 
-        # 5. Nuclear confirmation for tracked notes
+            # --- PASS 3: RESTORE AUDIBILITY ---
+            # Restore Volume so it's not silent for next playback
+            for ch in range(16):
+                port.send(mido.Message('control_change', channel=ch, control=7, value=100))
+                port.send(mido.Message('control_change', channel=ch, control=11, value=127))
+
+        # 5. Targeted confirmation for tracked notes from snapshot
         for (track_idx, pitch), (end_beat, velocity) in active_notes_snapshot:
             try:
                 track = self.sequencer.song.tracks[track_idx]
@@ -862,6 +877,7 @@ class JackManager:
                 for p in ports:
                     if p:
                         p.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                        p.send(mido.Message('note_on', channel=track.channel, note=pitch, velocity=0))
             except: pass
 
         for (track_idx, pitch) in sustained_notes_snapshot:
@@ -871,6 +887,7 @@ class JackManager:
                 for p in ports:
                     if p:
                         p.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
+                        p.send(mido.Message('note_on', channel=track.channel, note=pitch, velocity=0))
             except: pass
 
     def _queue_ipc_command(self, socket_path, command_data):
@@ -1523,14 +1540,15 @@ class JackManager:
                                 if track.output_port_name in self.open_ports: unique_ports.add(self.open_ports[track.output_port_name])
                                 if track.input_port_name in self.open_ports: unique_ports.add(self.open_ports[track.input_port_name])
 
-                        # 2. Broad CC reset (essential subset for RT safety)
+                        # 2. Broad CC reset & Volume kill (essential subset for organs - ALL 16 CHANNELS)
                         for port in unique_ports:
                             for ch in range(16):
-                                port.send(mido.Message('control_change', channel=ch, control=64, value=0))
-                                port.send(mido.Message('control_change', channel=ch, control=120, value=0))
-                                port.send(mido.Message('control_change', channel=ch, control=123, value=0))
+                                port.send(mido.Message('control_change', channel=ch, control=64, value=0))  # Sustain Off
+                                port.send(mido.Message('control_change', channel=ch, control=7, value=0))   # Volume 0
+                                port.send(mido.Message('control_change', channel=ch, control=120, value=0)) # Sound Off
+                                port.send(mido.Message('control_change', channel=ch, control=123, value=0)) # Notes Off
 
-                        # 3. Targeted confirmed note-offs for tracked notes
+                        # 3. Targeted note-offs for tracked notes
                         for (track_idx, pitch), (end_beat, velocity) in active_snapshot:
                             track = self.sequencer.song.tracks[track_idx]
                             ports_to_cut = set()
@@ -1548,6 +1566,10 @@ class JackManager:
                             for port in ports_to_cut:
                                 port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
                                 port.send(mido.Message('note_on', channel=track.channel, note=pitch, velocity=0))
+
+                        # 4. Delegate TOTAL sweep to background thread to keep RT thread light
+                        threading.Thread(target=self.silence_all_midi_notes, daemon=True).start()
+
                     return
 
                 start_beat_of_block = self.last_beat

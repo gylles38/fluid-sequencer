@@ -1563,6 +1563,12 @@ class Sequencer(EventDispatcher):
                     if should_be_audible:
                         try:
                             output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
+
+                            # SAFETY CUT: Kill any zombie notes before restoring volume
+                            port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))  # Sustain Off
+                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All Notes Off
+                            port.send(mido.Message('control_change', channel=track.channel, control=120, value=0)) # All Sound Off
+
                             # Bank and Program changes are always sent, unless automation for them exists at the start.
                             if track.bank_msb is not None and (i, 'cc0') not in primed_by_automation:
                                 port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))

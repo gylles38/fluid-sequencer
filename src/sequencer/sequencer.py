@@ -2180,9 +2180,12 @@ class Sequencer(EventDispatcher):
 
                                     # Thru OFF
                                     if enable_thru:
-                                        track = self.song.tracks[track_idx]
-                                        if is_midi_track(track) and track.output_port_name in self.open_ports:
-                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                        # Use current target_idx if track_idx is missing (safety)
+                                        t_idx = track_idx if track_idx is not None else target_idx
+                                        if t_idx is not None and 0 <= t_idx < len(self.song.tracks):
+                                            track = self.song.tracks[t_idx]
+                                            if is_midi_track(track) and track.output_port_name in self.open_ports:
+                                                self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
                         
                         if (num_beats_to_record is not None and
                                 current_beat >= (start_beat + num_beats_to_record)):

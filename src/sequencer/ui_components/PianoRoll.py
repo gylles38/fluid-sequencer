@@ -1,21 +1,21 @@
-from kivy.uix.widget import Widget
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, ListProperty
 from kivy.metrics import dp
-from kivy.graphics import Color, Rectangle, Line, Mesh
 from kivy.clock import Clock
+from kivy.graphics import Color, Rectangle, Line, Mesh
 from sequencer.models import MidiTrack
 
-class PianoRoll(Widget):
+class PianoRoll(RelativeLayout):
     """
     Represents the drawing area of the piano roll's grid and notes.
-    This widget is intended to be placed inside a ScrollView.
+    Uses RelativeLayout for absolute pixel-perfect coordinate handling.
     """
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
     beat_per_measure = NumericProperty(4)
-    note_height = NumericProperty(dp(12))
+    note_height = NumericProperty(round(dp(14)))
     editor = ObjectProperty(None, allownone=True)
     selected_notes = ListProperty([])
 
@@ -31,7 +31,12 @@ class PianoRoll(Widget):
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""
         self.width = self.total_beats * self.pixels_per_beat
-        self.height = 128 * self.note_height
+        # Ensure height is exactly the same as the keyboard
+        self.height = round(128 * self.note_height)
+        # Ensure children widgets are updated if any
+        for child in self.children:
+             if child.size_hint_y == 1:
+                  child.height = self.height
         Clock.unschedule(self.draw)
         Clock.schedule_once(self.draw, 0)
 
@@ -48,44 +53,54 @@ class PianoRoll(Widget):
         self.canvas.clear()
 
         with self.canvas.before:
+            # Main background
             Color(0.1, 0.1, 0.12, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
 
-            # --- Optimized Grid using Mesh ---
+            # --- Row backgrounds for black keys ---
+            # Using a slightly different shade to distinguish from the main background
+            Color(0.14, 0.14, 0.16, 1)
+            for i in range(128):
+                if (i % 12) in [1, 3, 6, 8, 10]:
+                    y_start = round(i * self.note_height)
+                    y_end = round((i + 1) * self.note_height)
+                    Rectangle(pos=(0, y_start), size=(self.width, y_end - y_start))
+
+            # --- Horizontal Grid Lines using Mesh ---
             black_keys_vertices = []
             white_keys_vertices = []
             octave_vertices = []
 
-            for i in range(128):
-                note_y = i * self.note_height
-                if (i % 12) in [1, 3, 6, 8, 10]:
-                    black_keys_vertices.extend([self.x, self.y + note_y, 0, 0, self.x + self.width, self.y + note_y, 0, 0])
+            for i in range(129):
+                line_y = round(i * self.note_height)
+                # Octave line (C)
+                if (i % 12) == 0:
+                    octave_vertices.extend([0, line_y, 0, 0, self.width, line_y, 0, 0])
+                # Line between E and F
+                elif (i % 12) == 5:
+                    white_keys_vertices.extend([0, line_y, 0, 0, self.width, line_y, 0, 0])
                 else:
-                    white_keys_vertices.extend([self.x, self.y + note_y, 0, 0, self.x + self.width, self.y + note_y, 0, 0])
-
-                if (i % 12) == 11:
-                    octave_line_y = self.y + note_y + self.note_height
-                    octave_vertices.extend([self.x, octave_line_y, 0, 0, self.x + self.width, octave_line_y, 0, 0])
+                    black_keys_vertices.extend([0, line_y, 0, 0, self.width, line_y, 0, 0])
 
             if black_keys_vertices:
-                Color(0.15, 0.15, 0.17, 1)
+                Color(0.12, 0.12, 0.14, 1) # Subtler lines
                 Mesh(vertices=black_keys_vertices, indices=list(range(len(black_keys_vertices)//4)), mode='lines')
             if white_keys_vertices:
-                Color(0.2, 0.2, 0.22, 1)
+                Color(0.18, 0.18, 0.20, 1)
                 Mesh(vertices=white_keys_vertices, indices=list(range(len(white_keys_vertices)//4)), mode='lines')
             if octave_vertices:
-                Color(0.8, 0.8, 0.8, 0.6)
+                Color(0.4, 0.4, 0.45, 0.8) # Stronger octave/C lines
                 Mesh(vertices=octave_vertices, indices=list(range(len(octave_vertices)//4)), mode='lines')
 
             # Vertical grid lines
             major_vertices = []
             minor_vertices = []
             for i in range(int(self.total_beats) + 1):
-                x_pos = i * self.pixels_per_beat
+                x_pos = round(i * self.pixels_per_beat)
                 if i % self.beat_per_measure == 0:
-                    major_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
+                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
                 else:
-                    minor_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
+                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
 
             if major_vertices:
                 Color(0.8, 0.8, 0.8, 0.8)
@@ -99,14 +114,21 @@ class PianoRoll(Widget):
             with self.canvas:
                 for event in self.track.events:
                     for note in event.notes:
-                        note_x = self.x + event.start_time * self.pixels_per_beat
-                        note_y = self.y + note.pitch * self.note_height
-                        note_width = note.duration * self.pixels_per_beat
+                        x_start = round(event.start_time * self.pixels_per_beat)
+                        x_end = round((event.start_time + note.duration) * self.pixels_per_beat)
+                        y_start = round(note.pitch * self.note_height)
+                        y_end = round((note.pitch + 1) * self.note_height)
+
+                        note_x = x_start
+                        note_y = y_start
+                        note_width = x_end - x_start
+                        note_h = y_end - y_start
+
                         note_color = self._velocity_to_color(note.velocity)
 
                         # Draw the main note body
                         Color(*note_color)
-                        Rectangle(pos=(note_x, note_y), size=(note_width, self.note_height))
+                        Rectangle(pos=(note_x, note_y), size=(note_width, note_h))
 
                         # Draw resize handles if the note is wide enough
                         if note_width > dp(16):
@@ -114,19 +136,17 @@ class PianoRoll(Widget):
                             handle_color = (min(1.0, note_color[0] * 1.2), min(1.0, note_color[1] * 1.2), min(1.0, note_color[2] * 1.2), 1.0)
                             Color(*handle_color)
                             # Left handle
-                            Rectangle(pos=(note_x, note_y), size=(handle_width, self.note_height))
+                            Rectangle(pos=(note_x, note_y), size=(handle_width, note_h))
                             # Right handle
-                            Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
+                            Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, note_h))
 
                         # Draw outline for selected note.
-                        # Both the legacy `selected_note` and the new `selected_notes` list must be
-                        # checked using identity (`is`) to handle identical-looking but distinct note objects.
                         is_in_multi_select = any(note is sel_note for sel_note in self.selected_notes)
                         is_the_single_select = self.editor and self.editor.selected_note is note
 
                         if is_in_multi_select or is_the_single_select:
                             Color(1, 1, 1, 1)  # White outline
-                            Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
+                            Line(rectangle=(note_x, note_y, note_width, note_h), width=1.1)
 
 
 class PianoRollViewer(ScrollView):
@@ -137,7 +157,7 @@ class PianoRollViewer(ScrollView):
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
-    note_height = NumericProperty(dp(12))
+    note_height = NumericProperty(dp(14))
 
     def __init__(self, **kwargs):
         super(PianoRollViewer, self).__init__(**kwargs)

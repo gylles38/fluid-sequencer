@@ -274,6 +274,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
     track_index = NumericProperty(0)
     is_minimized = BooleanProperty(False)
     full_height = NumericProperty(dp(160))
+    note_height = NumericProperty(round(dp(14)))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         kwargs.setdefault('orientation', 'vertical')
@@ -619,12 +620,24 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
-            note_height = dp(12)
+            note_height = self.note_height # Use the property
 
             # 1. Keyboard (fixed width)
-            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True, effect_cls=ScrollEffect)
+            # To ensure perfect vertical alignment, both ScrollViews must have identical viewport heights.
+            # We hide all scrollbars and use 'content' scroll type for both.
+            self.keyboard_sv = ScrollView(
+                size_hint_x=None,
+                width=dp(40),
+                do_scroll_x=False,
+                do_scroll_y=True,
+                effect_cls=ScrollEffect,
+                bar_width=0,
+                scroll_type=['content']
+            )
             self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
+            # Link piano_keyboard properties to TrackWidget properties
+            self.bind(note_height=self.piano_keyboard.setter('note_height'))
             self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
@@ -633,14 +646,15 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 do_scroll_x=True,
                 do_scroll_y=True,
                 effect_cls=ScrollEffect, # Désactive les rebonds (overscroll)
-                bar_width=dp(2)
+                bar_width=0, # Hide scrollbar to maintain vertical alignment with keyboard
+                scroll_type=['content'] # Ensure touch scrolls correctly
             )
             self.timeline_scroll.effect_x = ScrollEffect()
             self.timeline_scroll.effect_y = ScrollEffect()
 
             # Content container (RelativeLayout for local coordinate system)
             self.content = RelativeLayout(size_hint=(None, None))
-            self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
+            self.content.size = (self.total_beats * self.pixels_per_beat, 128 * self.note_height)
 
             # AJOUT : Préparation de la translation GPU
             with self.content.canvas.before:
@@ -657,7 +671,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat,
                 beat_per_measure=self.beats_per_measure,
-                note_height=note_height,
+                note_height=self.note_height,
                 size_hint=(None, None)
             )
             self.piano_roll.size = self.content.size
@@ -672,6 +686,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 Color(1, 0, 0, 0.8)
                 self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
             self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
+            self.content.bind(height=self.playback_line.setter('height'))
             self.content.add_widget(self.playback_line)
 
             # --- SYNCHRONISATION SÉCURISÉE ---
@@ -681,7 +696,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.timeline_scroll.add_widget(self.content)
 
             # Bind for size/zoom updates
-            self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
+            self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size, note_height=self.update_timeline_size)
 
             # Link vertical scrolling between keyboard and timeline
             self.keyboard_sv.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.keyboard_sv, self.timeline_scroll, v))
@@ -689,9 +704,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
-                total_height = 128 * note_height
+                total_height = 128 * self.note_height
                 view_height = self.height
-                note_center_y = 60 * note_height + note_height / 2
+                note_center_y = 60 * self.note_height + self.note_height / 2
                 desired_top_y = note_center_y - view_height / 2
                 max_top_y = total_height - view_height
                 desired_top_y = max(0, min(desired_top_y, max_top_y))
@@ -907,7 +922,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
         if hasattr(self, 'content'):
             # For MIDI tracks
             self.content.width = self.total_beats * self.pixels_per_beat
+            self.content.height = 128 * self.note_height
             self.piano_roll.width = self.content.width
+            self.piano_roll.height = self.content.height
             
             # --- CORRECTION ICI ---
             # Il faut propager les nouvelles valeurs à l'instance piano_roll
@@ -915,6 +932,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.piano_roll.total_beats = self.total_beats
             self.piano_roll.pixels_per_beat = self.pixels_per_beat
             self.piano_roll.beat_per_measure = self.beats_per_measure
+            self.piano_roll.note_height = self.note_height
             # ----------------------
             
             # Redraw is handled by property bindings in PianoRoll

@@ -776,7 +776,9 @@ Builder.load_string("""
                     id: keyboard_sv
                     size_hint: (1, 1)
                     do_scroll_x: False
+                    do_scroll_y: True
                     bar_width: 0
+                    scroll_type: ['content']
 
                     PianoKeyboard:
                         id: piano_keyboard

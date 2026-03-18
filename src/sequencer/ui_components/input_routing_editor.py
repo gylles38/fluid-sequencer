@@ -103,7 +103,7 @@ class RoutingValueAxis(Widget):
             self.labels.append(label)
             self.add_widget(label)
 
-class EditableRoutingGrid(RelativeLayout):
+class EditableRoutingGrid(Widget):
     editor = ObjectProperty()
     points = ListProperty([])
     active_index = NumericProperty(-1)
@@ -117,20 +117,20 @@ class EditableRoutingGrid(RelativeLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.grid_widget = Widget(size_hint=(1, 1), pos=(0, 0))
-        self.curve_widget = Widget(size_hint=(1, 1), pos=(0, 0))
+        self.grid_widget = Widget(size_hint=(None, None))
+        self.curve_widget = Widget(size_hint=(None, None))
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(size=self._update_layout, points=self.draw,
+        self.bind(pos=self._update_layout, size=self._update_layout, points=self.draw,
                   pixels_per_beat=self.draw, total_beats=self.draw,
                   midi_tracks=self.draw, active_index=self.draw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
-        self.grid_widget.pos = (0, 0)
+        self.grid_widget.pos = self.pos
         self.curve_widget.size = self.size
-        self.curve_widget.pos = (0, 0)
+        self.curve_widget.pos = self.pos
         self.draw()
 
     def _get_y_from_abs_idx(self, abs_idx):
@@ -237,23 +237,23 @@ class EditableRoutingGrid(RelativeLayout):
         self.grid_widget.canvas.clear()
         with self.grid_widget.canvas:
             Color(0.1, 0.1, 0.1, 1)
-            Rectangle(pos=(0, 0), size=self.size)
+            Rectangle(pos=self.pos, size=self.size)
 
             Color(0.2, 0.2, 0.2, 1)
             for i in range(int(self.total_beats) + 1):
                 x = i * self.pixels_per_beat
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
-                Line(points=[x, 0, x, self.height], width=1.5 if is_measure else 0.5)
+                Line(points=[self.x + x, self.y, self.x + x, self.y + self.height], width=1.5 if is_measure else 0.5)
 
             # Horizontal lines for each MIDI track
             for abs_idx, name in self.midi_tracks:
                 y = self._get_y_from_abs_idx(abs_idx)
                 if abs_idx == self.active_index:
                     Color(0.2, 0.3, 0.4, 0.5)
-                    Rectangle(pos=(0, y - dp(10)), size=(self.width, dp(20)))
+                    Rectangle(pos=(self.x, self.y + y - dp(10)), size=(self.width, dp(20)))
                     Color(0.2, 0.2, 0.2, 1)
-                Line(points=[0, y, self.width, y], width=0.5)
+                Line(points=[self.x, self.y + y, self.x + self.width, self.y + y], width=0.5)
 
         self.draw_curve_and_points()
 
@@ -270,7 +270,7 @@ class EditableRoutingGrid(RelativeLayout):
 
             # Start from 0
             first_p = sorted_points[0]
-            points_to_draw.extend([0, self._get_y_from_abs_idx(first_p.value)])
+            points_to_draw.extend([self.x, self.y + self._get_y_from_abs_idx(first_p.value)])
 
             for i in range(len(sorted_points)):
                 p = sorted_points[i]
@@ -280,13 +280,13 @@ class EditableRoutingGrid(RelativeLayout):
                 if i > 0:
                     # Vertical step from previous value
                     prev_y = self._get_y_from_abs_idx(sorted_points[i-1].value)
-                    points_to_draw.extend([x, prev_y])
+                    points_to_draw.extend([self.x + x, self.y + prev_y])
 
-                points_to_draw.extend([x, y])
+                points_to_draw.extend([self.x + x, self.y + y])
 
             # End line
             final_x = self.total_beats * self.pixels_per_beat
-            points_to_draw.extend([final_x, self._get_y_from_abs_idx(sorted_points[-1].value)])
+            points_to_draw.extend([self.x + final_x, self.y + self._get_y_from_abs_idx(sorted_points[-1].value)])
 
             if len(points_to_draw) >= 4:
                 Line(points=points_to_draw, width=1.5)
@@ -299,10 +299,10 @@ class EditableRoutingGrid(RelativeLayout):
                 y = self._get_y_from_abs_idx(p.value)
                 if p == self.selected_point:
                     Color(1, 0.6, 0, 1)
-                    Rectangle(pos=(x - selected_radius, y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
+                    Rectangle(pos=(self.x + x - selected_radius, self.y + y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
                 else:
                     Color(0.8, 0.8, 1, 0.9)
-                    Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
+                    Rectangle(pos=(self.x + x - point_radius, self.y + y - point_radius), size=(point_radius * 2, point_radius * 2))
 
 Builder.load_string("""
 <InputRoutingEditor>:

@@ -1,4 +1,4 @@
-from kivy.uix.relativelayout import RelativeLayout
+from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, ListProperty
 from kivy.metrics import dp
@@ -6,10 +6,9 @@ from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, Line, Mesh
 from sequencer.models import MidiTrack
 
-class PianoRoll(RelativeLayout):
+class PianoRoll(Widget):
     """
     Represents the drawing area of the piano roll's grid and notes.
-    Uses RelativeLayout for absolute pixel-perfect coordinate handling.
     """
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
@@ -49,13 +48,12 @@ class PianoRoll(RelativeLayout):
         return (red, green, blue, 0.9)
 
     def draw(self, *args):
-        self.canvas.before.clear()
         self.canvas.clear()
 
-        with self.canvas.before:
+        with self.canvas:
             # Main background
             Color(0.1, 0.1, 0.12, 1)
-            Rectangle(pos=(0, 0), size=self.size)
+            Rectangle(pos=self.pos, size=self.size)
 
             # --- Row backgrounds for black keys ---
             # Using a slightly different shade to distinguish from the main background
@@ -64,7 +62,7 @@ class PianoRoll(RelativeLayout):
                 if (i % 12) in [1, 3, 6, 8, 10]:
                     y_start = round(i * self.note_height)
                     y_end = round((i + 1) * self.note_height)
-                    Rectangle(pos=(0, y_start), size=(self.width, y_end - y_start))
+                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
 
             # --- Horizontal Grid Lines using Mesh ---
             black_keys_vertices = []
@@ -75,12 +73,12 @@ class PianoRoll(RelativeLayout):
                 line_y = round(i * self.note_height)
                 # Octave line (C)
                 if (i % 12) == 0:
-                    octave_vertices.extend([0, line_y, 0, 0, self.width, line_y, 0, 0])
+                    octave_vertices.extend([self.x, self.y + line_y, 0, 0, self.x + self.width, self.y + line_y, 0, 0])
                 # Line between E and F
                 elif (i % 12) == 5:
-                    white_keys_vertices.extend([0, line_y, 0, 0, self.width, line_y, 0, 0])
+                    white_keys_vertices.extend([self.x, self.y + line_y, 0, 0, self.x + self.width, self.y + line_y, 0, 0])
                 else:
-                    black_keys_vertices.extend([0, line_y, 0, 0, self.width, line_y, 0, 0])
+                    black_keys_vertices.extend([self.x, self.y + line_y, 0, 0, self.x + self.width, self.y + line_y, 0, 0])
 
             if black_keys_vertices:
                 Color(0.12, 0.12, 0.14, 1) # Subtler lines
@@ -98,9 +96,9 @@ class PianoRoll(RelativeLayout):
             for i in range(int(self.total_beats) + 1):
                 x_pos = round(i * self.pixels_per_beat)
                 if i % self.beat_per_measure == 0:
-                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    major_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
                 else:
-                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    minor_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
 
             if major_vertices:
                 Color(0.8, 0.8, 0.8, 0.8)
@@ -119,8 +117,8 @@ class PianoRoll(RelativeLayout):
                         y_start = round(note.pitch * self.note_height)
                         y_end = round((note.pitch + 1) * self.note_height)
 
-                        note_x = x_start
-                        note_y = y_start
+                        note_x = self.x + x_start
+                        note_y = self.y + y_start
                         note_width = x_end - x_start
                         note_h = y_end - y_start
 

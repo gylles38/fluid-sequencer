@@ -1,16 +1,15 @@
-from kivy.uix.relativelayout import RelativeLayout
+from kivy.uix.widget import Widget
 from kivy.properties import NumericProperty
 from kivy.graphics import Color, Rectangle, Line
 from kivy.uix.label import Label
 from kivy.metrics import dp
 from kivy.clock import Clock
 
-class PianoKeyboard(RelativeLayout):
+class PianoKeyboard(Widget):
     """
     A widget that draws a vertical piano keyboard.
-    Uses RelativeLayout for absolute pixel-perfect coordinate handling.
     """
-    note_height = NumericProperty(dp(14))
+    note_height = NumericProperty(round(dp(14)))
     highlighted_note = NumericProperty(-1)
 
     def on_note_height(self, instance, value):
@@ -31,12 +30,12 @@ class PianoKeyboard(RelativeLayout):
         Clock.schedule_once(self._redraw)
 
     def _redraw(self, *args):
-        self.canvas.before.clear()
+        self.canvas.clear()
         self.clear_widgets()
 
         highlight_color = (0.3, 0.7, 1.0, 1) # A light blue color for highlighting
 
-        with self.canvas.before:
+        with self.canvas:
             # --- Draw White Keys Backgrounds ---
             for i in range(128):
                 if (i % 12) not in [1, 3, 6, 8, 10]:
@@ -46,7 +45,7 @@ class PianoKeyboard(RelativeLayout):
                         Color(0.95, 0.95, 0.95, 1)
                     y_start = round(i * self.note_height)
                     y_end = round((i + 1) * self.note_height)
-                    Rectangle(pos=(0, y_start), size=(self.width, y_end - y_start))
+                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
 
             # --- Draw Black Keys Backgrounds ---
             for i in range(128):
@@ -57,7 +56,7 @@ class PianoKeyboard(RelativeLayout):
                         Color(0.1, 0.1, 0.1, 1)
                     y_start = round(i * self.note_height)
                     y_end = round((i + 1) * self.note_height)
-                    Rectangle(pos=(0, y_start), size=(self.width * 0.65, y_end - y_start))
+                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width * 0.65, y_end - y_start))
 
             # --- Draw EVERY Pitch Separator (Grid sync) ---
             for i in range(1, 129):
@@ -74,7 +73,7 @@ class PianoKeyboard(RelativeLayout):
                     Color(0.7, 0.7, 0.7, 0.4)
                     width = 0.6
 
-                Line(points=[0, y_pos, self.width, y_pos], width=width)
+                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=width)
 
         # Add C note labels
         for i in range(128):
@@ -83,15 +82,15 @@ class PianoKeyboard(RelativeLayout):
                 y_start = round(i * self.note_height)
                 y_end = round((i + 1) * self.note_height)
                 note_h = y_end - y_start
-                # RelativeLayout child coordinates: (0,0) is layout bottom-left.
+                note_y = self.y + y_start
                 label = Label(
                     text=f"C{octave_num}",
                     font_size=dp(9),
                     color=(0, 0, 0, 1),
                     size_hint=(None, None),
                     size=(self.width, note_h),
-                    x=0,
-                    y=y_start,
+                    center_x=self.center_x,
+                    center_y=note_y + note_h / 2,
                     halign='center',
                     valign='middle',
                 )

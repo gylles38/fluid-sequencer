@@ -964,7 +964,7 @@ class PianoRollEditor(FloatingWindow):
         self.ids.ruler.redraw()
 
         # Bind selected_notes properties
-        self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
+        self.bind(selected_notes=self.ids.grid.setter('selected_notes'))
         self.bind(selected_notes=self._update_legacy_selection)
 
         # Record the initial state
@@ -1003,7 +1003,7 @@ class PianoRollEditor(FloatingWindow):
                     self.ids.status_label.text = f"Note: {note_name}, Velocity: {self.hovered_note.velocity}"
                     
                     # Optionnel : redessiner la grille si la couleur dépend de la vélocité
-                    self.ids.grid_viewer.grid.draw()
+                    self.ids.grid.draw()
                     
                     # Enregistrement pour le Undo/Redo
                     self._record_state()
@@ -1093,7 +1093,7 @@ class PianoRollEditor(FloatingWindow):
         if keyboard in (273, 274, 275, 276): # Up, Down, Right, Left
             if keyboard in (276, 275): # Left, Right
                 timeline_scroll = self.ids.timeline_scroll
-                grid = self.ids.grid_viewer.grid
+                grid = self.ids.grid
                 beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
                 measure_width_pixels = beats_per_measure * self.pixels_per_beat
                 max_scroll_pixels = grid.width - timeline_scroll.width
@@ -1106,16 +1106,16 @@ class PianoRollEditor(FloatingWindow):
                 return True
 
             if keyboard in (273, 274): # Up, Down
-                grid_viewer = self.ids.grid_viewer
-                grid = self.ids.grid_viewer.grid
+                timeline_scroll = self.ids.timeline_scroll
+                grid = self.ids.grid
                 octave_height_pixels = 12 * self.note_height
-                max_scroll_pixels = grid.height - grid_viewer.height
+                max_scroll_pixels = grid.height - timeline_scroll.height
                 if max_scroll_pixels > 0:
-                    current_scroll_pixels = grid_viewer.scroll_y * max_scroll_pixels
+                    current_scroll_pixels = timeline_scroll.scroll_y * max_scroll_pixels
                     direction: int = 1 if keyboard == 273 else -1 # Up is +, Down is -
                     new_scroll_pixels = current_scroll_pixels + (octave_height_pixels * direction)
                     new_scroll_pixels: int = max(0, min(new_scroll_pixels, max_scroll_pixels))
-                    grid_viewer.scroll_y = new_scroll_pixels / max_scroll_pixels
+                    timeline_scroll.scroll_y = new_scroll_pixels / max_scroll_pixels
                 return True
 
         # On vérifie aussi 'backspace' (8) qui est souvent utilisé pour supprimer
@@ -1127,7 +1127,7 @@ class PianoRollEditor(FloatingWindow):
                 # On redessine la grille
                 #if hasattr(self.ids.ruler, 'redraw'):
                 #    self.ids.ruler.redraw()
-                self.ids.grid_viewer.grid.draw()                
+                self.ids.grid.draw()
                 return True # Indique que l'événement a été géré
 
         return False
@@ -1243,8 +1243,8 @@ class PianoRollEditor(FloatingWindow):
 
         self.selected_notes = new_selection
         # Explicitly update the grid's property to ensure the visual update.
-        self.ids.grid_viewer.grid.selected_notes = self.selected_notes
-        self.ids.grid_viewer.grid.draw()
+        self.ids.grid.selected_notes = self.selected_notes
+        self.ids.grid.draw()
         self._update_undo_redo_buttons_state()
         self.is_dirty = True
 
@@ -1281,7 +1281,7 @@ class PianoRollEditor(FloatingWindow):
         if is_cut:
             self._delete_selected_notes()
             self._record_state()
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid.draw()
 
     def _paste_selection(self) -> None:
         """Colle les notes à la position de la tête de lecture sans doublons."""
@@ -1329,7 +1329,7 @@ class PianoRollEditor(FloatingWindow):
             self.track_copy.events.sort(key=lambda e: e.start_time)
             self.is_dirty = True
             self._record_state()
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid.draw()
 
     def _select_all_notes(self) -> None:
         """Sélectionne toutes les notes présentes dans la piste actuelle."""
@@ -1340,7 +1340,7 @@ class PianoRollEditor(FloatingWindow):
         
         if all_notes:
             self.selected_notes = all_notes
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid.draw()
      
     def _delete_selected_notes(self) -> None:
         """Supprime proprement toutes les notes sélectionnées."""

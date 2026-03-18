@@ -447,7 +447,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.automation_controls.bind(on_selection_change=self.update_automation_visibility)
             self.automation_controls.size_hint=(None, None)
             self.automation_controls.height = dp(36)
-            self.automation_controls.width = dp(100)
+            self.automation_controls.width = dp(200)
             self.automation_controls.pos_hint = {'center_y': 0.5}
             
             # On l'ajoute directement dans la colonne de gauche
@@ -813,13 +813,17 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 # --- ÉTAPE 1 : IDENTIFIER LES PARAMÈTRES ---
                 # On définit les paramètres par défaut + ceux présents dans les points
                 params: set[str] = {"vol", "pan"} 
+                if hasattr(self, 'automation_controls'):
+                    if self.automation_controls.track_type == 'midi':
+                        params.update({"vel", "prog", "cc1"})
+
                 for p in self.track.points:
                     params.add(p.parameter)
 
                 # --- ÉTAPE 2 : CRÉER LES WIDGETS ---
                 for param in params:
                     min_v, max_v = 0.0, 1.0
-                    if param in ["prog", "vel"]: min_v, max_v = 0.0, 127.0
+                    if param in ["prog", "vel"] or param.startswith("cc"): min_v, max_v = 0.0, 127.0
                     elif param == "pan": min_v, max_v = -1.0, 1.0
 
                     is_vol: bool = (param == "vol")

@@ -1043,7 +1043,7 @@ class AutomationEditor(FloatingWindow):
     def on_automation_selection_change(self, instance, param):
         self.selected_parameter = param
 
-        if param in ["prog", "vel"]:
+        if param in ["prog", "vel"] or param.startswith("cc"):
             self.min_val, self.max_val = 0.0, 127.0
         elif param == "pan":
             self.min_val, self.max_val = -1.0, 1.0

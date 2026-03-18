@@ -25,7 +25,7 @@ class AutomationControls(BoxLayout, EventDispatcher):
         self.width = 0
 
         param_map = {
-            'Volume': 'vol', 'Pan': 'pan', 'Velocity': 'vel', 'Program Change': 'prog'
+            'Volume': 'vol', 'Pan': 'pan', 'Velocity': 'vel', 'Program Change': 'prog', 'Modulation': 'cc1'
         }
 
         if self.track_type == 'midi':
@@ -34,6 +34,7 @@ class AutomationControls(BoxLayout, EventDispatcher):
                 ("swap-horizontal", "Pan", "pan"),
                 ("speedometer", "Velocity", "vel"),
                 ("music-box-outline", "Program Change", "prog"),
+                ("midi-port", "Modulation (CC 1)", "cc1"),
             ]
         else: # audio
             automation_types = [

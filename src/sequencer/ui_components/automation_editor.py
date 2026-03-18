@@ -232,6 +232,7 @@ class EditableAutomationGrid(Widget):
                 self._drag_offset = (local_pos[0] - (clicked_point.start_time * self.pixels_per_beat)), \
                                     (local_pos[1] - (((clicked_point.value - self.min_val) / v_range) * self.height))
                 touch.grab(self)
+                return True
 
         return super().on_touch_down(touch)
 

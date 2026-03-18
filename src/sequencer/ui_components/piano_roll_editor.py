@@ -88,7 +88,7 @@ class EditableMidiGrid(PianoRoll):
         if hasattr(self, 'canvas'):
             with self.canvas.after:
                 Color(1, 0, 0, 0.8)
-                self.playback_rect = Rectangle(pos=(self.playback_line_x, 0), size=(dp(2), self.height))
+                self.playback_rect = Rectangle(pos=(self.x + self.playback_line_x, self.y), size=(dp(2), self.height))
 
                 # Re-add selection rectangle if in selection mode
                 if self._selection_group:
@@ -101,7 +101,7 @@ class EditableMidiGrid(PianoRoll):
     def set_playback_line_x(self, x):
         self.playback_line_x = x
         if self.playback_rect:
-            self.playback_rect.pos = (x, 0)
+            self.playback_rect.pos = (self.x + x, self.y)
 
     def on_touch_move(self, touch) -> None | bool:
         if touch.grab_current is not self:
@@ -534,7 +534,7 @@ class EditablePianoRollViewer(ScrollView):
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
-    note_height = NumericProperty(dp(12))
+    note_height = NumericProperty(round(dp(14)))
 
     def __init__(self, **kwargs) -> None:
         super(EditablePianoRollViewer, self).__init__(**kwargs)
@@ -767,44 +767,46 @@ Builder.load_string("""
             orientation: 'horizontal'
             spacing: 0
 
-            BoundedScrollView:
-                id: keyboard_sv
+            BoxLayout:
+                orientation: 'vertical'
                 size_hint_x: None
                 width: dp(60)
-                do_scroll_x: False
 
-                PianoKeyboard:
-                    id: piano_keyboard
-                    size_hint: (None, None)
-                    width: self.parent.width
-                    note_height: root.note_height
+                BoundedScrollView:
+                    id: keyboard_sv
+                    size_hint: (1, 1)
+                    do_scroll_x: False
+                    do_scroll_y: True
+                    bar_width: 0
+                    scroll_type: ['content']
+
+                    PianoKeyboard:
+                        id: piano_keyboard
+                        size_hint: (None, None)
+                        width: self.parent.width
+                        note_height: root.note_height
+
+                Widget: # Spacer to match horizontal scrollbar (bar_width + margin) of timeline_scroll
+                    size_hint_y: None
+                    height: dp(17)
 
             BoundedScrollView:
                 id: timeline_scroll
-                do_scroll_y: False
+                do_scroll_y: True
                 do_scroll_x: True
                 bar_width: dp(15)
                 scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
-                BoxLayout:
-                    orientation: 'vertical'
-                    size_hint_x: None
-                    width: grid_viewer.width
-                    padding: [0, 0, 0, dp(15)]
-
-                    EditablePianoRollViewer:
-                        id: grid_viewer
-                        editor: root
-                        track: root.track_copy
-                        total_beats: root.total_beats
-                        pixels_per_beat: root.pixels_per_beat
-                        note_height: root.note_height
-
-                    Widget:
-                        size_hint_y: None
-                        height: dp(18)
+                EditableMidiGrid:
+                    id: grid
+                    editor: root
+                    track: root.track_copy
+                    total_beats: root.total_beats
+                    pixels_per_beat: root.pixels_per_beat
+                    note_height: root.note_height
+                    size_hint: None, None
 
         MDBoxLayout:
             size_hint_y: None
@@ -847,7 +849,7 @@ class PianoRollEditor(FloatingWindow):
     track_copy = ObjectProperty()
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
-    note_height = NumericProperty(dp(14))
+    note_height = NumericProperty(round(dp(14)))
     edit_mode = StringProperty('insert')
     note_duration = NumericProperty(1.0) # Default to quarter note
     base_note_duration = NumericProperty(1.0)
@@ -900,15 +902,23 @@ class PianoRollEditor(FloatingWindow):
 
     def _post_kv_init(self, dt) -> None:
         keyboard_sv = self.ids.keyboard_sv
-        grid_viewer = self.ids.grid_viewer
+        grid = self.ids.grid
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_viewer, 'scroll_y', v))
-        grid_viewer.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+        def sync_y(instance, value):
+            if instance is keyboard_sv:
+                if abs(timeline_scroll.scroll_y - value) > 0.001:
+                    timeline_scroll.scroll_y = value
+            else:
+                if abs(keyboard_sv.scroll_y - value) > 0.001:
+                    keyboard_sv.scroll_y = value
 
-        self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
-        self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
+        keyboard_sv.bind(scroll_y=sync_y)
+        timeline_scroll.bind(scroll_y=sync_y)
+
+        self.ids.piano_keyboard.height = grid.height
+        grid.bind(height=self.ids.piano_keyboard.setter('height'))
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -918,11 +928,11 @@ class PianoRollEditor(FloatingWindow):
         self.ids.ruler.spacing = 0
 
         # Ensure ruler content width matches the grid
-        self.ids.ruler.ruler_content.width = self.ids.grid_viewer.grid.width
-        self.ids.grid_viewer.grid.bind(width=lambda i, v: setattr(self.ids.ruler.ruler_content, 'width', v))
+        self.ids.ruler.ruler_content.width = grid.width
+        grid.bind(width=lambda i, v: setattr(self.ids.ruler.ruler_content, 'width', v))
 
         # Add the playback line here to ensure it's drawn on top
-        self.ids.grid_viewer.grid.add_playback_line()
+        grid.add_playback_line()
 
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
@@ -932,7 +942,7 @@ class PianoRollEditor(FloatingWindow):
         if current_beat > 0 and self.total_beats > 0:
             def sync_at_start(dt):
                 scroll_pos = (current_beat * self.pixels_per_beat)
-                max_scroll = self.ids.grid_viewer.grid.width - timeline_scroll.width
+                max_scroll = grid.width - timeline_scroll.width
                 if max_scroll > 0:
                     target_scroll_x = min(1.0, scroll_pos / max_scroll)
                     timeline_scroll.scroll_x = target_scroll_x
@@ -954,7 +964,7 @@ class PianoRollEditor(FloatingWindow):
         self.ids.ruler.redraw()
 
         # Bind selected_notes properties
-        self.bind(selected_notes=self.ids.grid_viewer.grid.setter('selected_notes'))
+        self.bind(selected_notes=self.ids.grid.setter('selected_notes'))
         self.bind(selected_notes=self._update_legacy_selection)
 
         # Record the initial state
@@ -993,7 +1003,7 @@ class PianoRollEditor(FloatingWindow):
                     self.ids.status_label.text = f"Note: {note_name}, Velocity: {self.hovered_note.velocity}"
                     
                     # Optionnel : redessiner la grille si la couleur dépend de la vélocité
-                    self.ids.grid_viewer.grid.draw()
+                    self.ids.grid.draw()
                     
                     # Enregistrement pour le Undo/Redo
                     self._record_state()
@@ -1083,7 +1093,7 @@ class PianoRollEditor(FloatingWindow):
         if keyboard in (273, 274, 275, 276): # Up, Down, Right, Left
             if keyboard in (276, 275): # Left, Right
                 timeline_scroll = self.ids.timeline_scroll
-                grid = self.ids.grid_viewer.grid
+                grid = self.ids.grid
                 beats_per_measure = getattr(self.sequencer_layout.sequencer.song, 'time_signature_numerator', 4)
                 measure_width_pixels = beats_per_measure * self.pixels_per_beat
                 max_scroll_pixels = grid.width - timeline_scroll.width
@@ -1096,16 +1106,16 @@ class PianoRollEditor(FloatingWindow):
                 return True
 
             if keyboard in (273, 274): # Up, Down
-                grid_viewer = self.ids.grid_viewer
-                grid = self.ids.grid_viewer.grid
+                timeline_scroll = self.ids.timeline_scroll
+                grid = self.ids.grid
                 octave_height_pixels = 12 * self.note_height
-                max_scroll_pixels = grid.height - grid_viewer.height
+                max_scroll_pixels = grid.height - timeline_scroll.height
                 if max_scroll_pixels > 0:
-                    current_scroll_pixels = grid_viewer.scroll_y * max_scroll_pixels
+                    current_scroll_pixels = timeline_scroll.scroll_y * max_scroll_pixels
                     direction: int = 1 if keyboard == 273 else -1 # Up is +, Down is -
                     new_scroll_pixels = current_scroll_pixels + (octave_height_pixels * direction)
                     new_scroll_pixels: int = max(0, min(new_scroll_pixels, max_scroll_pixels))
-                    grid_viewer.scroll_y = new_scroll_pixels / max_scroll_pixels
+                    timeline_scroll.scroll_y = new_scroll_pixels / max_scroll_pixels
                 return True
 
         # On vérifie aussi 'backspace' (8) qui est souvent utilisé pour supprimer
@@ -1117,7 +1127,7 @@ class PianoRollEditor(FloatingWindow):
                 # On redessine la grille
                 #if hasattr(self.ids.ruler, 'redraw'):
                 #    self.ids.ruler.redraw()
-                self.ids.grid_viewer.grid.draw()                
+                self.ids.grid.draw()
                 return True # Indique que l'événement a été géré
 
         return False
@@ -1233,8 +1243,8 @@ class PianoRollEditor(FloatingWindow):
 
         self.selected_notes = new_selection
         # Explicitly update the grid's property to ensure the visual update.
-        self.ids.grid_viewer.grid.selected_notes = self.selected_notes
-        self.ids.grid_viewer.grid.draw()
+        self.ids.grid.selected_notes = self.selected_notes
+        self.ids.grid.draw()
         self._update_undo_redo_buttons_state()
         self.is_dirty = True
 
@@ -1271,7 +1281,7 @@ class PianoRollEditor(FloatingWindow):
         if is_cut:
             self._delete_selected_notes()
             self._record_state()
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid.draw()
 
     def _paste_selection(self) -> None:
         """Colle les notes à la position de la tête de lecture sans doublons."""
@@ -1319,7 +1329,7 @@ class PianoRollEditor(FloatingWindow):
             self.track_copy.events.sort(key=lambda e: e.start_time)
             self.is_dirty = True
             self._record_state()
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid.draw()
 
     def _select_all_notes(self) -> None:
         """Sélectionne toutes les notes présentes dans la piste actuelle."""
@@ -1330,7 +1340,7 @@ class PianoRollEditor(FloatingWindow):
         
         if all_notes:
             self.selected_notes = all_notes
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid.draw()
      
     def _delete_selected_notes(self) -> None:
         """Supprime proprement toutes les notes sélectionnées."""
@@ -1405,11 +1415,12 @@ class PianoRollEditor(FloatingWindow):
         return f"{note}{octave}"
 
     def _on_mouse_pos(self, instance, pos) -> None:
-        grid_viewer = self.ids.get('grid_viewer')
+        timeline_scroll = self.ids.get('timeline_scroll')
+        grid = self.ids.get('grid')
         piano_keyboard = self.ids.get('piano_keyboard')
         status_label = self.ids.get('status_label')
 
-        if not all([grid_viewer, piano_keyboard, status_label]):
+        if not all([timeline_scroll, grid, piano_keyboard, status_label]):
             return
 
         # --- Performance Optimization ---
@@ -1422,8 +1433,7 @@ class PianoRollEditor(FloatingWindow):
             return
 
         # 1. On récupère la position relative au contenu de la grille
-        # grid_viewer.grid est le PianoRoll qui contient les notes
-        grid_content = grid_viewer.grid
+        grid_content = grid
         
         # Transformation des coordonnées Fenêtre -> Widget interne
         # to_widget(pos) sur le contenu du scrollview est la méthode la plus fiable
@@ -1431,7 +1441,7 @@ class PianoRollEditor(FloatingWindow):
 
         # 2. On vérifie si la souris est dans la zone visible du ScrollView
         # On transforme les coordonnées fenêtre en coordonnées locales au parent du ScrollView
-        if grid_viewer.collide_point(*grid_viewer.parent.to_widget(*pos)):
+        if timeline_scroll.collide_point(*timeline_scroll.parent.to_widget(*pos)):
             
             # CALCULS (Pitch et Temps)
             # Note: on utilise int(ly / self.note_height)
@@ -1525,24 +1535,22 @@ class PianoRollEditor(FloatingWindow):
             super(PianoRollEditor, self).dismiss()
 
     def _save_changes(self) -> None:
-            # 1. Appliquer les changements (On utilise deepcopy pour éviter les références partagées)
-            import copy
-            self.track.events = copy.deepcopy(self.track_copy.events)
-            
-            self.is_dirty = False
-            
-            # 2. Rafraîchissement VISUEL de la fenêtre principale
-            # On cherche le widget de la piste dans la liste des widgets du séquenceur
-            if self.sequencer_layout and hasattr(self.sequencer_layout, 'track_widgets'):
-                for tw in self.sequencer_layout.track_widgets:
-                    if tw.track == self.track:
-                        # On parcourt les enfants du TrackWidget pour trouver le PianoRoll
-                        # Dans votre structure, il est dans timeline_container
-                        for child in tw.walk():
-                            if child.__class__.__name__ == 'PianoRoll':
-                                # On appelle la méthode de dessin du PianoRoll de la fenêtre principale
-                                child.draw()
-                        break
+        # 1. Appliquer les changements (On utilise deepcopy pour éviter les références partagées)
+        import copy
+        self.track.events = copy.deepcopy(self.track_copy.events)
+
+        self.is_dirty = False
+
+        # 2. Rafraîchissement VISUEL de la fenêtre principale
+        # On cherche le widget de la piste dans la liste des widgets du séquenceur
+        if self.sequencer_layout and hasattr(self.sequencer_layout, 'track_widgets'):
+            for tw in self.sequencer_layout.track_widgets:
+                if tw.track == self.track:
+                    # On parcourt les enfants du TrackWidget pour trouver le PianoRoll
+                    # Dans votre structure, il est dans timeline_container
+                    if hasattr(tw, 'piano_roll'):
+                        tw.piano_roll.draw()
+                    break
 
             # 3. Rafraîchissement de la LECTURE (Moteur MIDI)
             # On force le séquenceur à recharger les événements de cette piste
@@ -1591,7 +1599,7 @@ class PianoRollEditor(FloatingWindow):
 
     def _scroll_to_logic(self, current_beat):
         scroll_view = self.ids.timeline_scroll
-        grid = self.ids.grid_viewer.grid
+        grid = self.ids.grid
         ppb = self.pixels_per_beat
         total_width = grid.width
         viewport_width = scroll_view.width
@@ -1609,7 +1617,7 @@ class PianoRollEditor(FloatingWindow):
             scroll_view.scroll_x = max(0, min(1, new_scroll_x))
 
     def set_playback_position(self, current_beat: float) -> None:
-        grid = self.ids.grid_viewer.grid
+        grid = self.ids.grid
         x_pos = current_beat * self.pixels_per_beat
         grid.set_playback_line_x(x_pos)
 
@@ -1664,7 +1672,7 @@ class PianoRollEditor(FloatingWindow):
         if mode != 'move':
             if self.selected_notes:
                 self.selected_notes = []
-                self.ids.grid_viewer.grid.draw()
+                self.ids.grid.draw()
 
     def set_note_duration(self, dur, btn) -> None:
         self.base_note_duration = dur
@@ -1694,7 +1702,7 @@ class PianoRollEditor(FloatingWindow):
             for note in self.selected_notes:
                 note.duration = new_duration
             self.is_dirty = True
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid.draw()
 
     def _update_button_states(self, group, active_btn) -> None:
         """Met à jour l'apparence des boutons d'outils selon l'outil sélectionné."""
@@ -1747,10 +1755,11 @@ class PianoRollEditor(FloatingWindow):
         self._is_scrolling = False
 
     def _center_view_on_c4(self) -> None:
-        grid_viewer = self.ids.grid_viewer
-        max_scroll = (128 * self.note_height) - grid_viewer.height
+        timeline_scroll = self.ids.timeline_scroll
+        grid = self.ids.grid
+        max_scroll = (128 * self.note_height) - timeline_scroll.height
         if max_scroll > 0:
-            grid_viewer.scroll_y = max(0.0, min(1.0, ((60 * self.note_height) - (self.height / 2)) / max_scroll))
+            timeline_scroll.scroll_y = max(0.0, min(1.0, ((60 * self.note_height) - (self.height / 2)) / max_scroll))
 
     def zoom_in(self) -> None:
         self._apply_zoom(self.pixels_per_beat * 1.25)
@@ -1804,7 +1813,7 @@ class PianoRollEditor(FloatingWindow):
         if hasattr(self.ids.ruler, 'redraw'):
             self.ids.ruler.redraw()
         
-        self.ids.grid_viewer.grid.draw()
+        self.ids.grid.draw()
 
     def _preview_note(self, pitch, velocity, duration) -> None:
         """Plays a single note through the sequencer's MIDI output for preview."""

@@ -1,5 +1,6 @@
 from .midi_export import export_to_midi
 from .midi_import import import_song
+from .gp_import import import_gp
 from .midi_import_project import import_midi_to_project
 from .midi_export_project import export_midi_from_project
 from .models import (AnyTrack, AudioTrack, AutomationTrack, AutomationPoint,
@@ -1562,6 +1563,12 @@ class Sequencer(EventDispatcher):
                     if should_be_audible:
                         try:
                             output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
+
+                            # SAFETY CUT: Kill any zombie notes before restoring volume
+                            port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))  # Sustain Off
+                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All Notes Off
+                            port.send(mido.Message('control_change', channel=track.channel, control=120, value=0)) # All Sound Off
+
                             # Bank and Program changes are always sent, unless automation for them exists at the start.
                             if track.bank_msb is not None and (i, 'cc0') not in primed_by_automation:
                                 port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
@@ -1666,6 +1673,46 @@ class Sequencer(EventDispatcher):
         new_point = AutomationPoint(start_time=current_beat, parameter=mapping.action, value=point_value, curve='linear')
         auto_track.add_point(new_point)
         self.is_dirty = True
+
+    def load_gp_file(self, filepath: str) -> str:
+        """Loads a GuitarPro file as a new project and sets up virtual ports."""
+        try:
+            if self.playback_state != "stopped":
+                self.stop()
+
+            # Close and clear existing virtual ports
+            self.close_virtual_ports()
+            self.virtual_ports = []
+
+            # Perform the import
+            self.song = import_gp(filepath)
+            self.tempo = self.song.tempo
+            self.is_dirty = True
+            self.last_project_basename = None
+            self.invalidate_song_length_cache()
+            self.last_record_settings = None
+
+            # Create virtual ports for each MIDI track and assign them
+            for track in self.song.tracks:
+                if is_midi_track(track):
+                    port_name = track.name
+                    # Make sure the port name is unique if needed, but for now we use the track name
+                    self.create_virtual_port(port_name)
+                    track.output_port_name = port_name
+
+            # Restart Jack Manager to register new ports and handle routing
+            if self.jack_manager:
+                self.jack_manager.stop()
+                self.jack_manager.start()
+
+                self.jack_manager._manual_routing_override = -1
+                initial_idx = self.jack_manager._get_input_routing_value(0.0)
+                if initial_idx is not None:
+                    self.current_routing_index = initial_idx
+
+            return f"Successfully loaded GuitarPro file from '{filepath}' and created virtual ports."
+        except Exception as e:
+            return f"Error loading GuitarPro file: {e}"
 
     def load_song(self, filepath: str) -> str:
         try:
@@ -2133,9 +2180,12 @@ class Sequencer(EventDispatcher):
 
                                     # Thru OFF
                                     if enable_thru:
-                                        track = self.song.tracks[track_idx]
-                                        if is_midi_track(track) and track.output_port_name in self.open_ports:
-                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                        # Use current target_idx if track_idx is missing (safety)
+                                        t_idx = track_idx if track_idx is not None else target_idx
+                                        if t_idx is not None and 0 <= t_idx < len(self.song.tracks):
+                                            track = self.song.tracks[t_idx]
+                                            if is_midi_track(track) and track.output_port_name in self.open_ports:
+                                                self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
                         
                         if (num_beats_to_record is not None and
                                 current_beat >= (start_beat + num_beats_to_record)):
@@ -2522,7 +2572,7 @@ class Sequencer(EventDispatcher):
         generated_events.sort(key=lambda e: e['time'])
         return generated_events
 
-    def _resync_all_at_beat(self, beat: float, force_play: bool = False):
+    def _resync_all_at_beat(self, beat: float, force_play: bool = False, synchronous: bool = False):
         """
         Resynchronizes all tracks to a specific beat.
         If JACK is running, it repositions the master transport. Otherwise, it just
@@ -2574,7 +2624,7 @@ class Sequencer(EventDispatcher):
 
             # 4. Synchroniser les lecteurs externes avec la nouvelle position (l'état interne est déjà à jour)
             print("[DIAGNOSTIC] Seeking audio tracks (synchronously)...")
-            self.jack_manager.seek_audio_to_beat(beat, synchronous=True)
+            self.jack_manager.seek_audio_to_beat(beat, synchronous=synchronous)
             print("[DIAGNOSTIC] Audio track seek complete.")
 
             # 5. Régénérer les événements d'automation pour refléter le nouvel état (solo/mute)
@@ -2666,6 +2716,10 @@ class Sequencer(EventDispatcher):
                 current_beat = self._get_current_beat()
                 print(f"\n[DIAGNOSTIC] --- PAUSING at beat {current_beat:.6f} ---")
                 self.jack_manager.jack_client.transport_stop()
+
+                # Silence all MIDI notes to prevent hanging notes during pause
+                self.jack_manager.silence_all_midi_notes()
+
                 self.playback_state = "paused"
                 # Store the precise beat for resume
                 self.pause_beat = current_beat

@@ -139,7 +139,7 @@ class AutomationValueAxis(Widget):
             add_label(0.0, y_align='center')
 
 
-class EditableAutomationGrid(RelativeLayout):
+class EditableAutomationGrid(Widget):
     editor = ObjectProperty()
     points = ListProperty([])
     pixels_per_beat = NumericProperty(dp(100))
@@ -153,20 +153,20 @@ class EditableAutomationGrid(RelativeLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.grid_widget = Widget(size_hint=(1, 1), pos=(0, 0))
-        self.curve_widget = Widget(size_hint=(1, 1), pos=(0, 0))
+        self.grid_widget = Widget(size_hint=(None, None))
+        self.curve_widget = Widget(size_hint=(None, None))
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(size=self._update_layout, points=self.draw,
+        self.bind(pos=self._update_layout, size=self._update_layout, points=self.draw,
                   pixels_per_beat=self.draw, total_beats=self.draw,
                   min_val=self.draw, max_val=self.draw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
-        self.grid_widget.pos = (0, 0)
+        self.grid_widget.pos = self.pos
         self.curve_widget.size = self.size
-        self.curve_widget.pos = (0, 0)
+        self.curve_widget.pos = self.pos
         self.draw()
 
     def on_touch_down(self, touch):
@@ -285,8 +285,7 @@ class EditableAutomationGrid(RelativeLayout):
         with self.grid_widget.canvas:
             # Background
             Color(0.1, 0.1, 0.1, 1)
-            # RELATIVELAYOUT: Draw relative to (0,0)
-            Rectangle(pos=(0, 0), size=self.size)
+            Rectangle(pos=self.pos, size=self.size)
 
             # --- Grid Lines ---
             # Vertical lines (beats)
@@ -295,13 +294,13 @@ class EditableAutomationGrid(RelativeLayout):
                 x = i * self.pixels_per_beat
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
-                Line(points=[x, 0, x, self.height], width=1.5 if is_measure else 0.5)
+                Line(points=[self.x + x, self.y, self.x + x, self.y + self.height], width=1.5 if is_measure else 0.5)
 
             # Horizontal lines (values)
             num_h_lines = 10
             for i in range(num_h_lines + 1):
                 y = (i / num_h_lines) * self.height
-                Line(points=[0, y, self.width, y], width=0.5)
+                Line(points=[self.x, self.y + y, self.x + self.width, self.y + y], width=0.5)
 
         self.draw_curve_and_points()
 
@@ -341,7 +340,7 @@ class EditableAutomationGrid(RelativeLayout):
                 x1 = p1.start_time * self.pixels_per_beat
                 y1 = (normalize(p1.value) * self.height)
 
-                vertices.extend([x1, 0, 0, 0, x1, y1, 0, 0])
+                vertices.extend([self.x + x1, self.y, 0, 0, self.x + x1, self.y + y1, 0, 0])
                 indices.extend([v_index, v_index + 1])
                 v_index += 2
 
@@ -354,7 +353,7 @@ class EditableAutomationGrid(RelativeLayout):
                     if self.editor.selected_parameter == "prog":
                         # On crée un point intermédiaire à la même hauteur que p1, mais au temps de p2
                         # Cela crée la ligne horizontale de l'escalier
-                        vertices.extend([x2, 0, 0, 0, x2, y1, 0, 0])
+                        vertices.extend([self.x + x2, self.y, 0, 0, self.x + x2, self.y + y1, 0, 0])
                         indices.extend([v_index, v_index + 1])
                         v_index += 2
                     
@@ -378,7 +377,7 @@ class EditableAutomationGrid(RelativeLayout):
                                 
                             real_val = p1.value + ratio * (p2.value - p1.value)
                             curr_y = (normalize(real_val) * self.height)
-                            vertices.extend([curr_x, 0, 0, 0, curr_x, curr_y, 0, 0])
+                            vertices.extend([self.x + curr_x, self.y, 0, 0, self.x + curr_x, self.y + curr_y, 0, 0])
                             indices.extend([v_index, v_index + 1])
                             v_index += 2
 
@@ -387,7 +386,7 @@ class EditableAutomationGrid(RelativeLayout):
             final_x = self.total_beats * self.pixels_per_beat
             if last_x < final_x:
                 y_last = (normalize(last_p.value) * self.height)
-                vertices.extend([final_x, 0, 0, 0, final_x, y_last, 0, 0])
+                vertices.extend([self.x + final_x, self.y, 0, 0, self.x + final_x, self.y + y_last, 0, 0])
                 indices.extend([v_index, v_index + 1])
 
             Mesh(vertices=vertices, indices=indices, mode='triangle_strip')
@@ -404,7 +403,7 @@ class EditableAutomationGrid(RelativeLayout):
                 y1 = normalize(p1.value) * self.height
                 x2 = p2.start_time * self.pixels_per_beat
                 y2 = normalize(p2.value) * self.height
-                Line(points=[x1, y1, x2, y2], width=1.2)
+                Line(points=[self.x + x1, self.y + y1, self.x + x2, self.y + y2], width=1.2)
 
             # 2. Dessiner les points normaux (on saute le sélectionné)
             for p in sorted_points:
@@ -412,7 +411,7 @@ class EditableAutomationGrid(RelativeLayout):
                 x = p.start_time * self.pixels_per_beat
                 y = normalize(p.value) * self.height
                 Color(0.8, 0.8, 1, 0.9)
-                Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
+                Rectangle(pos=(self.x + x - point_radius, self.y + y - point_radius), size=(point_radius * 2, point_radius * 2))
 
             # 3. Dessiner le point sélectionné en DERNIER (Orange et par-dessus)
             if self.selected_point:
@@ -420,7 +419,7 @@ class EditableAutomationGrid(RelativeLayout):
                 x = p.start_time * self.pixels_per_beat
                 y = normalize(p.value) * self.height
                 Color(1, 0.6, 0, 1) # Orange vif
-                Rectangle(pos=(x - selected_radius, y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
+                Rectangle(pos=(self.x + x - selected_radius, self.y + y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
 
 Builder.load_string("""
 <AutomationEditor>:

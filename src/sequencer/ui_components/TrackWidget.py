@@ -127,6 +127,8 @@ class ResizeHandle(Widget):
             grip.pos = (start_x + i * spacing, center_y)
 
     def on_touch_down(self, touch):
+        if self.disabled:
+            return False
         if self.collide_point(*touch.pos):
             touch.grab(self)
             self._initial_height = self.track_widget.height
@@ -272,6 +274,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
     track_index = NumericProperty(0)
     is_minimized = BooleanProperty(False)
     full_height = NumericProperty(dp(160))
+    note_height = NumericProperty(round(dp(14)))
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         kwargs.setdefault('orientation', 'vertical')
@@ -312,7 +315,6 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.add_widget(self.resize_handle)
 
         # --- Left Section: Track Info ---
-        # Fixed-height wrapper for info elements (except DragHandle)
         self.info_section = BoxLayout(size_hint_x=None, width=self.info_width, orientation='horizontal', spacing=dp(8))
 
         # Handle container for DragHandle and MinimizeButton
@@ -351,14 +353,14 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         self.info_section.add_widget(self.handle_container)
 
-        # Container for other info elements - Fixed at top, clipped if track is too small
+        # Container for other info elements - Centered, clipped if track is too small
         self.info_clipped_wrapper = StencilView(size_hint_x=1, size_hint_y=1)
-        self.info_clipped_rel = RelativeLayout(size_hint=(None, None))
+        self.info_clipped_rel = RelativeLayout(size_hint=(1, 1))
+        self.info_clipped_wrapper.bind(size=self.info_clipped_rel.setter('size'), pos=self.info_clipped_rel.setter('pos'))
         self.info_clipped_wrapper.add_widget(self.info_clipped_rel)
-        self.info_clipped_wrapper.bind(pos=self.info_clipped_rel.setter('pos'), size=self.info_clipped_rel.setter('size'))
 
-        # Header bar for name and index - Centered vertically
-        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, None), height=dp(160), pos_hint={'center_y': 0.5})
+        # Header bar for name and index - Use size_hint_y=1 to fill main_row height
+        self.info_top_bar = BoxLayout(orientation='horizontal', spacing=dp(8), padding=[0, 0, dp(10), 0], size_hint=(1, 1))
         self.info_clipped_rel.add_widget(self.info_top_bar)
 
         self.info_section.add_widget(self.info_clipped_wrapper)
@@ -376,6 +378,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             width=dp(30),
             padding=labelPadding,
         )
+        self.index_label.bind(size=self.index_label.setter('text_size'))
         self.info_top_bar.add_widget(self.index_label)
 
         # Editable track name
@@ -410,11 +413,11 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # --- Middle Section: Controls ---
         # Robust clipping container
         self.controls_wrapper = StencilView(size_hint_x=None, width=self.controls_width, size_hint_y=1)
-        self.controls_clipped_rel = RelativeLayout(size_hint=(None, None))
+        self.controls_clipped_rel = RelativeLayout(size_hint=(1, 1))
+        self.controls_wrapper.bind(size=self.controls_clipped_rel.setter('size'), pos=self.controls_clipped_rel.setter('pos'))
         self.controls_wrapper.add_widget(self.controls_clipped_rel)
-        self.controls_wrapper.bind(pos=self.controls_clipped_rel.setter('pos'), size=self.controls_clipped_rel.setter('size'))
 
-        self.controls_section = BoxLayout(size_hint=(1, None), height=dp(160), spacing=dp(8), pos_hint={'center_y': 0.5})
+        self.controls_section = BoxLayout(size_hint=(1, 1), spacing=dp(8))
         self.controls_clipped_rel.add_widget(self.controls_section)
 
         # --- Solo Button (not for Automation tracks) ---
@@ -484,11 +487,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # --- MIDI Specific Controls (Channel, Program) ---
         midi_controls_layout = BoxLayout(
             orientation='vertical',
-            size_hint=(None, None),
-            height=dp(160),
+            size_hint=(None, 1),
             width=dp(170),  # Increased width
-            spacing=0,
-            pos_hint={'center_y': 0.5}
+            spacing=0
         )
 
         if isinstance(track, MidiTrack):
@@ -554,7 +555,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.controls_section.add_widget(midi_controls_layout)
         
         # --- Volume Controls ---
-        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
+        volume_layout = BoxLayout(orientation='vertical', size_hint=(None, 1), width=dp(50), spacing=0)
 
         mute_button_container = BoxLayout(size_hint_y=None, height=dp(36), pos_hint={'center_x': 0.5})
         self.mute_button = TooltipMDIconButton(
@@ -588,7 +589,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         # --- Pan Controls ---
         if not isinstance(track, AutomationTrack):
-            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, None), height=dp(160), width=dp(50), spacing=0, pos_hint={'center_y': 0.5})
+            pan_layout = BoxLayout(orientation='vertical', size_hint=(None, 1), width=dp(50), spacing=0)
 
             pan_icon_container = BoxLayout(size_hint_y=None, height=dp(36))
             pan_icon = MDIcon(icon='swap-horizontal', theme_text_color='Custom', text_color=[1, 1, 1, 0.38], pos_hint={'center_x': 0.5, 'center_y': 0.5})
@@ -619,12 +620,24 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
         # --- Right Section: Timeline ---
         if isinstance(track, MidiTrack):
-            note_height = dp(12)
+            note_height = self.note_height # Use the property
 
             # 1. Keyboard (fixed width)
-            self.keyboard_sv = ScrollView(size_hint_x=None, width=dp(40), do_scroll_x=False, do_scroll_y=True, effect_cls=ScrollEffect)
+            # To ensure perfect vertical alignment, both ScrollViews must have identical viewport heights.
+            # We hide all scrollbars and use 'content' scroll type for both.
+            self.keyboard_sv = ScrollView(
+                size_hint_x=None,
+                width=dp(40),
+                do_scroll_x=False,
+                do_scroll_y=True,
+                effect_cls=ScrollEffect,
+                bar_width=0,
+                scroll_type=['content']
+            )
             self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
+            # Link piano_keyboard properties to TrackWidget properties
+            self.bind(note_height=self.piano_keyboard.setter('note_height'))
             self.keyboard_sv.add_widget(self.piano_keyboard)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
@@ -633,14 +646,15 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 do_scroll_x=True,
                 do_scroll_y=True,
                 effect_cls=ScrollEffect, # Désactive les rebonds (overscroll)
-                bar_width=dp(2)
+                bar_width=0, # Hide scrollbar to maintain vertical alignment with keyboard
+                scroll_type=['content'] # Ensure touch scrolls correctly
             )
             self.timeline_scroll.effect_x = ScrollEffect()
             self.timeline_scroll.effect_y = ScrollEffect()
 
             # Content container (RelativeLayout for local coordinate system)
             self.content = RelativeLayout(size_hint=(None, None))
-            self.content.size = (self.total_beats * self.pixels_per_beat, 128 * note_height)
+            self.content.size = (self.total_beats * self.pixels_per_beat, 128 * self.note_height)
 
             # AJOUT : Préparation de la translation GPU
             with self.content.canvas.before:
@@ -657,7 +671,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 total_beats=self.total_beats,
                 pixels_per_beat=self.pixels_per_beat,
                 beat_per_measure=self.beats_per_measure,
-                note_height=note_height,
+                note_height=self.note_height,
                 size_hint=(None, None)
             )
             self.piano_roll.size = self.content.size
@@ -672,6 +686,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 Color(1, 0, 0, 0.8)
                 self.playback_rect = Rectangle(pos=self.playback_line.pos, size=self.playback_line.size)
             self.playback_line.bind(pos=self.update_playback_rect, size=self.update_playback_rect)
+            self.content.bind(height=self.playback_line.setter('height'))
             self.content.add_widget(self.playback_line)
 
             # --- SYNCHRONISATION SÉCURISÉE ---
@@ -681,7 +696,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.timeline_scroll.add_widget(self.content)
 
             # Bind for size/zoom updates
-            self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size)
+            self.bind(total_beats=self.update_timeline_size, pixels_per_beat=self.update_timeline_size, note_height=self.update_timeline_size)
 
             # Link vertical scrolling between keyboard and timeline
             self.keyboard_sv.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.keyboard_sv, self.timeline_scroll, v))
@@ -689,9 +704,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
-                total_height = 128 * note_height
+                total_height = 128 * self.note_height
                 view_height = self.height
-                note_center_y = 60 * note_height + note_height / 2
+                note_center_y = 60 * self.note_height + self.note_height / 2
                 desired_top_y = note_center_y - view_height / 2
                 max_top_y = total_height - view_height
                 desired_top_y = max(0, min(desired_top_y, max_top_y))
@@ -707,17 +722,15 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.main_row.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
-            # Create a layout for the track type icon, fixed height at top
+            # Create a layout for the track type icon
             self.icon_wrapper = StencilView(size_hint_x=None, width=dp(40), size_hint_y=1)
-            self.icon_clipped_rel = RelativeLayout(size_hint=(None, None))
+            self.icon_clipped_rel = RelativeLayout(size_hint=(1, 1))
+            self.icon_wrapper.bind(size=self.icon_clipped_rel.setter('size'), pos=self.icon_clipped_rel.setter('pos'))
             self.icon_wrapper.add_widget(self.icon_clipped_rel)
-            self.icon_wrapper.bind(pos=self.icon_clipped_rel.setter('pos'), size=self.icon_clipped_rel.setter('size'))
 
             self.icon_layout = BoxLayout(
-                size_hint=(1, None),
-                height=dp(160),
-                orientation='vertical',
-                pos_hint={'center_y': 0.5}
+                size_hint=(1, 1),
+                orientation='vertical'
             )
             self.icon_clipped_rel.add_widget(self.icon_layout)
 
@@ -909,7 +922,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
         if hasattr(self, 'content'):
             # For MIDI tracks
             self.content.width = self.total_beats * self.pixels_per_beat
+            self.content.height = 128 * self.note_height
             self.piano_roll.width = self.content.width
+            self.piano_roll.height = self.content.height
             
             # --- CORRECTION ICI ---
             # Il faut propager les nouvelles valeurs à l'instance piano_roll
@@ -917,6 +932,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.piano_roll.total_beats = self.total_beats
             self.piano_roll.pixels_per_beat = self.pixels_per_beat
             self.piano_roll.beat_per_measure = self.beats_per_measure
+            self.piano_roll.note_height = self.note_height
             # ----------------------
             
             # Redraw is handled by property bindings in PianoRoll
@@ -997,18 +1013,19 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self._temp_timeline_widgets = []
             if hasattr(self, 'keyboard_sv'):
                 self._temp_timeline_widgets.append(self.keyboard_sv)
-            if hasattr(self, 'icon_layout'):
-                self._temp_timeline_widgets.append(self.icon_layout)
+            if hasattr(self, 'icon_wrapper'):
+                self._temp_timeline_widgets.append(self.icon_wrapper)
             self._temp_timeline_widgets.append(self.timeline_scroll)
 
             for w in self._temp_timeline_widgets:
-                if w in self.children:
-                    self.remove_widget(w)
+                if w in self.main_row.children:
+                    self.main_row.remove_widget(w)
 
-            self.controls_section.opacity = 0
-            self.controls_section.disabled = True
-            self.controls_section.size_hint_x = None
-            self.controls_section.width = 0
+            # Properly hide controls section by hiding its wrapper
+            self.controls_wrapper.opacity = 0
+            self.controls_wrapper.disabled = True
+            self.controls_wrapper.size_hint_x = None
+            self.controls_wrapper.width = 0
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 0
@@ -1017,7 +1034,6 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 self.target_indicator_icon.width = 0
 
             # Allow left_panel and info_section to fill width
-            self.spacing = 0
             self.left_panel.spacing = 0
             self.left_panel.size_hint_x = 1
 
@@ -1029,14 +1045,21 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             if hasattr(self, 'vert_separator'):
                 self.vert_separator.size = (0, 0)
+
+            # Disable resizing while minimized
+            self.resize_handle.disabled = True
+            self.resize_handle.opacity = 0
+            self.resize_handle.height = 0
+            if self.resize_handle in self.children:
+                self.remove_widget(self.resize_handle)
         else:
             self.height = self.full_height
 
             # Restore sections
-            self.controls_section.opacity = 1
-            self.controls_section.disabled = False
-            self.controls_section.size_hint_x = None
-            self.controls_section.width = self.controls_width
+            self.controls_wrapper.opacity = 1
+            self.controls_wrapper.disabled = False
+            self.controls_wrapper.size_hint_x = None
+            self.controls_wrapper.width = self.controls_width
 
             if hasattr(self, 'target_indicator_icon'):
                 self.target_indicator_icon.opacity = 1
@@ -1046,19 +1069,21 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             # Re-add timeline widgets in correct order
             if hasattr(self, 'keyboard_sv'):
-                if self.keyboard_sv not in self.children:
-                    self.add_widget(self.keyboard_sv)
-            elif hasattr(self, 'icon_layout'):
-                if self.icon_layout not in self.children:
-                    self.add_widget(self.icon_layout)
+                if self.keyboard_sv.parent:
+                    self.keyboard_sv.parent.remove_widget(self.keyboard_sv)
+                self.main_row.add_widget(self.keyboard_sv)
+            elif hasattr(self, 'icon_wrapper'):
+                if self.icon_wrapper.parent:
+                    self.icon_wrapper.parent.remove_widget(self.icon_wrapper)
+                self.main_row.add_widget(self.icon_wrapper)
 
-            if self.timeline_scroll not in self.children:
-                self.add_widget(self.timeline_scroll)
+            if self.timeline_scroll.parent:
+                self.timeline_scroll.parent.remove_widget(self.timeline_scroll)
+            self.main_row.add_widget(self.timeline_scroll)
 
-            self.spacing = dp(12)
             self.left_panel.spacing = dp(12)
             self.left_panel.size_hint_x = None
-            self.left_panel.width = self.info_width + self.controls_width + self.spacing
+            self.left_panel.width = self.info_width + self.controls_width + dp(12)
 
             self.info_section.size_hint_x = None
             self.info_section.width = self.info_width
@@ -1070,6 +1095,13 @@ class TrackWidget(HoverBehavior, BoxLayout):
             if hasattr(self, 'vert_separator'):
                 # Size will be updated in _update_graphics
                 pass
+
+            # Re-enable resizing
+            self.resize_handle.disabled = False
+            self.resize_handle.opacity = 1
+            self.resize_handle.height = dp(12)
+            if self.resize_handle not in self.children:
+                self.add_widget(self.resize_handle)
 
         # Update visual separator and other graphics
         self._update_graphics()

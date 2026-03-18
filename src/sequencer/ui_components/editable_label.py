@@ -32,8 +32,9 @@ class EditableLabel(BoxLayout):
         self.orientation = 'horizontal'
         if self.adaptive_width:
             self.size_hint_x = None
-        self.size_hint_y = None
-        self.height = dp(36)
+        # Respect size_hint_y if it was set during initialization (defaults to 1 if not set)
+        if self.size_hint_y is None:
+            self.height = dp(36)
         self._setup_view_mode()
 
     def _setup_view_mode(self):
@@ -60,6 +61,8 @@ class EditableLabel(BoxLayout):
         else:
             self.label.size_hint_x = 1
             self.label.bind(size=self._update_text_size)
+            # Ensure text size is initialized correctly for non-adaptive mode
+            self.label.text_size = self.label.size
 
         self.label.bind(on_touch_down=self._enter_edit_mode)
         self.add_widget(self.label)

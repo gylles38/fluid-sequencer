@@ -9,7 +9,7 @@ from kivy.effects.scroll import ScrollEffect
 from kivy.graphics import Color, Rectangle, Line, Mesh, PushMatrix, PopMatrix, Translate
 from kivy.core.text import Label as CoreLabel # On utilise CoreLabel pour dessiner sur le canvas
 
-class RulerContent(RelativeLayout):
+class RulerContent(Widget):
     sequencer_layout = ObjectProperty(None)
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
@@ -98,7 +98,7 @@ class RulerContent(RelativeLayout):
 
         with self.canvas:
             Color(*c_bg)
-            Rectangle(pos=(0, 0), size=(target_width, self.height))
+            Rectangle(pos=self.pos, size=(target_width, self.height))
 
             # --- DESSIN DE LA SÉLECTION (PLAGE START/END) ---
             if self.sequencer_layout and self.sequencer_layout.sequencer:
@@ -110,17 +110,17 @@ class RulerContent(RelativeLayout):
                     Color(*c_selection_range)
                     x_start = start_beat * self.pixels_per_beat
                     x_end = end_beat * self.pixels_per_beat
-                    Rectangle(pos=(x_start, 0), size=(x_end - x_start, self.height))
+                    Rectangle(pos=(self.x + x_start, self.y), size=(x_end - x_start, self.height))
 
                 if start_beat is not None:
                     Color(*c_selection)
                     x = start_beat * self.pixels_per_beat
-                    Rectangle(pos=(x, 0), size=(dp(3), self.height))
+                    Rectangle(pos=(self.x + x, self.y), size=(dp(3), self.height))
 
                 if end_beat is not None:
                     Color(*c_selection)
                     x = end_beat * self.pixels_per_beat
-                    Rectangle(pos=(x - dp(3), 0), size=(dp(3), self.height))
+                    Rectangle(pos=(self.x + x - dp(3), self.y), size=(dp(3), self.height))
 
             # --- Optimized Grid Lines using Mesh ---
             major_vertices = []
@@ -129,9 +129,9 @@ class RulerContent(RelativeLayout):
             for beat in range(int(self.total_beats) + 1):
                 x = beat * self.pixels_per_beat
                 if beat % self.beats_per_measure == 0:
-                    major_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
+                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
                 else:
-                    minor_vertices.extend([x, self.height * 0.4, 0, 0, x, self.height * 0.6, 0, 0])
+                    minor_vertices.extend([self.x + x, self.y + self.height * 0.4, 0, 0, self.x + x, self.y + self.height * 0.6, 0, 0])
 
             if major_vertices:
                 Color(*c_measure)
@@ -150,7 +150,7 @@ class RulerContent(RelativeLayout):
                     Color(*c_white)
                     Rectangle(
                         texture=texture,
-                        pos=(int(x + self.label_padding_x), int(self.height * 0.2)),
+                        pos=(int(self.x + x + self.label_padding_x), int(self.y + self.height * 0.2)),
                         size=texture.size
                     )
 

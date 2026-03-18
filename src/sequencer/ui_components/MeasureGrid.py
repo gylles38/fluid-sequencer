@@ -31,13 +31,13 @@ class MeasureGrid(Widget):
             minor_vertices = []
 
             for i in range(int(self.total_beats) + 1):
-                x_pos = i * self.pixels_per_beat
+                x_pos = round(i * self.pixels_per_beat)
                 if i % self.beat_per_measure == 0:
                     # Major line
-                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    major_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
                 else:
                     # Minor line
-                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    minor_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
 
             if major_vertices:
                 Color(0.8, 0.8, 0.8, 0.8)

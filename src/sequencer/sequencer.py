@@ -2357,18 +2357,15 @@ class Sequencer(EventDispatcher):
                     self.is_smoothing = True
                     try:
                         # Find all automation tracks that might have been modified
-                        processed_auto_tracks = set()
+                        # Using indices to avoid unhashable type error for AutomationTrack
+                        processed_auto_indices = set()
                         for tidx in processed_tracks:
-                            for t in self.song.tracks:
+                            for i, t in enumerate(self.song.tracks):
                                 if isinstance(t, AutomationTrack) and t.target_track_index == tidx:
-                                    processed_auto_tracks.add(t)
+                                    processed_auto_indices.add(i)
 
-                        for auto_track in processed_auto_tracks:
-                             # Find its real index in song.tracks
-                             try:
-                                 real_idx = self.song.tracks.index(auto_track)
-                                 self._smooth_track_automation(real_idx)
-                             except ValueError: pass
+                        for auto_idx in processed_auto_indices:
+                             self._smooth_track_automation(auto_idx)
 
                         # Trigger final UI refresh
                         self._trigger_song_structure_change()

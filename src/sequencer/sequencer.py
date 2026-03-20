@@ -480,14 +480,44 @@ class Sequencer(EventDispatcher):
                     event = Event(start_time=event_data['start_time'], notes=[note])
                     track.add_event(event)
                 elif event_data['type'] == 'cc':
-                    cc = CCMessage(control=event_data['control'], value=event_data['value'])
-                    # Find or create event at this time
-                    existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
-                    if existing_event:
-                        existing_event.cc_messages.append(cc)
+                    # Support for direct CC automation recording (specifically CC1 for now)
+                    cc_num = event_data['control']
+                    cc_val = event_data['value']
+
+                    if cc_num == 1:
+                        # Find an automation track that targets this MIDI track and is meant for CC1
+                        found_auto = False
+                        for t in self.song.tracks:
+                            if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                                # We check if it already has CC1 points or is intended for it
+                                # If the track is empty, we could potentially use it, but usually,
+                                # we want to find one already showing CC1.
+                                # For simplicity, let's add it to the first automation track targeting this MIDI track.
+                                # The user says "one CC per automation track", so we look for 'cc1'
+                                if any(p.parameter == 'cc1' for p in t.points):
+                                    t.add_point(AutomationPoint(start_time=event_data['start_time'], parameter='cc1', value=float(cc_val), curve='linear'))
+                                    found_auto = True
+                                    break
+
+                        if not found_auto:
+                            # Fallback: record as standard CC message on the MIDI track
+                            cc = CCMessage(control=cc_num, value=cc_val)
+                            existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
+                            if existing_event:
+                                existing_event.cc_messages.append(cc)
+                            else:
+                                event = Event(start_time=event_data['start_time'], cc_messages=[cc])
+                                track.add_event(event)
                     else:
-                        event = Event(start_time=event_data['start_time'], cc_messages=[cc])
-                        track.add_event(event)
+                        # Standard CC recording for other controllers
+                        cc = CCMessage(control=cc_num, value=cc_val)
+                        # Find or create event at this time
+                        existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
+                        if existing_event:
+                            existing_event.cc_messages.append(cc)
+                        else:
+                            event = Event(start_time=event_data['start_time'], cc_messages=[cc])
+                            track.add_event(event)
 
                 any_added = True
             except IndexError:
@@ -2186,7 +2216,23 @@ class Sequencer(EventDispatcher):
                                             track = self.song.tracks[t_idx]
                                             if is_midi_track(track) and track.output_port_name in self.open_ports:
                                                 self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
-                        
+
+                            elif msg.type == 'control_change':
+                                if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
+                                    track = self.song.tracks[target_idx]
+                                    if is_midi_track(track):
+                                        # Record CC
+                                        self.jack_manager._recorded_events_to_merge.append({
+                                            'type': 'cc',
+                                            'track_idx': target_idx,
+                                            'control': msg.control,
+                                            'value': msg.value,
+                                            'start_time': current_beat
+                                        })
+                                        # Thru
+                                        if enable_thru and track.output_port_name in self.open_ports:
+                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+
                         if (num_beats_to_record is not None and
                                 current_beat >= (start_beat + num_beats_to_record)):
                             Clock.schedule_once(lambda dt: self._stop_playback_transport())

@@ -176,6 +176,7 @@ class EditableAutomationGrid(Widget):
         # In a RelativeLayout, touch.x and touch.y are already relative to the RL's origin.
         # We need to subtract this widget's local position (x, y) relative to that RL.
         lx, ly = touch.x - self.x, touch.y - self.y
+        local_pos = (lx, ly)
 
         clicked_beat = lx / self.pixels_per_beat
 

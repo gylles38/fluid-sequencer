@@ -164,6 +164,7 @@ class EditableRoutingGrid(Widget):
 
         # Subtract widget position from relative parent coordinates
         lx, ly = touch.x - self.x, touch.y - self.y
+        local_pos = (lx, ly)
 
         clicked_beat = lx / self.pixels_per_beat
         clicked_abs_idx = self._get_abs_idx_from_y(ly)

@@ -91,6 +91,7 @@ class SequencerLayout(BoxLayout):
             
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self.sequencer.bind(is_recording=self.update_record_button_state)
+        self.sequencer.bind(is_smoothing=self.update_smoothing_status)
         self.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
         self._transport_update_event = None # Pour stocker l'événement Clock
         self.current_command = ""
@@ -1656,6 +1657,16 @@ class SequencerLayout(BoxLayout):
             self.record_button.md_bg_color = blink_color
         else:
             self.record_button.md_bg_color = default_color
+
+    def update_smoothing_status(self, instance, value):
+        """Updates the UI to reflect the smoothing process."""
+        if value:
+            self.output_label.text = "[color=ff9800]Smoothing recorded automation...[/color]"
+            self.output_label.markup = True
+        else:
+            # Clear smoothing message if it was the last thing shown
+            if "Smoothing" in self.output_label.text:
+                 self.output_label.text = "Recording complete. Automation smoothed."
 
     def update_record_button_state(self, *args):
         """Centralized method to update the record button's visual state."""

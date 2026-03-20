@@ -45,6 +45,7 @@ class Sequencer(EventDispatcher):
     playback_state = StringProperty("stopped")
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
+    is_smoothing = BooleanProperty(False)
     song_structure_changed = NumericProperty(0)
     tempo = NumericProperty(120)
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
@@ -480,6 +481,13 @@ class Sequencer(EventDispatcher):
                     note = Note(pitch=event_data['pitch'], velocity=event_data['velocity'], duration=event_data['duration'])
                     event = Event(start_time=event_data['start_time'], notes=[note])
                     track.add_event(event)
+
+                    # Also record to Velocity automation if active
+                    for t in self.song.tracks:
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            if t.active_parameter.lower() == 'vel':
+                                self._add_smoothed_automation_point(t, 'vel', event_data['start_time'], float(event_data['velocity']))
+                                break
                 elif event_data['type'] == 'cc':
                     # Support for direct CC automation recording
                     cc_num = event_data['control']
@@ -519,6 +527,23 @@ class Sequencer(EventDispatcher):
                         else:
                             event = Event(start_time=event_data['start_time'], cc_messages=[cc])
                             track.add_event(event)
+                elif event_data['type'] == 'pitchwheel':
+                    pitch_val = event_data['pitch']
+                    norm_val = pitch_val / 8192.0 # Normalize -8192..8191 to -1.0..1.0
+                    for t in self.song.tracks:
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            active_p = t.active_parameter.lower()
+                            if active_p in ['pitch', 'pb']:
+                                self._add_smoothed_automation_point(t, active_p, event_data['start_time'], norm_val)
+                                break
+                elif event_data['type'] == 'program':
+                    prog_val = event_data['program']
+                    for t in self.song.tracks:
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            active_p = t.active_parameter.lower()
+                            if active_p == 'prog':
+                                self._add_smoothed_automation_point(t, active_p, event_data['start_time'], float(prog_val))
+                                break
 
                 any_added = True
             except IndexError:
@@ -2274,6 +2299,30 @@ class Sequencer(EventDispatcher):
                                         # Thru
                                         if enable_thru and track.output_port_name in self.open_ports:
                                             self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                            elif msg.type == 'pitchwheel':
+                                if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
+                                    track = self.song.tracks[target_idx]
+                                    if is_midi_track(track):
+                                        self.jack_manager._recorded_events_to_merge.append({
+                                            'type': 'pitchwheel',
+                                            'track_idx': target_idx,
+                                            'pitch': msg.pitch,
+                                            'start_time': current_beat
+                                        })
+                                        if enable_thru and track.output_port_name in self.open_ports:
+                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                            elif msg.type == 'program_change':
+                                if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
+                                    track = self.song.tracks[target_idx]
+                                    if is_midi_track(track):
+                                        self.jack_manager._recorded_events_to_merge.append({
+                                            'type': 'program',
+                                            'track_idx': target_idx,
+                                            'program': msg.program,
+                                            'start_time': current_beat
+                                        })
+                                        if enable_thru and track.output_port_name in self.open_ports:
+                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
 
                         if (num_beats_to_record is not None and
                                 current_beat >= (start_beat + num_beats_to_record)):
@@ -2303,10 +2352,33 @@ class Sequencer(EventDispatcher):
                             'duration': duration
                         })
 
+                # Perform post-recording smoothing
+                def do_smoothing(dt):
+                    self.is_smoothing = True
+                    try:
+                        # Find all automation tracks that might have been modified
+                        processed_auto_tracks = set()
+                        for tidx in processed_tracks:
+                            for t in self.song.tracks:
+                                if isinstance(t, AutomationTrack) and t.target_track_index == tidx:
+                                    processed_auto_tracks.add(t)
 
-                self.is_recording = False
-                self._stop_event.clear()
-                print("Enregistrement terminé.")
+                        for auto_track in processed_auto_tracks:
+                             # Find its real index in song.tracks
+                             try:
+                                 real_idx = self.song.tracks.index(auto_track)
+                                 self._smooth_track_automation(real_idx)
+                             except ValueError: pass
+
+                        # Trigger final UI refresh
+                        self._trigger_song_structure_change()
+                    finally:
+                        self.is_smoothing = False
+                        self.is_recording = False
+                        self._stop_event.clear()
+                        print("Enregistrement terminé.")
+
+                Clock.schedule_once(do_smoothing)
 
     def _truncate_track_for_recording(self, track_idx: int, start_beat: float, end_beat: Optional[float]):
         """Helper to truncate notes on a track before/during recording (OVERWRITE mode)."""
@@ -2356,6 +2428,83 @@ class Sequencer(EventDispatcher):
         """Triggers a UI refresh due to song structure changes."""
         self.invalidate_song_length_cache()
         self.song_structure_changed += 1
+
+    def _smooth_track_automation(self, track_idx: int):
+        """Applies Ramer-Douglas-Peucker smoothing to newly recorded automation on a track."""
+        track = self.song.tracks[track_idx]
+        if not isinstance(track, AutomationTrack) or not track.points:
+            return
+
+        # Separate points by parameter to smooth them independently
+        points_by_param = {}
+        for p in track.points:
+            points_by_param.setdefault(p.parameter, []).append(p)
+
+        new_total_points = []
+        for param, points in points_by_param.items():
+            if len(points) < 3:
+                new_total_points.extend(points)
+                continue
+
+            # Apply RDP algorithm
+            # We use a threshold relative to the parameter range
+            # For 0-127 (CCs), 1.0 is ~0.8% error.
+            # For 0-1 (Vol), 0.01 is 1% error.
+            if param.startswith('cc') or param in ['vel', 'prog']:
+                epsilon = 0.4 # Slightly less aggressive to preserve "assez proche"
+            elif param in ['pitch', 'pb']:
+                epsilon = 0.005 # More sensitive to fine movements
+            else:
+                epsilon = 0.002
+
+            smoothed = self._rdp(points, epsilon)
+            new_total_points.extend(smoothed)
+
+        # Update track points and sort
+        track.points = sorted(new_total_points, key=lambda p: p.start_time)
+
+    def _rdp(self, points: List[AutomationPoint], epsilon: float) -> List[AutomationPoint]:
+        """Simplified Ramer-Douglas-Peucker algorithm implementation."""
+        if len(points) < 3:
+            return points
+
+        dmax = 0.0
+        index = 0
+        end = len(points) - 1
+
+        for i in range(1, end):
+            d = self._perpendicular_distance(points[i], points[0], points[end])
+            if d > dmax:
+                index = i
+                dmax = d
+
+        if dmax > epsilon:
+            res1 = self._rdp(points[:index+1], epsilon)
+            res2 = self._rdp(points[index:], epsilon)
+            return res1[:-1] + res2
+        else:
+            return [points[0], points[end]]
+
+    def _perpendicular_distance(self, p, start, end):
+        """Calculates perpendicular distance from point p to line (start, end)."""
+        # We normalize time vs value roughly for distance calculation
+        # For CCs (0-127), we might want to scale beats to make them comparable.
+        # But keeping it simple for now as per user request for "assez proche".
+        x, y = p.start_time, p.value
+        x1, y1 = start.start_time, start.value
+        x2, y2 = end.start_time, end.value
+
+        if x1 == x2:
+            if y1 == y2:
+                return math.sqrt((x - x1)**2 + (y - y1)**2)
+            return abs(x - x1)
+
+        # Distance from point (x,y) to line (x1,y1)-(x2,y2)
+        numerator = abs((y2 - y1) * x - (x2 - x1) * y + x2 * y1 - y2 * x1)
+        denominator = math.sqrt((y2 - y1)**2 + (x2 - x1)**2)
+        if denominator == 0:
+            return math.sqrt((x - x1)**2 + (y - y1)**2)
+        return numerator / denominator
 
     def _start_recording_internal(self, track_index: Optional[int], start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: Optional[bool], enable_thru: bool):
             # Truncation for OVERWRITE mode

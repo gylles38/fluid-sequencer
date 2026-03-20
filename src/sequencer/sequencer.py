@@ -593,7 +593,7 @@ class Sequencer(EventDispatcher):
 
         # Add new point and shift history
         new_p = AutomationPoint(start_time=start_time, parameter=parameter, value=value, curve='linear')
-        auto_track.add_point(new_p)
+        auto_track.add_point(new_p, sort=sort)
         self._last_recorded_auto_points[key] = [new_p, last_p]
 
     def get_default_record_port(self) -> Optional[str]:
@@ -2197,7 +2197,7 @@ class Sequencer(EventDispatcher):
 
                     print(f"En attente de la première note sur '{target_name}'...")
 
-                    pending_first_note = None
+                    pending_trigger_msg = None
                     while not self._stop_event.is_set() and not first_note_detected:
                         if not self.is_recording:
                              print("Recording armed state cancelled.")
@@ -2210,14 +2210,21 @@ class Sequencer(EventDispatcher):
                             break
 
                         msg = inport.poll()
-                        if msg and msg.type == 'note_on' and msg.velocity > 0:
-                            first_note_detected = True
-                            pending_first_note = msg
-                            self.play(start_beat=start_beat)
-                            time.sleep(0.05)
-                            recording_start_beat = self._get_current_beat()
-                            print(f"Enregistrement déclenché à {self._format_beats_to_position(recording_start_beat)}")
-                            break
+                        if msg:
+                            # Any MIDI activity can trigger recording (Note, CC, Pitch, Program)
+                            is_trigger = False
+                            if msg.type == 'note_on' and msg.velocity > 0: is_trigger = True
+                            elif msg.type in ('control_change', 'pitchwheel', 'program_change'): is_trigger = True
+
+                            if is_trigger:
+                                first_note_detected = True
+                                pending_trigger_msg = msg
+                                self.play(start_beat=start_beat)
+                                # Small delay to allow transport to start and get a reliable beat
+                                time.sleep(0.05)
+                                recording_start_beat = self._get_current_beat()
+                                print(f"Enregistrement déclenché par {msg.type} à {self._format_beats_to_position(recording_start_beat)}")
+                                break
 
                         time.sleep(0.01)
 
@@ -2243,12 +2250,13 @@ class Sequencer(EventDispatcher):
                                         self._truncate_track_for_recording(target_idx, start_beat, session_end_beat)
                                 processed_tracks.add(target_idx)
 
-                        # Process pending first note
-                        if pending_first_note:
-                            msgs = [pending_first_note]
-                            pending_first_note = None
-                        else:
-                            msgs = list(inport.iter_pending())
+                        # Process triggering message if any, then pull pending
+                        msgs = []
+                        if pending_trigger_msg:
+                            msgs.append(pending_trigger_msg)
+                            pending_trigger_msg = None
+
+                        msgs.extend(list(inport.iter_pending()))
 
                         for msg in msgs:
                             if msg.type == 'note_on' and msg.velocity > 0:
@@ -2258,8 +2266,8 @@ class Sequencer(EventDispatcher):
                                         if msg.note not in open_notes:
                                             open_notes[msg.note] = (current_beat, msg.velocity, target_idx)
                                             # Thru
-                                            if enable_thru and track.output_port_name in self.open_ports:
-                                                self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                            if enable_thru and getattr(track, 'output_port_name', None) in self.open_ports:
+                                                self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
 
                             elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                                 if msg.note in open_notes:
@@ -2279,12 +2287,12 @@ class Sequencer(EventDispatcher):
 
                                     # Thru OFF
                                     if enable_thru:
-                                        # Use current target_idx if track_idx is missing (safety)
+                                        # Use original track_idx for Note Off to match the Note On channel
                                         t_idx = track_idx if track_idx is not None else target_idx
                                         if t_idx is not None and 0 <= t_idx < len(self.song.tracks):
                                             track = self.song.tracks[t_idx]
-                                            if is_midi_track(track) and track.output_port_name in self.open_ports:
-                                                self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                            if is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                                self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
 
                             elif msg.type == 'control_change':
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
@@ -2298,8 +2306,8 @@ class Sequencer(EventDispatcher):
                                         'start_time': current_beat
                                     })
                                     # Thru (Only for MIDI tracks)
-                                    if enable_thru and is_midi_track(track) and track.output_port_name in self.open_ports:
-                                        self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                    if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
                             elif msg.type == 'pitchwheel':
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
@@ -2309,8 +2317,8 @@ class Sequencer(EventDispatcher):
                                         'pitch': msg.pitch,
                                         'start_time': current_beat
                                     })
-                                    if enable_thru and is_midi_track(track) and track.output_port_name in self.open_ports:
-                                        self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                    if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
                             elif msg.type == 'program_change':
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
@@ -2320,8 +2328,8 @@ class Sequencer(EventDispatcher):
                                         'program': msg.program,
                                         'start_time': current_beat
                                     })
-                                    if enable_thru and is_midi_track(track) and track.output_port_name in self.open_ports:
-                                        self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                    if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
 
                         if (num_beats_to_record is not None and
                                 current_beat >= (start_beat + num_beats_to_record)):

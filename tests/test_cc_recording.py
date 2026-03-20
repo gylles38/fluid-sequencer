@@ -89,5 +89,32 @@ class TestCCRecording(unittest.TestCase):
         self.assertEqual(auto_track.points[0].parameter, 'vol')
         self.assertAlmostEqual(auto_track.points[0].value, 80.0/127.0)
 
+    def test_auto_create_automation_track_during_merge(self):
+        """Test that automation tracks are auto-created for CC1, CC7, etc. if they don't exist."""
+        # Initial state: only one MIDI track, no automation tracks
+        self.sequencer.song.tracks = [MidiTrack(name="Target")]
+
+        # Simulate recorded CC1 (Modulation)
+        event_data = {
+            'type': 'cc',
+            'track_idx': 0,
+            'control': 1,
+            'value': 120,
+            'start_time': 5.0
+        }
+        self.sequencer.jack_manager._recorded_events_to_merge.append(event_data)
+
+        # Merge
+        self.sequencer._merge_recorded_events(0)
+
+        # Should have auto-created an automation track
+        self.assertEqual(len(self.sequencer.song.tracks), 2)
+        auto_track = self.sequencer.song.tracks[1]
+        self.assertIsInstance(auto_track, AutomationTrack)
+        self.assertEqual(auto_track.target_track_index, 0)
+        self.assertEqual(len(auto_track.points), 1)
+        self.assertEqual(auto_track.points[0].parameter, 'cc1')
+        self.assertEqual(auto_track.points[0].value, 120.0)
+
 if __name__ == '__main__':
     unittest.main()

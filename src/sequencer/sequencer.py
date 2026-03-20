@@ -494,31 +494,40 @@ class Sequencer(EventDispatcher):
                     cc_num = event_data['control']
                     cc_val = event_data['value']
 
+                    # Mapping of standard controllers to automation parameters
+                    target_param = None
+                    norm_val = float(cc_val)
+                    if cc_num == 1: target_param = 'cc1'
+                    elif cc_num == 7:
+                        target_param = 'vol'
+                        norm_val = cc_val / 127.0
+                    elif cc_num == 10:
+                        target_param = 'pan'
+                        norm_val = (cc_val / 127.0) * 2.0 - 1.0
+
                     # 1. Search for an automation track that is targeting this track
                     found_auto = False
                     for i, t in enumerate(self.song.tracks):
                         if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
-                            # Mapping of standard controllers to automation parameters
-                            target_param = None
-                            norm_val = float(cc_val)
-
-                            if cc_num == 1:
-                                target_param = 'cc1'
-                            elif cc_num == 7:
-                                target_param = 'vol'
-                                norm_val = cc_val / 127.0
-                            elif cc_num == 10:
-                                target_param = 'pan'
-                                norm_val = (cc_val / 127.0) * 2.0 - 1.0
+                            current_target_param = target_param
                             # Also check if it matches the current active custom CC lane
-                            elif t.active_parameter.lower() == f"cc{cc_num}":
-                                target_param = t.active_parameter.lower()
+                            if not current_target_param and t.active_parameter.lower() == f"cc{cc_num}":
+                                current_target_param = t.active_parameter.lower()
 
-                            if target_param:
+                            if current_target_param:
                                 # Optimization: don't sort inside the loop
-                                self._add_smoothed_automation_point(t, target_param, event_data['start_time'], norm_val, sort=False)
+                                self._add_smoothed_automation_point(t, current_target_param, event_data['start_time'], norm_val, sort=False)
                                 found_auto = True
                                 tracks_to_sort.add(i)
+
+                    # 2. Auto-create automation track for standard parameters if not found
+                    if not found_auto and target_param:
+                        auto_track_idx = self._find_or_create_automation_track(track_idx, target_param)
+                        if auto_track_idx is not None:
+                            auto_track = self.song.tracks[auto_track_idx]
+                            self._add_smoothed_automation_point(auto_track, target_param, event_data['start_time'], norm_val, sort=False)
+                            tracks_to_sort.add(auto_track_idx)
+                            found_auto = True
 
                     if not found_auto and is_midi_track(track):
                         # Fallback: record as standard CC message on the MIDI track
@@ -532,16 +541,31 @@ class Sequencer(EventDispatcher):
                 elif event_data['type'] == 'pitchwheel':
                     pitch_val = event_data['pitch']
                     norm_val = pitch_val / 8192.0 # Normalize -8192..8191 to -1.0..1.0
+                    found_auto = False
                     for i, t in enumerate(self.song.tracks):
                         if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
                             self._add_smoothed_automation_point(t, 'pitch', event_data['start_time'], norm_val, sort=False)
                             tracks_to_sort.add(i)
+                            found_auto = True
+                    if not found_auto:
+                        auto_track_idx = self._find_or_create_automation_track(track_idx, 'pitch')
+                        if auto_track_idx is not None:
+                            self._add_smoothed_automation_point(self.song.tracks[auto_track_idx], 'pitch', event_data['start_time'], norm_val, sort=False)
+                            tracks_to_sort.add(auto_track_idx)
+
                 elif event_data['type'] == 'program':
                     prog_val = event_data['program']
+                    found_auto = False
                     for i, t in enumerate(self.song.tracks):
                         if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
                             self._add_smoothed_automation_point(t, 'prog', event_data['start_time'], float(prog_val), sort=False)
                             tracks_to_sort.add(i)
+                            found_auto = True
+                    if not found_auto:
+                        auto_track_idx = self._find_or_create_automation_track(track_idx, 'prog')
+                        if auto_track_idx is not None:
+                            self._add_smoothed_automation_point(self.song.tracks[auto_track_idx], 'prog', event_data['start_time'], float(prog_val), sort=False)
+                            tracks_to_sort.add(auto_track_idx)
 
                 any_added = True
             except IndexError:
@@ -2138,10 +2162,12 @@ class Sequencer(EventDispatcher):
         target_track = self.song.tracks[target_track_index]
         new_track_name = f"{target_track.name} {parameter_name.capitalize()} Automation"
         for i, track in enumerate(self.song.tracks):
-            if isinstance(track, AutomationTrack) and track.target_track_index == target_track_index and track.name == new_track_name:
-                return i
+            if isinstance(track, AutomationTrack) and track.target_track_index == target_track_index:
+                # Allow matching if it's the right target and either has the right name or is targeting that parameter
+                if track.name == new_track_name or any(p.parameter == parameter_name for p in track.points) or track.active_parameter == parameter_name:
+                    return i
         print(f"\nCreating new automation track: '{new_track_name}'")
-        new_track = AutomationTrack(name=new_track_name, target_track_index=target_track_index)
+        new_track = AutomationTrack(name=new_track_name, target_track_index=target_track_index, active_parameter=parameter_name)
         self.song.add_track(new_track)
         self.is_dirty = True
         return len(self.song.tracks) - 1
@@ -2373,6 +2399,10 @@ class Sequencer(EventDispatcher):
 
                         for auto_idx in processed_auto_indices:
                              self._smooth_track_automation(auto_idx)
+
+                        # IMPORTANT: Refresh the engine's automation cache so it plays back immediately
+                        if self.jack_manager:
+                            self.jack_manager._prepare_automation_events()
 
                         # Trigger final UI refresh
                         self._trigger_song_structure_change()

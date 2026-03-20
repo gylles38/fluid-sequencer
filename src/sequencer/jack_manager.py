@@ -547,13 +547,12 @@ class JackManager:
                 if 0 <= target_track_index < len(tracks):
                     target_track = tracks[target_track_index]
 
-                    # An automation track itself can be muted/soloed
-                    auto_track_should_play = (not hasattr(track, 'is_solo') or track.is_solo or not is_any_track_soloed) and \
-                                             (not hasattr(track, 'is_muted') or not track.is_muted)
-
-                    # The target track can also be muted/soloed
+                    # The target track can be muted/soloed
                     target_track_should_play = (not hasattr(target_track, 'is_solo') or target_track.is_solo or not is_any_track_soloed) and \
                                                (not hasattr(target_track, 'is_muted') or not target_track.is_muted)
+
+                    # An automation track is audible if its target is audible AND it is not specifically muted
+                    auto_track_should_play = target_track_should_play and (not hasattr(track, 'is_muted') or not track.is_muted)
 
                     # EXCEPTION for OVERWRITE mode: if the target track is being recorded, suppress its existing automation
                     if self.sequencer.is_recording and getattr(target_track, 'record_mode', 'OFF') == 'OVERWRITE':

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
-from kivy.properties import BooleanProperty
+from kivy.properties import BooleanProperty, StringProperty
 from kivy.event import EventDispatcher
 
 @dataclass
@@ -161,15 +161,18 @@ class AutomationTrack(BaseTrack, EventDispatcher):
     """A track that contains automation data for another track."""
     is_muted = BooleanProperty(False)
     is_solo = BooleanProperty(False)
+    active_parameter = StringProperty('vol')
 
     def __init__(self, name: str, target_track_index: int, is_muted: bool = False,
-                 is_solo: bool = False, points: List[AutomationPoint] = None, **kwargs):
+                 is_solo: bool = False, points: List[AutomationPoint] = None,
+                 active_parameter: str = 'vol', **kwargs):
         BaseTrack.__init__(self, name=name)
         EventDispatcher.__init__(self, **kwargs)
         self.target_track_index = target_track_index
         self.is_muted = is_muted
         self.is_solo = is_solo
         self.points = points if points is not None else []
+        self.active_parameter = active_parameter
 
     def add_point(self, point: AutomationPoint):
         """Adds an automation point and keeps the list sorted."""

@@ -11,9 +11,7 @@ class TestCCRecording(unittest.TestCase):
         self.sequencer = Sequencer()
         self.midi_track = MidiTrack(name="Target Track")
         self.sequencer.song.add_track(self.midi_track)
-        self.auto_track = AutomationTrack(name="Modulation", target_track_index=0)
-        # Add a dummy point to satisfy the 'any(p.parameter == "cc1" for p in t.points)' check
-        self.auto_track.add_point(AutomationPoint(start_time=0.0, parameter="cc1", value=0.0))
+        self.auto_track = AutomationTrack(name="Modulation", target_track_index=0, active_parameter='cc1')
         self.sequencer.song.add_track(self.auto_track)
 
     def test_merge_cc1_to_automation(self):
@@ -32,9 +30,8 @@ class TestCCRecording(unittest.TestCase):
         self.sequencer._merge_recorded_events(0)
 
         # 3. Verify that the point was added to the automation track
-        # points[0] is the dummy point at t=0
-        self.assertEqual(len(self.auto_track.points), 2)
-        new_point = self.auto_track.points[1]
+        self.assertEqual(len(self.auto_track.points), 1)
+        new_point = self.auto_track.points[0]
         self.assertEqual(new_point.parameter, 'cc1')
         self.assertEqual(new_point.start_time, 1.0)
         self.assertEqual(new_point.value, 64.0)

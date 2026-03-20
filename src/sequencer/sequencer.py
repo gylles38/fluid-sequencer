@@ -480,38 +480,43 @@ class Sequencer(EventDispatcher):
                     event = Event(start_time=event_data['start_time'], notes=[note])
                     track.add_event(event)
                 elif event_data['type'] == 'cc':
-                    # Support for direct CC automation recording (specifically CC1 for now)
+                    # Support for direct CC automation recording
                     cc_num = event_data['control']
                     cc_val = event_data['value']
 
-                    if cc_num == 1:
-                        # Find an automation track that targets this MIDI track and is meant for CC1
-                        found_auto = False
-                        for t in self.song.tracks:
-                            if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
-                                # We check if it already has CC1 points or is intended for it
-                                # If the track is empty, we could potentially use it, but usually,
-                                # we want to find one already showing CC1.
-                                # For simplicity, let's add it to the first automation track targeting this MIDI track.
-                                # The user says "one CC per automation track", so we look for 'cc1'
-                                if any(p.parameter == 'cc1' for p in t.points):
-                                    t.add_point(AutomationPoint(start_time=event_data['start_time'], parameter='cc1', value=float(cc_val), curve='linear'))
-                                    found_auto = True
-                                    break
+                    # 1. Search for an automation track that is actively targeting this CC
+                    found_auto = False
+                    for t in self.song.tracks:
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            # Mapping of standard controllers to automation parameters
+                            param_match = False
+                            norm_val = float(cc_val)
 
-                        if not found_auto:
-                            # Fallback: record as standard CC message on the MIDI track
-                            cc = CCMessage(control=cc_num, value=cc_val)
-                            existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
-                            if existing_event:
-                                existing_event.cc_messages.append(cc)
-                            else:
-                                event = Event(start_time=event_data['start_time'], cc_messages=[cc])
-                                track.add_event(event)
-                    else:
-                        # Standard CC recording for other controllers
+                            active_p = t.active_parameter.lower()
+                            if cc_num == 1 and active_p == 'cc1':
+                                param_match = True
+                            elif cc_num == 7 and active_p == 'vol':
+                                param_match = True
+                                norm_val = cc_val / 127.0
+                            elif cc_num == 10 and active_p == 'pan':
+                                param_match = True
+                                norm_val = (cc_val / 127.0) * 2.0 - 1.0
+                            elif active_p == f"cc{cc_num}":
+                                param_match = True
+
+                            if param_match:
+                                t.add_point(AutomationPoint(
+                                    start_time=event_data['start_time'],
+                                    parameter=active_p,
+                                    value=norm_val,
+                                    curve='linear'
+                                ))
+                                found_auto = True
+                                break
+
+                    if not found_auto:
+                        # Fallback: record as standard CC message on the MIDI track
                         cc = CCMessage(control=cc_num, value=cc_val)
-                        # Find or create event at this time
                         existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
                         if existing_event:
                             existing_event.cc_messages.append(cc)

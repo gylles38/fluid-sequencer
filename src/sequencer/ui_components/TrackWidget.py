@@ -444,6 +444,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 track_type=automation_type
             )
             # Liez l'événement personnalisé à la méthode de mise à jour
+            self.automation_controls.selected_param = track.active_parameter
             self.automation_controls.bind(on_selection_change=self.update_automation_visibility)
             self.automation_controls.size_hint=(None, None)
             self.automation_controls.height = dp(36)
@@ -1201,6 +1202,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
     def update_automation_visibility(self, instance, selected_param):
         """Affiche le calque correspondant au bouton cliqué."""
+        if isinstance(self.track, AutomationTrack):
+            self.track.active_parameter = selected_param
+
         for curve in self.automation_curves:
             if curve.param_type == selected_param:
                 curve.opacity = 1

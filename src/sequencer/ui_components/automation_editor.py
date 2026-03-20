@@ -1048,6 +1048,8 @@ class AutomationEditor(FloatingWindow):
 
     def on_automation_selection_change(self, instance, param):
         self.selected_parameter = param
+        if self.track:
+            self.track.active_parameter = param
 
         if param in ["prog", "vel"] or param.startswith("cc"):
             self.min_val, self.max_val = 0.0, 127.0
@@ -1425,6 +1427,7 @@ class AutomationEditor(FloatingWindow):
     def _save_changes(self):
         # 1. On applique les changements aux points (qu'ils soient vides ou modifiés)
         self.track.points = copy.deepcopy(self.track_copy.points)
+        self.track.active_parameter = self.selected_parameter
         self.is_dirty = False
         
         # 2. On rafraîchit l'affichage des miniatures (Timeline)

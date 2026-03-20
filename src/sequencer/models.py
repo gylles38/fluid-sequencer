@@ -174,10 +174,11 @@ class AutomationTrack(BaseTrack, EventDispatcher):
         self.points = points if points is not None else []
         self.active_parameter = active_parameter
 
-    def add_point(self, point: AutomationPoint):
-        """Adds an automation point and keeps the list sorted."""
+    def add_point(self, point: AutomationPoint, sort: bool = True):
+        """Adds an automation point and optionally keeps the list sorted."""
         self.points.append(point)
-        self.points.sort(key=lambda p: p.start_time)
+        if sort:
+            self.points.sort(key=lambda p: p.start_time)
 
     def get_value_at(self, beat: float, parameter: str = 'vol') -> float:
         import math

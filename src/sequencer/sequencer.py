@@ -466,6 +466,7 @@ class Sequencer(EventDispatcher):
     def _merge_recorded_events(self, dt):
         """Polls recorded events from JackManager and merges them into tracks."""
         any_added = False
+        tracks_to_sort = set()
         while True:
             try:
                 event_data = self.jack_manager._recorded_events_to_merge.popleft()
@@ -474,51 +475,52 @@ class Sequencer(EventDispatcher):
                     continue
 
                 track = self.song.tracks[track_idx]
-                if not is_midi_track(track):
-                    continue
 
                 if event_data['type'] == 'note':
+                    if not is_midi_track(track):
+                        continue
                     note = Note(pitch=event_data['pitch'], velocity=event_data['velocity'], duration=event_data['duration'])
                     event = Event(start_time=event_data['start_time'], notes=[note])
                     track.add_event(event)
 
-                    # Also record to Velocity automation if active
-                    for t in self.song.tracks:
+                    # Also record to Velocity automation
+                    for i, t in enumerate(self.song.tracks):
                         if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
-                            if t.active_parameter.lower() == 'vel':
-                                self._add_smoothed_automation_point(t, 'vel', event_data['start_time'], float(event_data['velocity']))
-                                break
+                            # Stored as absolute MIDI velocity 0-127
+                            self._add_smoothed_automation_point(t, 'vel', event_data['start_time'], float(event_data['velocity']), sort=False)
+                            tracks_to_sort.add(i)
                 elif event_data['type'] == 'cc':
                     # Support for direct CC automation recording
                     cc_num = event_data['control']
                     cc_val = event_data['value']
 
-                    # 1. Search for an automation track that is actively targeting this CC
+                    # 1. Search for an automation track that is targeting this track
                     found_auto = False
-                    for t in self.song.tracks:
+                    for i, t in enumerate(self.song.tracks):
                         if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
                             # Mapping of standard controllers to automation parameters
-                            param_match = False
+                            target_param = None
                             norm_val = float(cc_val)
 
-                            active_p = t.active_parameter.lower()
-                            if cc_num == 1 and active_p == 'cc1':
-                                param_match = True
-                            elif cc_num == 7 and active_p == 'vol':
-                                param_match = True
+                            if cc_num == 1:
+                                target_param = 'cc1'
+                            elif cc_num == 7:
+                                target_param = 'vol'
                                 norm_val = cc_val / 127.0
-                            elif cc_num == 10 and active_p == 'pan':
-                                param_match = True
+                            elif cc_num == 10:
+                                target_param = 'pan'
                                 norm_val = (cc_val / 127.0) * 2.0 - 1.0
-                            elif active_p == f"cc{cc_num}":
-                                param_match = True
+                            # Also check if it matches the current active custom CC lane
+                            elif t.active_parameter.lower() == f"cc{cc_num}":
+                                target_param = t.active_parameter.lower()
 
-                            if param_match:
-                                self._add_smoothed_automation_point(t, active_p, event_data['start_time'], norm_val)
+                            if target_param:
+                                # Optimization: don't sort inside the loop
+                                self._add_smoothed_automation_point(t, target_param, event_data['start_time'], norm_val, sort=False)
                                 found_auto = True
-                                break
+                                tracks_to_sort.add(i)
 
-                    if not found_auto:
+                    if not found_auto and is_midi_track(track):
                         # Fallback: record as standard CC message on the MIDI track
                         cc = CCMessage(control=cc_num, value=cc_val)
                         existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
@@ -530,35 +532,35 @@ class Sequencer(EventDispatcher):
                 elif event_data['type'] == 'pitchwheel':
                     pitch_val = event_data['pitch']
                     norm_val = pitch_val / 8192.0 # Normalize -8192..8191 to -1.0..1.0
-                    for t in self.song.tracks:
+                    for i, t in enumerate(self.song.tracks):
                         if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
-                            active_p = t.active_parameter.lower()
-                            if active_p in ['pitch', 'pb']:
-                                self._add_smoothed_automation_point(t, active_p, event_data['start_time'], norm_val)
-                                break
+                            self._add_smoothed_automation_point(t, 'pitch', event_data['start_time'], norm_val, sort=False)
+                            tracks_to_sort.add(i)
                 elif event_data['type'] == 'program':
                     prog_val = event_data['program']
-                    for t in self.song.tracks:
+                    for i, t in enumerate(self.song.tracks):
                         if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
-                            active_p = t.active_parameter.lower()
-                            if active_p == 'prog':
-                                self._add_smoothed_automation_point(t, active_p, event_data['start_time'], float(prog_val))
-                                break
+                            self._add_smoothed_automation_point(t, 'prog', event_data['start_time'], float(prog_val), sort=False)
+                            tracks_to_sort.add(i)
 
                 any_added = True
             except IndexError:
                 break
 
         if any_added:
+            # Batch sort all modified tracks
+            for idx in tracks_to_sort:
+                self.song.tracks[idx].points.sort(key=lambda p: p.start_time)
+
             self.is_dirty = True
             self._trigger_song_structure_change()
 
-    def _add_smoothed_automation_point(self, auto_track: AutomationTrack, parameter: str, start_time: float, value: float):
+    def _add_smoothed_automation_point(self, auto_track: AutomationTrack, parameter: str, start_time: float, value: float, sort: bool = True):
         """Adds an automation point, smoothing out almost collinear points to reduce density."""
         key = (id(auto_track), parameter)
         if key not in self._last_recorded_auto_points:
             point = AutomationPoint(start_time=start_time, parameter=parameter, value=value, curve='linear')
-            auto_track.add_point(point)
+            auto_track.add_point(point, sort=sort)
             self._last_recorded_auto_points[key] = [point, None] # [last, prev]
             return
 
@@ -580,7 +582,7 @@ class Sequencer(EventDispatcher):
                     # Threshold for 'almost collinear'.
                     # For 0-127 CCs, 0.5 is a good balance.
                     # For normalized 0-1, it's 0.5 / 127 = ~0.004
-                    threshold = 1.01 if parameter.startswith('cc') or parameter in ['vel', 'prog'] else 0.01
+                    threshold = 0.51 if parameter.startswith('cc') or parameter in ['vel', 'prog'] else 0.004
 
                     # Also don't allow segments longer than 4 beats without a point
                     if abs(last_p.value - expected_val) < threshold and total_gap < 4.0:
@@ -2239,7 +2241,7 @@ class Sequencer(EventDispatcher):
                                         # This ensures all "previous" notes (from start_beat) are cleared.
                                         session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
                                         self._truncate_track_for_recording(target_idx, start_beat, session_end_beat)
-                                    processed_tracks.add(target_idx)
+                                processed_tracks.add(target_idx)
 
                         # Process pending first note
                         if pending_first_note:
@@ -2287,42 +2289,39 @@ class Sequencer(EventDispatcher):
                             elif msg.type == 'control_change':
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
-                                    if is_midi_track(track):
-                                        # Record CC
-                                        self.jack_manager._recorded_events_to_merge.append({
-                                            'type': 'cc',
-                                            'track_idx': target_idx,
-                                            'control': msg.control,
-                                            'value': msg.value,
-                                            'start_time': current_beat
-                                        })
-                                        # Thru
-                                        if enable_thru and track.output_port_name in self.open_ports:
-                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                    # Record CC (Supported for both MIDI and Audio tracks via automation)
+                                    self.jack_manager._recorded_events_to_merge.append({
+                                        'type': 'cc',
+                                        'track_idx': target_idx,
+                                        'control': msg.control,
+                                        'value': msg.value,
+                                        'start_time': current_beat
+                                    })
+                                    # Thru (Only for MIDI tracks)
+                                    if enable_thru and is_midi_track(track) and track.output_port_name in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
                             elif msg.type == 'pitchwheel':
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
-                                    if is_midi_track(track):
-                                        self.jack_manager._recorded_events_to_merge.append({
-                                            'type': 'pitchwheel',
-                                            'track_idx': target_idx,
-                                            'pitch': msg.pitch,
-                                            'start_time': current_beat
-                                        })
-                                        if enable_thru and track.output_port_name in self.open_ports:
-                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                    self.jack_manager._recorded_events_to_merge.append({
+                                        'type': 'pitchwheel',
+                                        'track_idx': target_idx,
+                                        'pitch': msg.pitch,
+                                        'start_time': current_beat
+                                    })
+                                    if enable_thru and is_midi_track(track) and track.output_port_name in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
                             elif msg.type == 'program_change':
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
-                                    if is_midi_track(track):
-                                        self.jack_manager._recorded_events_to_merge.append({
-                                            'type': 'program',
-                                            'track_idx': target_idx,
-                                            'program': msg.program,
-                                            'start_time': current_beat
-                                        })
-                                        if enable_thru and track.output_port_name in self.open_ports:
-                                            self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                    self.jack_manager._recorded_events_to_merge.append({
+                                        'type': 'program',
+                                        'track_idx': target_idx,
+                                        'program': msg.program,
+                                        'start_time': current_beat
+                                    })
+                                    if enable_thru and is_midi_track(track) and track.output_port_name in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
 
                         if (num_beats_to_record is not None and
                                 current_beat >= (start_beat + num_beats_to_record)):
@@ -2574,9 +2573,6 @@ class Sequencer(EventDispatcher):
             if self.playback_state != "stopped":
                 return "Error: Please stop playback before starting a new recording."
 
-            # Clear manual routing override when starting a recording session
-            if self.jack_manager:
-                self.jack_manager._manual_routing_override = -1
 
             # Reset smoothing state
             self._last_recorded_auto_points.clear()

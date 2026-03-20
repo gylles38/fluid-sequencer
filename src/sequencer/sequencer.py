@@ -96,6 +96,7 @@ class Sequencer(EventDispatcher):
         self.audio_track_duration_ms: Dict[str, int] = {}
         
         self.default_record_port: Optional[str] = None  # Port d'enregistrement par défaut        
+        self._last_recorded_auto_points = {} # (track_idx, param) -> [last_p, prev_p]
         
         # ⚠️ NOUVEAU : Cache pour éviter de recharger les fichiers audio
         self._audio_duration_cache: Dict[str, float] = {} 
@@ -505,12 +506,7 @@ class Sequencer(EventDispatcher):
                                 param_match = True
 
                             if param_match:
-                                t.add_point(AutomationPoint(
-                                    start_time=event_data['start_time'],
-                                    parameter=active_p,
-                                    value=norm_val,
-                                    curve='linear'
-                                ))
+                                self._add_smoothed_automation_point(t, active_p, event_data['start_time'], norm_val)
                                 found_auto = True
                                 break
 
@@ -531,6 +527,47 @@ class Sequencer(EventDispatcher):
         if any_added:
             self.is_dirty = True
             self._trigger_song_structure_change()
+
+    def _add_smoothed_automation_point(self, auto_track: AutomationTrack, parameter: str, start_time: float, value: float):
+        """Adds an automation point, smoothing out almost collinear points to reduce density."""
+        key = (id(auto_track), parameter)
+        if key not in self._last_recorded_auto_points:
+            point = AutomationPoint(start_time=start_time, parameter=parameter, value=value, curve='linear')
+            auto_track.add_point(point)
+            self._last_recorded_auto_points[key] = [point, None] # [last, prev]
+            return
+
+        last_p, prev_p = self._last_recorded_auto_points[key]
+
+        # Optimization logic:
+        # If the new point is almost on the same line as the segment [prev_p, last_p],
+        # we update last_p instead of adding a new point.
+        if prev_p is not None:
+            # Linear interpolation check
+            time_gap = last_p.start_time - prev_p.start_time
+            if time_gap > 0:
+                # Expected value at last_p.start_time if it was on a line from prev_p to new point
+                total_gap = start_time - prev_p.start_time
+                if total_gap > 0:
+                    ratio = time_gap / total_gap
+                    expected_val = prev_p.value + ratio * (value - prev_p.value)
+
+                    # Threshold for 'almost collinear'.
+                    # For 0-127 CCs, 0.5 is a good balance.
+                    # For normalized 0-1, it's 0.5 / 127 = ~0.004
+                    threshold = 1.01 if parameter.startswith('cc') or parameter in ['vel', 'prog'] else 0.01
+
+                    # Also don't allow segments longer than 4 beats without a point
+                    if abs(last_p.value - expected_val) < threshold and total_gap < 4.0:
+                        # Replace last point
+                        last_p.start_time = start_time
+                        last_p.value = value
+                        return
+
+        # Add new point and shift history
+        new_p = AutomationPoint(start_time=start_time, parameter=parameter, value=value, curve='linear')
+        auto_track.add_point(new_p)
+        self._last_recorded_auto_points[key] = [new_p, last_p]
 
     def get_default_record_port(self) -> Optional[str]:
         """Retourne le port d'enregistrement par défaut"""
@@ -2394,6 +2431,9 @@ class Sequencer(EventDispatcher):
             # Clear manual routing override when starting a recording session
             if self.jack_manager:
                 self.jack_manager._manual_routing_override = -1
+
+            # Reset smoothing state
+            self._last_recorded_auto_points.clear()
 
             # track_idx is None means we follow dynamic MIDI Routing
             # self.last_record_settings is checked for record_bis

@@ -162,9 +162,11 @@ class EditableRoutingGrid(Widget):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
 
-        local_pos = self.to_local(*touch.pos)
-        clicked_beat = local_pos[0] / self.pixels_per_beat
-        clicked_abs_idx = self._get_abs_idx_from_y(local_pos[1])
+        # Subtract widget position from relative parent coordinates
+        lx, ly = touch.x - self.x, touch.y - self.y
+
+        clicked_beat = lx / self.pixels_per_beat
+        clicked_abs_idx = self._get_abs_idx_from_y(ly)
 
         edit_mode = self.editor.edit_mode
 
@@ -206,14 +208,16 @@ class EditableRoutingGrid(Widget):
             return super().on_touch_move(touch)
 
         if self._dragged_point:
-            local_pos = self.to_local(*touch.pos)
-            new_x = local_pos[0] - self._drag_offset[0]
+            # Subtract widget position from relative parent coordinates
+            lx, ly = touch.x - self.x, touch.y - self.y
+
+            new_x = lx - self._drag_offset[0]
             new_beat = new_x / self.pixels_per_beat
             quantized_beat = round(new_beat * 4) / 4
             self._dragged_point.start_time = max(0, quantized_beat)
 
             # For routing, we allow vertical movement too?
-            new_abs_idx = self._get_abs_idx_from_y(local_pos[1])
+            new_abs_idx = self._get_abs_idx_from_y(ly)
             self._dragged_point.value = new_abs_idx
 
             self.editor.is_dirty = True
@@ -462,8 +466,8 @@ Builder.load_string("""
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
-                # Utiliser un FloatLayout pour superposer le contenu et la playhead
-                FloatLayout:
+                # Utiliser un RelativeLayout pour superposer le contenu et la playhead
+                RelativeLayout:
                     id: scroll_content
                     size_hint: None, 1
                     width: grid.width

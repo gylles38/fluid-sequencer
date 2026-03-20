@@ -173,15 +173,17 @@ class EditableAutomationGrid(Widget):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
 
-        local_pos = self.to_local(*touch.pos)
-        # RELATIVELAYOUT: local_pos is already relative to (0,0)
-        clicked_beat = local_pos[0] / self.pixels_per_beat
+        # In a RelativeLayout, touch.x and touch.y are already relative to the RL's origin.
+        # We need to subtract this widget's local position (x, y) relative to that RL.
+        lx, ly = touch.x - self.x, touch.y - self.y
+
+        clicked_beat = lx / self.pixels_per_beat
 
         v_range = self.max_val - self.min_val
         if v_range == 0: v_range = 1
         
-        # Valeur cliquée relative à la hauteur du widget
-        clicked_value = self.min_val + (local_pos[1] / self.height) * v_range
+        # Value clicked relative to widget height
+        clicked_value = self.min_val + (ly / self.height) * v_range
 
         edit_mode = self.editor.edit_mode
         
@@ -223,14 +225,16 @@ class EditableAutomationGrid(Widget):
 
         elif edit_mode == 'move':
             if clicked_point:
-                # On synchronise les deux variables de sélection
+                # Synchronization of selection variables
                 self.editor.selected_point = clicked_point
                 self.selected_point = clicked_point 
                 
                 self._dragged_point = clicked_point
-                # Offset par rapport à la position réelle du point (en coordonnées locales)
-                self._drag_offset = (local_pos[0] - (clicked_point.start_time * self.pixels_per_beat)), \
-                                    (local_pos[1] - (((clicked_point.value - self.min_val) / v_range) * self.height))
+                # Local offset from real point position
+                px = clicked_point.start_time * self.pixels_per_beat
+                py = ((clicked_point.value - self.min_val) / v_range) * self.height
+                self._drag_offset = (lx - px, ly - py)
+
                 touch.grab(self)
                 return True
 
@@ -241,11 +245,11 @@ class EditableAutomationGrid(Widget):
             return super().on_touch_move(touch)
 
         if self._dragged_point:
-            local_pos = self.to_local(*touch.pos)
+            # Consistent coordinate calculation: subtract widget position from the touch's relative window/parent coordinates.
+            lx, ly = touch.x - self.x, touch.y - self.y
 
             # --- Time (X-axis) Calculation ---
-            new_x = local_pos[0] - self._drag_offset[0]
-            # RELATIVELAYOUT: local_pos is already relative to (0,0)
+            new_x = lx - self._drag_offset[0]
             new_beat = new_x / self.pixels_per_beat
             quantized_beat = round(new_beat * 4) / 4 # Snap to 16th
             self._dragged_point.start_time = max(0, quantized_beat)
@@ -253,7 +257,7 @@ class EditableAutomationGrid(Widget):
             # --- Value (Y-axis) Calculation ---
             v_range = self.max_val - self.min_val
             if v_range == 0: v_range = 1
-            new_y = local_pos[1] - self._drag_offset[1]
+            new_y = ly - self._drag_offset[1]
             new_value_normalized = new_y / self.height
             new_value = self.min_val + new_value_normalized * v_range
             self._dragged_point.value = max(self.min_val, min(self.max_val, new_value))
@@ -598,7 +602,7 @@ Builder.load_string("""
                 bar_margin: dp(2)
 
                 # L'ENFANT UNIQUE DU SCROLLVIEW
-                FloatLayout:
+                RelativeLayout:
                     id: scroll_content
                     size_hint: None, 1
                     width: grid.width

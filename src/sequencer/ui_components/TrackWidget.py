@@ -878,8 +878,18 @@ class TrackWidget(HoverBehavior, BoxLayout):
             is_recording=lambda inst, val: self._sync_recording_status(inst, val)
         )
         
+        if isinstance(self.track, AutomationTrack):
+            self.track.bind(active_parameter=self._on_active_parameter_changed)
+
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
+
+    def _on_active_parameter_changed(self, instance, value):
+        """Callback when the active parameter of the track changes in the model."""
+        if hasattr(self, 'automation_controls'):
+            # This prevents infinite loops as select_param checks for equality
+            self.automation_controls.selected_param = value
+        self.update_automation_visibility(None, value)
 
     def _get_target_track_name_for_tooltip(self) -> str:
         """Retourne le nom de la piste cible pour le tooltip."""

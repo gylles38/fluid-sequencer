@@ -180,7 +180,7 @@ class TestMidiMapping(unittest.TestCase):
         from sequencer.models import AutomationTrack
         self.assertIsInstance(auto_track, AutomationTrack)
         self.assertEqual(auto_track.target_track_index, 0)
-        self.assertEqual(auto_track.name, "Test Track Volume Automation")
+        self.assertEqual(auto_track.name, "Test Track Automation")
 
         # Check that an automation point was created correctly
         self.assertEqual(len(auto_track.points), 1)

@@ -9,7 +9,7 @@ from .automation_editor import AutomationEditor
 from .AutomationCurve import AutomationCurveWidget
 
 class HoverableSlider(MDSlider, HoverBehavior):
-    pass
+    midi_command = ListProperty([]) # [category, parameter]
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.relativelayout import RelativeLayout
@@ -431,7 +431,8 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 icon_color=[1, 1, 0, 1] if track.is_solo else [1, 1, 1, 0.8],
                 md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8],
                 size_hint=(None, None),
-                size=(dp(36), dp(36))
+                size=(dp(36), dp(36)),
+                midi_command=["track_solo_buttons", str(self.track_index)]
             )
             self.controls_section.add_widget(self.solo_button)
         elif isinstance(track, AutomationTrack):
@@ -480,6 +481,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.record_mode_button.pos_hint = {'center_y': 0.5}
             self.record_mode_button.size_hint = (None, None)
             self.record_mode_button.size = (dp(36), dp(36))
+            # ThreeStateRecordButton logic handles MIDI learn via its internal components if needed,
+            # but we can also treat it as a single button for toggling.
+            if hasattr(self.record_mode_button, 'midi_command'):
+                self.record_mode_button.midi_command = ["selected_track", "record_arm"]
             self.controls_section.add_widget(self.record_mode_button)
         else:
             # Pour les pistes Audio standards, on garde l'espaceur de 44dp
@@ -568,13 +573,15 @@ class TrackWidget(HoverBehavior, BoxLayout):
             icon_color = [0.8, 0.3, 0, 1] if track.is_muted else [1, 0.6, 0, 1],
             md_bg_color = [0.4, 0.2, 0.1, 0.8] if track.is_muted else [0.3, 0.2, 0.1, 0.8],
             size_hint=(None, None),
-            size=(dp(36), dp(36))
+            size=(dp(36), dp(36)),
+            midi_command=["selected_track", "mute"]
         )
         mute_button_container.add_widget(self.mute_button)
 
         if not isinstance(track, AutomationTrack):
             volume_layout.add_widget(mute_button_container)
             self.volume_slider = HoverableSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.volume_slider.midi_command = ["volume_sliders", str(self.track_index)]
             self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
             volume_layout.add_widget(self.volume_slider)
             volume_layout.add_widget(self.volume_label)
@@ -597,6 +604,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             pan_icon_container.add_widget(pan_icon)
 
             self.pan_slider = HoverableSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
+            self.pan_slider.midi_command = ["selected_track", "pan"] # Per-track pan is not in DEFAULT_MIDI_MAPPINGS, so using selected_track or adding a new category
             self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
             pan_layout.add_widget(pan_icon_container)
@@ -975,6 +983,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
     def _on_track_index_change(self, instance, value):
         self.index_label.text = f"[{int(value)}]"
         self._update_bg_color()
+        if hasattr(self, 'volume_slider'):
+            self.volume_slider.midi_command = ["volume_sliders", str(int(value))]
+        if hasattr(self, 'solo_button'):
+            self.solo_button.midi_command = ["track_solo_buttons", str(int(value))]
 
     def _on_height_changed(self, instance, value):
         """Called when the TrackWidget's height changes."""

@@ -4,11 +4,12 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle
 from kivy.clock import Clock
-from kivy.properties import StringProperty
+from kivy.properties import StringProperty, ListProperty
 from .HoverBehavior import HoverBehavior
 
 class TooltipMDIconButton(MDIconButton, HoverBehavior):
     tooltip_text = StringProperty()
+    midi_command = ListProperty([]) # [category, parameter]
 
     # --- Optimisation XRun ---
     # Un seul label partagé pour toutes les info-bulles afin d'éviter de créer/détruire des widgets en permanence.

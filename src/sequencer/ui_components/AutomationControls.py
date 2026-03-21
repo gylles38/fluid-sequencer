@@ -50,7 +50,8 @@ class AutomationControls(BoxLayout, EventDispatcher):
                 icon_color=[1, 1, 1, 0.8],
                 md_bg_color=[0.2, 0.2, 0.2, 1],
                 size_hint=(None, None),
-                size=(dp(36), dp(36))
+                size=(dp(36), dp(36)),
+                midi_command=["selected_track", param_name]
             )
             button.param_name = param_name
             button.bind(on_press=self._on_button_press)

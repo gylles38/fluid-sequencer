@@ -58,10 +58,22 @@ class HoverBehavior:
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""
         Window.set_system_cursor('hand')
+        from kivymd.app import MDApp
+        app = MDApp.get_running_app()
+        if app and hasattr(app, 'root') and hasattr(app.root, 'sequencer_layout'):
+            app.root.sequencer_layout.report_hover(self, True)
+        elif app and hasattr(app, 'sequencer_layout'):
+            app.sequencer_layout.report_hover(self, True)
 
     def on_leave(self, *args):
         """Called when the mouse leaves the widget area."""
         Window.set_system_cursor('arrow')
+        from kivymd.app import MDApp
+        app = MDApp.get_running_app()
+        if app and hasattr(app, 'root') and hasattr(app.root, 'sequencer_layout'):
+            app.root.sequencer_layout.report_hover(self, False)
+        elif app and hasattr(app, 'sequencer_layout'):
+            app.sequencer_layout.report_hover(self, False)
 
 class HoverableMDButton(MDButton, HoverBehavior):
     pass

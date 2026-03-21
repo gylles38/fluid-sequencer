@@ -44,6 +44,8 @@ class Sequencer(EventDispatcher):
     current_routing_index = NumericProperty(-1)
     playback_state = StringProperty("stopped")
     is_recording = BooleanProperty(False)
+    midi_learn_mode = BooleanProperty(False)
+    last_learned_cc = NumericProperty(-1)
     ui_end_pos_str = StringProperty("")
     is_smoothing = BooleanProperty(False)
     song_structure_changed = NumericProperty(0)
@@ -358,6 +360,14 @@ class Sequencer(EventDispatcher):
                             control = msg.control
                             value = msg.value
 
+                            # --- Handle MIDI Learn Mode ---
+                            if self.midi_learn_mode:
+                                def _learned(dt, c=control):
+                                    self.last_learned_cc = -1
+                                    self.last_learned_cc = c
+                                Clock.schedule_once(_learned)
+                                continue
+
                             # --- Handle Transport Controls ---
                             if value == 127:
                                 if control == self.midi_config.get_transport_cc("play_pause"):
@@ -370,22 +380,62 @@ class Sequencer(EventDispatcher):
                                     Clock.schedule_once(lambda dt: self.seek("-1m"))
                                 elif control == self.midi_config.get_transport_cc("forward"):
                                     Clock.schedule_once(lambda dt: self.seek("+1m"))
+                                elif control == self.midi_config.get_transport_cc("loop"):
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("loop"))
+                                elif control == self.midi_config.get_transport_cc("panic"):
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("panic"))
 
-                            # --- Handle Volume Sliders & Solo Buttons ---
-                            for i in range(len(self.song.tracks)):
-                                # Volume
-                                if control == self.midi_config.get_volume_slider_cc(i):
-                                    volume_value = value / 127.0
-                                    Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
-                                    break # Found a match, no need to check other tracks for this CC
+                            # --- Handle Custom Mappings ---
+                            handled = False
+                            for category, mapping in self.midi_config.mappings.items():
+                                if category == "transport":
+                                    continue # Handled above
 
-                                # Solo
-                                if control == self.midi_config.get_track_solo_button_cc(i):
-                                    track = self.song.tracks[i]
-                                    is_solo = getattr(track, 'is_solo', False)
-                                    if (value == 127 and not is_solo) or (value == 0 and is_solo):
-                                        Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
-                                    break # Found a match
+                                if isinstance(mapping, list):
+                                    for i, cc in enumerate(mapping):
+                                        if cc == control:
+                                            if category == "volume_sliders":
+                                                volume_value = value / 127.0
+                                                Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
+                                                handled = True
+                                            elif category == "track_solo_buttons":
+                                                if value == 127:
+                                                    Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
+                                                handled = True
+                                            if handled: break
+                                elif isinstance(mapping, dict):
+                                    for param, cc in mapping.items():
+                                        if cc == control:
+                                            if category == "selected_track":
+                                                target_idx = self.current_routing_index
+                                                if target_idx != -1:
+                                                    if param in ('volume', 'vol'):
+                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=value/127.0: self.set_track_volume(ti, v, api_mode=True))
+                                                    elif param == 'solo' and value == 127:
+                                                        Clock.schedule_once(lambda dt, ti=target_idx: self.toggle_solo(ti))
+                                                    elif param == 'mute' and value == 127:
+                                                        Clock.schedule_once(lambda dt, ti=target_idx: self.toggle_mute(ti))
+                                                    elif param == 'pan':
+                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=(value/127.0)*2-1: self.set_track_pan(ti, str(v), api_mode=True))
+                                                    elif param == 'record_arm' and value == 127:
+                                                        Clock.schedule_once(lambda dt, ti=target_idx: self.set_record_mode(ti, 'OVERWRITE' if self.song.tracks[ti].record_mode == 'OFF' else 'OFF'))
+                                                    elif param == 'vel':
+                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=value: self.set_track_velocity(ti, str(v/100.0), api_mode=True))
+                                                    elif param == 'prog':
+                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=value: self.set_program(ti, v))
+                                                    elif param.startswith('cc'):
+                                                        try:
+                                                            cc_num = int(param[2:])
+                                                            def send_generic_cc(dt, ti=target_idx, cn=cc_num, val=value):
+                                                                if 0 <= ti < len(self.song.tracks):
+                                                                    track = self.song.tracks[ti]
+                                                                    if is_midi_track(track) and track.output_port_name:
+                                                                        self.send_cc_message(track.output_port_name, track.channel, cn, val)
+                                                            Clock.schedule_once(send_generic_cc)
+                                                        except ValueError: pass
+                                            handled = True
+                                            if handled: break
+                                if handled: break
 
                     time.sleep(0.01)
         except Exception as e:

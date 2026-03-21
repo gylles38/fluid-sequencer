@@ -214,6 +214,7 @@ class SequencerLayout(BoxLayout):
         settings_items = [
             {"leading_icon": "cog", "text": "Preferences", "on_release": lambda: self.menu_action(self.show_preferences_popup)},
             {"leading_icon": "midi", "text": "MIDI Input Settings", "on_release": lambda: self.menu_action(self.show_midi_settings)},
+            {"leading_icon": "brain", "text": "Midi Learn", "on_release": lambda: self.menu_action(self.toggle_midi_learn_mode)},
             {"leading_icon": "audio-input-stereo-minijack", "text": "Audio Settings", "on_release": lambda: self.menu_action(self.show_audio_settings)},
         ]
 
@@ -467,7 +468,8 @@ class SequencerLayout(BoxLayout):
             theme_icon_color="Custom",
             icon_color=[0, 0.7, 0.3, 1],
             theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 1]
+            md_bg_color=[0.1, 0.1, 0.1, 1],
+            midi_command=["transport", "play_pause"]
         )
 
         self.loop_button = TooltipMDIconButton(
@@ -481,7 +483,8 @@ class SequencerLayout(BoxLayout):
             theme_icon_color="Custom",
             icon_color=[0.2, 0.6, 0.8, 1],
             theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 1]
+            md_bg_color=[0.1, 0.1, 0.1, 1],
+            midi_command=["transport", "loop"]
         )
 
         self.pause_button = TooltipMDIconButton(
@@ -495,7 +498,8 @@ class SequencerLayout(BoxLayout):
             theme_icon_color="Custom",
             icon_color=[0.9, 0.9, 0.2, 1],
             theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 1]
+            md_bg_color=[0.1, 0.1, 0.1, 1],
+            midi_command=["transport", "play_pause"]
         )
 
         self.stop_button = TooltipMDIconButton(
@@ -509,7 +513,8 @@ class SequencerLayout(BoxLayout):
             theme_icon_color="Custom",
             icon_color=[0.8, 0.2, 0.2, 1],
             theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 1]
+            md_bg_color=[0.1, 0.1, 0.1, 1],
+            midi_command=["transport", "stop"]
         )
 
         self.record_button = TooltipMDIconButton(
@@ -523,7 +528,8 @@ class SequencerLayout(BoxLayout):
             theme_icon_color="Custom",
             icon_color=[1, 0, 0, 1],
             theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 1]
+            md_bg_color=[0.1, 0.1, 0.1, 1],
+            midi_command=["transport", "record_arm"]
         )
 
         self.panic_button = TooltipMDIconButton(
@@ -537,7 +543,8 @@ class SequencerLayout(BoxLayout):
             theme_icon_color="Custom",
             icon_color=[1, 0.6, 0, 1],
             theme_bg_color="Custom",
-            md_bg_color=[0.1, 0.1, 0.1, 1]
+            md_bg_color=[0.1, 0.1, 0.1, 1],
+            midi_command=["transport", "panic"]
         )
 
         transport_card.add_widget(self.play_button)
@@ -720,6 +727,8 @@ class SequencerLayout(BoxLayout):
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
 
         Window.bind(on_key_down=self._on_keyboard_down)
+        self.sequencer.bind(last_learned_cc=self._on_midi_learned)
+        self._hovered_midi_widget = None
 
     def move_to_beat(self, beat):
         """
@@ -791,8 +800,53 @@ class SequencerLayout(BoxLayout):
         Logger.info("UI: Song structure changed, performing debounced UI refresh.")
         self.update_status_display()
 
+    def on_touch_down(self, touch):
+        if self.sequencer.midi_learn_mode:
+            return True # Block all touches
+        return super().on_touch_down(touch)
+
+    def toggle_midi_learn_mode(self):
+        self.sequencer.midi_learn_mode = not self.sequencer.midi_learn_mode
+        if self.sequencer.midi_learn_mode:
+            self.output_label.text = "[color=ff9800]MIDI LEARN MODE ACTIVE - Hover an icon and move a MIDI control. Press ESC to exit.[/color]"
+            self.output_label.markup = True
+        else:
+            self.sequencer.midi_config.save_mappings()
+            self.output_label.text = "MIDI Learn Mode disabled. Mappings saved."
+
+    def report_hover(self, widget, is_enter):
+        if is_enter:
+            self._hovered_midi_widget = widget
+        else:
+            if self._hovered_midi_widget == widget:
+                self._hovered_midi_widget = None
+
+    def _on_midi_learned(self, instance, cc_value):
+        if not self.sequencer.midi_learn_mode or cc_value == -1:
+            return
+
+        if self._hovered_midi_widget and hasattr(self._hovered_midi_widget, 'midi_command') and self._hovered_midi_widget.midi_command:
+            category, parameter = self._hovered_midi_widget.midi_command
+
+            # If it's a per-track command that was learned via a specific track widget
+            # we already have the index in 'parameter' string.
+            # If it's a generic "selected track" command, we keep it as is.
+
+            self.sequencer.midi_config.update_mapping(category, parameter, cc_value)
+            self.output_label.text = f"[color=00ff00]Mapped {category}/{parameter} to CC {cc_value}[/color]"
+            self.output_label.markup = True
+
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""
+        # ESC key to exit MIDI learn mode
+        if keyboard == 27: # ESC
+            if self.sequencer.midi_learn_mode:
+                self.toggle_midi_learn_mode()
+                return True
+
+        if self.sequencer.midi_learn_mode:
+            return True # Block all other interactions
+
         # --- Sécurité : Désactiver les raccourcis si un champ texte a le focus ---
         if is_any_text_input_focused():
             return False

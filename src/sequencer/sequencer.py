@@ -391,17 +391,6 @@ class Sequencer(EventDispatcher):
         except Exception as e:
             print(f"\nError in transport control listener for port '{port_name}': {e}")
 
-    def reload_midi_mappings(self, filepath: str) -> str:
-        """Loads a new MIDI mapping file and restarts the listener if necessary."""
-        self.midi_config.load_mappings(filepath)
-
-        # If a transport control port is active, restart it to apply the new mappings
-        if self.default_record_port and self._transport_control_thread and self._transport_control_thread.is_alive():
-            print("Restarting MIDI transport control listener to apply new mappings...")
-            return self.set_default_record_port(self.default_record_port)
-
-        return f"MIDI mappings loaded from {filepath}. No transport listener was active."
-
     def set_default_record_port(self, port_name: str) -> str:
         """
         Sets the default MIDI input port for recording and transport controls.

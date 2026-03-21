@@ -1161,34 +1161,38 @@ class TrackWidget(HoverBehavior, BoxLayout):
     def on_touch_down(self, touch):
         """
         Handle touch events for track selection.
-        If the sequencer is stopped and the user clicks on the track (but not on a control),
-        select this track's instrument.
+        If the sequencer is stopped and the user clicks on the track,
+        select this track's instrument immediately.
         """
         if self.collide_point(*touch.pos):
+            # 1. Immediate Track Selection (Regression Fix)
+            # We want clicking ANYWHERE on the track (info, controls, grid) to select it if stopped.
+            # We do this BEFORE dispatching to children to ensure it happens.
+            seq = self.sequencer_layout.sequencer
+            is_stopped = seq.playback_state in ("stopped", "paused")
+
+            # Special handling for mouse wheel (ignore for selection)
+            is_scroll = hasattr(touch, 'button') and touch.button in ('scrollup', 'scrolldown', 'scrollleft', 'scrollright')
+
+            if is_stopped and isinstance(self.track, MidiTrack) and not is_scroll:
+                # Manual override of the MIDI routing for the instrument selection.
+                seq.jack_manager._manual_routing_override = self.track_index
+                # Refresh UI immediately
+                seq.current_routing_index = self.track_index
+
+            # 2. Child Dispatch
             # Special case for ResizeHandle which is a direct child but we want to let it grab the touch
             if hasattr(self, 'resize_handle') and self.resize_handle.collide_point(*touch.pos):
                  return self.resize_handle.on_touch_down(touch)
 
-            # We let the default Kivy processing happen first for buttons/sliders.
-            # super().on_touch_down(touch) returns True if a child consumed the touch.
+            # Standard Kivy dispatch to buttons, sliders, and timeline grid.
             if super().on_touch_down(touch):
                 return True
 
-            # Ignore mouse wheel events for track selection
-            if hasattr(touch, 'button') and touch.button in ('scrollup', 'scrolldown', 'scrollleft', 'scrollright'):
-                return False
-
-            # If the touch wasn't consumed by a child (button, slider, etc.)
-            # and the sequencer is stopped, we select this track.
-            # Regression fix: only apply this to MIDI tracks to route to instrument.
-            seq = self.sequencer_layout.sequencer
-            if seq.playback_state == "stopped" and isinstance(self.track, MidiTrack):
-                # Manual override of the MIDI routing for the instrument selection.
-                # We tell the JackManager to target this track specifically.
-                seq.jack_manager._manual_routing_override = self.track_index
-                # We need to refresh the UI to show the new routing.
-                seq.current_routing_index = self.track_index
+            # If we selected the track, we return True to consume the touch if it wasn't a scroll.
+            if is_stopped and isinstance(self.track, MidiTrack) and not is_scroll:
                 return True
+
         return False
 
     def on_automation_selection_change(self, selected_param) -> None:

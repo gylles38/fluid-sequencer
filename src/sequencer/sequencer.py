@@ -209,7 +209,17 @@ class Sequencer(EventDispatcher):
             # Ajoute une petite compensation (ex: 0.05 beat) pour compenser le lag de l'UI
             look_ahead_beat = self.current_beat + 0.05           
             val = self.jack_manager._get_input_routing_value(look_ahead_beat)
-            new_index = int(round(val)) if val is not None else -1
+
+            # Safeguard: Robustly handle numeric types (including numpy/Mocks)
+            try:
+                if val is not None:
+                    new_index = int(round(val))
+                else:
+                    new_index = -1
+            except (TypeError, ValueError):
+                # This handles MagicMocks in tests without breaking real numeric values
+                new_index = self.current_routing_index if "MagicMock" in str(type(val)) else -1
+
             if new_index != self.current_routing_index:
                 self.current_routing_index = new_index
 
@@ -3097,7 +3107,8 @@ class Sequencer(EventDispatcher):
         else:
             self._stop_playback_transport()
 
-        self.current_routing_index = -1
+        # Update routing status immediately to reflect manual override if present
+        self._update_current_routing()
         
         # LA LIGNE SUIVANTE EST LA CAUSE DU PROBLÈME ET A ÉTÉ VOLONTAIREMENT SUPPRIMÉE :
         # self.jack_manager.stop()

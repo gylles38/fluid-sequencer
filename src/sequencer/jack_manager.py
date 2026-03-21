@@ -1648,28 +1648,27 @@ class JackManager:
         """
         Returns the target track index for MIDI input routing at the given beat.
         Prioritization:
-        0. Manual override IF STOPPED (regression fix).
-        1. Automation Priority (Wins during playback/recording if present).
-        2. Manual override Priority (Respect UI selection if no automation).
+        1. Manual Override Priority (Set by clicking a track in the UI).
+        2. Automation Priority (Wins during active playback/recording).
         3. Armed Track Priority (RT safe).
         4. Final Fallback: First MIDI track (cached).
         """
-        # 0. Manual override Priority IF STOPPED (regression fix)
-        # When stopped, we want a click on a track to immediately and persistently route MIDI to it.
-        if self.sequencer.playback_state == "stopped" and self._manual_routing_override != -1:
+        # 1. Manual Override Priority (Highest Priority when set)
+        # This ensures that clicking a track in the UI persistently routes MIDI to it.
+        # It is reset to -1 when playback starts to allow following automation.
+        if self._manual_routing_override != -1:
             return self._manual_routing_override
 
-        # 1. Automation Priority (Wins during playback/recording if present)
-        if self._routing_track and self._routing_track.points:
+        playback_state = getattr(self.sequencer, 'playback_state', 'stopped')
+        is_logic_rolling = playback_state in ("playing", "recording")
+
+        # 2. Automation Priority (Follows the 'input_routing' automation track during playback)
+        if is_logic_rolling and self._routing_track and self._routing_track.points:
             routing_points = [p for p in self._routing_track.points if p.parameter == 'input_routing']
             if routing_points:
                 val = self._routing_track.get_value_at(beat, 'input_routing')
                 if val is not None:
                     return int(round(val))
-
-        # 2. Manual Override Priority (Respect UI selection if no automation)
-        if self._manual_routing_override != -1:
-            return self._manual_routing_override
 
         # 3. Armed Track Priority (RT safe)
         armed_idx = getattr(self, '_cached_armed_idx', None)

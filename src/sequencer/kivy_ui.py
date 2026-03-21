@@ -802,13 +802,20 @@ class SequencerLayout(BoxLayout):
         self.update_status_display()
 
     def on_touch_down(self, touch):
+        # Allow menu interaction if you want, but per requirements we block other things.
+        # However, we must not block the Settings menu button itself if we want to toggle it off via menu.
+        # But user said "tant que le logiciel est en mode midi learn il ne faut pas que le logiciel permette autre chose que l'apprentissage midi"
         if self.sequencer.midi_learn_mode:
+            # We must still allow Hover events to pass for reporting
+            # but Kivy touch events are different from mouse move.
+            # Returning True here blocks touch (clicks)
             return True # Block all touches
         return super().on_touch_down(touch)
 
     def toggle_midi_learn_mode(self):
         self.sequencer.midi_learn_mode = not self.sequencer.midi_learn_mode
         if self.sequencer.midi_learn_mode:
+            print("[LEARN] MIDI Learn Mode Activated")
             self.output_label.text = "[color=ff9800]MIDI LEARN MODE ACTIVE - Hover an icon and move a MIDI control. Press ESC to exit.[/color]"
             self.output_label.markup = True
             # Center current target track for learn feedback
@@ -816,6 +823,7 @@ class SequencerLayout(BoxLayout):
                 target_name = self.sequencer.song.tracks[self.sequencer.current_routing_index].name
                 self.output_label.text += f"\n[color=00ffff]Target Track: {target_name}[/color]"
         else:
+            print("[LEARN] MIDI Learn Mode Deactivated - Saving Mappings")
             self.sequencer.midi_config.save_mappings()
             self.output_label.text = "MIDI Learn Mode disabled. Mappings saved."
 
@@ -832,6 +840,7 @@ class SequencerLayout(BoxLayout):
 
         if self._hovered_midi_widget and hasattr(self._hovered_midi_widget, 'midi_command') and self._hovered_midi_widget.midi_command:
             category, parameter = self._hovered_midi_widget.midi_command
+            print(f"[LEARN] Found hovered widget: {self._hovered_midi_widget} with command {category}/{parameter}")
 
             # If it's a per-track command that was learned via a specific track widget
             # we already have the index in 'parameter' string.
@@ -840,6 +849,8 @@ class SequencerLayout(BoxLayout):
             self.sequencer.midi_config.update_mapping(category, parameter, cc_value)
             self.output_label.text = f"[color=00ff00]Mapped {category}/{parameter} to CC {cc_value}[/color]"
             self.output_label.markup = True
+        else:
+            print(f"[LEARN] No hovered widget with midi_command found. Hovered: {self._hovered_midi_widget}")
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         """Callback for keyboard events."""

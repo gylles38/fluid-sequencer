@@ -37,6 +37,7 @@ from contextlib import contextmanager
 from kivy.properties import NumericProperty, StringProperty, BooleanProperty, ObjectProperty
 from kivy.event import EventDispatcher
 from kivy.clock import Clock
+from kivymd.app import MDApp
 
 class Sequencer(EventDispatcher):
     current_beat = NumericProperty(0)
@@ -142,10 +143,11 @@ class Sequencer(EventDispatcher):
                 self._apply_midi_mapping_action(mapping, value)
             except IndexError: break
 
-        while self.jack_manager._pending_control_messages:
+        while self.jack_manager._pending_ui_messages:
             try:
-                chan, ctrl, val = self.jack_manager._pending_control_messages.popleft()
-                self._handle_raw_cc(chan, ctrl, val)
+                msg = self.jack_manager._pending_ui_messages.popleft()
+                if msg.type == 'control_change':
+                    self._handle_raw_cc(msg.channel, msg.control, msg.value)
             except IndexError: break
 
         # Check for new MIDI activity to trigger recording (Dynamic Routing)
@@ -368,65 +370,14 @@ class Sequencer(EventDispatcher):
             # N'oubliez pas d'appeler cette fonction chaque fois que le tempo, le chemin d'un fichier audio, 
             # ou un événement de piste est modifié (ajout/suppression).
 
-    def _transport_control_listener_loop(self, port_name: str):
-        """
-        A dedicated thread that listens for transport control MIDI messages via mido.
-        Now just forwards to _handle_raw_cc for unified processing.
-        """
-        try:
-            with mido.open_input(port_name) as inport:
-                while not self._transport_control_stop_event.is_set():
-                    for msg in inport.iter_pending():
-                        if msg.type == 'control_change':
-                            Clock.schedule_once(lambda dt, m=msg: self._handle_raw_cc(m.channel, m.control, m.value))
-                    time.sleep(0.01)
-        except Exception as e:
-            print(f"\nError in transport control listener for port '{port_name}': {e}")
-
     def set_default_record_port(self, port_name: str) -> str:
         """
         Sets the default MIDI input port for recording and transport controls.
-        Manages the lifecycle of the transport control listener thread.
+        The JackManager routing worker handles connecting this port to the control_in port.
         """
-        try:
-            # We don't strictly verify here anymore because port_name might be a JACK-only port
-            # or an alias that mido doesn't see yet. JackManager handles discovery.
-
-            # Stop any existing listener before starting a new one
-            if self._transport_control_thread and self._transport_control_thread.is_alive():
-                self._transport_control_stop_event.set()
-                self._transport_control_thread.join(timeout=1.0)
-
-            self.default_record_port = port_name
-            self.is_dirty = True
-
-            # Start the new listener thread if mido can see it
-            input_ports = get_input_names()
-            mido_port = None
-            if port_name in input_ports:
-                mido_port = port_name
-            else:
-                # Try partial matching
-                for p in input_ports:
-                    if port_name in p or p in port_name:
-                        mido_port = p
-                        break
-
-            if mido_port:
-                self._transport_control_stop_event.clear()
-                self._transport_control_thread = threading.Thread(
-                    target=self._transport_control_listener_loop,
-                    args=(mido_port,),
-                    daemon=True
-                )
-                self._transport_control_thread.start()
-                msg = f"Default record and transport control port set to: {port_name} (mido+jack)"
-            else:
-                msg = f"Default record port set to: {port_name} (jack-only)"
-
-            return msg
-        except Exception as e:
-            return f"Error setting record port: {e}"
+        self.default_record_port = port_name
+        self.is_dirty = True
+        return f"Default record and control port set to: {port_name} (jack-unified)"
 
     def start_midi_recording(self):
         """
@@ -2217,10 +2168,6 @@ class Sequencer(EventDispatcher):
             processed_tracks = set() # Tracks encountered during this session
 
             try:
-                with mido.open_input(inport_name) as inport:
-                    print(f"Port d'entrée MIDI ouvert: {inport_name}")
-                    list(inport.iter_pending())
-                    
                     # Target track name for logging
                     initial_target_idx = self.jack_manager._get_input_routing_value(start_beat)
                     if initial_target_idx is not None and 0 <= initial_target_idx < len(self.song.tracks):
@@ -2228,7 +2175,7 @@ class Sequencer(EventDispatcher):
                     else:
                         target_name = "Dynamic Routing"
 
-                    print(f"En attente de la première note sur '{target_name}'...")
+                    print(f"En attente de la première note sur '{target_name}' (unified)...")
 
                     pending_trigger_msg = None
                     while not self._stop_event.is_set() and not first_note_detected:
@@ -2242,24 +2189,30 @@ class Sequencer(EventDispatcher):
                             print(f"Enregistrement démarré à {self._format_beats_to_position(recording_start_beat)}")
                             break
 
-                        msg = inport.poll()
-                        if msg:
-                            # Any MIDI activity can trigger recording (Note, CC, Pitch, Program)
-                            is_trigger = False
-                            if msg.type == 'note_on' and msg.velocity > 0: is_trigger = True
-                            elif msg.type in ('control_change', 'pitchwheel', 'program_change'): is_trigger = True
+                        while self.jack_manager._pending_rec_messages:
+                            try:
+                                msg = self.jack_manager._pending_rec_messages.popleft()
+                                # Any MIDI activity can trigger recording (Note, CC, Pitch, Program)
+                                is_trigger = False
+                                if msg.type == 'note_on' and msg.velocity > 0: is_trigger = True
+                                elif msg.type in ('control_change', 'pitchwheel', 'program_change'): is_trigger = True
 
-                            if is_trigger:
-                                first_note_detected = True
-                                pending_trigger_msg = msg
-                                self.play(start_beat=start_beat)
-                                # Small delay to allow transport to start and get a reliable beat
-                                time.sleep(0.05)
-                                recording_start_beat = self._get_current_beat()
-                                print(f"Enregistrement déclenché par {msg.type} à {self._format_beats_to_position(recording_start_beat)}")
+                                if is_trigger:
+                                    first_note_detected = True
+                                    # Use the targeted start_beat for the trigger message
+                                    # to ensure it's captured exactly where intended
+                                    recording_start_beat = start_beat
+                                    pending_trigger_msg = msg
+                                    print(f"[REC] Triggered by {msg.type} on {target_name} at {self._format_beats_to_position(start_beat)}")
+                                    Clock.schedule_once(lambda dt: self.play(start_beat=start_beat))
+                                    # Still wait a bit for transport to physically start before main loop
+                                    time.sleep(0.05)
+                                    break
+                            except IndexError:
                                 break
 
-                        time.sleep(0.01)
+                        if not first_note_detected:
+                            time.sleep(0.02)
 
                     if not first_note_detected:
                         self.is_recording = False
@@ -2289,15 +2242,21 @@ class Sequencer(EventDispatcher):
                             msgs.append(pending_trigger_msg)
                             pending_trigger_msg = None
 
-                        msgs.extend(list(inport.iter_pending()))
+                        while self.jack_manager._pending_rec_messages:
+                            try: msgs.append(self.jack_manager._pending_rec_messages.popleft())
+                            except IndexError: break
 
                         for msg in msgs:
+                            # Use exact sequencer beat for messages during recording
+                            # to avoid "latency compensation" jitter
+                            msg_beat = current_beat
+
                             if msg.type == 'note_on' and msg.velocity > 0:
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
                                     if is_midi_track(track):
                                         if msg.note not in open_notes:
-                                            open_notes[msg.note] = (current_beat, msg.velocity, target_idx)
+                                            open_notes[msg.note] = (msg_beat, msg.velocity, target_idx)
                                             # Thru
                                             if enable_thru and getattr(track, 'output_port_name', None) in self.open_ports:
                                                 self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
@@ -2307,7 +2266,7 @@ class Sequencer(EventDispatcher):
                                     note_start, original_velocity, track_idx = open_notes.pop(msg.note)
                                     duration = current_beat - note_start
                                     
-                                    if duration > 0:
+                                    if duration >= 0:
                                         # Use the safe merger to avoid background thread issues and ensure UI refresh
                                         self.jack_manager._recorded_events_to_merge.append({
                                             'type': 'note',
@@ -2315,7 +2274,7 @@ class Sequencer(EventDispatcher):
                                             'pitch': msg.note,
                                             'velocity': original_velocity,
                                             'start_time': note_start,
-                                            'duration': duration
+                                            'duration': max(0.001, duration) # Ensure minimum duration
                                         })
 
                                     # Thru OFF
@@ -2347,7 +2306,7 @@ class Sequencer(EventDispatcher):
                                         'track_idx': final_track_idx,
                                         'control': msg.control,
                                         'value': msg.value,
-                                        'start_time': current_beat
+                                        'start_time': msg_beat
                                     })
                                     # Thru (Only for MIDI tracks)
                                     if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
@@ -2360,7 +2319,7 @@ class Sequencer(EventDispatcher):
                                         'type': 'pitchwheel',
                                         'track_idx': target_idx,
                                         'pitch': msg.pitch,
-                                        'start_time': current_beat
+                                        'start_time': msg_beat
                                     })
                                     if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
                                         self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
@@ -2372,7 +2331,7 @@ class Sequencer(EventDispatcher):
                                         'type': 'program',
                                         'track_idx': target_idx,
                                         'program': msg.program,
-                                        'start_time': current_beat
+                                        'start_time': msg_beat
                                     })
                                     if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
                                         self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
@@ -3197,23 +3156,22 @@ class Sequencer(EventDispatcher):
             return "Error: Invalid seek format. Use +/-<number><m|b> (e.g., '+1m', '-4b')."
 
     def _handle_raw_cc(self, chan, ctrl, val):
-        # --- Deduplicate (mido vs jack) ---
-        now = time.perf_counter()
-        last_val, last_time = self._last_processed_cc.get((chan, ctrl), (None, 0))
-        # If same CC and same value within 50ms, skip
-        if last_val == val and (now - last_time) < 0.05:
-            return
-        self._last_processed_cc[(chan, ctrl)] = (val, now)
+        # print(f"[DEBUG] _handle_raw_cc: chan={chan}, ctrl={ctrl}, val={val}")
 
         # --- Handle MIDI Learn Mode ---
         if self.midi_learn_mode:
+            print(f"[LEARN] Learned CC {ctrl} (val {val})")
+            # Always update the property for reactive UI bindings
+            self.last_learned_cc = -1
+            self.last_learned_cc = ctrl
+
+            # Also try direct call for immediate response if possible
             def _learned(dt, c=ctrl):
-                from kivymd.app import MDApp
                 app = MDApp.get_running_app()
                 layout = getattr(app, 'sequencer_layout', None)
-                if not layout and hasattr(app, 'sequencer_layout'):
-                    layout = app.sequencer_layout
-                if not layout and app and hasattr(app, 'root'):
+
+                # Robust search if not found directly
+                if not layout and app and app.root:
                     def find_layout(widget):
                         if widget.__class__.__name__ == 'SequencerLayout':
                             return widget
@@ -3227,14 +3185,21 @@ class Sequencer(EventDispatcher):
                 if layout:
                     layout._on_midi_learned(self, c)
                 else:
-                    self.last_learned_cc = -1
-                    self.last_learned_cc = c
+                    print("[LEARN] Error: SequencerLayout not found in app hierarchy")
             Clock.schedule_once(_learned)
             return
 
+        # --- Deduplicate (mido vs jack) ---
+        now = time.perf_counter()
+        last_val, last_time = self._last_processed_cc.get((chan, ctrl), (None, 0))
+        # If same CC and same value within 50ms, skip
+        if last_val == val and (now - last_time) < 0.05:
+            return
+        self._last_processed_cc[(chan, ctrl)] = (val, now)
+
         # --- Handle Normal Mappings ---
         # 1. Transport
-        if val == 127:
+        if val >= 64: # Binary button detection
             if ctrl == self.midi_config.get_transport_cc("play_pause"):
                 self.process_transport_command("play_pause")
             elif ctrl == self.midi_config.get_transport_cc("stop"):
@@ -3261,8 +3226,14 @@ class Sequencer(EventDispatcher):
                         if category == "volume_sliders":
                             self.set_track_volume(i, value_str=str(val / 127.0), api_mode=True)
                             handled = True
-                        elif category == "track_solo_buttons" and val == 127:
+                        elif category == "track_solo_buttons" and val >= 64:
                             self.toggle_solo(i)
+                            handled = True
+                        elif category == "track_mute_buttons" and val >= 64:
+                            self.toggle_mute(i)
+                            handled = True
+                        elif category == "pan_sliders":
+                            self.set_track_pan(i, pan_str=str((val / 127.0) * 2 - 1), api_mode=True)
                             handled = True
                         if handled: break
             elif isinstance(mapping, dict):
@@ -3273,13 +3244,13 @@ class Sequencer(EventDispatcher):
                             if target_idx != -1:
                                 if param in ('volume', 'vol'):
                                     self.set_track_volume(target_idx, value_str=str(val / 127.0), api_mode=True)
-                                elif param == 'solo' and val == 127:
+                                elif param == 'solo' and val >= 64:
                                     self.toggle_solo(target_idx)
-                                elif param == 'mute' and val == 127:
+                                elif param == 'mute' and val >= 64:
                                     self.toggle_mute(target_idx)
                                 elif param == 'pan':
                                     self.set_track_pan(target_idx, pan_str=str((val / 127.0) * 2 - 1), api_mode=True)
-                                elif param == 'record_arm' and val == 127:
+                                elif param == 'record_arm' and val >= 64:
                                     self.set_record_mode(target_idx, 'OVERWRITE' if self.song.tracks[target_idx].record_mode == 'OFF' else 'OFF')
                                 elif param == 'vel':
                                     self.set_track_velocity(target_idx, velocity_str=str(val / 100.0), api_mode=True)

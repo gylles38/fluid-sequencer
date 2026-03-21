@@ -1,5 +1,6 @@
 import json
 import os
+import copy
 
 DEFAULT_MIDI_MAPPINGS = {
     "transport": {
@@ -12,13 +13,22 @@ DEFAULT_MIDI_MAPPINGS = {
         "panic": 113
     },
     "volume_sliders": [70, 71, 72, 73, 74, 75, 76, 77],
-    "track_solo_buttons": [65, 30, 31, 62, 80, 81, 82, 83]
+    "track_solo_buttons": [65, 30, 31, 62, 80, 81, 82, 83],
+    "track_mute_buttons": [None, None, None, None, None, None, None, None],
+    "pan_sliders": [None, None, None, None, None, None, None, None],
+    "selected_track": {
+        "volume": None,
+        "pan": None,
+        "mute": None,
+        "solo": None,
+        "record_arm": None
+    }
 }
 
 class MidiConfig:
     def __init__(self, filepath=None):
         self.filepath = filepath
-        self.mappings = DEFAULT_MIDI_MAPPINGS.copy()
+        self.mappings = copy.deepcopy(DEFAULT_MIDI_MAPPINGS)
         if filepath:
             self.load_mappings(filepath)
 
@@ -64,6 +74,7 @@ class MidiConfig:
 
     def update_mapping(self, category, parameter, cc_value):
         """Updates or adds a mapping."""
+        print(f"[CONFIG] Updating mapping: {category}/{parameter} -> CC {cc_value}")
         if category not in self.mappings:
             self.mappings[category] = {}
 

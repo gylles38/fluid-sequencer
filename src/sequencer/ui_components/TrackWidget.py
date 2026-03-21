@@ -432,7 +432,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8],
                 size_hint=(None, None),
                 size=(dp(36), dp(36)),
-                midi_command=["selected_track", "solo"]
+                midi_command=["track_solo_buttons", str(self.track_index)]
             )
             self.controls_section.add_widget(self.solo_button)
         elif isinstance(track, AutomationTrack):
@@ -574,14 +574,14 @@ class TrackWidget(HoverBehavior, BoxLayout):
             md_bg_color = [0.4, 0.2, 0.1, 0.8] if track.is_muted else [0.3, 0.2, 0.1, 0.8],
             size_hint=(None, None),
             size=(dp(36), dp(36)),
-            midi_command=["selected_track", "mute"]
+            midi_command=["track_mute_buttons", str(self.track_index)]
         )
         mute_button_container.add_widget(self.mute_button)
 
         if not isinstance(track, AutomationTrack):
             volume_layout.add_widget(mute_button_container)
             self.volume_slider = HoverableSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
-            self.volume_slider.midi_command = ["selected_track", "volume"]
+            self.volume_slider.midi_command = ["volume_sliders", str(self.track_index)]
             self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
             volume_layout.add_widget(self.volume_slider)
             volume_layout.add_widget(self.volume_label)
@@ -604,7 +604,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             pan_icon_container.add_widget(pan_icon)
 
             self.pan_slider = HoverableSlider(min=-1, max=1, value=track.pan, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
-            self.pan_slider.midi_command = ["selected_track", "pan"] # Per-track pan is not in DEFAULT_MIDI_MAPPINGS, so using selected_track or adding a new category
+            self.pan_slider.midi_command = ["pan_sliders", str(self.track_index)]
             self.pan_label = Label(text=f"{track.pan:+.1f}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
 
             pan_layout.add_widget(pan_icon_container)

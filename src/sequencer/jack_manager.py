@@ -93,7 +93,8 @@ class JackManager:
         #self._diag_last_target_idx = -1
         self._last_beat_rt = 0.0 # Atomic float for UI sync
         self._last_transport_state_rt = jack.STOPPED
-        self._pending_control_messages = collections.deque()
+        self._pending_ui_messages = collections.deque()
+        self._pending_rec_messages = collections.deque()
         self.control_in_port = None
 
     def find_port_by_name(self, pattern):
@@ -351,8 +352,16 @@ class JackManager:
 
     def _find_jack_port(self, pattern: str, is_output: bool = False) -> Optional[jack.Port]:
         """Finds a JACK port matching the given pattern using native API, checking aliases."""
-        if not pattern: return None
         if not self.jack_client: return None
+
+        # 1. Handle special patterns or fallbacks
+        if not pattern:
+            # Fallback: find any MIDI output port if we are looking for a source
+            if is_output:
+                ports = self.jack_client.get_ports(is_midi=True, is_output=True)
+                # Filter out our own output ports if any (none yet)
+                if ports: return ports[0]
+            return None
 
         # Exact match first
         ports = self.jack_client.get_ports(is_midi=True, is_output=is_output, is_input=not is_output)
@@ -368,19 +377,22 @@ class JackManager:
             # Fallback to tokens including digits if all tokens were numeric
             tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
 
-        if not tokens: return None
-        unique_tokens = set(tokens)
+        if tokens:
+            unique_tokens = set(tokens)
+            for port in ports:
+                name_lower = port.name.lower()
+                if all(token in name_lower for token in unique_tokens):
+                    return port
 
-        for port in ports:
-            name_lower = port.name.lower()
-            if all(token in name_lower for token in unique_tokens):
-                return port
+                # Check aliases (often containing ALSA names)
+                for alias in port.aliases:
+                    if all(token in alias.lower() for token in unique_tokens):
+                        return port
 
-            # Check aliases (often containing ALSA names)
-            aliases = port.aliases
-            for alias in aliases:
-                alias_lower = alias.lower()
-                if all(token in alias_lower for token in unique_tokens):
+        # 2. Final Fallback: if is_output (source), try to find any MIDI capture/out port
+        if is_output:
+            for port in ports:
+                if 'midi' in port.name.lower() and ('capture' in port.name.lower() or 'out' in port.name.lower()):
                     return port
 
         return None
@@ -461,6 +473,10 @@ class JackManager:
                         self.jack_client.connect(src_port, self.control_in_port)
                     except jack.JackError:
                         pass # Already connected
+                elif not src_port:
+                    # Log once every few seconds if source not found
+                    if int(time.time()) % 5 == 0:
+                         print(f"[Conductor] Warning: Source MIDI port matching '{src_pattern}' not found.")
 
                 if dest_pattern:
                     dest_port = self._find_jack_port(dest_pattern, is_output=False)
@@ -1527,14 +1543,17 @@ class JackManager:
         """Reads incoming MIDI from the control_in JACK port."""
         if self.control_in_port:
             for offset, data in self.control_in_port.incoming_midi_events():
-                if len(data) >= 3:
-                    status = data[0] & 0xF0
-                    if status == 0xB0: # CC
-                        chan = data[0] & 0x0F
-                        ctrl = data[1]
-                        val = data[2]
-                        # Log or print here if needed for low-level debug
-                        self._pending_control_messages.append((chan, ctrl, val))
+                try:
+                    msg = mido.Message.from_bytes(data)
+                    # Filter out realtime noise
+                    if msg.type in ('clock', 'active_sensing', 'aftertouch'):
+                        continue
+
+                    print(f"[MIDI-IN] JACK: {msg}")
+                    self._pending_ui_messages.append(msg)
+                    self._pending_rec_messages.append(msg)
+                except Exception as e:
+                    print(f"[MIDI-IN] Error: {e}")
 
     def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
         if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:

@@ -58,22 +58,69 @@ class HoverBehavior:
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""
         Window.set_system_cursor('hand')
+
+        # Only report if we have a midi_command to learn
+        if not hasattr(self, 'midi_command') or not self.midi_command:
+            return
+
         from kivymd.app import MDApp
         app = MDApp.get_running_app()
-        if app and hasattr(app, 'root') and hasattr(app.root, 'sequencer_layout'):
-            app.root.sequencer_layout.report_hover(self, True)
-        elif app and hasattr(app, 'sequencer_layout'):
-            app.sequencer_layout.report_hover(self, True)
+        if not app: return
+
+        # Try to get layout from app instance directly
+        layout = getattr(app, 'sequencer_layout', None)
+
+        # Fallback: search in root
+        if not layout and hasattr(app, 'root'):
+            if app.root.__class__.__name__ == 'SequencerLayout':
+                layout = app.root
+            elif hasattr(app.root, 'sequencer_layout'):
+                layout = app.root.sequencer_layout
+            else:
+                def find_layout(widget):
+                    if widget.__class__.__name__ == 'SequencerLayout':
+                        return widget
+                    if hasattr(widget, 'children'):
+                        for child in widget.children:
+                            res = find_layout(child)
+                            if res: return res
+                    return None
+                layout = find_layout(app.root)
+
+        if layout:
+            layout.report_hover(self, True)
 
     def on_leave(self, *args):
         """Called when the mouse leaves the widget area."""
         Window.set_system_cursor('arrow')
+
+        # Only report if we have a midi_command to learn
+        if not hasattr(self, 'midi_command') or not self.midi_command:
+            return
+
         from kivymd.app import MDApp
         app = MDApp.get_running_app()
-        if app and hasattr(app, 'root') and hasattr(app.root, 'sequencer_layout'):
-            app.root.sequencer_layout.report_hover(self, False)
-        elif app and hasattr(app, 'sequencer_layout'):
-            app.sequencer_layout.report_hover(self, False)
+        if not app: return
+
+        layout = getattr(app, 'sequencer_layout', None)
+        if not layout and hasattr(app, 'root'):
+            if app.root.__class__.__name__ == 'SequencerLayout':
+                layout = app.root
+            elif hasattr(app.root, 'sequencer_layout'):
+                layout = app.root.sequencer_layout
+            else:
+                def find_layout(widget):
+                    if widget.__class__.__name__ == 'SequencerLayout':
+                        return widget
+                    if hasattr(widget, 'children'):
+                        for child in widget.children:
+                            res = find_layout(child)
+                            if res: return res
+                    return None
+                layout = find_layout(app.root)
+
+        if layout:
+            layout.report_hover(self, False)
 
 class HoverableMDButton(MDButton, HoverBehavior):
     pass

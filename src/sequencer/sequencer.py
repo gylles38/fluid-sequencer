@@ -363,8 +363,26 @@ class Sequencer(EventDispatcher):
                             # --- Handle MIDI Learn Mode ---
                             if self.midi_learn_mode:
                                 def _learned(dt, c=control):
-                                    self.last_learned_cc = -1
-                                    self.last_learned_cc = c
+                                    from kivymd.app import MDApp
+                                    app = MDApp.get_running_app()
+                                    layout = getattr(app, 'sequencer_layout', None)
+                                    if not layout and app and hasattr(app, 'root'):
+                                        def find_layout(widget):
+                                            if widget.__class__.__name__ == 'SequencerLayout':
+                                                return widget
+                                            if hasattr(widget, 'children'):
+                                                for child in widget.children:
+                                                    res = find_layout(child)
+                                                    if res: return res
+                                            return None
+                                        layout = find_layout(app.root)
+
+                                    if layout:
+                                        layout._on_midi_learned(self, c)
+                                    else:
+                                        # Fallback to property if layout not found
+                                        self.last_learned_cc = -1
+                                        self.last_learned_cc = c
                                 Clock.schedule_once(_learned)
                                 continue
 

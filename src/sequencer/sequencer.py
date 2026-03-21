@@ -624,8 +624,8 @@ class Sequencer(EventDispatcher):
 
                     # Threshold for 'almost collinear'.
                     # For 0-127 CCs, 0.5 is a good balance.
-                    # For normalized 0-1, it's 0.5 / 127 = ~0.004
-                    threshold = 0.51 if parameter.startswith('cc') or parameter in ['vel', 'prog'] else 0.004
+                    # For normalized 0-1, we use ~0.008 (slightly above 1 bit)
+                    threshold = 0.51 if parameter.startswith('cc') or parameter in ['vel', 'prog'] else 0.008
 
                     # Also don't allow segments longer than 4 beats without a point
                     if abs(last_p.value - expected_val) < threshold and total_gap < 4.0:
@@ -2530,7 +2530,7 @@ class Sequencer(EventDispatcher):
             elif param in ['pitch', 'pb']:
                 epsilon = 0.005 # More sensitive to fine movements
             else:
-                epsilon = 0.002
+                epsilon = 0.005 # Match pitch sensitivity for vol/pan (roughly 1/2 of a MIDI step)
 
             smoothed = self._rdp(points, epsilon)
             new_total_points.extend(smoothed)

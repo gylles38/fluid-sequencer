@@ -1180,8 +1180,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
             # If the touch wasn't consumed by a child (button, slider, etc.)
             # and the sequencer is stopped, we select this track.
+            # Regression fix: only apply this to MIDI tracks to route to instrument.
             seq = self.sequencer_layout.sequencer
-            if seq.playback_state == "stopped":
+            if seq.playback_state == "stopped" and isinstance(self.track, MidiTrack):
                 # Manual override of the MIDI routing for the instrument selection.
                 # We tell the JackManager to target this track specifically.
                 seq.jack_manager._manual_routing_override = self.track_index

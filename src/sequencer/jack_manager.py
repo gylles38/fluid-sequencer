@@ -1648,11 +1648,17 @@ class JackManager:
         """
         Returns the target track index for MIDI input routing at the given beat.
         Prioritization:
-        1. Automation points on the routing track.
-        2. Manual override (selected track in UI).
-        3. Armed track index (cached).
+        0. Manual override IF STOPPED (regression fix).
+        1. Automation Priority (Wins during playback/recording if present).
+        2. Manual override Priority (Respect UI selection if no automation).
+        3. Armed Track Priority (RT safe).
         4. Final Fallback: First MIDI track (cached).
         """
+        # 0. Manual override Priority IF STOPPED (regression fix)
+        # When stopped, we want a click on a track to immediately and persistently route MIDI to it.
+        if self.sequencer.playback_state == "stopped" and self._manual_routing_override != -1:
+            return self._manual_routing_override
+
         # 1. Automation Priority (Wins during playback/recording if present)
         if self._routing_track and self._routing_track.points:
             routing_points = [p for p in self._routing_track.points if p.parameter == 'input_routing']

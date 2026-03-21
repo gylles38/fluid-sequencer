@@ -92,7 +92,9 @@ class JackManager:
         #self._diag_clavier_routed = 0
         #self._diag_last_target_idx = -1
         self._last_beat_rt = 0.0 # Atomic float for UI sync
-        self._last_transport_state_rt = jack.STOPPED        
+        self._last_transport_state_rt = jack.STOPPED
+        self._pending_control_messages = collections.deque()
+        self.control_in_port = None
 
     def find_port_by_name(self, pattern):
         """
@@ -348,27 +350,49 @@ class JackManager:
             time.sleep(0.05)
 
     def _find_jack_port(self, pattern: str, is_output: bool = False) -> Optional[jack.Port]:
-        """Finds a JACK port matching the given pattern using native API."""
+        """Finds a JACK port matching the given pattern using native API, checking aliases."""
         if not pattern: return None
         if not self.jack_client: return None
 
+        # Exact match first
+        ports = self.jack_client.get_ports(is_midi=True, is_output=is_output, is_input=not is_output)
+        for port in ports:
+            if port.name == pattern:
+                return port
+
         # Clean the pattern (remove ALSA indices)
         clean_pattern = re.sub(r'[:\s]\d+[:\d]*$', '', pattern)
-        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
+        # Filter out purely numeric tokens which are often ALSA-specific indices and vary between systems
+        tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t and not t.isdigit()]
+        if not tokens:
+            # Fallback to tokens including digits if all tokens were numeric
+            tokens = [t.lower() for t in re.split(r'[^a-zA-Z0-9]+', clean_pattern) if t]
+
         if not tokens: return None
         unique_tokens = set(tokens)
-
-        # Query ports from JACK using keyword arguments
-        if is_output:
-            ports = self.jack_client.get_ports(is_midi=True, is_output=True)
-        else:
-            ports = self.jack_client.get_ports(is_midi=True, is_input=True)
 
         for port in ports:
             name_lower = port.name.lower()
             if all(token in name_lower for token in unique_tokens):
                 return port
+
+            # Check aliases (often containing ALSA names)
+            aliases = port.aliases
+            for alias in aliases:
+                alias_lower = alias.lower()
+                if all(token in alias_lower for token in unique_tokens):
+                    return port
+
         return None
+
+    def get_midi_source_ports(self) -> List[str]:
+        """Returns names of all available MIDI output ports (sources)."""
+        if not self.jack_client: return []
+        try:
+            ports = self.jack_client.get_ports(is_midi=True, is_output=True)
+            return sorted([p.name for p in ports])
+        except Exception:
+            return []
 
     def _get_managed_instrument_ports(self) -> set[str]:
         """Returns a set of full JACK port names managed by the project's MIDI tracks."""
@@ -428,9 +452,17 @@ class JackManager:
                     if is_midi_track(track):
                         dest_pattern = getattr(track, 'input_port_name', None)
 
-                # 4. Manage connections if target changed
+                # 4. Manage connections
+                src_port = self._find_jack_port(src_pattern, is_output=True)
+
+                # Always connect keyboard to our internal control port
+                if src_port and self.control_in_port:
+                    try:
+                        self.jack_client.connect(src_port, self.control_in_port)
+                    except jack.JackError:
+                        pass # Already connected
+
                 if dest_pattern:
-                    src_port = self._find_jack_port(src_pattern, is_output=True)
                     dest_port = self._find_jack_port(dest_pattern, is_output=False)
 
                     if src_port and dest_port:
@@ -653,6 +685,9 @@ class JackManager:
                             should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                             if not self._send_ipc_command(ap.socket_path, {"command": ["set_property", "mute", not should_be_audible]}):
                                 print(f"    - Warning: Failed to set mute state for track '{track.name}'.", file=sys.stderr)
+
+                # --- MIDI Control Port ---
+                self.control_in_port = self.jack_client.midi_inports.register("control_in")
 
                 self.jack_client.set_process_callback(self._process_callback)
                 self.jack_client.set_timebase_callback(self._time_callback)
@@ -1488,6 +1523,19 @@ class JackManager:
                 self._metronome_notes_to_turn_off.append((beat_to_check + 0.1, pitch))
                 beat_to_check += 1
 
+    def _process_control_in(self):
+        """Reads incoming MIDI from the control_in JACK port."""
+        if self.control_in_port:
+            for offset, data in self.control_in_port.incoming_midi_events():
+                if len(data) >= 3:
+                    status = data[0] & 0xF0
+                    if status == 0xB0: # CC
+                        chan = data[0] & 0x0F
+                        ctrl = data[1]
+                        val = data[2]
+                        # Log or print here if needed for low-level debug
+                        self._pending_control_messages.append((chan, ctrl, val))
+
     def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block):
         if self.sequencer.play_range_enabled and end_beat_of_block >= self.sequencer.play_range_end_beat:
             if start_beat_of_block < self.sequencer.play_range_end_beat:
@@ -1550,6 +1598,9 @@ class JackManager:
                 else: # STOPPED or other state
                     self.set_all_audio_pause_state(True)
                 self.last_transport_state = current_transport_state
+
+            # Always process control input, regardless of transport state
+            self._process_control_in()
 
             with self.sync_lock:
                 if not self.jack_client or self.jack_client.transport_state != jack.ROLLING:

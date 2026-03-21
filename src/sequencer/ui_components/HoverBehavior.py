@@ -69,6 +69,8 @@ class HoverBehavior:
 
         # Try to get layout from app instance directly
         layout = getattr(app, 'sequencer_layout', None)
+        if not layout and hasattr(app, 'sequencer_layout'):
+            layout = app.sequencer_layout
 
         # Fallback: search in root
         if not layout and hasattr(app, 'root'):
@@ -103,6 +105,9 @@ class HoverBehavior:
         if not app: return
 
         layout = getattr(app, 'sequencer_layout', None)
+        if not layout and hasattr(app, 'sequencer_layout'):
+            layout = app.sequencer_layout
+
         if not layout and hasattr(app, 'root'):
             if app.root.__class__.__name__ == 'SequencerLayout':
                 layout = app.root

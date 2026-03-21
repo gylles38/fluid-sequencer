@@ -7,7 +7,9 @@ DEFAULT_MIDI_MAPPINGS = {
         "forward": 116,
         "stop": 117,
         "play_pause": 118,
-        "record_arm": 119
+        "record_arm": 119,
+        "loop": 114,
+        "panic": 113
     },
     "volume_sliders": [70, 71, 72, 73, 74, 75, 76, 77],
     "track_solo_buttons": [65, 30, 31, 62, 80, 81, 82, 83]

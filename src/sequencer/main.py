@@ -587,24 +587,40 @@ def process_command(user_input, seq, api_mode=False, confirmation_handler=None):
             
     elif command == "setrecordport":
         if len(args) == 1:
-            result = seq.set_default_record_port(args[0])  # Changer 'sequencer' en 'seq'
-            print(result)
+            result = seq.set_default_record_port(args[0])
+            if api_mode:
+                return True, json.dumps({"status": "success", "message": result})
+            else:
+                return True, result
         else:
-            print("Usage: setrecordport <port_name>")           
+            msg = "Usage: setrecordport <port_name>"
+            if api_mode:
+                return True, json.dumps({"status": "error", "message": msg})
+            else:
+                return True, msg
 ###
-    elif command.startswith("recordmode"):
-        # Commande pour changer le mode d'enregistrement d'une piste
-        parts = command.split()
-        if len(parts) == 3:
+    elif command == "recordmode":
+        if len(args) == 2:
             try:
-                track_index = int(parts[1])
-                mode = parts[2].upper()
-                result = sequencer.set_record_mode(track_index, mode)
-                print(result)
+                track_index = int(args[0])
+                mode = args[1].upper()
+                result = seq.set_record_mode(track_index, mode)
+                if api_mode:
+                    return True, json.dumps({"status": "success", "message": result})
+                else:
+                    return True, result
             except (ValueError, IndexError):
-                print("Error: Invalid track index or mode. Usage: recordmode <track_index> <OFF|OVERWRITE|KEEP>")
+                msg = "Error: Invalid track index or mode. Usage: recordmode <track_index> <OFF|OVERWRITE|KEEP>"
+                if api_mode:
+                    return True, json.dumps({"status": "error", "message": msg})
+                else:
+                    return True, msg
         else:
-            print("Error: Invalid command. Usage: recordmode <track_index> <OFF|OVERWRITE|KEEP>")
+            msg = "Usage: recordmode <track_index> <OFF|OVERWRITE|KEEP>"
+            if api_mode:
+                return True, json.dumps({"status": "error", "message": msg})
+            else:
+                return True, msg
 
     elif command == "bis":
         if seq.last_record_settings is None:

@@ -44,6 +44,7 @@ class Sequencer(EventDispatcher):
     current_routing_index = NumericProperty(-1)
     playback_state = StringProperty("stopped")
     is_recording = BooleanProperty(False)
+    loop_enabled = BooleanProperty(False)
     midi_learn_mode = BooleanProperty(False)
     last_learned_cc = NumericProperty(-1)
     ui_end_pos_str = StringProperty("")
@@ -80,7 +81,6 @@ class Sequencer(EventDispatcher):
         self.recording_thread = None
         self._stop_event = threading.Event()
 
-        self.loop_enabled = False
         self.loop_start_beat = 0.0
         self.loop_end_beat = 0.0
 
@@ -110,6 +110,7 @@ class Sequencer(EventDispatcher):
         self.track_overrides: Dict[int, MidiTrack] = {}
         self.last_play_start_beat: Optional[float] = None
         self._last_transport_command_time = 0.0
+        self._last_processed_cc = {} # (chan, ctrl) -> (val, time)
 
         self.bind(song_structure_changed=self._update_current_routing)
         
@@ -121,7 +122,38 @@ class Sequencer(EventDispatcher):
         if not self.jack_manager or not self.jack_manager.is_running:
             return
 
-        # Skip sync if we recently sent a manual command (cooldown to allow engine to catch up)
+        # --- Process Pending Commands from RT (MIDI controller) ---
+        # We do this BEFORE the transport sync cooldown to ensure MIDI controls/learn are always responsive
+        if self.jack_manager._pending_play_pause:
+            self.jack_manager._pending_play_pause = False
+            self.process_transport_command("play_pause")
+
+        if self.jack_manager._pending_stop:
+            self.jack_manager._pending_stop = False
+            self.process_transport_command("stop")
+
+        if self.jack_manager._pending_record:
+            self.jack_manager._pending_record = False
+            self.process_transport_command("record")
+
+        while self.jack_manager._pending_mappings:
+            try:
+                mapping, value = self.jack_manager._pending_mappings.popleft()
+                self._apply_midi_mapping_action(mapping, value)
+            except IndexError: break
+
+        while self.jack_manager._pending_control_messages:
+            try:
+                chan, ctrl, val = self.jack_manager._pending_control_messages.popleft()
+                self._handle_raw_cc(chan, ctrl, val)
+            except IndexError: break
+
+        # Check for new MIDI activity to trigger recording (Dynamic Routing)
+        if self.playback_state == "stopped" and self.is_recording and self.last_learned_cc == -1:
+             # This check is just to ensure the thread poll keeps running or triggers UI
+             pass
+
+        # Skip transport sync if we recently sent a manual command
         if time.perf_counter() - self._last_transport_command_time < 0.5:
             return
 
@@ -170,24 +202,6 @@ class Sequencer(EventDispatcher):
                 print(f"[UI] Engine ROLL detected par transport_query.")
                 self.playback_state = "playing"
                 
-        # 3. Process Pending Commands from RT (MIDI controller)
-        if self.jack_manager._pending_play_pause:
-            self.jack_manager._pending_play_pause = False
-            self.process_transport_command("play_pause")
-
-        if self.jack_manager._pending_stop:
-            self.jack_manager._pending_stop = False
-            self.process_transport_command("stop")
-
-        if self.jack_manager._pending_record:
-            self.jack_manager._pending_record = False
-            self.process_transport_command("record")
-
-        while self.jack_manager._pending_mappings:
-            try:
-                mapping, value = self.jack_manager._pending_mappings.popleft()
-                self._apply_midi_mapping_action(mapping, value)
-            except IndexError: break
 
     def _update_current_routing(self, *args):
         """
@@ -335,6 +349,12 @@ class Sequencer(EventDispatcher):
             else:
                 self.start_midi_recording() # Assumes a track is armed
 
+        elif command == "loop":
+            if not self.loop_enabled:
+                self.set_loop_range(self.ui_start_pos_str, self.ui_end_pos_str)
+            else:
+                self.loop_enabled = False
+
     def get_start_beat(self):
         """Calcule le beat de départ basé sur le texte de l'interface"""
         start_pos_str = getattr(self, 'ui_start_pos_str', "1:1") or "1:1"
@@ -350,111 +370,15 @@ class Sequencer(EventDispatcher):
 
     def _transport_control_listener_loop(self, port_name: str):
         """
-        A dedicated thread that listens for transport control MIDI messages based on the loaded configuration.
+        A dedicated thread that listens for transport control MIDI messages via mido.
+        Now just forwards to _handle_raw_cc for unified processing.
         """
         try:
             with mido.open_input(port_name) as inport:
                 while not self._transport_control_stop_event.is_set():
                     for msg in inport.iter_pending():
                         if msg.type == 'control_change':
-                            control = msg.control
-                            value = msg.value
-
-                            # --- Handle MIDI Learn Mode ---
-                            if self.midi_learn_mode:
-                                def _learned(dt, c=control):
-                                    from kivymd.app import MDApp
-                                    app = MDApp.get_running_app()
-                                    layout = getattr(app, 'sequencer_layout', None)
-                                    if not layout and app and hasattr(app, 'root'):
-                                        def find_layout(widget):
-                                            if widget.__class__.__name__ == 'SequencerLayout':
-                                                return widget
-                                            if hasattr(widget, 'children'):
-                                                for child in widget.children:
-                                                    res = find_layout(child)
-                                                    if res: return res
-                                            return None
-                                        layout = find_layout(app.root)
-
-                                    if layout:
-                                        layout._on_midi_learned(self, c)
-                                    else:
-                                        # Fallback to property if layout not found
-                                        self.last_learned_cc = -1
-                                        self.last_learned_cc = c
-                                Clock.schedule_once(_learned)
-                                continue
-
-                            # --- Handle Transport Controls ---
-                            if value == 127:
-                                if control == self.midi_config.get_transport_cc("play_pause"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
-                                elif control == self.midi_config.get_transport_cc("stop"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
-                                elif control == self.midi_config.get_transport_cc("record_arm"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("record"))
-                                elif control == self.midi_config.get_transport_cc("rewind"):
-                                    Clock.schedule_once(lambda dt: self.seek("-1m"))
-                                elif control == self.midi_config.get_transport_cc("forward"):
-                                    Clock.schedule_once(lambda dt: self.seek("+1m"))
-                                elif control == self.midi_config.get_transport_cc("loop"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("loop"))
-                                elif control == self.midi_config.get_transport_cc("panic"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("panic"))
-
-                            # --- Handle Custom Mappings ---
-                            handled = False
-                            for category, mapping in self.midi_config.mappings.items():
-                                if category == "transport":
-                                    continue # Handled above
-
-                                if isinstance(mapping, list):
-                                    for i, cc in enumerate(mapping):
-                                        if cc == control:
-                                            if category == "volume_sliders":
-                                                volume_value = value / 127.0
-                                                Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
-                                                handled = True
-                                            elif category == "track_solo_buttons":
-                                                if value == 127:
-                                                    Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
-                                                handled = True
-                                            if handled: break
-                                elif isinstance(mapping, dict):
-                                    for param, cc in mapping.items():
-                                        if cc == control:
-                                            if category == "selected_track":
-                                                target_idx = self.current_routing_index
-                                                if target_idx != -1:
-                                                    if param in ('volume', 'vol'):
-                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=value/127.0: self.set_track_volume(ti, v, api_mode=True))
-                                                    elif param == 'solo' and value == 127:
-                                                        Clock.schedule_once(lambda dt, ti=target_idx: self.toggle_solo(ti))
-                                                    elif param == 'mute' and value == 127:
-                                                        Clock.schedule_once(lambda dt, ti=target_idx: self.toggle_mute(ti))
-                                                    elif param == 'pan':
-                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=(value/127.0)*2-1: self.set_track_pan(ti, str(v), api_mode=True))
-                                                    elif param == 'record_arm' and value == 127:
-                                                        Clock.schedule_once(lambda dt, ti=target_idx: self.set_record_mode(ti, 'OVERWRITE' if self.song.tracks[ti].record_mode == 'OFF' else 'OFF'))
-                                                    elif param == 'vel':
-                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=value: self.set_track_velocity(ti, str(v/100.0), api_mode=True))
-                                                    elif param == 'prog':
-                                                        Clock.schedule_once(lambda dt, ti=target_idx, v=value: self.set_program(ti, v))
-                                                    elif param.startswith('cc'):
-                                                        try:
-                                                            cc_num = int(param[2:])
-                                                            def send_generic_cc(dt, ti=target_idx, cn=cc_num, val=value):
-                                                                if 0 <= ti < len(self.song.tracks):
-                                                                    track = self.song.tracks[ti]
-                                                                    if is_midi_track(track) and track.output_port_name:
-                                                                        self.send_cc_message(track.output_port_name, track.channel, cn, val)
-                                                            Clock.schedule_once(send_generic_cc)
-                                                        except ValueError: pass
-                                            handled = True
-                                            if handled: break
-                                if handled: break
-
+                            Clock.schedule_once(lambda dt, m=msg: self._handle_raw_cc(m.channel, m.control, m.value))
                     time.sleep(0.01)
         except Exception as e:
             print(f"\nError in transport control listener for port '{port_name}': {e}")
@@ -465,9 +389,8 @@ class Sequencer(EventDispatcher):
         Manages the lifecycle of the transport control listener thread.
         """
         try:
-            input_ports = get_input_names()
-            if port_name not in input_ports:
-                return f"Error: MIDI input port '{port_name}' not found."
+            # We don't strictly verify here anymore because port_name might be a JACK-only port
+            # or an alias that mido doesn't see yet. JackManager handles discovery.
 
             # Stop any existing listener before starting a new one
             if self._transport_control_thread and self._transport_control_thread.is_alive():
@@ -477,16 +400,31 @@ class Sequencer(EventDispatcher):
             self.default_record_port = port_name
             self.is_dirty = True
 
-            # Start the new listener thread
-            self._transport_control_stop_event.clear()
-            self._transport_control_thread = threading.Thread(
-                target=self._transport_control_listener_loop,
-                args=(port_name,),
-                daemon=True
-            )
-            self._transport_control_thread.start()
+            # Start the new listener thread if mido can see it
+            input_ports = get_input_names()
+            mido_port = None
+            if port_name in input_ports:
+                mido_port = port_name
+            else:
+                # Try partial matching
+                for p in input_ports:
+                    if port_name in p or p in port_name:
+                        mido_port = p
+                        break
 
-            return f"Default record and transport control port set to: {port_name}"
+            if mido_port:
+                self._transport_control_stop_event.clear()
+                self._transport_control_thread = threading.Thread(
+                    target=self._transport_control_listener_loop,
+                    args=(mido_port,),
+                    daemon=True
+                )
+                self._transport_control_thread.start()
+                msg = f"Default record and transport control port set to: {port_name} (mido+jack)"
+            else:
+                msg = f"Default record port set to: {port_name} (jack-only)"
+
+            return msg
         except Exception as e:
             return f"Error setting record port: {e}"
 
@@ -3257,6 +3195,106 @@ class Sequencer(EventDispatcher):
 
         except (ValueError, IndexError):
             return "Error: Invalid seek format. Use +/-<number><m|b> (e.g., '+1m', '-4b')."
+
+    def _handle_raw_cc(self, chan, ctrl, val):
+        # --- Deduplicate (mido vs jack) ---
+        now = time.perf_counter()
+        last_val, last_time = self._last_processed_cc.get((chan, ctrl), (None, 0))
+        # If same CC and same value within 50ms, skip
+        if last_val == val and (now - last_time) < 0.05:
+            return
+        self._last_processed_cc[(chan, ctrl)] = (val, now)
+
+        # --- Handle MIDI Learn Mode ---
+        if self.midi_learn_mode:
+            def _learned(dt, c=ctrl):
+                from kivymd.app import MDApp
+                app = MDApp.get_running_app()
+                layout = getattr(app, 'sequencer_layout', None)
+                if not layout and hasattr(app, 'sequencer_layout'):
+                    layout = app.sequencer_layout
+                if not layout and app and hasattr(app, 'root'):
+                    def find_layout(widget):
+                        if widget.__class__.__name__ == 'SequencerLayout':
+                            return widget
+                        if hasattr(widget, 'children'):
+                            for child in widget.children:
+                                res = find_layout(child)
+                                if res: return res
+                        return None
+                    layout = find_layout(app.root)
+
+                if layout:
+                    layout._on_midi_learned(self, c)
+                else:
+                    self.last_learned_cc = -1
+                    self.last_learned_cc = c
+            Clock.schedule_once(_learned)
+            return
+
+        # --- Handle Normal Mappings ---
+        # 1. Transport
+        if val == 127:
+            if ctrl == self.midi_config.get_transport_cc("play_pause"):
+                self.process_transport_command("play_pause")
+            elif ctrl == self.midi_config.get_transport_cc("stop"):
+                self.process_transport_command("stop")
+            elif ctrl == self.midi_config.get_transport_cc("record_arm"):
+                self.process_transport_command("record")
+            elif ctrl == self.midi_config.get_transport_cc("rewind"):
+                self.seek("-1m")
+            elif ctrl == self.midi_config.get_transport_cc("forward"):
+                self.seek("+1m")
+            elif ctrl == self.midi_config.get_transport_cc("loop"):
+                self.process_transport_command("loop")
+            elif ctrl == self.midi_config.get_transport_cc("panic"):
+                self.panic()
+
+        # 2. Custom Mappings
+        handled = False
+        for category, mapping in self.midi_config.mappings.items():
+            if category == "transport": continue
+
+            if isinstance(mapping, list):
+                for i, cc in enumerate(mapping):
+                    if cc == ctrl:
+                        if category == "volume_sliders":
+                            self.set_track_volume(i, value_str=str(val / 127.0), api_mode=True)
+                            handled = True
+                        elif category == "track_solo_buttons" and val == 127:
+                            self.toggle_solo(i)
+                            handled = True
+                        if handled: break
+            elif isinstance(mapping, dict):
+                for param, cc in mapping.items():
+                    if cc == ctrl:
+                        if category == "selected_track":
+                            target_idx = self.current_routing_index
+                            if target_idx != -1:
+                                if param in ('volume', 'vol'):
+                                    self.set_track_volume(target_idx, value_str=str(val / 127.0), api_mode=True)
+                                elif param == 'solo' and val == 127:
+                                    self.toggle_solo(target_idx)
+                                elif param == 'mute' and val == 127:
+                                    self.toggle_mute(target_idx)
+                                elif param == 'pan':
+                                    self.set_track_pan(target_idx, pan_str=str((val / 127.0) * 2 - 1), api_mode=True)
+                                elif param == 'record_arm' and val == 127:
+                                    self.set_record_mode(target_idx, 'OVERWRITE' if self.song.tracks[target_idx].record_mode == 'OFF' else 'OFF')
+                                elif param == 'vel':
+                                    self.set_track_velocity(target_idx, velocity_str=str(val / 100.0), api_mode=True)
+                                elif param == 'prog':
+                                    self.set_program(target_idx, val)
+                                elif param.startswith('cc'):
+                                    try:
+                                        cc_num = int(param[2:])
+                                        track = self.song.tracks[target_idx]
+                                        if is_midi_track(track) and track.output_port_name:
+                                            self.send_cc_message(track.output_port_name, track.channel, cc_num, val)
+                                    except ValueError: pass
+                        handled = True
+                        if handled: break
+            if handled: break
 
     def send_cc_message(self, port_name: str, channel: int, control: int, value: int) -> str:
         """Sends a single CC message to a specified port."""

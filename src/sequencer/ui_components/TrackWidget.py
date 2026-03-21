@@ -432,7 +432,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 md_bg_color=[0.3, 0.3, 0.1, 0.8] if track.is_solo else [0.1, 0.1, 0.1, 0.8],
                 size_hint=(None, None),
                 size=(dp(36), dp(36)),
-                midi_command=["track_solo_buttons", str(self.track_index)]
+                midi_command=["selected_track", "solo"]
             )
             self.controls_section.add_widget(self.solo_button)
         elif isinstance(track, AutomationTrack):
@@ -581,7 +581,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
         if not isinstance(track, AutomationTrack):
             volume_layout.add_widget(mute_button_container)
             self.volume_slider = HoverableSlider(min=0, max=1, value=track.volume, orientation='vertical', size_hint_y=1, padding=0, track_active_width=dp(16), track_inactive_width=dp(16))
-            self.volume_slider.midi_command = ["volume_sliders", str(self.track_index)]
+            self.volume_slider.midi_command = ["selected_track", "volume"]
             self.volume_label = Label(text=f"{int(track.volume * 100)}", size_hint_y=None, height=dp(16), color=[0.9, 0.9, 0.9, 1], font_size=dp(10), pos_hint={'center_x': 0.5})
             volume_layout.add_widget(self.volume_slider)
             volume_layout.add_widget(self.volume_label)
@@ -983,10 +983,6 @@ class TrackWidget(HoverBehavior, BoxLayout):
     def _on_track_index_change(self, instance, value):
         self.index_label.text = f"[{int(value)}]"
         self._update_bg_color()
-        if hasattr(self, 'volume_slider'):
-            self.volume_slider.midi_command = ["volume_sliders", str(int(value))]
-        if hasattr(self, 'solo_button'):
-            self.solo_button.midi_command = ["track_solo_buttons", str(int(value))]
 
     def _on_height_changed(self, instance, value):
         """Called when the TrackWidget's height changes."""

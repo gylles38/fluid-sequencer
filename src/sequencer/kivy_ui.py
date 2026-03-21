@@ -91,6 +91,7 @@ class SequencerLayout(BoxLayout):
             
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self.sequencer.bind(is_recording=self.update_record_button_state)
+        self.sequencer.bind(loop_enabled=self.update_loop_button_state)
         self.sequencer.bind(is_smoothing=self.update_smoothing_status)
         self.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
         self._transport_update_event = None # Pour stocker l'événement Clock
@@ -810,6 +811,10 @@ class SequencerLayout(BoxLayout):
         if self.sequencer.midi_learn_mode:
             self.output_label.text = "[color=ff9800]MIDI LEARN MODE ACTIVE - Hover an icon and move a MIDI control. Press ESC to exit.[/color]"
             self.output_label.markup = True
+            # Center current target track for learn feedback
+            if self.sequencer.current_routing_index != -1:
+                target_name = self.sequencer.song.tracks[self.sequencer.current_routing_index].name
+                self.output_label.text += f"\n[color=00ffff]Target Track: {target_name}[/color]"
         else:
             self.sequencer.midi_config.save_mappings()
             self.output_label.text = "MIDI Learn Mode disabled. Mappings saved."
@@ -943,13 +948,6 @@ class SequencerLayout(BoxLayout):
         def apply_settings(port_name):
             if port_name:
                 try:
-                    import mido
-                    input_ports = mido.get_input_names()
-                    if port_name not in input_ports:
-                        self.show_error_popup("Invalid Port",
-                                            f"Port '{port_name}' is not available.")
-                        return
-
                     self.process_command_ui(f'setrecordport "{port_name}"')
                     self.show_info_popup("Success", f"MIDI input port set to:\n{port_name}")
                     
@@ -958,9 +956,16 @@ class SequencerLayout(BoxLayout):
         
         try:
             import mido
-            input_ports = mido.get_input_names()
+            mido_ports = mido.get_input_names()
             
-            if not input_ports:
+            jack_ports = []
+            if self.sequencer.jack_manager and self.sequencer.jack_manager.is_running:
+                jack_ports = self.sequencer.jack_manager.get_midi_source_ports()
+
+            # Merge and deduplicate, prioritizing JACK names
+            all_ports = sorted(list(set(jack_ports + mido_ports)))
+
+            if not all_ports:
                 self.show_error_popup("No MIDI Input Ports", 
                                     "No MIDI input ports found.")
                 return
@@ -969,7 +974,7 @@ class SequencerLayout(BoxLayout):
             
             self.show_port_selection_popup(
                 title="Select MIDI Input Port",
-                ports=input_ports,
+                ports=all_ports,
                 callback=apply_settings,
                 current_port=current_port
             )
@@ -1853,34 +1858,15 @@ class SequencerLayout(BoxLayout):
         return None
 
     def loop_pressed(self, instance):
-        # Si on désactive le looping pendant la lecture
-        if self.is_looping and self.sequencer.playback_state == 'playing':
-            # Récupérer la position de fin actuelle du loop
-            end_pos = self.end_pos_input.text
-            if end_pos:
-                # Mettre à jour la position de fin pour la lecture normale
-                self.end_pos_input.text = end_pos
-                # Récupérer la position actuelle
-                current_pos = self.playhead_label.text.replace("Pos: ", "")
-                # Envoyer une commande play avec la nouvelle fin
-                command = f'play "{current_pos}" "{end_pos}"'
-                print(f"DEBUG: Loop disabled, setting play range from {current_pos} to {end_pos}")
-                self.process_command_ui(command)
+        self.sequencer.process_transport_command("loop")
 
-        self.is_looping = not self.is_looping
-        if self.is_looping:
+    def update_loop_button_state(self, *args):
+        if self.sequencer.loop_enabled:
             self.loop_button.icon = 'repeat-variant'
             self.loop_button.md_bg_color = [0, 0.4, 0.8, 1]
-            start_pos = self.start_pos_input.text
-            end_pos = self.end_pos_input.text
-            if end_pos:
-                self.end_pos_manual_override = True
-            command = f'setloop "{start_pos}" "{end_pos}"'
-            self.process_command_ui(command)
         else:
             self.loop_button.icon = 'repeat'
             self.loop_button.md_bg_color = [0.1, 0.1, 0.1, 1]
-            self.process_command_ui('loop off')
             
     def toggle_metronome(self, instance):
         # Directly toggle the metronome state in the song object
@@ -2746,6 +2732,8 @@ class SequencerApp(MDApp):
         
         root = FloatLayout()
         self.sequencer_layout = SequencerLayout(size_hint=(1, 1))
+        # Ensure easy access from MDApp.get_running_app()
+        self.sequencer_layout.sequencer.app = self
         self.window_manager = FloatLayout(size_hint=(1, 1))
         self.sequencer_layout.window_manager = self.window_manager
 

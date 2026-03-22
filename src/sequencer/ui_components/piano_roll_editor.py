@@ -1449,6 +1449,16 @@ class PianoRollEditor(FloatingWindow):
         if not all([timeline_scroll, grid, piano_keyboard, status_label]):
             return
 
+        # Transformation des coordonnées Fenêtre -> Widget interne pour collision check
+        # relative au parent du ScrollView pour vérifier si on est DANS le scrollview
+        local_to_parent = timeline_scroll.parent.to_local(*pos)
+        if not timeline_scroll.collide_point(*local_to_parent):
+            # Hors de la grille
+            Window.set_system_cursor('arrow')
+            piano_keyboard.highlighted_note = -1
+            status_label.text = ""
+            return
+
         # --- Performance Optimization ---
         # Disable heavy hover calculations during playback
         if self.sequencer_layout.sequencer.playback_state in ('playing', 'recording'):
@@ -1458,23 +1468,14 @@ class PianoRollEditor(FloatingWindow):
             status_label.text = ""
             return
 
-        # 1. On récupère la position relative au contenu de la grille
-        grid_content = grid
-        
-        # Transformation des coordonnées Fenêtre -> Widget interne
-        # to_widget(pos) sur le contenu du scrollview est la méthode la plus fiable
-        lx, ly = grid_content.to_widget(*pos)
+        # Transformation des coordonnées Fenêtre -> Grille locale (relative au coin 0,0 du canvas)
+        lx, ly = grid.to_local(*pos)
 
-        # 2. On vérifie si la souris est dans la zone visible du ScrollView
-        # On transforme les coordonnées fenêtre en coordonnées locales au parent du ScrollView
-        if timeline_scroll.collide_point(*timeline_scroll.parent.to_widget(*pos)):
-            
-            # CALCULS (Pitch et Temps)
-            # Note: on utilise int(ly / self.note_height)
-            pitch = int(ly / self.note_height)
-            current_beat = lx / self.pixels_per_beat
-            
-            if 0 <= pitch <= 127:
+        # CALCULS (Pitch et Temps)
+        pitch = int(ly / self.note_height)
+        current_beat = lx / self.pixels_per_beat
+
+        if 0 <= pitch <= 127:
                 # Allume la touche sur le clavier à gauche
                 piano_keyboard.highlighted_note = pitch
                 
@@ -1511,11 +1512,6 @@ class PianoRollEditor(FloatingWindow):
             else:
                 piano_keyboard.highlighted_note = -1
                 status_label.text = ""
-        else:
-            # Hors de la grille
-            Window.set_system_cursor('arrow')
-            piano_keyboard.highlighted_note = -1
-            status_label.text = ""
 
     def _set_editor_cursor(self) -> None:
         """Gère l'apparence du curseur selon le mode d'édition"""

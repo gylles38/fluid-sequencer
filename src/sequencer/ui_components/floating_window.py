@@ -136,9 +136,6 @@ class FloatingWindow(RelativeLayout):
         if not self.collide_point(*touch.pos):
             return False
 
-        # Capture GLOBAL coordinates here before transformation
-        global_touch_pos = (touch.x, touch.y)
-
         # Apply transformation to get local coordinates for collision checks
         touch.push()
         touch.apply_transform_2d(self.to_local)
@@ -163,7 +160,7 @@ class FloatingWindow(RelativeLayout):
                 self.size = old_size
 
                 self._is_resizing = True
-                self._resize_start_touch_pos = global_touch_pos
+                self._resize_start_touch_pos = (touch.ox, touch.oy) # Use original window touch pos
                 self._resize_start_widget_size = self.size[:]
                 self._resize_start_widget_pos = self.pos[:]
                 # Use real top as anchor to avoid jumps during move
@@ -190,7 +187,7 @@ class FloatingWindow(RelativeLayout):
                 self.size = old_size
 
                 self._is_dragging = True
-                self._drag_start_touch_pos = global_touch_pos
+                self._drag_start_touch_pos = (touch.ox, touch.oy)
                 self._drag_start_widget_pos = self.pos[:]
 
                 touch.grab(self)
@@ -213,9 +210,9 @@ class FloatingWindow(RelativeLayout):
 
         if self._is_dragging:
             if self.parent:
-                # Calculate delta using window coordinates (touch.x, touch.y)
-                dx = touch.x - self._drag_start_touch_pos[0]
-                dy = touch.y - self._drag_start_touch_pos[1]
+                # Use original window coordinates (touch.ox, touch.oy) for delta to avoid relative jump
+                dx = touch.ox - self._drag_start_touch_pos[0]
+                dy = touch.oy - self._drag_start_touch_pos[1]
 
                 # Update position based on initial position + delta
                 new_x = self._drag_start_widget_pos[0] + dx
@@ -236,8 +233,8 @@ class FloatingWindow(RelativeLayout):
         if self._is_resizing:
             if self.parent:
                 # Calculate delta using window coordinates
-                dx = touch.x - self._resize_start_touch_pos[0]
-                dy = touch.y - self._resize_start_touch_pos[1]
+                dx = touch.ox - self._resize_start_touch_pos[0]
+                dy = touch.oy - self._resize_start_touch_pos[1]
 
                 # 1. Width (Right edge)
                 new_width = self._resize_start_widget_size[0] + dx

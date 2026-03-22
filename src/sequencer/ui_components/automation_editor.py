@@ -158,16 +158,16 @@ class EditableAutomationGrid(Widget):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.draw,
-                  pixels_per_beat=self.draw, total_beats=self.draw,
-                  min_val=self.draw, max_val=self.draw)
+        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+                  pixels_per_beat=self.redraw, total_beats=self.redraw,
+                  min_val=self.redraw, max_val=self.redraw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
         self.grid_widget.pos = self.pos
         self.curve_widget.size = self.size
         self.curve_widget.pos = self.pos
-        self.draw()
+        self.redraw()
 
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
@@ -286,7 +286,12 @@ class EditableAutomationGrid(Widget):
         return super().on_touch_up(touch)
 
 
+    def redraw(self, *args):
+        Clock.unschedule(self.draw)
+        Clock.schedule_once(self.draw, 0)
+
     def draw(self, *args):
+        if not self.canvas: return
         self.grid_widget.canvas.clear()
         with self.grid_widget.canvas:
             # Background

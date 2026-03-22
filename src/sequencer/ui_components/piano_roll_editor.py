@@ -131,13 +131,16 @@ class EditableMidiGrid(PianoRoll):
                 if earliest_start + delta_beat < 0:
                     delta_beat = -earliest_start
 
+                # Optimisation : On pré-indexe les événements pour ce frame pour éviter O(S*E)
+                event_map = {round(e.start_time, 4): e for e in self.editor.track_copy.events}
+
                 for item in self._multi_drag_data:
                     target_new_beat = item['original_start'] + delta_beat
                     target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
 
                     # Update the model live. We store the new parent to ensure subsequent moves
                     # within the same drag can reliably remove the note from its previous location.
-                    new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
+                    new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'], event_map)
                     item['parent_event'] = new_parent
 
                 # Sort events once after moving everything to ensure consistency
@@ -229,7 +232,7 @@ class EditableMidiGrid(PianoRoll):
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
-    def _move_note_logic(self, note, new_beat, new_pitch, source_event):
+    def _move_note_logic(self, note, new_beat, new_pitch, source_event, event_map=None):
         track = self.editor.track_copy
         
         # 1. Retrait par identité stricte
@@ -243,7 +246,10 @@ class EditableMidiGrid(PianoRoll):
         note.pitch = int(new_pitch)
         
         # 3. Placement et récupération du nouvel Event
-        target_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
+        if event_map is not None:
+            target_event = event_map.get(round(new_beat, 4))
+        else:
+            target_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
         
         if target_event:
             # On vérifie si CETTE instance n'y est pas déjà
@@ -253,6 +259,8 @@ class EditableMidiGrid(PianoRoll):
         else:
             new_event = Event(start_time=new_beat, notes=[note])
             track.events.append(new_event)
+            if event_map is not None:
+                event_map[round(new_beat, 4)] = new_event
             # Sorting removed from here; caller must sort at the end of the loop
             return new_event
 
@@ -1266,11 +1274,12 @@ class PianoRollEditor(FloatingWindow):
         self.clipboard_data = []
         
         # 1. On associe chaque note sélectionnée à son temps de départ
+        # Optimisation : Utilisation d'un set d'IDs pour une recherche en O(1)
+        selected_ids = {id(sn) for sn in self.selected_notes}
         selected_with_times = []
         for event in self.track_copy.events:
             for note in event.notes:
-                # On utilise 'is' pour comparer l'instance exacte de la note
-                if any(note is sn for sn in self.selected_notes):
+                if id(note) in selected_ids:
                     selected_with_times.append((event.start_time, note))
         
         if not selected_with_times:
@@ -1301,20 +1310,22 @@ class PianoRollEditor(FloatingWindow):
         # Position cible : la tête de lecture (playhead)
         target_beat = self.sequencer_layout.sequencer.current_beat
         
+        # Optimisation : Indexer les événements par temps pour éviter O(C*E)
+        event_map = {round(e.start_time, 4): e for e in self.track_copy.events}
+
         new_selection = []
         for item in self.clipboard_data:
             paste_time = target_beat + item['offset']
+            rounded_time = round(paste_time, 4)
             new_pitch = item['pitch']
             
             # 1. Trouver ou créer l'événement à ce temps
-            event = next((e for e in self.track_copy.events 
-                        if abs(e.start_time - paste_time) < 0.001), None)
+            event = event_map.get(rounded_time)
             
             if event:
-                # VERIFICATION : Si une note de même pitch existe déjà ici, 
-                # on ne la colle pas (ou on peut choisir de la remplacer)
+                # VERIFICATION : Si une note de même pitch existe déjà ici, on ne la colle pas
                 if any(n.pitch == new_pitch for n in event.notes):
-                    continue  # Saute cette note pour éviter le doublon
+                    continue
                 
                 new_note = Note(
                     pitch=new_pitch, 
@@ -1330,6 +1341,7 @@ class PianoRollEditor(FloatingWindow):
                 )
                 new_event = Event(start_time=paste_time, notes=[new_note])
                 self.track_copy.events.append(new_event)
+                event_map[rounded_time] = new_event # Mise à jour de l'index
             
             new_selection.append(new_note)
 
@@ -1357,9 +1369,11 @@ class PianoRollEditor(FloatingWindow):
         if not self.selected_notes:
             return
             
+        # Optimisation : Utilisation d'un set d'IDs
+        selected_ids = {id(sn) for sn in self.selected_notes}
         for event in list(self.track_copy.events):
             for note in list(event.notes):
-                if any(note is sn for sn in self.selected_notes):
+                if id(note) in selected_ids:
                     event.notes.remove(note)
             
             if not event.notes and not event.cc_messages:
@@ -1388,18 +1402,20 @@ class PianoRollEditor(FloatingWindow):
         ]
 
         # Create a list of stable identifiers for the selected notes.
+        # Optimisation : Indexer les événements et leurs positions pour éviter O(S*E)
         note_to_event_map = {id(note): event for event in self.track_copy.events for note in event.notes}
+        event_to_index_map = {id(e): i for i, e in enumerate(self.track_copy.events)}
+
         selection_ids = []
         for note in self.selected_notes:
             event = note_to_event_map.get(id(note))
             if event:
                 try:
-                    # Find the index of the event *in the original list*
-                    event_index = self.track_copy.events.index(event)
+                    event_index = event_to_index_map.get(id(event))
                     note_index = event.notes.index(note)
                     selection_ids.append((event_index, note_index))
-                except ValueError:
-                    pass  # Should not happen in a consistent state
+                except (ValueError, KeyError):
+                    pass
 
         state = {
             'events': events_snapshot,
@@ -1466,16 +1482,18 @@ class PianoRollEditor(FloatingWindow):
                 note_name: str = self._pitch_to_note_name(pitch)
                 
                 # --- RECHERCHE DE LA NOTE SOUS LE CURSEUR ---
+                # Fixed: Use binary search or early exit for performance on large tracks
                 found_note = None
                 for event in self.track_copy.events:
-                    # Optimisation : on ne scanne que si le beat est proche de l'événement
-                    if event.start_time <= current_beat <= (event.start_time + 20): 
-                        for note in event.notes:
-                            if note.pitch == pitch:
-                                # Vérification précise de la collision temporelle
-                                if event.start_time <= current_beat <= (event.start_time + note.duration):
-                                    found_note = note
-                                    break
+                    if event.start_time > current_beat:
+                        break # Past the current beat, notes are sorted by start_time
+
+                    for note in event.notes:
+                        if note.pitch == pitch:
+                            # Exact temporal collision check
+                            if event.start_time <= current_beat <= (event.start_time + note.duration):
+                                found_note = note
+                                break
                     if found_note:
                         break
 

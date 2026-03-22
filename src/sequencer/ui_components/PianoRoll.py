@@ -109,6 +109,11 @@ class PianoRoll(Widget):
 
         # --- Notes ---
         if isinstance(self.track, MidiTrack):
+            # Performance Fix: Pre-calculate selected note IDs for fast lookup
+            # This avoids O(N*S) complexity in the loop below.
+            selected_ids = {id(n) for n in self.selected_notes}
+            single_selected_id = id(self.editor.selected_note) if self.editor and self.editor.selected_note else None
+
             with self.canvas:
                 for event in self.track.events:
                     for note in event.notes:
@@ -139,10 +144,10 @@ class PianoRoll(Widget):
                             Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, note_h))
 
                         # Draw outline for selected note.
-                        is_in_multi_select = any(note is sel_note for sel_note in self.selected_notes)
-                        is_the_single_select = self.editor and self.editor.selected_note is note
+                        note_id = id(note)
+                        is_selected = note_id in selected_ids or note_id == single_selected_id
 
-                        if is_in_multi_select or is_the_single_select:
+                        if is_selected:
                             Color(1, 1, 1, 1)  # White outline
                             Line(rectangle=(note_x, note_y, note_width, note_h), width=1.1)
 

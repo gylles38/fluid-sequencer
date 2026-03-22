@@ -471,12 +471,12 @@ Builder.load_string("""
                 RelativeLayout:
                     id: scroll_content
                     size_hint: None, 1
-                    width: grid.width
+                    width: grid.width + dp(15)
 
                     BoxLayout:
                         orientation: 'vertical'
                         size_hint: (1, 1)
-                        padding: [0, 0, dp(15), dp(15)] # Added right padding to clear scrollbar
+                        padding: [0, 0, 0, dp(15)]
 
                         # Grille d'automation (Routing)
                         EditableRoutingGrid:

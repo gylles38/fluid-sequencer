@@ -25,11 +25,18 @@ class BoundedScrollView(ScrollView):
         for weak_ref in touch.grab_list:
             grabbed_widget = weak_ref()
             if grabbed_widget and grabbed_widget is not self:
+                # IF the ScrollView itself is in the grab_list (for scrollbars),
+                # we SHOULD allow the movement to proceed.
+                if grabbed_widget is self or getattr(grabbed_widget, 'parent', None) is self:
+                    # Specific check for Kivy scrollbar widgets which are children of ScrollView
+                    if grabbed_widget.__class__.__name__ in ('ScrollBar', 'EffectWidget'):
+                        continue
+
                 # Walk up the parent tree of the grabbed widget
                 parent = grabbed_widget.parent
                 while parent:
                     if parent is self:
-                        return True
+                        return True # Descendant grabbed the touch, block scrolling
                     parent = parent.parent
 
         return super().on_touch_move(touch)

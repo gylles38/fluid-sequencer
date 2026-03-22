@@ -799,14 +799,21 @@ Builder.load_string("""
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
-                EditableMidiGrid:
-                    id: grid
-                    editor: root
-                    track: root.track_copy
-                    total_beats: root.total_beats
-                    pixels_per_beat: root.pixels_per_beat
-                    note_height: root.note_height
+                RelativeLayout:
+                    id: grid_container
                     size_hint: None, None
+                    width: grid.width + dp(15)
+                    height: grid.height
+
+                    EditableMidiGrid:
+                        id: grid
+                        editor: root
+                        track: root.track_copy
+                        total_beats: root.total_beats
+                        pixels_per_beat: root.pixels_per_beat
+                        note_height: root.note_height
+                        size_hint: None, None
+                        pos: 0, 0
 
         MDBoxLayout:
             size_hint_y: None
@@ -930,6 +937,9 @@ class PianoRollEditor(FloatingWindow):
         # Ensure ruler content width matches the grid
         self.ids.ruler.ruler_content.width = grid.width
         grid.bind(width=lambda i, v: setattr(self.ids.ruler.ruler_content, 'width', v))
+
+        # Ensure grid_container width stays in sync with grid + padding
+        grid.bind(width=lambda i, v: setattr(self.ids.grid_container, 'width', v + dp(15)))
 
         # Add the playback line here to ensure it's drawn on top
         grid.add_playback_line()

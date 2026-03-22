@@ -612,7 +612,7 @@ Builder.load_string("""
                     BoxLayout:
                         orientation: 'vertical'
                         size_hint: (1, 1)
-                        padding: [0, 0, 0, dp(15)]
+                        padding: [0, 0, dp(15), dp(15)] # Added right padding to clear scrollbar
                         
                         EditableAutomationGrid:
                             id: grid

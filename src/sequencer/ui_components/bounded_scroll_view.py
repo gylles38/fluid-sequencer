@@ -24,9 +24,9 @@ class BoundedScrollView(ScrollView):
         # We check touch.grab_list because grab_current is None during the normal tree walk.
         for weak_ref in touch.grab_list:
             grabbed_widget = weak_ref()
-            if grabbed_widget:
+            if grabbed_widget and grabbed_widget is not self:
                 # Walk up the parent tree of the grabbed widget
-                parent = grabbed_widget
+                parent = grabbed_widget.parent
                 while parent:
                     if parent is self:
                         return True

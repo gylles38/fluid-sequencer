@@ -592,7 +592,7 @@ Builder.load_string("""
                 min_val: root.min_val
                 max_val: root.max_val
 
-            ScrollView:
+            BoundedScrollView:
                 id: timeline_scroll
                 size_hint: (1, 1)
                 do_scroll_x: True

@@ -458,7 +458,7 @@ Builder.load_string("""
                 midi_tracks: root.midi_tracks
                 active_index: root.current_routing_index
 
-            ScrollView:
+            BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_x: True
                 do_scroll_y: False

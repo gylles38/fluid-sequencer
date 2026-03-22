@@ -18,13 +18,10 @@ class BoundedScrollView(ScrollView):
         return super().on_touch_up(touch)
 
     def on_touch_move(self, touch):
-        # This is a specific fix for the PianoRollEditor.
-        # If the child is an EditableMidiGrid and a note is being dragged,
-        # consume the event to prevent this ScrollView from scrolling.
-        if self.children:
-            child = self.children[0]
-            # Check for the specific class name to avoid circular imports
-            if child.__class__.__name__ == 'EditableMidiGrid':
-                if child._dragged_note and touch.grab_current is child:
-                    return True
+        # Regression Fix: If the direct child of this ScrollView has grabbed the touch,
+        # we MUST NOT scroll. This allows for rubber-band selection, note dragging, etc.
+        # without the window moving around.
+        if self.children and touch.grab_current is self.children[0]:
+            return True
+
         return super().on_touch_move(touch)

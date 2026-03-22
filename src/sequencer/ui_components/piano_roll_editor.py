@@ -1456,7 +1456,7 @@ class PianoRollEditor(FloatingWindow):
             # Hors de la grille
             Window.set_system_cursor('arrow')
             piano_keyboard.highlighted_note = -1
-            status_label.text = ""
+            status_label.text = ''
             return
 
         # --- Performance Optimization ---
@@ -1465,7 +1465,7 @@ class PianoRollEditor(FloatingWindow):
             # Reset to a clean state and exit
             Window.set_system_cursor('arrow')
             piano_keyboard.highlighted_note = -1
-            status_label.text = ""
+            status_label.text = ''
             return
 
         # Transformation des coordonnées Fenêtre -> Grille locale (relative au coin 0,0 du canvas)
@@ -1476,42 +1476,42 @@ class PianoRollEditor(FloatingWindow):
         current_beat = lx / self.pixels_per_beat
 
         if 0 <= pitch <= 127:
-                # Allume la touche sur le clavier à gauche
-                piano_keyboard.highlighted_note = pitch
-                
-                # Nom de la note (C4, D#2, etc.)
-                note_name: str = self._pitch_to_note_name(pitch)
-                
-                # --- RECHERCHE DE LA NOTE SOUS LE CURSEUR ---
-                # Fixed: Use binary search or early exit for performance on large tracks
-                found_note = None
-                for event in self.track_copy.events:
-                    if event.start_time > current_beat:
-                        break # Past the current beat, notes are sorted by start_time
+            # Allume la touche sur le clavier à gauche
+            piano_keyboard.highlighted_note = pitch
 
-                    for note in event.notes:
-                        if note.pitch == pitch:
-                            # Exact temporal collision check
-                            if event.start_time <= current_beat <= (event.start_time + note.duration):
-                                found_note = note
-                                break
-                    if found_note:
-                        break
+            # Nom de la note (C4, D#2, etc.)
+            note_name: str = self._pitch_to_note_name(pitch)
 
-                # On mémorise l'objet note pour les raccourcis clavier (+/-)
-                self.hovered_note = found_note 
-                
-                # --- MISE À JOUR DU TEXTE ---
+            # --- RECHERCHE DE LA NOTE SOUS LE CURSEUR ---
+            # Fixed: Use binary search or early exit for performance on large tracks
+            found_note = None
+            for event in self.track_copy.events:
+                if event.start_time > current_beat:
+                    break # Past the current beat, notes are sorted by start_time
+
+                for note in event.notes:
+                    if note.pitch == pitch:
+                        # Exact temporal collision check
+                        if event.start_time <= current_beat <= (event.start_time + note.duration):
+                            found_note = note
+                            break
                 if found_note:
-                    status_label.text = f"Note: {note_name} | Velocity: {found_note.velocity}"
-                else:
-                    status_label.text = f"Note: {note_name}"
-                
-                # Curseur
-                self._set_editor_cursor()
+                    break
+
+            # On mémorise l'objet note pour les raccourcis clavier (+/-)
+            self.hovered_note = found_note
+
+            # --- MISE À JOUR DU TEXTE ---
+            if found_note:
+                status_label.text = f'Note: {note_name} | Velocity: {found_note.velocity}'
             else:
-                piano_keyboard.highlighted_note = -1
-                status_label.text = ""
+                status_label.text = f'Note: {note_name}'
+
+            # Curseur
+            self._set_editor_cursor()
+        else:
+            piano_keyboard.highlighted_note = -1
+            status_label.text = ''
 
     def _set_editor_cursor(self) -> None:
         """Gère l'apparence du curseur selon le mode d'édition"""

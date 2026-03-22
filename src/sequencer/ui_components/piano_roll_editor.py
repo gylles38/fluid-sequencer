@@ -778,7 +778,7 @@ Builder.load_string("""
                     do_scroll_x: False
                     do_scroll_y: True
                     bar_width: 0
-                    scroll_type: ['content']
+                    scroll_type: ['bars']
 
                     PianoKeyboard:
                         id: piano_keyboard
@@ -795,7 +795,7 @@ Builder.load_string("""
                 do_scroll_y: True
                 do_scroll_x: True
                 bar_width: dp(15)
-                scroll_type: ['bars', 'content']
+                scroll_type: ['bars']
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 

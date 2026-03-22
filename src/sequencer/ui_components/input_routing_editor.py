@@ -463,7 +463,7 @@ Builder.load_string("""
                 do_scroll_x: True
                 do_scroll_y: False
                 bar_width: dp(15)
-                scroll_type: ['bars', 'content']
+                scroll_type: ['bars']
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 

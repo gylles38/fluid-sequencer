@@ -71,12 +71,16 @@ class TestMidiMapping(unittest.TestCase):
             self.assertEqual(len(new_seq.song.midi_mappings), 1)
             self.assertEqual(new_seq.song.midi_mappings[0].control, 7)
 
+    @patch('sequencer.sequencer.Clock.schedule_once')
     @patch('mido.open_input')
-    def test_midi_listener_logic(self, mock_open_input):
+    def test_midi_listener_logic(self, mock_open_input, mock_clock):
         """Test the MIDI listener logic."""
         # Mock the mido input port
         mock_port = MagicMock()
         mock_open_input.return_value = mock_port
+
+        # Execute Clock.schedule_once immediately
+        mock_clock.side_effect = lambda f, *args, **kwargs: f(0)
 
         # Create a mock message
         msg = MagicMock()
@@ -144,14 +148,17 @@ class TestMidiMapping(unittest.TestCase):
                     new_seq.load_project("test_project_with_control_port")
                     mock_set_control_port.assert_called_once_with("my_control_port")
 
+    @patch('sequencer.sequencer.Clock.schedule_once')
     @patch('sequencer.sequencer.Sequencer._get_current_beat', return_value=5.0)
     @patch('mido.open_input')
-    def test_record_automation(self, mock_open_input, mock_get_current_beat):
+    def test_record_automation(self, mock_open_input, mock_get_current_beat, mock_clock):
         """Test that CC messages are recorded as automation points when recording."""
         # Mock the mido input port to yield a single CC message then stop
         mock_port = MagicMock()
         mock_open_input.return_value.__enter__.return_value = mock_port
         cc_msg = mido.Message('control_change', channel=0, control=7, value=100)
+
+        mock_clock.side_effect = lambda f, *args, **kwargs: f(0)
 
         # This side effect will yield the message once, then stop the listener thread
         def iter_pending_side_effect():

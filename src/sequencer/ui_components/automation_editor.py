@@ -328,11 +328,12 @@ class EditableAutomationGrid(RelativeLayout):
 
             first_p = sorted_points[0]
             first_x = first_p.start_time * self.pixels_per_beat
+            y_first = (normalize(first_p.value) * self.height)
             if first_x > 0:
-                vertices.extend([0, 0, 0, 0, 0, 0, 0, 0])
+                vertices.extend([0, 0, 0, 0, 0, y_first, 0, 0])
                 indices.extend([v_index, v_index + 1])
                 v_index += 2
-                vertices.extend([first_x, 0, 0, 0, first_x, 0, 0, 0])
+                vertices.extend([first_x, 0, 0, 0, first_x, y_first, 0, 0])
                 indices.extend([v_index, v_index + 1])
                 v_index += 2
 
@@ -398,6 +399,9 @@ class EditableAutomationGrid(RelativeLayout):
 
             # 1. Dessiner d'abord toutes les lignes de liaison
             Color(0.8, 0.8, 1, 0.9)
+            if first_x > 0:
+                Line(points=[0, y_first, first_x, y_first], width=1.2)
+
             for i in range(len(sorted_points) - 1):
                 p1, p2 = sorted_points[i], sorted_points[i+1]
                 x1 = p1.start_time * self.pixels_per_beat
@@ -405,6 +409,10 @@ class EditableAutomationGrid(RelativeLayout):
                 x2 = p2.start_time * self.pixels_per_beat
                 y2 = normalize(p2.value) * self.height
                 Line(points=[x1, y1, x2, y2], width=1.2)
+
+            if last_x < final_x:
+                y_last = (normalize(last_p.value) * self.height)
+                Line(points=[last_x, y_last, final_x, y_last], width=1.2)
 
             # 2. Dessiner les points normaux (on saute le sélectionné)
             for p in sorted_points:
@@ -767,6 +775,7 @@ class AutomationEditor(FloatingWindow):
         self.selected_parameter = initial_param
         
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
+        self.sequencer_layout.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
 
         Clock.schedule_once(self._post_kv_init)
         Window.bind(on_key_down=self._on_key_down)
@@ -867,13 +876,21 @@ class AutomationEditor(FloatingWindow):
             pause_btn.icon = 'pause'
             pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
 
+    def on_song_structure_changed(self, instance, value):
+        if self.sequencer_layout.sequencer.playback_state == 'recording':
+            # Check if points changed to avoid unnecessary heavy copying
+            if len(self.track_copy.points) != len(self.source_track.points):
+                # Sync track_copy with the actual track points for the current parameter
+                self.track_copy.points = copy.deepcopy(self.source_track.points)
+                self.visible_points = [p for p in self.track_copy.points if p.parameter == self.selected_parameter]
+
     def update_status_bar(self, point):
         if point:
             self.ids.edit_zone.opacity = 1
             self.ids.input_beat.text = f"{point.start_time:.2f}"
             
             # Valeur principale
-            if self.selected_parameter in ["prog", "vel"]:
+            if self.selected_parameter in ["prog", "vel"] or self.selected_parameter.startswith("cc"):
                 self.ids.input_value.text = f"{int(point.value)}"
             else:
                 self.ids.input_value.text = f"{point.value:.3f}"
@@ -979,6 +996,7 @@ class AutomationEditor(FloatingWindow):
     def on_dismiss(self):
         """Nettoyage des bindings et de l'horloge à la fermeture de l'éditeur."""
         self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+        self.sequencer_layout.sequencer.unbind(song_structure_changed=self.on_song_structure_changed)
 
         # 1. On libère le clavier
         Window.unbind(on_key_down=self._on_key_down)
@@ -1044,7 +1062,7 @@ class AutomationEditor(FloatingWindow):
     def on_automation_selection_change(self, instance, param):
         self.selected_parameter = param
 
-        if param in ["prog", "vel"]:
+        if param in ["prog", "vel"] or param.startswith("cc"):
             self.min_val, self.max_val = 0.0, 127.0
         elif param == "pan":
             self.min_val, self.max_val = -1.0, 1.0

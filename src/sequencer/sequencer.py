@@ -2973,7 +2973,7 @@ class Sequencer(EventDispatcher):
         if self.jack_manager:
             self.jack_manager._manual_routing_override = -1
 
-    # 1. On change l'état IMMÉDIATEMENT (Optimisme)
+        # 1. On change l'état IMMÉDIATEMENT (Optimisme)
         self.playback_state = "playing"
         self._last_play_click_time = time.perf_counter() # Pour le poll_engine_state
         self._last_transport_command_time = time.perf_counter()

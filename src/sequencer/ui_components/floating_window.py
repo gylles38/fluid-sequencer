@@ -160,7 +160,7 @@ class FloatingWindow(RelativeLayout):
                 self.size = old_size
 
                 self._is_resizing = True
-                self._resize_start_touch_pos = (touch.ox, touch.oy) # Use original window touch pos
+                self._resize_start_touch_pos = (touch.x, touch.y)
                 self._resize_start_widget_size = self.size[:]
                 self._resize_start_widget_pos = self.pos[:]
                 # Use real top as anchor to avoid jumps during move
@@ -187,7 +187,7 @@ class FloatingWindow(RelativeLayout):
                 self.size = old_size
 
                 self._is_dragging = True
-                self._drag_start_touch_pos = (touch.ox, touch.oy)
+                self._drag_start_touch_pos = (touch.x, touch.y)
                 self._drag_start_widget_pos = self.pos[:]
 
                 touch.grab(self)
@@ -210,9 +210,9 @@ class FloatingWindow(RelativeLayout):
 
         if self._is_dragging:
             if self.parent:
-                # Use original window coordinates (touch.ox, touch.oy) for delta to avoid relative jump
-                dx = touch.ox - self._drag_start_touch_pos[0]
-                dy = touch.oy - self._drag_start_touch_pos[1]
+                # Use current window coordinates (touch.x, touch.y) for delta
+                dx = touch.x - self._drag_start_touch_pos[0]
+                dy = touch.y - self._drag_start_touch_pos[1]
 
                 # Update position based on initial position + delta
                 new_x = self._drag_start_widget_pos[0] + dx
@@ -232,9 +232,9 @@ class FloatingWindow(RelativeLayout):
 
         if self._is_resizing:
             if self.parent:
-                # Calculate delta using window coordinates
-                dx = touch.ox - self._resize_start_touch_pos[0]
-                dy = touch.oy - self._resize_start_touch_pos[1]
+                # Calculate delta using current window coordinates
+                dx = touch.x - self._resize_start_touch_pos[0]
+                dy = touch.y - self._resize_start_touch_pos[1]
 
                 # 1. Width (Right edge)
                 new_width = self._resize_start_widget_size[0] + dx

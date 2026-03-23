@@ -20,6 +20,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
 import mido
+import bisect
 from sequencer.ui_components.HoverBehavior import HoverableButton
 
 
@@ -66,6 +67,25 @@ class EditHistoryManager:
 class EditableMidiGrid(PianoRoll):
     editor = ObjectProperty()
     _dragged_note = ObjectProperty(None, allownone=True)
+    _multi_drag_data = ListProperty([])
+
+    def _find_note_at_pos(self, beat, pitch):
+        """Optimized binary search for note collision at specific beat and pitch."""
+        track = self.editor.track_copy
+        # Check events starting at or before 'beat'
+        idx = bisect.bisect_right(track.events, beat, key=lambda e: e.start_time)
+
+        # Check back a reasonable amount (e.g. 16 beats) for long notes
+        for i in range(idx - 1, -1, -1):
+            event = track.events[i]
+            if beat - event.start_time > 16:
+                break
+
+            for note in event.notes:
+                if note.pitch == pitch:
+                    if event.start_time <= beat <= event.start_time + note.duration:
+                        return event, note
+        return None, None
     _drag_event = ObjectProperty(None, allownone=True)
     _drag_mode = StringProperty(None, allownone=True) # 'move', 'resize', or 'select'
     _drag_offset = (0, 0)
@@ -110,7 +130,7 @@ class EditableMidiGrid(PianoRoll):
         local_pos = self.to_local(*touch.pos)
         
         if self._drag_mode == 'move' and self._dragged_note:
-            # Multi-move logic (handles single notes too if they are in the selection)
+            # High-Performance Drag: Only update virtual offsets for drawing
             if hasattr(self, '_multi_drag_data') and self._multi_drag_data:
                 new_x = local_pos[0] - self._drag_offset[0]
                 new_beat = new_x / self.pixels_per_beat
@@ -121,7 +141,6 @@ class EditableMidiGrid(PianoRoll):
                     return True
 
                 raw_delta_beat = new_beat - master_data['original_start']
-                # Quantize delta_beat to 16th notes for snappy live dragging
                 delta_beat = round(raw_delta_beat * 4) / 4
 
                 new_pitch = int(local_pos[1] / self.note_height)
@@ -131,48 +150,53 @@ class EditableMidiGrid(PianoRoll):
                 if earliest_start + delta_beat < 0:
                     delta_beat = -earliest_start
 
-                # Optimisation : On pré-indexe les événements pour ce frame pour éviter O(S*E)
-                event_map = {round(e.start_time, 4): e for e in self.editor.track_copy.events}
+                # Update virtual offsets for the draw() method
+                self.drag_delta_beat = delta_beat
+                self.drag_delta_pitch = delta_pitch
 
-                for item in self._multi_drag_data:
-                    target_new_beat = item['original_start'] + delta_beat
-                    target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
-
-                    # Update the model live. We store the new parent to ensure subsequent moves
-                    # within the same drag can reliably remove the note from its previous location.
-                    new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'], event_map)
-                    item['parent_event'] = new_parent
-
-                # Sort events once after moving everything to ensure consistency
-                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
-                self.editor.is_dirty = True
-                self.draw()
+                # Visual only update (debounced)
+                self.redraw()
                 return True
         
         if self._drag_mode == 'select':
             if self._selection_rect:
                 self._selection_rect.size = (local_pos[0] - self._selection_start_pos[0], local_pos[1] - self._selection_start_pos[1])
 
-                # Update selected notes based on the rectangle
-                newly_selected = []
+                # --- High Performance Rubber-band Selection ---
                 x1, y1 = self._selection_start_pos
                 x2, y2 = local_pos
-                sel_x, sel_w = (min(x1, x2), abs(x1 - x2))
-                sel_y, sel_h = (min(y1, y2), abs(y1 - y2))
+                sel_x1, sel_x2 = sorted((x1, x2))
+                sel_y1, sel_y2 = sorted((y1, y2))
 
+                # Convert pixels to beats for range filtering
+                start_beat = sel_x1 / self.pixels_per_beat
+                end_beat = sel_x2 / self.pixels_per_beat
+
+                # Convert pixels to pitch for vertical filtering
+                pitch_min = int(sel_y1 / self.note_height)
+                pitch_max = int(sel_y2 / self.note_height)
+
+                newly_selected = []
                 for event in self.editor.track_copy.events:
-                    for note in event.notes:
-                        note_x = event.start_time * self.pixels_per_beat
-                        note_y = note.pitch * self.note_height
-                        note_w = note.duration * self.pixels_per_beat
-                        note_h = self.note_height
+                    # Time range filter (early exit or skip)
+                    if event.start_time > end_beat:
+                        break
 
-                        if sel_x < (note_x + note_w) and (sel_x + sel_w) > note_x and \
-                           sel_y < (note_y + note_h) and (sel_y + sel_h) > note_y:
-                            newly_selected.append(note)
+                    # We must also consider notes that start before sel_x1 but end after it
+                    # But for now, standard selection logic:
+                    for note in event.notes:
+                        note_end = event.start_time + note.duration
+                        if note_end < start_beat:
+                            continue
+
+                        # Temporal collision
+                        if event.start_time < end_beat and note_end > start_beat:
+                            # Vertical collision
+                            if pitch_min <= note.pitch <= pitch_max:
+                                newly_selected.append(note)
 
                 self.editor.selected_notes = newly_selected
-                self.draw()
+                self.redraw()
             return True
 
 
@@ -214,21 +238,8 @@ class EditableMidiGrid(PianoRoll):
                         # Update the drag reference to the new event
                         self._drag_event = target_event
 
-            elif self._drag_mode == 'move':
-                # This block is for cases where _multi_drag_data might be missing
-                # but we are in move mode. Fallback to basic move.
-                new_x = local_pos[0] - self._drag_offset[0]
-                new_y = local_pos[1] - self._drag_offset[1]
-
-                new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
-                new_pitch: int = max(0, min(127, int(new_y / self.note_height)))
-
-                self._drag_event.start_time = new_beat
-                self._dragged_note.pitch = new_pitch
-                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
-
             self.editor.is_dirty = True
-            self.draw()
+            self.redraw()
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
@@ -252,7 +263,7 @@ class EditableMidiGrid(PianoRoll):
             target_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
         
         if target_event:
-            # On vérifie si CETTE instance n'y est pas déjà
+            # Identité check
             if not any(n is note for n in target_event.notes):
                 target_event.notes.append(note)
             return target_event
@@ -261,7 +272,6 @@ class EditableMidiGrid(PianoRoll):
             track.events.append(new_event)
             if event_map is not None:
                 event_map[round(new_beat, 4)] = new_event
-            # Sorting removed from here; caller must sort at the end of the loop
             return new_event
 
     def _store_selection_states_if_needed(self, dragged_note) -> None:
@@ -294,96 +304,65 @@ class EditableMidiGrid(PianoRoll):
         edit_mode = self.editor.edit_mode
         track = self.editor.track_copy
 
-        # --- Note Preview Logic ---
-        note_to_preview = None
+        # --- Note Preview & Collision ---
+        found_event, found_note = self._find_note_at_pos(clicked_beat, clicked_pitch)
+
         if edit_mode in ('insert', 'move'):
-            # Find if there's a note at the clicked position
-            for event in reversed(track.events):
-                for note in reversed(event.notes):
-                    note_x = event.start_time * self.pixels_per_beat
-                    note_y = note.pitch * self.note_height
-                    note_width = note.duration * self.pixels_per_beat
-
-                    if note_x <= local_pos[0] <= note_x + note_width and \
-                       note_y <= local_pos[1] <= note_y + self.note_height:
-                        note_to_preview = note
-                        break
-                if note_to_preview:
-                    break
-
-            velocity = note_to_preview.velocity if note_to_preview else 100
+            velocity = found_note.velocity if found_note else 100
             duration_in_seconds = (60.0 / self.editor.sequencer_layout.sequencer.song.tempo) * self.editor.note_duration
             self.editor._preview_note(clicked_pitch, velocity, duration_in_seconds)
 
+        if edit_mode == 'move' and found_note:
+            note_x = found_event.start_time * self.pixels_per_beat
+            note_width = found_note.duration * self.pixels_per_beat
+            handle_width: float | int = min(dp(8), note_width / 4) if note_width > dp(16) else 0
 
-        if edit_mode == 'move':
-            for event in reversed(track.events):
-                for note in reversed(event.notes):
-                    note_x = event.start_time * self.pixels_per_beat
-                    note_y = note.pitch * self.note_height
-                    note_width = note.duration * self.pixels_per_beat
-                    handle_width: float | int = min(dp(8), note_width / 4) if note_width > dp(16) else 0
+            # Check for right handle resize
+            if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width:
+                self._dragged_note = found_note
+                self._drag_event = found_event
+                self._drag_mode = 'resize_end'
+                self._store_selection_states_if_needed(found_note)
+                Window.set_system_cursor('size_we')
+                touch.grab(self)
+                return True
 
-                    # Check for right handle resize
-                    if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
-                       note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'resize_end'
-                        self._store_selection_states_if_needed(note)
-                        Window.set_system_cursor('size_we')
-                        touch.grab(self)
-                        return True
+            # Check for left handle resize
+            elif note_x <= local_pos[0] <= note_x + handle_width:
+                self._dragged_note = found_note
+                self._drag_event = found_event
+                self._drag_mode = 'resize_start'
+                self._store_selection_states_if_needed(found_note)
+                Window.set_system_cursor('size_we')
+                touch.grab(self)
+                return True
 
-                    # Check for left handle resize
-                    elif note_x <= local_pos[0] <= note_x + handle_width and \
-                            note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'resize_start'
-                        self._store_selection_states_if_needed(note)
-                        Window.set_system_cursor('size_we')
-                        touch.grab(self)
-                        return True
+            # Check for note move
+            else:
+                is_already_selected: bool = any(found_note is sel_note for sel_note in self.editor.selected_notes)
+                if not is_already_selected:
+                    self.editor.selected_notes = [found_note]
+                    self.editor._record_state()
 
-                    # Check for note move
-                    elif note_x <= local_pos[0] <= note_x + note_width and \
-                         note_y <= local_pos[1] <= note_y + self.note_height:
-                        # --- CORRECTED SELECTION LOGIC ---
-                        # Use an identity check (`is`) to see if the *exact* note instance is already selected.
-                        # The `in` operator uses equality (`==`), which fails for identical but distinct notes.
-                        is_already_selected: bool = any(note is sel_note for sel_note in self.editor.selected_notes)
-                        if not is_already_selected:
-                            self.editor.selected_notes = [note]
-                            self.editor._record_state()
+                self._dragged_note = found_note
+                self._drag_event = found_event
+                self._drag_mode = 'move'
+                self._drag_offset = (local_pos[0] - note_x, local_pos[1] - (found_note.pitch * self.note_height))
 
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'move'
-                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+                # --- High-Performance Multi-Move Data Collection ---
+                selected_ids = {id(sn) for sn in self.editor.selected_notes}
+                self._multi_drag_data = [
+                    {'note': n, 'parent_event': ev, 'original_start': ev.start_time, 'original_pitch': n.pitch}
+                    for ev in track.events for n in ev.notes if id(n) in selected_ids
+                ]
 
-                        # --- AJOUT POUR LE MULTI-MOVE ---
-                        # On stocke la position de départ de TOUTES les notes sélectionnées
-                        self._multi_drag_data = []
-                        for ev in track.events:
-                            for n in ev.notes:
-                                if any(n is sn for sn in self.editor.selected_notes):
-                                    self._multi_drag_data.append({
-                                        'note': n,
-                                        'parent_event': ev,  # On mémorise l'événement actuel !
-                                        'original_start': ev.start_time,
-                                        'original_pitch': n.pitch
-                                    })
+                self._store_selection_states_if_needed(found_note)
+                self.editor.selected_event = found_event
+                self.redraw()
+                touch.grab(self)
+                return True
 
-                        self._store_selection_states_if_needed(note)
-                        
-                        self.editor.selected_event = event # Gardé pour compatibilité, mais moins utile en multi-select
-                        self.draw()
-
-                        touch.grab(self)
-                        return True
-
-            # If no note was clicked, it's a click on an empty space.
+        # If no note was clicked...
             # This action should clear any existing selection. To ensure the UI
             # updates, we must re-assign the list, not clear it in-place.
             if self.editor.selected_notes:
@@ -451,7 +430,26 @@ class EditableMidiGrid(PianoRoll):
             self.editor._record_state()
 
         if self._dragged_note:
-            if hasattr(self, '_multi_drag_data'):
+            if self._drag_mode == 'move' and hasattr(self, '_multi_drag_data') and self._multi_drag_data:
+                # Apply the final virtual offsets to the real data model ONCE
+                delta_beat = self.drag_delta_beat
+                delta_pitch = self.drag_delta_pitch
+
+                # Optimisation : On pré-indexe les événements pour éviter O(S*E)
+                event_map = {round(e.start_time, 4): e for e in self.editor.track_copy.events}
+
+                for item in self._multi_drag_data:
+                    target_new_beat = item['original_start'] + delta_beat
+                    target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
+
+                    self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'], event_map)
+
+                # Reset virtual offsets
+                self.drag_delta_beat = 0.0
+                self.drag_delta_pitch = 0
+                self._multi_drag_data.clear()
+
+            elif hasattr(self, '_multi_drag_data'):
                 self._multi_drag_data.clear()
 
             if self._selection_initial_states:
@@ -460,9 +458,10 @@ class EditableMidiGrid(PianoRoll):
 
             if self._drag_mode in ('resize_start', 'resize_end', 'move'):
                 Window.set_system_cursor('arrow')
-            if self._drag_mode == 'move':
-                # Tri final pour s'assurer que les événements déplacés sont dans le bon ordre
-                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
+
+            # Final order consistency
+            self.editor.track_copy.events.sort(key=lambda e: e.start_time)
+
             self._dragged_note = None
             self._drag_event = None
 
@@ -470,7 +469,7 @@ class EditableMidiGrid(PianoRoll):
 
         self._drag_mode = None
         touch.ungrab(self)
-        self.draw() # Redessine la grille pour afficher l'état final
+        self.redraw() # Redessine la grille pour afficher l'état final
         return True
 
     def _apply_multi_selection_changes(self) -> None:
@@ -1446,68 +1445,38 @@ class PianoRollEditor(FloatingWindow):
         piano_keyboard = self.ids.get('piano_keyboard')
         status_label = self.ids.get('status_label')
 
-        if not all([timeline_scroll, grid, piano_keyboard, status_label]):
-            return
+        if not all([timeline_scroll, grid, piano_keyboard, status_label]): return
+        if grid._dragged_note or grid._drag_mode == 'select': return
 
-        # Transformation des coordonnées Fenêtre -> Widget interne pour collision check
-        # relative au parent du ScrollView pour vérifier si on est DANS le scrollview
         local_to_parent = timeline_scroll.parent.to_local(*pos)
         if not timeline_scroll.collide_point(*local_to_parent):
-            # Hors de la grille
             Window.set_system_cursor('arrow')
             piano_keyboard.highlighted_note = -1
             status_label.text = ''
             return
 
-        # --- Performance Optimization ---
-        # Disable heavy hover calculations during playback
         if self.sequencer_layout.sequencer.playback_state in ('playing', 'recording'):
-            # Reset to a clean state and exit
             Window.set_system_cursor('arrow')
             piano_keyboard.highlighted_note = -1
             status_label.text = ''
             return
 
-        # Transformation des coordonnées Fenêtre -> Grille locale (relative au coin 0,0 du canvas)
         lx, ly = grid.to_local(*pos)
-
-        # CALCULS (Pitch et Temps)
         pitch = int(ly / self.note_height)
         current_beat = lx / self.pixels_per_beat
 
         if 0 <= pitch <= 127:
-            # Allume la touche sur le clavier à gauche
             piano_keyboard.highlighted_note = pitch
-
-            # Nom de la note (C4, D#2, etc.)
             note_name: str = self._pitch_to_note_name(pitch)
 
-            # --- RECHERCHE DE LA NOTE SOUS LE CURSEUR ---
-            # Fixed: Use binary search or early exit for performance on large tracks
-            found_note = None
-            for event in self.track_copy.events:
-                if event.start_time > current_beat:
-                    break # Past the current beat, notes are sorted by start_time
-
-                for note in event.notes:
-                    if note.pitch == pitch:
-                        # Exact temporal collision check
-                        if event.start_time <= current_beat <= (event.start_time + note.duration):
-                            found_note = note
-                            break
-                if found_note:
-                    break
-
-            # On mémorise l'objet note pour les raccourcis clavier (+/-)
+            # High-Performance Lookup
+            _, found_note = grid._find_note_at_pos(current_beat, pitch)
             self.hovered_note = found_note
 
-            # --- MISE À JOUR DU TEXTE ---
             if found_note:
                 status_label.text = f'Note: {note_name} | Velocity: {found_note.velocity}'
             else:
                 status_label.text = f'Note: {note_name}'
-
-            # Curseur
             self._set_editor_cursor()
         else:
             piano_keyboard.highlighted_note = -1

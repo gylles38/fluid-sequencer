@@ -421,36 +421,39 @@ class TestRecording(unittest.TestCase):
         # Mock the jack client's transport state to be ROLLING
         self.sequencer.jack_manager.jack_client.transport_state = 2 # jack.ROLLING
 
-    @patch('sequencer.sequencer.threading.Thread')
-    def test_record_replace_notes_only(self, mock_thread):
+    def test_record_replace_notes_only(self):
         """Test that recording with 'replace' only removes notes."""
         track = self.sequencer.song.tracks[0]
         track.record_mode = 'OVERWRITE'
         track.add_event(Event(start_time=1.0, notes=[Note(pitch=60, velocity=100, duration=1.0)], cc_messages=[CCMessage(control=7, value=100)]))
 
-        # Call the internal method directly to test the replacement logic
-        self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=True, enable_thru=False)
+        # Mock playback starting to trigger truncation
+        self.sequencer.playback_state = 'stopped'
+        self.sequencer.is_recording = True
+        self.sequencer.last_record_settings = {'start_beat': 0.0, 'track_index': 0}
+
+        # We simulate the truncation by calling the internal method or
+        # letting the logic in unified loop handle it if we could run the thread.
+        # Here we test the helper directly to confirm it still works.
+        self.sequencer._truncate_track_for_recording(0, 0.0, 4.0)
 
         # Check that the event still exists but the note is gone
         self.assertEqual(len(track.events), 1)
         self.assertEqual(len(track.events[0].notes), 0)
         self.assertEqual(len(track.events[0].cc_messages), 1)
         self.assertEqual(track.events[0].cc_messages[0].control, 7)
-        mock_thread.assert_called_once()
 
-    @patch('sequencer.sequencer.threading.Thread')
-    def test_overdub_does_not_mute(self, mock_thread):
+    def test_overdub_does_not_mute(self):
         """Test that overdubbing does not mute the track."""
         track = self.sequencer.song.tracks[0]
         track.record_mode = 'KEEP'
         track.is_muted = False
 
-        # Call the internal method directly to test the logic
+        self.sequencer.is_recording = True
         self.sequencer._start_recording_internal(track_index=0, start_beat=0.0, num_beats_to_record=4.0, inport_name='dummy', replace_notes=False, enable_thru=False)
 
         # Check that the track is not muted
         self.assertFalse(track.is_muted)
-        mock_thread.assert_called_once()
 
     @patch('sequencer.sequencer.Sequencer._start_recording_internal')
     def test_record_track_flow(self, mock_start_recording):
@@ -542,8 +545,7 @@ class TestRecording(unittest.TestCase):
         self.assertTrue(self.sequencer._stop_event.is_set)
 
 
-    @patch('sequencer.sequencer.threading.Thread')
-    def test_record_overwrite_respects_end_beat(self, mock_thread):
+    def test_record_overwrite_respects_end_beat(self):
         """Test that 'overwrite' mode only clears notes within the recording range."""
         self.sequencer.song.time_signature_numerator = 4
         track = self.sequencer.song.tracks[0]
@@ -554,12 +556,12 @@ class TestRecording(unittest.TestCase):
         track.add_event(Event(start_time=5.0, notes=[Note(pitch=62, velocity=100, duration=1.0)])) # During
         track.add_event(Event(start_time=9.0, notes=[Note(pitch=64, velocity=100, duration=1.0)])) # After
 
-        # Set UI to record from measure 2 to 3 (beats 4.0 to 8.0)
-        self.sequencer.ui_start_pos_str = "2:1"
-        self.sequencer.ui_end_pos_str = "3:1"
+        # Measure 2 to 3 (beats 4.0 to 8.0)
+        start_beat = 4.0
+        end_beat = 8.0
 
-        # Call record_track. This will trigger the note deletion logic.
-        self.sequencer.record_track(track_idx=0, inport_name='dummy')
+        # Simulate truncation call that now happens in Unified loop or via helper
+        self.sequencer._truncate_track_for_recording(0, start_beat, end_beat)
 
         # Check which notes remain
         remaining_pitches = [note.pitch for event in track.events for note in event.notes]

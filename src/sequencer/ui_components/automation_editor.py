@@ -878,11 +878,15 @@ class AutomationEditor(FloatingWindow):
 
     def on_song_structure_changed(self, instance, value):
         if self.sequencer_layout.sequencer.playback_state == 'recording':
-            # Check if points changed to avoid unnecessary heavy copying
-            if len(self.track_copy.points) != len(self.source_track.points):
-                # Sync track_copy with the actual track points for the current parameter
-                self.track_copy.points = copy.deepcopy(self.source_track.points)
-                self.visible_points = [p for p in self.track_copy.points if p.parameter == self.selected_parameter]
+            # Use a debounced update for visible points during recording to prevent UI lag
+            Clock.unschedule(self._update_visible_points)
+            Clock.schedule_once(self._update_visible_points, 0.05)
+
+    def _update_visible_points(self, dt):
+        # Sync visible points from the actual track during live recording
+        new_visible = [p for p in self.source_track.points if p.parameter == self.selected_parameter]
+        if len(new_visible) != len(self.visible_points):
+            self.visible_points = new_visible
 
     def update_status_bar(self, point):
         if point:

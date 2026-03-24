@@ -43,12 +43,21 @@ class PianoRoll(Widget):
         return (red, green, blue, 0.9)
 
     def draw(self, *args):
+        # Safety check for widget size
+        if self.width <= 1 or self.height <= 1:
+            return
+
         self.canvas.before.clear()
         self.canvas.clear()
 
         with self.canvas.before:
+            PushMatrix()
+            # USE ABSOLUTE POSITIONS because we use canvas.clear() on a Widget.
+            # PianoRoll inherits from Widget, so (0,0) on canvas is window origin.
+            Translate(self.x, self.y)
+
             Color(0.1, 0.1, 0.12, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
 
             # --- Optimized Grid using Mesh ---
             black_keys_vertices = []
@@ -93,9 +102,14 @@ class PianoRoll(Widget):
                 Color(0.5, 0.5, 0.5, 0.4)
                 Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
 
+            PopMatrix()
+
         # --- Notes ---
         if isinstance(self.track, MidiTrack):
             with self.canvas:
+                PushMatrix()
+                Translate(self.x, self.y)
+
                 for event in self.track.events:
                     for note in event.notes:
                         note_x = event.start_time * self.pixels_per_beat
@@ -126,6 +140,8 @@ class PianoRoll(Widget):
                         if is_in_multi_select or is_the_single_select:
                             Color(1, 1, 1, 1)  # White outline
                             Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
+
+                PopMatrix()
 
 
 class PianoRollViewer(ScrollView):

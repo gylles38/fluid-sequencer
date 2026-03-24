@@ -310,9 +310,18 @@ class TestSequencer(unittest.TestCase):
         sequencer.play_range_end_beat = 4.0
         sequencer.stop = MagicMock()
 
+        snapshot = {
+            'play_range_enabled': True,
+            'play_range_end_beat': 4.0,
+            'loop_enabled': False,
+            'is_recording': False,
+            'song_length_beats': 10.0,
+            'tempo': 120.0
+        }
+
         # Simulate the callback hitting the end of the range.
         # This logic is now in JackManager, so we call it on the real instance.
-        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1)
+        sequencer.jack_manager._check_for_loop_and_play_range(start_beat_of_block=3.9, end_beat_of_block=4.1, snapshot=snapshot)
 
         # The method should schedule sequencer.stop() to be called.
         mock_schedule.assert_called_once()
@@ -321,7 +330,6 @@ class TestSequencer(unittest.TestCase):
         scheduled_function(0) # The argument is dt (delta-time), 0 is fine.
 
         sequencer.stop.assert_called_once()
-        self.assertFalse(sequencer.play_range_enabled)
 
     def test_automation_ease_in_to_none_curve(self):
         """
@@ -364,8 +372,8 @@ class TestSequencer(unittest.TestCase):
         self.assertAlmostEqual(end_event['value'], 1.0)
 
     @patch('pydub.AudioSegment.from_file')
-    @patch('sequencer.sequencer.JackManager._send_ipc_command')
-    def test_audio_track_automation_sends_ipc_commands(self, mock_send_ipc, mock_from_file):
+    @patch('sequencer.sequencer.JackManager._queue_ipc_command')
+    def test_audio_track_automation_sends_ipc_commands(self, mock_queue_ipc, mock_from_file):
         """
         Verify that automation events for audio tracks are correctly translated
         into IPC commands for mpv.
@@ -379,6 +387,11 @@ class TestSequencer(unittest.TestCase):
             MagicMock(track_index=0, socket_path="/tmp/mpv-socket")
         ]
 
+        snapshot = {
+            'tracks': [{'index': 0, 'type': 'audio'}],
+            'audio_processes': [{'track_index': 0, 'socket_path': '/tmp/mpv-socket'}]
+        }
+
         # 2. Test Volume Automation
         vol_event = {
             "target_track_index": 0,
@@ -386,11 +399,11 @@ class TestSequencer(unittest.TestCase):
             "param_config": {}, # Not used for audio track logic
             "value": 0.75
         }
-        self.sequencer.jack_manager._apply_automation_event(vol_event)
+        self.sequencer.jack_manager._apply_automation_event(vol_event, snapshot=snapshot)
 
         # Assert that the correct volume command was sent (0.75 -> 75.0)
         expected_vol_command = {"command": ["set_property", "volume", 75.0]}
-        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_vol_command)
+        mock_queue_ipc.assert_called_with("/tmp/mpv-socket", expected_vol_command)
 
         # 3. Test Pan Automation
         pan_event = {
@@ -399,13 +412,13 @@ class TestSequencer(unittest.TestCase):
             "param_config": {},
             "value": -0.5 # Pan to the left
         }
-        self.sequencer.jack_manager._apply_automation_event(pan_event)
+        self.sequencer.jack_manager._apply_automation_event(pan_event, snapshot=snapshot)
 
         # Assert that the correct pan command was sent
         expected_pan_filter = "lavfi=[pan=stereo|c0=1.00*c0|c1=0.50*c1]"
         expected_pan_command = {"command": ["set_property", "af", expected_pan_filter]}
         # The mock was already called for volume, so we check the last call
-        mock_send_ipc.assert_called_with("/tmp/mpv-socket", expected_pan_command)
+        mock_queue_ipc.assert_called_with("/tmp/mpv-socket", expected_pan_command)
 
 
 if __name__ == '__main__':

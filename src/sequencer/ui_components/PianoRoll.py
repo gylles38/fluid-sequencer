@@ -2,7 +2,7 @@ from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, ListProperty
 from kivy.metrics import dp
-from kivy.graphics import Color, Rectangle, Line, Mesh
+from kivy.graphics import Color, Rectangle, Line, Mesh, PushMatrix, PopMatrix, Translate
 from kivy.clock import Clock
 from sequencer.models import MidiTrack
 

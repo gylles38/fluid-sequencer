@@ -93,6 +93,7 @@ class JackManager:
         #self._diag_last_target_idx = -1
         self._last_beat_rt = 0.0 # Atomic float for UI sync
         self._last_transport_state_rt = jack.STOPPED        
+        self._request_silence_sweep = False
 
     def find_port_by_name(self, pattern):
         """
@@ -427,6 +428,11 @@ class JackManager:
                     track = self.sequencer.song.tracks[target_idx]
                     if is_midi_track(track):
                         dest_pattern = getattr(track, 'input_port_name', None)
+
+                # 0.5. Handle requested silence sweep (moved from RT thread)
+                if self._request_silence_sweep:
+                    self._request_silence_sweep = False
+                    self.silence_all_midi_notes()
 
                 # 4. Manage connections if target changed
                 if dest_pattern:
@@ -1232,18 +1238,17 @@ class JackManager:
     def _time_callback(self, state, blocksize, pos, new_pos):
         if new_pos:
             pos_dict = jack.position2dict(pos)
-            self.sequencer.song.tempo = pos_dict.get('beats_per_minute', self.sequencer.song.tempo)
+            # Use local copy of tempo for calculations to avoid race conditions
+            tempo = pos_dict.get('beats_per_minute', getattr(self.sequencer.song, 'tempo', 120))
             frame = pos_dict.get('frame', 0)
             samplerate = self.jack_client.samplerate
-            beats_per_second = self.sequencer.song.tempo / 60.0
+            beats_per_second = tempo / 60.0
             current_beat = 0.0
             if samplerate > 0 and beats_per_second > 0:
                 current_beat = (frame / samplerate) * beats_per_second
             self._sync_playhead_to_beat(current_beat)
             self.seek_audio_to_beat(current_beat)
-            if self.sequencer.gui_mode:
-                self.sequencer.current_beat = current_beat
-                self.sequencer.last_beat_update_time = time.perf_counter()
+            # Property updates removed from here, handled by Sequencer._poll_engine_state
 
     def _process_midi_events(self, start_beat_of_block, end_beat_of_block):
         tracks = self.sequencer.song.tracks
@@ -1508,12 +1513,13 @@ class JackManager:
                     pos.frame = target_frame
                     self.jack_client.transport_reposition_struct(pos)
 
-        song_length_beats = self.sequencer.get_song_length_in_beats()
+        # Access cached song length to avoid heavy calculation in RT callback
+        song_length_beats = getattr(self.sequencer, '_cached_song_length_beats', 0.0)
+        if song_length_beats is None: song_length_beats = 0.0
         
         if not self.sequencer.loop_enabled and not self.sequencer.is_recording and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
                 self.jack_client.transport_stop()
-                self.sequencer.playback_state = "stopped"
 
     def _process_callback(self, frames: int):
         try:
@@ -1593,8 +1599,8 @@ class JackManager:
                             for port in ports_to_cut:
                                 port.send(mido.Message('note_off', channel=track.channel, note=pitch, velocity=0))
 
-                        # 4. Delegate TOTAL sweep to background thread to keep RT thread light
-                        threading.Thread(target=self.silence_all_midi_notes, daemon=True).start()
+                        # 4. Request TOTAL sweep to be handled in a non-RT thread
+                        self._request_silence_sweep = True
 
                     return
 

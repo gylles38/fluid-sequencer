@@ -1812,7 +1812,7 @@ class PianoRollEditor(FloatingWindow):
             note_on_msg = mido.Message('note_on', channel=channel, note=pitch, velocity=velocity)
             note_off_msg = mido.Message('note_off', channel=channel, note=pitch, velocity=velocity)
 
-            port.send(note_on_msg)
-            Clock.schedule_once(lambda dt: port.send(note_off_msg), duration)
+            sequencer.jack_manager._send_midi(port_name, note_on_msg)
+            Clock.schedule_once(lambda dt: sequencer.jack_manager._send_midi(port_name, note_off_msg), duration)
         except Exception as e:
             print(f"Error sending preview note: {e}")

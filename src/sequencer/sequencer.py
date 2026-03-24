@@ -495,10 +495,8 @@ class Sequencer(EventDispatcher):
                                     if enable_thru:
                                         track = self.song.tracks[target_idx]
                                         if is_midi_track(track) and track.output_port_name in self.open_ports:
-                                            try:
-                                                thru_msg = msg.copy(channel=track.channel)
-                                                self.open_ports[track.output_port_name].send(thru_msg)
-                                            except: pass
+                                            thru_msg = msg.copy(channel=track.channel)
+                                            self.jack_manager._send_midi(track.output_port_name, thru_msg)
 
                                 # Dispatch to merge queue
                                 if msg.type == 'note_on' and msg.velocity > 0:
@@ -1611,10 +1609,8 @@ class Sequencer(EventDispatcher):
                             break
         elif isinstance(track, MidiTrack):
             if self.jack_manager.is_running and track.output_port_name:
-                port = self.jack_manager.open_ports.get(track.output_port_name)
-                if port:
-                    midi_volume = int(volume * 127)
-                    port.send(mido.Message("control_change", channel=track.channel, control=7, value=midi_volume))
+                midi_volume = int(volume * 127)
+                self.jack_manager._send_midi(track.output_port_name, mido.Message("control_change", channel=track.channel, control=7, value=midi_volume))
 
         return {"status": "success", "message": f"Volume for track '{track.name}' set to {volume:.2f}."}
 
@@ -1704,11 +1700,9 @@ class Sequencer(EventDispatcher):
         # === UPDATE PISTE MIDI (CC #10) ===
         elif isinstance(track, MidiTrack):
             if self.jack_manager.is_running and track.output_port_name:
-                port = self.jack_manager.open_ports.get(track.output_port_name)
-                if port:
-                    # Conversion de pan (-1.0 à 1.0) en valeur MIDI (0 à 127)
-                    midi_pan = int((pan + 1.0) / 2.0 * 127)
-                    port.send(mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
+                # Conversion de pan (-1.0 à 1.0) en valeur MIDI (0 à 127)
+                midi_pan = int((pan + 1.0) / 2.0 * 127)
+                self.jack_manager._send_midi(track.output_port_name, mido.Message("control_change", channel=track.channel, control=10, value=midi_pan))
         
         return {"status": "success", "message": f"Pan for track '{track.name}' set to {pan:.2f}."}
 
@@ -1767,11 +1761,10 @@ class Sequencer(EventDispatcher):
             # --- MIDI Track: Silence notes and conditionally resync ---
             elif isinstance(track, MidiTrack):
                 if track.output_port_name and track.output_port_name in self.jack_manager.open_ports:
-                    port = self.jack_manager.open_ports[track.output_port_name]
                     if track.is_muted:
                         # Silence all notes for this track
                         for cc in (123, 120, 121):
-                            port.send(mido.Message('control_change', channel=track.channel, control=cc, value=0))
+                            self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=cc, value=0))
                         keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == track_index]
                         for key in keys_to_remove:
                             del self.jack_manager._active_notes[key]
@@ -1823,8 +1816,7 @@ class Sequencer(EventDispatcher):
                     should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
                     if not should_be_audible:
                         if track.output_port_name and track.output_port_name in self.jack_manager.open_ports:
-                            port = self.jack_manager.open_ports[track.output_port_name]
-                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0))
+                            self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=123, value=0))
                             keys_to_remove = [key for key in self.jack_manager._active_notes.keys() if key[0] == i]
                             for key in keys_to_remove:
                                 del self.jack_manager._active_notes[key]
@@ -1860,42 +1852,41 @@ class Sequencer(EventDispatcher):
 
             if isinstance(track, MidiTrack) and track.output_port_name:
                 should_be_audible = (track.is_solo or not is_any_track_soloed) and not track.is_muted
-                port = self.jack_manager.open_ports.get(track.output_port_name)
 
-                if port:
+                if track.output_port_name in self.jack_manager.open_ports:
                     if should_be_audible:
                         try:
-                            output += f"  - Priming MIDI track '{track.name}' to '{port.name}' on Ch: {track.channel + 1}\n"
+                            output += f"  - Priming MIDI track '{track.name}' to '{track.output_port_name}' on Ch: {track.channel + 1}\n"
 
                             # SAFETY CUT: Kill any zombie notes before restoring volume
-                            port.send(mido.Message('control_change', channel=track.channel, control=64, value=0))  # Sustain Off
-                            port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All Notes Off
-                            port.send(mido.Message('control_change', channel=track.channel, control=120, value=0)) # All Sound Off
+                            self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=64, value=0))  # Sustain Off
+                            self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=123, value=0)) # All Notes Off
+                            self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=120, value=0)) # All Sound Off
 
                             # Bank and Program changes are always sent, unless automation for them exists at the start.
                             if track.bank_msb is not None and (i, 'cc0') not in primed_by_automation:
-                                port.send(mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
+                                self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=0, value=track.bank_msb))
                             if track.bank_lsb is not None and (i, 'cc32') not in primed_by_automation:
-                                port.send(mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
+                                self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=32, value=track.bank_lsb))
                             if (i, 'prog') not in primed_by_automation:
-                                port.send(mido.Message('program_change', channel=track.channel, program=track.instrument))
+                                self.jack_manager._send_midi(track.output_port_name, mido.Message('program_change', channel=track.channel, program=track.instrument))
 
                             # Only send volume if not already handled by automation.
                             if (i, 'vol') not in primed_by_automation:
                                 midi_volume = int(track.volume * 127)
-                                port.send(mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
+                                self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=7, value=midi_volume))
 
                             # Only send pan if not already handled by automation.
                             if (i, 'pan') not in primed_by_automation:
                                 midi_pan = int((track.pan + 1.0) / 2.0 * 127)
-                                port.send(mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
+                                self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=10, value=midi_pan))
 
                         except Exception as e:
                             output += f"  - Could not send state to port '{track.output_port_name}': {e}\n"
                     else:
                         # Silence the track if it's not supposed to be audible
-                        port.send(mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
-                        port.send(mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
+                        self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=7, value=0)) # Volume to 0
+                        self.jack_manager._send_midi(track.output_port_name, mido.Message('control_change', channel=track.channel, control=123, value=0)) # All notes off
                 else:
                     output += f"  - Skipping track '{track.name}', port '{track.output_port_name}' not open in JackManager.\n"
         return output
@@ -3149,33 +3140,18 @@ class Sequencer(EventDispatcher):
 
     def send_cc_message(self, port_name: str, channel: int, control: int, value: int) -> str:
         """Sends a single CC message to a specified port."""
-        port = self.open_ports.get(port_name)
-        if not port:
-            vp = next((p for p in self.virtual_ports if p.name == port_name), None)
-            if vp:
-                port = vp
-        is_temp_port = False
-        if not port:
-            try:
-                port = open_output(port_name)
-                is_temp_port = True
-            except Exception as e:
-                return f"Error: Could not open MIDI port '{port_name}': {e}"
-        if port:
-            try:
-                if not 0 <= channel <= 15:
-                    return "Error: Channel must be between 0 and 15."
-                if not 0 <= control <= 127:
-                    return "Error: CC number must be between 0 and 127."
-                if not 0 <= value <= 127:
-                    return "Error: CC value must be between 0 and 127."
-                msg = mido.Message('control_change', channel=channel, control=control, value=value)
-                port.send(msg)
-                time.sleep(0.01)
-                return f"Sent CC message to {port_name}: Ch={channel+1}, CC={control}, Val={value}"
-            except Exception as e:
-                return f"Error sending CC message: {e}"
-            finally:
-                if is_temp_port and port:
-                    port.close()
-        return ""
+        try:
+            if not 0 <= channel <= 15:
+                return "Error: Channel must be between 0 and 15."
+            if not 0 <= control <= 127:
+                return "Error: CC number must be between 0 and 127."
+            if not 0 <= value <= 127:
+                return "Error: CC value must be between 0 and 127."
+            msg = mido.Message('control_change', channel=channel, control=control, value=value)
+
+            # Using unified dispatcher for all MIDI output
+            self.jack_manager._send_midi(port_name, msg)
+
+            return f"Sent CC message to {port_name}: Ch={channel+1}, CC={control}, Val={value}"
+        except Exception as e:
+            return f"Error sending CC message: {e}"

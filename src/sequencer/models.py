@@ -171,22 +171,45 @@ class AutomationTrack(BaseTrack, EventDispatcher):
         self.target_track_index = target_track_index
         self.is_muted = is_muted
         self.is_solo = is_solo
-        self.points = points if points is not None else []
+        self._points = points if points is not None else []
         self.active_parameter = active_parameter
+        self._cache_points_by_param = {}
+        self._cache_dirty = True
+
+    @property
+    def points(self):
+        return self._points
+
+    @points.setter
+    def points(self, value):
+        self._points = value
+        self._cache_dirty = True
 
     def add_point(self, point: AutomationPoint, sort: bool = True):
         """Adds an automation point and optionally keeps the list sorted."""
-        self.points.append(point)
+        self._points.append(point)
+        self._cache_dirty = True
         if sort:
-            self.points.sort(key=lambda p: p.start_time)
+            self._points.sort(key=lambda p: p.start_time)
+
+    def _ensure_cache(self):
+        if self._cache_dirty:
+            self._cache_points_by_param = {}
+            for p in self._points:
+                self._cache_points_by_param.setdefault(p.parameter, []).append(p)
+            for param in self._cache_points_by_param:
+                self._cache_points_by_param[param].sort(key=lambda x: x.start_time)
+            self._cache_dirty = False
 
     def get_value_at(self, beat: float, parameter: str = 'vol') -> float:
         import math
-        # 1. Filtrage et tri des points par paramètre
-        pts = sorted([p for p in self.points if p.parameter == parameter], key=lambda x: x.start_time)
+        self._ensure_cache()
+        pts = self._cache_points_by_param.get(parameter, [])
 
         if not pts:
-            return 0.0 if parameter == 'pan' else 1.0
+            if parameter == 'pan': return 0.0
+            if parameter == 'pitch' or parameter == 'pb': return 0.0
+            return 1.0
 
         if beat <= pts[0].start_time: return pts[0].value
         if beat >= pts[-1].start_time: return pts[-1].value

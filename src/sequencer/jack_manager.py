@@ -87,6 +87,7 @@ class JackManager:
         self.active_audio_processes: List[ActiveAudioProcess] = []
         self.midi_dispatcher = MidiDispatcher(self)
         self.process_lock = threading.Lock()
+        self.port_lock = threading.Lock()
         self.sync_lock = threading.Lock()
         self.silence_lock = threading.Lock()
         self._display_thread = None
@@ -236,18 +237,19 @@ class JackManager:
 
     def open_midi_port(self, port_name: str, verbose=False):
         """Opens a MIDI port if it's not already open."""
-        if port_name in self.open_ports and not self.open_ports[port_name].closed:
-            return  # Port is already open
+        with self.port_lock:
+            if port_name in self.open_ports and not self.open_ports[port_name].closed:
+                return  # Port is already open
 
-        vp = next((p for p in self.sequencer.virtual_ports if p.name == port_name), None)
-        if vp:
-            self.open_ports[port_name] = vp
-        else:
-            try:
-                self.open_ports[port_name] = mido.open_output(port_name)
-                if verbose: print(f"Successfully opened MIDI port '{port_name}'")
-            except Exception as e:
-                if verbose: print(f"Could not open MIDI port '{port_name}': {e}")
+            vp = next((p for p in self.sequencer.virtual_ports if p.name == port_name), None)
+            if vp:
+                self.open_ports[port_name] = vp
+            else:
+                try:
+                    self.open_ports[port_name] = mido.open_output(port_name)
+                    if verbose: print(f"Successfully opened MIDI port '{port_name}'")
+                except Exception as e:
+                    if verbose: print(f"Could not open MIDI port '{port_name}': {e}")
 
     def close_midi_port(self, port_name: str):
         """Closes a MIDI port if it's open and not used by other tracks."""
@@ -256,17 +258,18 @@ class JackManager:
             if isinstance(track, MidiTrack) and track.output_port_name == port_name:
                 return  # Port is still in use, do not close
 
-        if port_name in self.open_ports:
-            port = self.open_ports[port_name]
-            # Don't close virtual ports managed elsewhere
-            if not port.closed and port not in self.sequencer.virtual_ports:
-                try:
-                    port.close()
-                    print(f"Successfully closed MIDI port '{port_name}'")
-                except Exception as e:
-                    print(f"Error closing MIDI port '{port_name}': {e}")
-            # Remove from the dictionary regardless
-            del self.open_ports[port_name]
+        with self.port_lock:
+            if port_name in self.open_ports:
+                port = self.open_ports[port_name]
+                # Don't close virtual ports managed elsewhere
+                if not port.closed and port not in self.sequencer.virtual_ports:
+                    try:
+                        port.close()
+                        print(f"Successfully closed MIDI port '{port_name}'")
+                    except Exception as e:
+                        print(f"Error closing MIDI port '{port_name}': {e}")
+                # Remove from the dictionary regardless
+                del self.open_ports[port_name]
 
     def _audio_correction_loop(self):
         """
@@ -413,12 +416,12 @@ class JackManager:
                 return port
         return None
 
-    def _get_managed_instrument_ports(self) -> set[str]:
+    def _get_managed_instrument_ports_from_snapshot(self, snapshot) -> set[str]:
         """Returns a set of full JACK port names managed by the project's MIDI tracks."""
         managed_ports = set()
-        for track in self.sequencer.song.tracks:
-            if is_midi_track(track) and track.input_port_name:
-                port = self._find_jack_port(track.input_port_name, is_output=False)
+        for t in snapshot['tracks']:
+            if t['type'] == 'midi' and t.get('input_port_name'):
+                port = self._find_jack_port(t['input_port_name'], is_output=False)
                 if port:
                     managed_ports.add(port.name)
         return managed_ports
@@ -429,7 +432,10 @@ class JackManager:
         """
         while not self._routing_stop_event.is_set():
             try:
-                if not self.is_running or not self.jack_client:
+                with self._rt_lock:
+                    snapshot = self._rt_snapshot
+
+                if not self.is_running or not self.jack_client or not snapshot:
                     time.sleep(1.0)
                     continue
 
@@ -438,11 +444,11 @@ class JackManager:
                     time.sleep(1.5)
                     print("[Conductor] Initializing routing: Disconnecting project instrument links...")
 
-                    src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+                    src_pattern = snapshot['metronome']['default_record_port'] or "MPK249 Port A"
                     src_port = self._find_jack_port(src_pattern, is_output=True)
 
                     if src_port:
-                        managed_dest_ports = self._get_managed_instrument_ports()
+                        managed_dest_ports = self._get_managed_instrument_ports_from_snapshot(snapshot)
 
                         # 1. Disconnect only managed project targets from this source
                         try:
@@ -459,17 +465,17 @@ class JackManager:
 
                 # 1. Determine target track index
                 current_beat = self.last_beat
-                target_idx = self._get_input_routing_value(current_beat)
+                target_idx = self._get_input_routing_value(current_beat, snapshot=snapshot)
 
                 # 2. Identify source keyboard
-                src_pattern = self.sequencer.default_record_port or "MPK249 Port A"
+                src_pattern = snapshot['metronome']['default_record_port'] or "MPK249 Port A"
 
                 # 3. Identify destination instrument
                 dest_pattern = None
-                if target_idx is not None and 0 <= target_idx < len(self.sequencer.song.tracks):
-                    track = self.sequencer.song.tracks[target_idx]
-                    if is_midi_track(track):
-                        dest_pattern = getattr(track, 'input_port_name', None)
+                if target_idx is not None:
+                    track_data = next((t for t in snapshot['tracks'] if t['index'] == target_idx), None)
+                    if track_data and track_data['type'] == 'midi':
+                        dest_pattern = track_data.get('input_port_name')
 
                 # 0.5. Handle requested silence sweep (moved from RT thread)
                 if self._request_silence_sweep:
@@ -490,7 +496,7 @@ class JackManager:
 
                             # --- 1. DISCONNECT (SELECTIVE) ---
                             try:
-                                managed_dest_ports = self._get_managed_instrument_ports()
+                                managed_dest_ports = self._get_managed_instrument_ports_from_snapshot(snapshot)
                                 connections = self.jack_client.get_all_connections(src_port)
                                 for connection in connections:
                                     if connection.name in managed_dest_ports:
@@ -504,9 +510,9 @@ class JackManager:
 
                             # --- 3. NUCLEAR SILENCE ---
                             if self._last_routing_target_idx != -1:
-                                self._silence_instrument_at_index(self._last_routing_target_idx)
+                                self._silence_instrument_at_index(self._last_routing_target_idx, snapshot=snapshot)
                             if target_idx != self._last_routing_target_idx:
-                                self._silence_instrument_at_index(target_idx)
+                                self._silence_instrument_at_index(target_idx, snapshot=snapshot)
 
                             # --- 4. SETTLING DELAY ---
                             time.sleep(0.08)
@@ -523,13 +529,13 @@ class JackManager:
                         # Target defined but port not found (instrument closed)
                         if self._last_connected_src_id:
                             if self._last_routing_target_idx != -1:
-                                self._silence_instrument_at_index(self._last_routing_target_idx)
+                                self._silence_instrument_at_index(self._last_routing_target_idx, snapshot=snapshot)
 
                             # Cleanup only managed project instruments from source
                             src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
                             if src_port_to_clean:
                                 try:
-                                    managed_dest_ports = self._get_managed_instrument_ports()
+                                    managed_dest_ports = self._get_managed_instrument_ports_from_snapshot(snapshot)
                                     connections = self.jack_client.get_all_connections(src_port_to_clean)
                                     for conn in connections:
                                         if conn.name in managed_dest_ports:
@@ -544,13 +550,13 @@ class JackManager:
                     # No target or not a MIDI track
                     if self._last_connected_src_id:
                          if self._last_routing_target_idx != -1:
-                             self._silence_instrument_at_index(self._last_routing_target_idx)
+                             self._silence_instrument_at_index(self._last_routing_target_idx, snapshot=snapshot)
                              time.sleep(0.1)
 
                          src_port_to_clean = self._find_jack_port(src_pattern, is_output=True)
                          if src_port_to_clean:
                              try:
-                                 managed_dest_ports = self._get_managed_instrument_ports()
+                                 managed_dest_ports = self._get_managed_instrument_ports_from_snapshot(snapshot)
                                  connections = self.jack_client.get_all_connections(src_port_to_clean)
                                  for conn in connections:
                                      if conn.name in managed_dest_ports:
@@ -611,8 +617,9 @@ class JackManager:
             'play_range_enabled': self.sequencer.play_range_enabled,
             'play_range_end_beat': self.sequencer.play_range_end_beat,
             'is_recording': self.sequencer.is_recording,
-            'song_length_beats': getattr(self.sequencer, '_cached_song_length_beats', 0.0),
+            'song_length_beats': self.sequencer.get_song_length_in_beats(),
             'is_any_track_soloed': is_any_track_soloed,
+            'playback_state': self.sequencer.playback_state,
             'metronome': {
                 'enabled': self.sequencer.song.metronome_enabled,
                 'port': self.sequencer.song.metronome_port_name,
@@ -621,7 +628,8 @@ class JackManager:
                 'pitch_beat': self.sequencer.metronome_pitch_beat,
                 'volume': self.sequencer.song.metronome_volume,
                 'pan': self.sequencer.song.metronome_pan,
-                'time_signature_numerator': self.sequencer.song.time_signature_numerator
+                'time_signature_numerator': self.sequencer.song.time_signature_numerator,
+                'default_record_port': self.sequencer.default_record_port
             },
             'track_overrides': {}
         }
@@ -1048,10 +1056,11 @@ class JackManager:
             self.midi_dispatcher.send(port_name, message)
         else:
             # Fallback if dispatcher not started (should not happen normally)
-            port = self.open_ports.get(port_name)
-            if port:
-                try: port.send(message)
-                except: pass
+            with self.port_lock:
+                port = self.open_ports.get(port_name)
+                if port:
+                    try: port.send(message)
+                    except: pass
 
     def _send_ipc_command(self, socket_path, command_data) -> bool:
         try:
@@ -1396,7 +1405,7 @@ class JackManager:
         # USE SNAPSHOT for RT
         tracks_data = [t for t in snapshot['tracks'] if t['type'] == 'midi']
         is_any_track_soloed = snapshot.get('is_any_track_soloed', False)
-        is_recording = getattr(self.sequencer, 'is_recording', False)
+        is_recording = snapshot['is_recording']
 
         for track_data in tracks_data:
             i = track_data['index']
@@ -1725,6 +1734,7 @@ class JackManager:
                                 unique_ports.add(t['output_port'])
 
                         for port_name in unique_ports:
+                            if port_name is None: continue
                             for ch in range(16):
                                 self._send_midi(port_name, mido.Message('control_change', channel=ch, control=64, value=0))
                                 self._send_midi(port_name, mido.Message('control_change', channel=ch, control=7, value=0))
@@ -1743,11 +1753,19 @@ class JackManager:
                         self._request_silence_sweep = True
                     return
 
+                # --- STABLE PLAYBACK ADVANCE ---
                 start_beat_of_block = self.last_beat
-                end_beat_of_block = authoritative_beat_now + (frames / samplerate) * bps
+                beats_in_this_block = (frames / samplerate) * bps
+                end_beat_of_block = start_beat_of_block + beats_in_this_block
+
+                # If desync is too large (e.g. seek), jump to authoritative position
+                if abs(start_beat_of_block - authoritative_beat_now) > 0.5:
+                    start_beat_of_block = authoritative_beat_now
+                    end_beat_of_block = start_beat_of_block + beats_in_this_block
+                    self._sync_playhead_to_beat(start_beat_of_block, snapshot=snapshot)
 
                 for (idx, pitch), (end, vel) in list(self._active_notes.items()):
-                    if end < end_beat_of_block:
+                    if end is not None and end < end_beat_of_block:
                         t = next((tr for tr in snapshot['tracks'] if tr['index'] == idx), None)
                         if t and t['type'] == 'midi' and t['output_port']:
                             self._send_midi(t['output_port'], mido.Message('note_off', channel=t['channel'], note=pitch, velocity=0))
@@ -1775,7 +1793,7 @@ class JackManager:
 
 
 
-    def _get_input_routing_value(self, beat: float) -> Optional[int]:
+    def _get_input_routing_value(self, beat: float, snapshot=None) -> Optional[int]:
         """
         Returns the target track index for MIDI input routing at the given beat.
         Prioritization:
@@ -1788,7 +1806,12 @@ class JackManager:
         if self._manual_routing_override != -1:
             return self._manual_routing_override
 
-        is_logic_rolling = self.sequencer.playback_state in ("playing", "recording")
+        if snapshot is None:
+            with self._rt_lock:
+                snapshot = self._rt_snapshot
+
+        playback_state = snapshot['playback_state'] if snapshot else self.sequencer.playback_state
+        is_logic_rolling = playback_state in ("playing", "recording")
 
         # 2. Automation Priority
         if is_logic_rolling and self._routing_track and self._routing_track.points:
@@ -1847,7 +1870,8 @@ class JackManager:
                     except jack.JackError: pass
 
                 # 4. Deliver robust silence
-                is_rolling = self.sequencer.playback_state in ("playing", "recording")
+                playback_state = snapshot_copy['playback_state'] if snapshot_copy else self.sequencer.playback_state
+                is_rolling = playback_state in ("playing", "recording")
 
                 for port in unique_ports:
                     if not port or getattr(port, 'closed', False): continue
@@ -1878,7 +1902,8 @@ class JackManager:
 
                     # 5. RESTORE AUDIBILITY
                     time.sleep(0.1)
-                    if self.sequencer.playback_state == "stopped":
+                    playback_state = snapshot_copy['playback_state'] if snapshot_copy else self.sequencer.playback_state
+                    if playback_state == "stopped":
                         from kivy.clock import Clock
                         Clock.schedule_once(lambda dt: self.sequencer.prime_all_tracks())
                     else:

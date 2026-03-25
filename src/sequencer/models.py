@@ -209,6 +209,7 @@ class AutomationTrack(BaseTrack, EventDispatcher):
         if not pts:
             if parameter == 'pan': return 0.0
             if parameter == 'pitch' or parameter == 'pb': return 0.0
+            if parameter == 'input_routing': return 0.0
             return 1.0
 
         if beat <= pts[0].start_time: return pts[0].value

@@ -577,6 +577,8 @@ class JackManager:
         """Generates and sorts all automation events and creates a comprehensive RT snapshot."""
         # 1. Prepare non-RT visible state
         self.automation_events.clear()
+
+        # Link the global routing track from the song
         self._routing_track = self.sequencer.song.input_routing
 
         # Update cached indices for fallback routing (used by background conductor)
@@ -631,6 +633,7 @@ class JackManager:
                 'time_signature_numerator': self.sequencer.song.time_signature_numerator,
                 'default_record_port': self.sequencer.default_record_port
             },
+        'input_routing_points': list(self.sequencer.song.input_routing.points) if self.sequencer.song.input_routing else [],
             'track_overrides': {}
         }
 
@@ -934,8 +937,12 @@ class JackManager:
         heavy sweeping is performed in a background thread to maintain UI responsiveness.
         """
         if snapshot is None:
-            with self._rt_lock:
-                snapshot = self._rt_snapshot
+            try:
+                with self._rt_lock:
+                    snapshot = self._rt_snapshot
+            except AttributeError:
+                # Fallback if _rt_lock is not yet initialized during early startup/init
+                snapshot = None
 
         # 1. Snapshot and clear internal tracking under lock IMMEDIATELY
         with self.sync_lock:
@@ -963,11 +970,10 @@ class JackManager:
                 # 3. Identify all MIDI ports
                 unique_ports = set()
                 with self.port_lock:
-                    unique_ports.update(self.open_ports.values())
+                    for p in self.open_ports.values():
+                        if p and not getattr(p, 'closed', False): unique_ports.add(p)
                     for vp in getattr(self.sequencer, 'virtual_ports', []):
-                        unique_ports.add(vp)
-
-                unique_ports = {p for p in unique_ports if p and not getattr(p, 'closed', False)}
+                        if vp and not getattr(vp, 'closed', False): unique_ports.add(vp)
 
                 # Identify relevant channels for quick kill
                 if snapshot_copy:
@@ -1367,7 +1373,7 @@ class JackManager:
             events = track_data['events']
             # Optimization: could use binary search here
             for j, event in enumerate(events):
-                if event.start_time >= self.last_beat:
+                if event.start_time is not None and event.start_time >= self.last_beat:
                     self.next_event_indices[i] = j
                     break
             else:
@@ -1444,7 +1450,7 @@ class JackManager:
             while self.next_event_indices[i] < len(events):
                 event = events[self.next_event_indices[i]]
 
-                if start_beat_of_block <= event.start_time < end_beat_of_block:
+                if event.start_time is not None and start_beat_of_block <= event.start_time < end_beat_of_block:
                     if should_be_audible:
                         for note in event.notes:
                             final_velocity = int(note.velocity * track_velocity)
@@ -1623,10 +1629,10 @@ class JackManager:
         auto_events = snapshot['automation_events']
         while self.next_automation_event_index < len(auto_events):
             event = auto_events[self.next_automation_event_index]
-            if start_beat_of_block <= event['time'] < end_beat_of_block:
+            if event['time'] is not None and start_beat_of_block <= event['time'] < end_beat_of_block:
                 self._apply_automation_event(event, snapshot=snapshot)
                 self.next_automation_event_index += 1
-            elif event['time'] >= end_beat_of_block:
+            elif event['time'] is not None and event['time'] >= end_beat_of_block:
                 break
             else:
                 self.next_automation_event_index += 1
@@ -1664,28 +1670,31 @@ class JackManager:
                 beat_to_check += 1
 
     def _check_for_loop_and_play_range(self, start_beat_of_block, end_beat_of_block, snapshot):
-        if snapshot['play_range_enabled'] and end_beat_of_block >= snapshot['play_range_end_beat']:
-            if start_beat_of_block < snapshot['play_range_end_beat']:
+        play_range_end = snapshot.get('play_range_end_beat')
+        if snapshot['play_range_enabled'] and play_range_end is not None and end_beat_of_block >= play_range_end:
+            if start_beat_of_block < play_range_end:
                 # Schedule the stop command to be executed on the main thread
                 Clock.schedule_once(lambda dt: self.sequencer.stop())
 
-        if snapshot['loop_enabled'] and end_beat_of_block >= snapshot['loop_end_beat']:
-            if start_beat_of_block < snapshot['loop_end_beat']:
+        loop_end = snapshot.get('loop_end_beat')
+        loop_start = snapshot.get('loop_start_beat', 0.0) or 0.0
+        if snapshot['loop_enabled'] and loop_end is not None and end_beat_of_block >= loop_end:
+            if start_beat_of_block < loop_end:
                 # When looping, re-prime automation to the loop start point
-                self._prime_automation_at_beat(snapshot['loop_start_beat'], snapshot=snapshot)
+                self._prime_automation_at_beat(loop_start, snapshot=snapshot)
 
                 beats_per_second = snapshot['tempo'] / 60.0
                 samplerate = self.jack_client.samplerate
                 if beats_per_second > 0 and samplerate > 0:
-                    target_frame = int((snapshot['loop_start_beat'] / beats_per_second) * samplerate)
+                    target_frame = int((loop_start / beats_per_second) * samplerate)
                     _ , pos = self.jack_client.transport_query_struct()
                     pos.frame = target_frame
                     self.jack_client.transport_reposition_struct(pos)
 
         # Access cached song length to avoid heavy calculation in RT callback
-        song_length_beats = snapshot['song_length_beats']
+        song_length_beats = snapshot.get('song_length_beats')
         
-        if not snapshot['loop_enabled'] and not snapshot['is_recording'] and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
+        if not snapshot['loop_enabled'] and not snapshot['is_recording'] and song_length_beats is not None and song_length_beats > 0 and end_beat_of_block >= song_length_beats:
             if start_beat_of_block < song_length_beats:
                 self.jack_client.transport_stop()
 
@@ -1779,8 +1788,9 @@ class JackManager:
 
             for ad in snapshot['audio_processes']:
                 t = next((tr for tr in snapshot['tracks'] if tr['index'] == ad['track_index']), None)
-                if t and t['type'] == 'audio':
-                    end = t['start_time'] + (t['duration_beats'] or 0.0)
+                if t and t['type'] == 'audio' and t['start_time'] is not None:
+                    duration = t['duration_beats'] or 0.0
+                    end = t['start_time'] + duration
                     if end_beat_of_block >= end and start_beat_of_block < end:
                         self._queue_ipc_command(ad['socket_path'], {"command": ["set_property", "pause", True]})
                     if start_beat_of_block <= t['start_time'] < end_beat_of_block:
@@ -1814,10 +1824,24 @@ class JackManager:
         is_logic_rolling = playback_state in ("playing", "recording")
 
         # 2. Automation Priority
-        if is_logic_rolling and self._routing_track and self._routing_track.points:
-            val = self._routing_track.get_value_at(beat, 'input_routing')
+        routing_points = snapshot.get('input_routing_points', []) if snapshot else (self._routing_track.points if self._routing_track else [])
+        if is_logic_rolling and routing_points:
+            # We use the track object but it will correctly use its point list.
+            # During RT, the points have already been snapshotted and the model
+            # might have changed, so we should really use a helper or ensure
+            # the _routing_track's state is safe.
+            # Better: if we have points in snapshot, we should follow them.
+            val = self._get_routing_value_from_points(beat, routing_points)
             if val is not None:
-                return int(round(val))
+                # Ensure the track exists in the snapshot before routing
+                target_idx = int(round(val))
+                if snapshot:
+                    target_track_data = next((t for t in snapshot['tracks'] if t['index'] == target_idx), None)
+                    if target_track_data and target_track_data['type'] == 'midi':
+                        return target_idx
+                else:
+                    # Fallback if no snapshot (e.g. initial UI check)
+                    return target_idx
 
         # 3. Armed Track Priority (RT safe - uses cached value prepared in non-RT thread)
         armed_idx = getattr(self, '_cached_armed_idx', None)
@@ -1827,6 +1851,18 @@ class JackManager:
         # 4. Final Fallback
         fallback_idx = getattr(self, '_cached_first_midi_idx', None)
         return fallback_idx
+
+    def _get_routing_value_from_points(self, beat: float, points: List[AutomationPoint]) -> Optional[float]:
+        """Calculates routing value from a list of points (RT safe)."""
+        if not points: return None
+        # Since it's 'none' curve (steps), we just find the last point at or before the beat
+        res = points[0].value
+        for p in points:
+            if p.start_time <= beat:
+                res = p.value
+            else:
+                break
+        return res
 
     def _silence_instrument_at_index(self, track_idx: int, snapshot=None):
         """
@@ -1873,13 +1909,13 @@ class JackManager:
                 playback_state = snapshot_copy['playback_state'] if snapshot_copy else self.sequencer.playback_state
                 is_rolling = playback_state in ("playing", "recording")
 
+                target_channels = [t_data['channel']] if is_rolling else range(16)
+
                 for port in unique_ports:
                     if not port or getattr(port, 'closed', False): continue
 
                     # PASS 1: IMMEDIATE KILL
                     # If rolling, we only target the specific channel to avoid blipping other tracks
-                    target_channels = [track.channel] if is_rolling else range(16)
-
                     for _ in range(2):
                         for ch in target_channels:
                             self._send_midi(port.name, mido.Message('control_change', channel=ch, control=64, value=0))
@@ -1892,7 +1928,7 @@ class JackManager:
 
                     # PASS 2: TARGET SWEEP
                     # Always include common channels (0, 9) and the specific track channel
-                    sweep_channels = sorted(list({0, 9, track.channel})) if is_rolling else range(16)
+                    sweep_channels = sorted(list({0, 9, t_data['channel']})) if is_rolling else range(16)
 
                     for ch in sweep_channels:
                         for pitch in range(128):

@@ -876,8 +876,26 @@ class AutomationEditor(FloatingWindow):
             pause_btn.icon = 'pause'
             pause_btn.md_bg_color = [0.1, 0.1, 0.1, 1]
 
+        # Sync track_copy when recording stops to incorporate live-recorded data
+        if state != 'recording' and getattr(self, '_last_state_was_recording', False):
+            self.track_copy.points = copy.deepcopy(self.source_track.points)
+            self.on_automation_selection_change(None, self.selected_parameter)
+            self.is_dirty = True
+
+        self._last_state_was_recording = (state == 'recording')
+
     def on_song_structure_changed(self, instance, value):
-        if self.sequencer_layout.sequencer.playback_state == 'recording':
+        seq = self.sequencer_layout.sequencer
+        if seq.playback_state == 'recording':
+            # Update total beats to expand the grid during live recording
+            new_total = seq.get_song_length_in_beats()
+            if new_total > self.total_beats:
+                self.total_beats = new_total
+                self.ids.ruler.total_beats = new_total
+                new_width = new_total * self.pixels_per_beat
+                self.ids.grid.width = new_width
+                self.ids.ruler.ruler_content.width = new_width
+
             # Use a debounced update for visible points during recording to prevent UI lag
             Clock.unschedule(self._update_visible_points)
             Clock.schedule_once(self._update_visible_points, 0.05)
@@ -885,8 +903,9 @@ class AutomationEditor(FloatingWindow):
     def _update_visible_points(self, dt):
         # Sync visible points from the actual track during live recording
         new_visible = [p for p in self.source_track.points if p.parameter == self.selected_parameter]
-        if len(new_visible) != len(self.visible_points):
-            self.visible_points = new_visible
+        # Always update during recording to catch point modifications (smoothing)
+        self.visible_points = new_visible
+        self.ids.grid.draw_curve_and_points()
 
     def update_status_bar(self, point):
         if point:

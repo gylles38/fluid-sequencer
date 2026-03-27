@@ -180,7 +180,7 @@ class EditableMidiGrid(PianoRoll):
 
                 # Only update if selection actually changed to avoid redundant property triggers
                 if len(newly_selected) != len(self.editor.selected_notes) or \
-                   set(id(n) for n in newly_selected) != self.editor.selected_note_ids:
+                   set(id(n) for n in newly_selected) != self.selected_note_ids:
                     self.editor.selected_notes = newly_selected
                 self.draw()
             return True

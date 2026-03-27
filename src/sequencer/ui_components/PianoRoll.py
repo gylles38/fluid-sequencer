@@ -5,6 +5,7 @@ from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle, Line, Mesh, PushMatrix, PopMatrix, Translate
 from kivy.clock import Clock
 from sequencer.models import MidiTrack
+import bisect
 
 class PianoRoll(Widget):
     """
@@ -14,8 +15,11 @@ class PianoRoll(Widget):
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
+    selected_note_ids = ObjectProperty(set())
     beat_per_measure = NumericProperty(4)
     note_height = NumericProperty(round(dp(14)))
+    drag_delta_beat = NumericProperty(0)
+    drag_delta_pitch = NumericProperty(0)
     editor = ObjectProperty(None, allownone=True)
     selected_notes = ListProperty([])
 
@@ -127,39 +131,95 @@ class PianoRoll(Widget):
                 PushMatrix()
                 Translate(self.x, self.y)
 
-                for event in self.track.events:
+                # Performance optimization: use viewport clipping if parent is a ScrollView
+                scroll_view = None
+                curr = self.parent
+                while curr:
+                    if isinstance(curr, ScrollView):
+                        scroll_view = curr
+                        break
+                    curr = curr.parent
+
+                if scroll_view:
+                    view_x = scroll_view.scroll_x * (self.width - scroll_view.width)
+                    view_w = scroll_view.width
+                    view_y = scroll_view.scroll_y * (self.height - scroll_view.height)
+                    view_h = scroll_view.height
+                else:
+                    view_x, view_y, view_w, view_h = 0, 0, self.width, self.height
+
+                # Use a set of IDs for O(1) selection lookup
+                sel_ids = self.selected_note_ids
+                ddb = self.drag_delta_beat
+                ddp = self.drag_delta_pitch
+
+                # Horizontal clipping using binary search
+                # A note could start before the view but extend into it.
+                # Margin of 16 beats should cover most cases.
+                view_beat_start = view_x / self.pixels_per_beat
+                search_beat = max(0, view_beat_start - 16)
+
+                # Finding the starting index
+                # Note: creating this list is O(N), we should ideally have it cached
+                # or use a custom binary search on the events list.
+                idx = 0
+                if len(self.track.events) > 100:
+                    # Simple binary search implementation to avoid full list copy
+                    low = 0
+                    high = len(self.track.events)
+                    while low < high:
+                        mid = (low + high) // 2
+                        if self.track.events[mid].start_time < search_beat:
+                            low = mid + 1
+                        else:
+                            high = mid
+                    idx = low
+
+                for i in range(idx, len(self.track.events)):
+                    event = self.track.events[i]
+                    base_note_x = event.start_time * self.pixels_per_beat
+
+                    if base_note_x > view_x + view_w:
+                        break
+
                     for note in event.notes:
-                        note_x = event.start_time * self.pixels_per_beat
-                        y_start = round(note.pitch * self.note_height)
-                        y_end = round((note.pitch + 1) * self.note_height)
-                        note_h = y_end - y_start
+                        is_selected = id(note) in sel_ids
+
+                        curr_note_x = base_note_x
+                        curr_pitch = note.pitch
+
+                        if is_selected:
+                            curr_note_x += (ddb * self.pixels_per_beat)
+                            curr_pitch += ddp
 
                         note_width = note.duration * self.pixels_per_beat
+                        if curr_note_x + note_width < view_x:
+                            continue
+
+                        y_start = round(curr_pitch * self.note_height)
+                        # Vertical clipping
+                        if y_start > view_y + view_h or y_start + self.note_height < view_y:
+                            continue
+
+                        y_end = round((note.pitch + 1) * self.note_height)
+                        note_h = y_end - y_start
                         note_color = self._velocity_to_color(note.velocity)
 
                         # Draw the main note body
                         Color(*note_color)
-                        Rectangle(pos=(note_x, y_start), size=(note_width, note_h))
+                        Rectangle(pos=(curr_note_x, y_start), size=(note_width, note_h))
 
                         # Draw resize handles if the note is wide enough
                         if note_width > dp(16):
                             handle_width = min(dp(8), note_width / 4)
                             handle_color = (min(1.0, note_color[0] * 1.2), min(1.0, note_color[1] * 1.2), min(1.0, note_color[2] * 1.2), 1.0)
                             Color(*handle_color)
-                            # Left handle
-                            Rectangle(pos=(note_x, y_start), size=(handle_width, note_h))
-                            # Right handle
-                            Rectangle(pos=(note_x + note_width - handle_width, y_start), size=(handle_width, note_h))
+                            Rectangle(pos=(curr_note_x, y_start), size=(handle_width, note_h))
+                            Rectangle(pos=(curr_note_x + note_width - handle_width, y_start), size=(handle_width, note_h))
 
-                        # Draw outline for selected note.
-                        # Both the legacy `selected_note` and the new `selected_notes` list must be
-                        # checked using identity (`is`) to handle identical-looking but distinct note objects.
-                        is_in_multi_select = any(note is sel_note for sel_note in self.selected_notes)
-                        is_the_single_select = self.editor and self.editor.selected_note is note
-
-                        if is_in_multi_select or is_the_single_select:
-                            Color(1, 1, 1, 1)  # White outline
-                            Line(rectangle=(note_x, y_start, note_width, note_h), width=1.1)
+                        if is_selected:
+                            Color(1, 1, 1, 1)
+                            Line(rectangle=(curr_note_x, y_start, note_width, note_h), width=1.1)
 
                 PopMatrix()
 

@@ -270,7 +270,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
     timeline_container = ObjectProperty(None)
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
-    is_active_routing = BooleanProperty(False)    
+    is_active_routing = BooleanProperty(False)
     track_index = NumericProperty(0)
     is_minimized = BooleanProperty(False)
     full_height = NumericProperty(dp(160))
@@ -626,29 +626,38 @@ class TrackWidget(HoverBehavior, BoxLayout):
             # 1. Keyboard (fixed width)
             # To ensure perfect vertical alignment, both ScrollViews must have identical viewport heights.
             # We hide all scrollbars and use 'content' scroll type for both.
+            # To ensure perfect vertical alignment, both ScrollViews must have identical viewport heights.
+            # We use matching BoxLayouts to compensate for potential scrollbars.
+
+            # 1. Keyboard Section
+            self.keyboard_column = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(40))
+
             self.keyboard_sv = ScrollView(
-                size_hint_x=None,
-                width=dp(40),
+                size_hint=(1, 1),
                 do_scroll_x=False,
                 do_scroll_y=True,
                 effect_cls=ScrollEffect,
                 bar_width=0,
                 scroll_type=['content']
             )
-            self.keyboard_sv.effect_y = ScrollEffect()  # Bounded, no bounce
+            self.keyboard_sv.effect_y = ScrollEffect()
             self.piano_keyboard = PianoKeyboard(note_height=note_height)
-            # Link piano_keyboard properties to TrackWidget properties
             self.bind(note_height=self.piano_keyboard.setter('note_height'))
             self.keyboard_sv.add_widget(self.piano_keyboard)
+
+            # Spacer to match the grid side's horizontal scrollbar
+            self.keyboard_spacer = Widget(size_hint_y=None, height=0)
+            self.keyboard_column.add_widget(self.keyboard_sv)
+            self.keyboard_column.add_widget(self.keyboard_spacer)
 
             # 2. Timeline ScrollView (expanding, with both x and y scroll)
             self.timeline_scroll = ScrollView(
                 size_hint=(1, 1),
                 do_scroll_x=True,
                 do_scroll_y=True,
-                effect_cls=ScrollEffect, # Désactive les rebonds (overscroll)
-                bar_width=0, # Hide scrollbar to maintain vertical alignment with keyboard
-                scroll_type=['content'] # Ensure touch scrolls correctly
+                effect_cls=ScrollEffect,
+                bar_width=dp(4), # Subtle scrollbar
+                scroll_type=['bars', 'content']
             )
             self.timeline_scroll.effect_x = ScrollEffect()
             self.timeline_scroll.effect_y = ScrollEffect()
@@ -703,6 +712,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
             self.keyboard_sv.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.keyboard_sv, self.timeline_scroll, v))
             self.timeline_scroll.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(self.timeline_scroll, self.keyboard_sv, v))
 
+            # Update keyboard spacer when scrollbar visibility might change (though bar_width is fixed)
+            self.timeline_scroll.bind(width=self._update_keyboard_spacer, height=self._update_keyboard_spacer)
+            self._update_keyboard_spacer()
+
             # Center on C4 (note 60) by default
             def set_default_scroll(dt):
                 total_height = 128 * self.note_height
@@ -719,7 +732,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
             Clock.schedule_once(set_default_scroll)
 
             # Add to main layout
-            self.main_row.add_widget(self.keyboard_sv)
+            self.main_row.add_widget(self.keyboard_column)
             self.main_row.add_widget(self.timeline_scroll)
 
         else:  # Audio and Automation tracks (unchanged, no vertical scroll)
@@ -909,6 +922,13 @@ class TrackWidget(HoverBehavior, BoxLayout):
         # Puisque la classe est dans le même fichier, l'appel est direct
         popup = ChangeTargetPopup(track_widget=self)
         popup.open()
+
+    def _update_keyboard_spacer(self, *args):
+        # The ScrollView's horizontal scrollbar takes up space at the bottom.
+        # Kivy's ScrollView implementation might vary, but usually bar_width is the height.
+        if hasattr(self, 'keyboard_spacer'):
+             # If we use bar_width=dp(4), we match it.
+             self.keyboard_spacer.height = dp(4)
 
     def _sync_vertical_scrolls(self, source_sv, target_sv, value):
         """Helper to synchronize vertical scrolling between two ScrollViews."""

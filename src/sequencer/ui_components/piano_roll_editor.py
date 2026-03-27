@@ -523,7 +523,7 @@ class EditablePianoRollViewer(ScrollView):
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
     track = ObjectProperty(None, allownone=True)
-    note_height = NumericProperty(dp(12))
+    note_height = NumericProperty(round(dp(14)))
 
     def __init__(self, **kwargs) -> None:
         super(EditablePianoRollViewer, self).__init__(**kwargs)
@@ -756,18 +756,31 @@ Builder.load_string("""
             orientation: 'horizontal'
             spacing: 0
 
-            BoundedScrollView:
-                id: keyboard_sv
+            # --- Left Column: Keyboard ---
+            BoxLayout:
+                orientation: 'vertical'
                 size_hint_x: None
                 width: dp(60)
-                do_scroll_x: False
 
-                PianoKeyboard:
-                    id: piano_keyboard
-                    size_hint: (None, None)
-                    width: self.parent.width
-                    note_height: root.note_height
+                BoundedScrollView:
+                    id: keyboard_sv
+                    size_hint: (1, 1)
+                    do_scroll_x: False
+                    bar_width: 0
+                    scroll_type: ['content']
 
+                    PianoKeyboard:
+                        id: piano_keyboard
+                        size_hint: (None, None)
+                        width: self.parent.width
+                        note_height: root.note_height
+
+                # Exact spacer to match the grid side's horizontal scrollbar and bottom widget
+                Widget:
+                    size_hint_y: None
+                    height: dp(15) + dp(18)
+
+            # --- Right Column: Horizontal Timeline ---
             BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: False
@@ -775,13 +788,14 @@ Builder.load_string("""
                 bar_width: dp(15)
                 scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
-                bar_margin: dp(2)
+                bar_margin: dp(0)
 
                 BoxLayout:
                     orientation: 'vertical'
                     size_hint_x: None
                     width: grid_viewer.width
-                    padding: [0, 0, 0, dp(15)]
+                    # Usable height is timeline_scroll.height - bar_width.
+                    # We want grid_viewer to have the same height as keyboard_sv.
 
                     EditablePianoRollViewer:
                         id: grid_viewer
@@ -790,10 +804,13 @@ Builder.load_string("""
                         total_beats: root.total_beats
                         pixels_per_beat: root.pixels_per_beat
                         note_height: root.note_height
+                        bar_width: 0
+                        scroll_type: ['content']
+                        size_hint_y: 1
 
                     Widget:
                         size_hint_y: None
-                        height: dp(18)
+                        height: dp(15) + dp(18)
 
         MDBoxLayout:
             size_hint_y: None
@@ -836,7 +853,7 @@ class PianoRollEditor(FloatingWindow):
     track_copy = ObjectProperty()
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
-    note_height = NumericProperty(dp(14))
+    note_height = NumericProperty(round(dp(14)))
     edit_mode = StringProperty('insert')
     note_duration = NumericProperty(1.0) # Default to quarter note
     base_note_duration = NumericProperty(1.0)

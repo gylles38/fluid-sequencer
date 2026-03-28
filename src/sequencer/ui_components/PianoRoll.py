@@ -44,7 +44,9 @@ class PianoRoll(Widget):
         self.redraw()
 
     def _update_width(self, *args):
-        self.width = self.total_beats * self.pixels_per_beat
+        new_width = self.total_beats * self.pixels_per_beat
+        if self.width != new_width:
+            self.width = new_width
 
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""
@@ -52,10 +54,14 @@ class PianoRoll(Widget):
             return
         self._redraw_pending = True
         Clock.unschedule(self._do_redraw)
+        # Higher priority or next frame to ensure layout is stable
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
         self._redraw_pending = False
+        # IMPORTANT: Do not change self.width or self.height here.
+        # Changing size during draw triggers a re-layout, which triggers
+        # a redraw, leading to an infinite loop and freezing the UI.
         self.draw()
 
     _color_cache = {}
@@ -74,6 +80,11 @@ class PianoRoll(Widget):
         vx, vy = 0, 0
         vw, vh = self.width, self.height
         x_res, y_res = False, False
+
+        # Clean up stale SV references to avoid memory leaks and ghost redraws
+        if hasattr(self, '_bound_svs'):
+            stale = [sid for sid in self._bound_svs if not any(id(c) == sid for c in self.walk_reverse())]
+            for sid in stale: self._bound_svs.remove(sid)
 
         curr = self.parent
         while curr:

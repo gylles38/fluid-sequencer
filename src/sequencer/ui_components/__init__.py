@@ -29,7 +29,7 @@ from .Ruler import Ruler
 from .PianoKeyboard import PianoKeyboard
 from .floating_window import FloatingWindow
 from .bounded_scroll_view import BoundedScrollView
-from .piano_roll_editor import PianoRollEditor
+from .piano_roll_editor import PianoRollEditor, EditableMidiGrid
 from .automation_editor import AutomationEditor
 from .AutomationControls import AutomationControls
 from .VportsPopup import VportsPopup

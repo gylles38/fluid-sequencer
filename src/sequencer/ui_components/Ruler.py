@@ -30,8 +30,9 @@ class RulerContent(Widget):
             PopMatrix()
 
         self.bind(size=self._trigger_redraw, 
-                  total_beats=self._trigger_redraw, 
-                  pixels_per_beat=self._trigger_redraw)
+                  total_beats=self._update_width,
+                  pixels_per_beat=self._update_width)
+        self._update_width()
 
     def get_measure_texture(self, number):
         """ Crée ou récupère la texture du numéro de mesure """
@@ -82,6 +83,11 @@ class RulerContent(Widget):
         Clock.unschedule(self._do_redraw)
         Clock.schedule_once(self._do_redraw, 0)
 
+    def _update_width(self, *args):
+        new_width = self.total_beats * self.pixels_per_beat
+        if self.width != new_width:
+            self.width = new_width
+
     def _get_viewport(self):
         """Calculates the visible horizontal viewport."""
         viewport_x = 0
@@ -96,10 +102,6 @@ class RulerContent(Widget):
         return viewport_x, viewport_w
 
     def _do_redraw(self, dt):
-        # On calcule la largeur cible
-        target_width = self.total_beats * self.pixels_per_beat
-        self.width = target_width # Met à jour le widget pour le ScrollView
-        
         self.canvas.clear()
         
         c_bg = (0.18, 0.18, 0.18, 1)

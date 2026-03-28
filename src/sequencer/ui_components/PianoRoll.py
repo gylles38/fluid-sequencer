@@ -25,6 +25,7 @@ class PianoRoll(Widget):
         self.size_hint = (None, None)
         self.height = 128 * self.note_height
         self._redraw_pending = False
+        self._selected_ids_cache = set()
 
         # Update width when beats or zoom changes
         self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width)
@@ -85,7 +86,9 @@ class PianoRoll(Widget):
         self.canvas.before.clear()
         self.canvas.clear()
 
-        # Performance Optimization: Use a set for O(1) selection lookup
+        # Performance Optimization: Use a cached set for O(1) selection lookup.
+        # Note: We rebuild it on draw, but we could optimize further by binding to selected_notes change.
+        # Given redraw() is debounced, this is acceptable.
         selected_ids = {id(n) for n in self.selected_notes}
         if self.editor and self.editor.selected_note:
             selected_ids.add(id(self.editor.selected_note))
@@ -125,9 +128,16 @@ class PianoRoll(Widget):
                 Mesh(vertices=octave_vertices, indices=list(range(len(octave_vertices)//4)), mode='lines')
 
             # Vertical grid lines
+            # Performance Optimization: Only draw visible grid lines
             major_vertices = []
             minor_vertices = []
-            for i in range(int(self.total_beats) + 1):
+
+            start_beat = int(viewport_x / self.pixels_per_beat)
+            end_beat = int((viewport_x + viewport_w) / self.pixels_per_beat) + 1
+            start_beat = max(0, start_beat)
+            end_beat = min(int(self.total_beats), end_beat)
+
+            for i in range(start_beat, end_beat + 1):
                 x_pos = i * self.pixels_per_beat
                 if i % self.beat_per_measure == 0:
                     major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])

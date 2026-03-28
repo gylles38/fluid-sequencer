@@ -1,4 +1,5 @@
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
 from kivy.core.window import Window
 
 
@@ -36,7 +37,11 @@ class BoundedScrollView(ScrollView):
                 parent = grabbed_widget.parent
                 while parent:
                     if parent is self:
-                        return True # Descendant grabbed the touch, block scrolling
+                        # Regression Fix: If a descendant has grabbed the touch,
+                        # we want to block the ScrollView's drag-to-scroll logic
+                        # but still allow standard touch propagation (coordinate transformations).
+                        # We do this by calling Widget.on_touch_move instead of ScrollView.on_touch_move.
+                        return Widget.on_touch_move(self, touch)
                     parent = parent.parent
 
         return super().on_touch_move(touch)

@@ -4,6 +4,7 @@ from kivy.properties import NumericProperty, ObjectProperty, ListProperty
 from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle, Line, Mesh
 from kivy.clock import Clock
+import bisect
 from sequencer.models import MidiTrack
 
 class PianoRoll(Widget):
@@ -23,16 +24,29 @@ class PianoRoll(Widget):
         super(PianoRoll, self).__init__(**kwargs)
         self.size_hint = (None, None)
         self.height = 128 * self.note_height
+        self._redraw_pending = False
 
-        self.bind(total_beats=self.redraw, pixels_per_beat=self.redraw,
-                  track=self.redraw, pos=self.redraw, size=self.redraw)
+        # Update width when beats or zoom changes
+        self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width)
+        # Redraw when state or geometry changes (debounced to avoid infinite loops)
+        self.bind(track=self.redraw, pos=self.redraw, size=self.redraw, selected_notes=self.redraw)
+        self._update_width()
         self.redraw()
+
+    def _update_width(self, *args):
+        self.width = self.total_beats * self.pixels_per_beat
 
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""
-        self.width = self.total_beats * self.pixels_per_beat
-        Clock.unschedule(self.draw)
-        Clock.schedule_once(self.draw, 0)
+        if self._redraw_pending:
+            return
+        self._redraw_pending = True
+        Clock.unschedule(self._do_redraw)
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
+        self._redraw_pending = False
+        self.draw()
 
     def _velocity_to_color(self, velocity):
         """Converts MIDI velocity (0-127) to a color for visualization."""
@@ -42,9 +56,43 @@ class PianoRoll(Widget):
         green = 0.3
         return (red, green, blue, 0.9)
 
+    def _get_viewport(self):
+        """Calculates the visible viewport based on the parent ScrollView."""
+        viewport_x = 0
+        viewport_y = 0
+        viewport_w = self.width
+        viewport_h = self.height
+
+        parent = self.parent
+        # Small optimization: cache the scrollview if found
+        if hasattr(self, '_scroll_view_cache') and self._scroll_view_cache and self._scroll_view_cache.parent:
+            parent = self._scroll_view_cache
+        else:
+            self._scroll_view_cache = None
+
+        while parent:
+            if isinstance(parent, ScrollView):
+                self._scroll_view_cache = parent
+                viewport_x = parent.scroll_x * max(0, self.width - parent.width)
+                viewport_y = parent.scroll_y * max(0, self.height - parent.height)
+                viewport_w = parent.width
+                viewport_h = parent.height
+                break
+            parent = parent.parent
+        return viewport_x, viewport_y, viewport_w, viewport_h
+
     def draw(self, *args):
         self.canvas.before.clear()
         self.canvas.clear()
+
+        # Performance Optimization: Use a set for O(1) selection lookup
+        selected_ids = {id(n) for n in self.selected_notes}
+        if self.editor and self.editor.selected_note:
+            selected_ids.add(id(self.editor.selected_note))
+
+        # Performance Optimization: Calculate visible viewport to skip rendering non-visible notes.
+        # This is crucial for long tracks with many notes to prevent UI thread freezes.
+        viewport_x, viewport_y, viewport_w, viewport_h = self._get_viewport()
 
         with self.canvas.before:
             Color(0.1, 0.1, 0.12, 1)
@@ -94,13 +142,34 @@ class PianoRoll(Widget):
                 Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
 
         # --- Notes ---
-        if isinstance(self.track, MidiTrack):
+        if isinstance(self.track, MidiTrack) and self.track.events:
             with self.canvas:
-                for event in self.track.events:
+                # Performance Optimization: Use binary search to find starting events
+                # We need events that could reach viewport_x. Since events are sorted by start_time,
+                # we search for events starting at or after (viewport_x / pixels_per_beat) - max_note_len.
+                # Assuming a safe max note length of 32 beats for clipping.
+                search_beat = max(0, (viewport_x / self.pixels_per_beat) - 32)
+                start_idx = bisect.bisect_left(self.track.events, search_beat, key=lambda e: e.start_time)
+
+                for i in range(start_idx, len(self.track.events)):
+                    event = self.track.events[i]
+                    note_x = event.start_time * self.pixels_per_beat
+
+                    # Temporal clipping: stop if we've passed the viewport
+                    if note_x > viewport_x + viewport_w:
+                        break
+
                     for note in event.notes:
-                        note_x = event.start_time * self.pixels_per_beat
                         note_y = note.pitch * self.note_height
                         note_width = note.duration * self.pixels_per_beat
+
+                        if note_x + note_width < viewport_x:
+                            continue
+
+                        # Pitch clipping: check if the note is vertically within view
+                        if note_y + self.note_height < viewport_y or note_y > viewport_y + viewport_h:
+                            continue
+
                         note_color = self._velocity_to_color(note.velocity)
 
                         # Draw the main note body
@@ -118,12 +187,8 @@ class PianoRoll(Widget):
                             Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
 
                         # Draw outline for selected note.
-                        # Both the legacy `selected_note` and the new `selected_notes` list must be
-                        # checked using identity (`is`) to handle identical-looking but distinct note objects.
-                        is_in_multi_select = any(note is sel_note for sel_note in self.selected_notes)
-                        is_the_single_select = self.editor and self.editor.selected_note is note
-
-                        if is_in_multi_select or is_the_single_select:
+                        # Performance Optimization: Use O(1) set lookup
+                        if id(note) in selected_ids:
                             Color(1, 1, 1, 1)  # White outline
                             Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
 

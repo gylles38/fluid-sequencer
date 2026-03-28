@@ -22,6 +22,7 @@ from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, In
 from collections import deque
 import copy
 import mido
+import bisect
 from sequencer.ui_components.HoverBehavior import HoverableButton
 
 
@@ -118,14 +119,27 @@ class EditableMidiGrid(PianoRoll):
             if self._selection_rect:
                 self._selection_rect.size = (local_pos[0] - self._selection_start_pos[0], local_pos[1] - self._selection_start_pos[1])
 
-                # Update selected notes based on the rectangle
+                # Performance Optimization: Calculate selected notes based on current viewport.
+                # Redrawing the entire grid on every mouse move is expensive and causes freezes.
+                # We update the selection list but use a debounced redraw.
                 newly_selected = []
                 x1, y1 = self._selection_start_pos
                 x2, y2 = local_pos
                 sel_x, sel_w = (min(x1, x2), abs(x1 - x2))
                 sel_y, sel_h = (min(y1, y2), abs(y1 - y2))
 
-                for event in self.editor.track_copy.events:
+                # Temporal boundaries for the selection box
+                sel_start_beat = sel_x / self.pixels_per_beat
+                sel_end_beat = (sel_x + sel_w) / self.pixels_per_beat
+
+                # Performance Optimization: Use binary search to narrow down selection range
+                search_idx = bisect.bisect_left(self.editor.track_copy.events, sel_start_beat - 32, key=lambda e: e.start_time)
+
+                for i in range(search_idx, len(self.editor.track_copy.events)):
+                    event = self.editor.track_copy.events[i]
+                    if event.start_time > sel_end_beat:
+                        break # Optimization: stopped searching after the selection box
+
                     for note in event.notes:
                         note_x = event.start_time * self.pixels_per_beat
                         note_y = note.pitch * self.note_height
@@ -136,8 +150,9 @@ class EditableMidiGrid(PianoRoll):
                            sel_y < (note_y + note_h) and (sel_y + sel_h) > note_y:
                             newly_selected.append(note)
 
-                self.editor.selected_notes = newly_selected
-                self.draw()
+                if newly_selected != self.editor.selected_notes:
+                    self.editor.selected_notes = newly_selected
+                    self.redraw() # Use debounced redraw
             return True
 
         if self._dragged_note:

@@ -1,3 +1,4 @@
+import bisect
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 from kivy.properties import BooleanProperty, StringProperty
@@ -84,7 +85,6 @@ class MidiTrack(BaseTrack, EventDispatcher):
     
     def add_event(self, event: Event):
         """Adds a MIDI event to the track and keeps the event list sorted by start time."""
-        import bisect
         bisect.insort(self.events, event, key=lambda e: e.start_time)
 
     def __repr__(self):

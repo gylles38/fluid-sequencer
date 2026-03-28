@@ -15,14 +15,13 @@ from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.core.window import Window
 import copy
+import mido
+import bisect
+from collections import deque
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate, InstructionGroup
-from collections import deque
-import copy
-import mido
-import bisect
 from sequencer.ui_components.HoverBehavior import HoverableButton
 
 
@@ -445,13 +444,25 @@ class EditableMidiGrid(PianoRoll):
         if edit_mode == 'insert':
             # Quantize to 16th notes, which is a common default for piano rolls
             quantized_beat = round(clicked_beat * 4) / 4
-            new_note = Note(pitch=clicked_pitch, velocity=100, duration=self.editor.note_duration)
+
+            try:
+                new_note = Note(pitch=clicked_pitch, velocity=100, duration=self.editor.note_duration)
+            except Exception as e:
+                print(f"Error creating note: {e}")
+                return True
+
             target_event = self._find_event_at(track, quantized_beat)
 
             if target_event:
-                if not any(n.pitch == new_note.pitch for n in target_event.notes): target_event.notes.append(new_note)
+                if not any(n.pitch == new_note.pitch for n in target_event.notes):
+                    target_event.notes.append(new_note)
             else:
-                track.add_event(Event(start_time=quantized_beat, notes=[new_note]))
+                try:
+                    new_event = Event(start_time=float(quantized_beat), notes=[new_note])
+                    track.add_event(new_event)
+                except Exception as e:
+                    print(f"Error creating/adding event: {e}")
+                    return True
 
             self.editor.is_dirty = True
             self.redraw()
@@ -1326,7 +1337,7 @@ class PianoRollEditor(FloatingWindow):
         new_events = []
         for event_data in state['events']:
             new_notes: list[Note] = [Note(**note_data) for note_data in event_data['notes']]
-            new_events.append(Event(start_time=event_data['start_time'], notes=new_notes))
+            new_events.append(Event(start_time=float(event_data['start_time']), notes=new_notes))
 
         self.track_copy.events = new_events
 
@@ -1474,21 +1485,25 @@ class PianoRollEditor(FloatingWindow):
         # Performance Optimization: Build events_snapshot and selection_ids in a single pass
         events_snapshot = []
         selection_ids = []
+
+        if not self.track_copy:
+            return
+
         selected_ids = {id(n) for n in self.selected_notes}
 
         for event_idx, event in enumerate(self.track_copy.events):
             notes_snapshot = []
             for note_idx, note in enumerate(event.notes):
                 notes_snapshot.append({
-                    'pitch': note.pitch,
-                    'velocity': note.velocity,
-                    'duration': note.duration
+                    'pitch': int(note.pitch),
+                    'velocity': int(note.velocity),
+                    'duration': float(note.duration)
                 })
                 if id(note) in selected_ids:
                     selection_ids.append((event_idx, note_idx))
 
             events_snapshot.append({
-                'start_time': event.start_time,
+                'start_time': float(event.start_time),
                 'notes': notes_snapshot
             })
 
@@ -1645,6 +1660,9 @@ class PianoRollEditor(FloatingWindow):
 
     def dismiss(self, action=None, *args) -> None:
         if action == 'save_and_close':
+            # Force record pending state
+            if self._record_state_event:
+                self._do_record_state()
             self._save_changes()
             super(PianoRollEditor, self).dismiss(*args)
             return

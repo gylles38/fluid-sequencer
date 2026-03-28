@@ -76,6 +76,8 @@ class EditableMidiGrid(PianoRoll):
     _selection_border = None
     _selection_group = None
     _selection_initial_states = None
+    _selection_update_event = None
+
     def __init__(self, **kwargs) -> None:
         self.playback_line_x = 0
         self.playback_rect = None
@@ -122,40 +124,13 @@ class EditableMidiGrid(PianoRoll):
                 if self._selection_border:
                     self._selection_border.rectangle = (self._selection_start_pos[0], self._selection_start_pos[1], width, height)
 
-                # Performance Optimization: Calculate selected notes based on current viewport.
-                # Redrawing the entire grid on every mouse move is expensive and causes freezes.
-                # We update the selection list but use a debounced redraw.
-                newly_selected = []
-                x1, y1 = self._selection_start_pos
-                x2, y2 = local_pos
-                sel_x, sel_w = (min(x1, x2), abs(x1 - x2))
-                sel_y, sel_h = (min(y1, y2), abs(y1 - y2))
+                # Performance Optimization: Throttled selection recalculation.
+                # Update the visual rectangle in real-time, but only recalculate hit notes
+                # occasionally to prevent UI freezing on dense tracks.
+                if self._selection_update_event:
+                    self._selection_update_event.cancel()
+                self._selection_update_event = Clock.schedule_once(lambda dt: self._update_selection_logic(local_pos), 0.02)
 
-                # Temporal boundaries for the selection box
-                sel_start_beat = sel_x / self.pixels_per_beat
-                sel_end_beat = (sel_x + sel_w) / self.pixels_per_beat
-
-                # Performance Optimization: Use binary search to narrow down selection range
-                search_idx = bisect.bisect_left(self.editor.track_copy.events, sel_start_beat - 32, key=lambda e: e.start_time)
-
-                for i in range(search_idx, len(self.editor.track_copy.events)):
-                    event = self.editor.track_copy.events[i]
-                    if event.start_time > sel_end_beat:
-                        break # Optimization: stopped searching after the selection box
-
-                    for note in event.notes:
-                        note_x = event.start_time * self.pixels_per_beat
-                        note_y = note.pitch * self.note_height
-                        note_w = note.duration * self.pixels_per_beat
-                        note_h = self.note_height
-
-                        if sel_x < (note_x + note_w) and (sel_x + sel_w) > note_x and \
-                           sel_y < (note_y + note_h) and (sel_y + sel_h) > note_y:
-                            newly_selected.append(note)
-
-                if len(newly_selected) != len(self.editor.selected_notes) or newly_selected != self.editor.selected_notes:
-                    self.editor.selected_notes = newly_selected
-                    self.redraw() # Use debounced redraw
             return True
 
         if self._dragged_note:
@@ -490,11 +465,56 @@ class EditableMidiGrid(PianoRoll):
 
         return super(EditableMidiGrid, self).on_touch_down(touch)
 
+    def _update_selection_logic(self, local_pos):
+        if not self.editor or not self.editor.track_copy:
+            return
+
+        newly_selected = []
+        x1, y1 = self._selection_start_pos
+        x2, y2 = local_pos
+        sel_x, sel_w = (min(x1, x2), abs(x1 - x2))
+        sel_y, sel_h = (min(y1, y2), abs(y1 - y2))
+
+        # Temporal boundaries for the selection box
+        sel_start_beat = sel_x / self.pixels_per_beat
+        sel_end_beat = (sel_x + sel_w) / self.pixels_per_beat
+
+        # Performance Optimization: Use binary search to narrow down selection range
+        events = self.editor.track_copy.events
+        search_idx = bisect.bisect_left(events, sel_start_beat - 32, key=lambda e: e.start_time)
+
+        for i in range(search_idx, len(events)):
+            event = events[i]
+            if event.start_time > sel_end_beat:
+                break # Optimization: stopped searching after the selection box
+
+            for note in event.notes:
+                note_x = event.start_time * self.pixels_per_beat
+                note_y = note.pitch * self.note_height
+                note_width = note.duration * self.pixels_per_beat
+
+                if sel_x < (note_x + note_width) and (sel_x + sel_w) > note_x and \
+                    sel_y < (note_y + self.note_height) and (sel_y + sel_h) > note_y:
+                    newly_selected.append(note)
+
+        # Performance Optimization: Avoid full list comparison if lengths differ
+        if len(newly_selected) != len(self.editor.selected_notes) or newly_selected != self.editor.selected_notes:
+            self.editor.selected_notes = newly_selected
+            # We don't call redraw() here; the property change will trigger it if bound.
+            # PianoRoll already binds selected_notes to redraw.
+
     def on_touch_up(self, touch) -> None | bool:
         if touch.grab_current is not self:
             return super(EditableMidiGrid, self).on_touch_up(touch)
 
+        if self._selection_update_event:
+            self._selection_update_event.cancel()
+            self._selection_update_event = None
+
         if self._drag_mode == 'select':
+            # Ensure final selection state is captured
+            self._update_selection_logic(self.to_local(*touch.pos))
+
             if self._selection_group:
                 try:
                     self.canvas.after.remove(self._selection_group)

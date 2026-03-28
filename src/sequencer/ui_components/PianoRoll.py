@@ -25,13 +25,18 @@ class PianoRoll(Widget):
         self.size_hint = (None, None)
         self.height = 128 * self.note_height
         self._redraw_pending = False
-        self._selected_ids_cache = set()
+        self._selected_ids_cache = None
 
         # Update width when beats or zoom changes
         self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width)
         # Redraw when state or geometry changes (debounced to avoid infinite loops)
-        self.bind(track=self.redraw, pos=self.redraw, size=self.redraw, selected_notes=self.redraw)
+        self.bind(track=self.redraw, pos=self.redraw, size=self.redraw)
+        self.bind(selected_notes=self._on_selected_notes_change)
         self._update_width()
+        self.redraw()
+
+    def _on_selected_notes_change(self, *args):
+        self._selected_ids_cache = None # Invalidate cache
         self.redraw()
 
     def _update_width(self, *args):
@@ -87,11 +92,13 @@ class PianoRoll(Widget):
         self.canvas.clear()
 
         # Performance Optimization: Use a cached set for O(1) selection lookup.
-        # Note: We rebuild it on draw, but we could optimize further by binding to selected_notes change.
-        # Given redraw() is debounced, this is acceptable.
-        selected_ids = {id(n) for n in self.selected_notes}
-        if self.editor and self.editor.selected_note:
-            selected_ids.add(id(self.editor.selected_note))
+        # We only rebuild it if needed.
+        if not hasattr(self, '_selected_ids_cache') or self._selected_ids_cache is None:
+            self._selected_ids_cache = {id(n) for n in self.selected_notes}
+            if self.editor and self.editor.selected_note:
+                self._selected_ids_cache.add(id(self.editor.selected_note))
+
+        selected_ids = self._selected_ids_cache
 
         # Performance Optimization: Calculate visible viewport to skip rendering non-visible notes.
         # This is crucial for long tracks with many notes to prevent UI thread freezes.
@@ -166,6 +173,7 @@ class PianoRoll(Widget):
                 search_beat = max(0, (viewport_x / self.pixels_per_beat) - 32)
                 start_idx = bisect.bisect_left(self.track.events, search_beat, key=lambda e: e.start_time)
 
+                selection_outline_vertices = []
                 for i in range(start_idx, len(self.track.events)):
                     event = self.track.events[i]
                     note_x = event.start_time * self.pixels_per_beat
@@ -201,11 +209,22 @@ class PianoRoll(Widget):
                             # Right handle
                             Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
 
-                        # Draw outline for selected note.
-                        # Performance Optimization: Use O(1) set lookup
+                        # Performance Optimization: Batch selected note outlines using vertices
                         if id(note) in selected_ids:
-                            Color(1, 1, 1, 1)  # White outline
-                            Line(rectangle=(note_x, note_y, note_width, self.note_height), width=1.1)
+                            x, y, w, h = note_x, note_y, note_width, self.note_height
+                            # 4 lines per rectangle (8 points total for 'lines' mode)
+                            selection_outline_vertices.extend([
+                                x, y, 0, 0, x + w, y, 0, 0,
+                                x + w, y, 0, 0, x + w, y + h, 0, 0,
+                                x + w, y + h, 0, 0, x, y + h, 0, 0,
+                                x, y + h, 0, 0, x, y, 0, 0
+                            ])
+
+                if selection_outline_vertices:
+                    Color(1, 1, 1, 1)  # White outline
+                    Mesh(vertices=selection_outline_vertices,
+                         indices=list(range(len(selection_outline_vertices)//4)),
+                         mode='lines')
 
 
 class PianoRollViewer(ScrollView):

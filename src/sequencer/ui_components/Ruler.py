@@ -82,6 +82,19 @@ class RulerContent(Widget):
         Clock.unschedule(self._do_redraw)
         Clock.schedule_once(self._do_redraw, 0)
 
+    def _get_viewport(self):
+        """Calculates the visible horizontal viewport."""
+        viewport_x = 0
+        viewport_w = self.width
+        parent = self.parent
+        while parent:
+            if isinstance(parent, ScrollView):
+                viewport_x = parent.scroll_x * max(0, self.width - parent.width)
+                viewport_w = parent.width
+                break
+            parent = parent.parent
+        return viewport_x, viewport_w
+
     def _do_redraw(self, dt):
         # On calcule la largeur cible
         target_width = self.total_beats * self.pixels_per_beat
@@ -96,37 +109,47 @@ class RulerContent(Widget):
         c_selection = (0.2, 0.6, 0.8, 0.5) # Bleu semi-transparent
         c_selection_range = (0.2, 0.6, 0.8, 0.15)
 
+        # Performance Optimization: Calculate visible viewport to skip rendering non-visible elements.
+        viewport_x, viewport_w = self._get_viewport()
+        start_beat = max(0, int(viewport_x / self.pixels_per_beat))
+        end_beat = min(int(self.total_beats), int((viewport_x + viewport_w) / self.pixels_per_beat) + 1)
+
         with self.canvas:
             Color(*c_bg)
-            Rectangle(pos=self.pos, size=(target_width, self.height))
+            # Only draw background for the visible part
+            Rectangle(pos=(self.x + viewport_x, self.y), size=(viewport_w, self.height))
 
             # --- DESSIN DE LA SÉLECTION (PLAGE START/END) ---
             if self.sequencer_layout and self.sequencer_layout.sequencer:
                 seq = self.sequencer_layout.sequencer
-                start_beat = seq.parse_position_to_beats(seq.ui_start_pos_str)
-                end_beat = seq.parse_position_to_beats(seq.ui_end_pos_str) if seq.ui_end_pos_str else None
+                start_beat_sel = seq.parse_position_to_beats(seq.ui_start_pos_str)
+                end_beat_sel = seq.parse_position_to_beats(seq.ui_end_pos_str) if seq.ui_end_pos_str else None
 
-                if start_beat is not None and end_beat is not None and end_beat > start_beat:
-                    Color(*c_selection_range)
-                    x_start = start_beat * self.pixels_per_beat
-                    x_end = end_beat * self.pixels_per_beat
-                    Rectangle(pos=(self.x + x_start, self.y), size=(x_end - x_start, self.height))
+                if start_beat_sel is not None and end_beat_sel is not None and end_beat_sel > start_beat_sel:
+                    # Clip selection range to viewport
+                    draw_start = max(start_beat_sel * self.pixels_per_beat, viewport_x)
+                    draw_end = min(end_beat_sel * self.pixels_per_beat, viewport_x + viewport_w)
+                    if draw_end > draw_start:
+                        Color(*c_selection_range)
+                        Rectangle(pos=(self.x + draw_start, self.y), size=(draw_end - draw_start, self.height))
 
-                if start_beat is not None:
-                    Color(*c_selection)
-                    x = start_beat * self.pixels_per_beat
-                    Rectangle(pos=(self.x + x, self.y), size=(dp(3), self.height))
+                if start_beat_sel is not None:
+                    x = start_beat_sel * self.pixels_per_beat
+                    if viewport_x <= x <= viewport_x + viewport_w:
+                        Color(*c_selection)
+                        Rectangle(pos=(self.x + x, self.y), size=(dp(3), self.height))
 
-                if end_beat is not None:
-                    Color(*c_selection)
-                    x = end_beat * self.pixels_per_beat
-                    Rectangle(pos=(self.x + x - dp(3), self.y), size=(dp(3), self.height))
+                if end_beat_sel is not None:
+                    x = end_beat_sel * self.pixels_per_beat
+                    if viewport_x <= x <= viewport_x + viewport_w:
+                        Color(*c_selection)
+                        Rectangle(pos=(self.x + x - dp(3), self.y), size=(dp(3), self.height))
 
             # --- Optimized Grid Lines using Mesh ---
             major_vertices = []
             minor_vertices = []
 
-            for beat in range(int(self.total_beats) + 1):
+            for beat in range(start_beat, end_beat + 1):
                 x = beat * self.pixels_per_beat
                 if beat % self.beats_per_measure == 0:
                     major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
@@ -142,7 +165,7 @@ class RulerContent(Widget):
                 Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
 
             # --- Labels ---
-            for beat in range(int(self.total_beats) + 1):
+            for beat in range(start_beat, end_beat + 1):
                 if beat % self.beats_per_measure == 0:
                     x = beat * self.pixels_per_beat
                     measure_num = (beat // self.beats_per_measure) + 1

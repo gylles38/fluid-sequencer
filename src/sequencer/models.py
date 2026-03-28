@@ -84,8 +84,8 @@ class MidiTrack(BaseTrack, EventDispatcher):
     
     def add_event(self, event: Event):
         """Adds a MIDI event to the track and keeps the event list sorted by start time."""
-        self.events.append(event)
-        self.events.sort(key=lambda e: e.start_time)
+        import bisect
+        bisect.insort(self.events, event, key=lambda e: e.start_time)
 
     def __repr__(self):
         return (f"MidiTrack(name='{self.name}', channel={self.channel}, "

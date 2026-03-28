@@ -20,10 +20,19 @@ class PianoKeyboard(Widget):
         self.size_hint = (None, None)
         self.height = round(128 * self.note_height)
         self.width = dp(40)
+        self._texture_cache = {}
 
         self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule, note_height=self._redraw_on_schedule,
                   highlighted_note=self._redraw_on_schedule)
         self._redraw_on_schedule()
+
+    def get_note_texture(self, text):
+        from kivy.core.text import Label as CoreLabel
+        if text not in self._texture_cache:
+            lbl = CoreLabel(text=text, font_size=dp(9), color=(0, 0, 0, 1))
+            lbl.refresh()
+            self._texture_cache[text] = lbl.texture
+        return self._texture_cache[text]
 
     def _redraw_on_schedule(self, *args):
         # Schedule the redraw for the next frame to ensure all properties are updated.
@@ -32,13 +41,28 @@ class PianoKeyboard(Widget):
 
     def _redraw(self, *args):
         self.canvas.clear()
-        self.clear_widgets()
+        # Optimization: Use canvas labels instead of widgets for performance
+
+        # Optimization: Calculate viewport to only draw visible keys
+        viewport_y = 0
+        viewport_h = self.height
+        from kivy.uix.scrollview import ScrollView
+        parent = self.parent
+        while parent:
+            if isinstance(parent, ScrollView):
+                viewport_y = parent.scroll_y * max(0, self.height - parent.height)
+                viewport_h = parent.height
+                break
+            parent = parent.parent
+
+        start_idx = max(0, int(viewport_y / self.note_height))
+        end_idx = min(127, int((viewport_y + viewport_h) / self.note_height) + 1)
 
         highlight_color = (0.3, 0.7, 1.0, 1) # A light blue color for highlighting
 
         with self.canvas:
             # --- Draw White Keys Backgrounds ---
-            for i in range(128):
+            for i in range(start_idx, end_idx + 1):
                 if (i % 12) not in [1, 3, 6, 8, 10]:
                     if i == self.highlighted_note:
                         Color(*highlight_color)
@@ -49,7 +73,7 @@ class PianoKeyboard(Widget):
                     Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
 
             # --- Draw Black Keys Backgrounds ---
-            for i in range(128):
+            for i in range(start_idx, end_idx + 1):
                 if (i % 12) in [1, 3, 6, 8, 10]:
                     if i == self.highlighted_note:
                         Color(*highlight_color)
@@ -60,7 +84,8 @@ class PianoKeyboard(Widget):
                     Rectangle(pos=(self.x, self.y + y_start), size=(self.width * 0.65, y_end - y_start))
 
             # --- Draw EVERY Pitch Separator (Grid sync) ---
-            for i in range(1, 129):
+            for i in range(start_idx + 1, end_idx + 2):
+                if i > 128: break
                 y_pos = round(i * self.note_height)
                 # Octave line (below C)
                 if (i % 12) == 0:
@@ -76,25 +101,17 @@ class PianoKeyboard(Widget):
 
                 Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=width)
 
-        # Add C note labels
-        for i in range(128):
-            if (i % 12) == 0:
-                octave_num = (i // 12) - 1  # MIDI note 12 is C0, 24 is C1 etc.
-                y_start = round(i * self.note_height)
-                y_end = round((i + 1) * self.note_height)
-                note_h = y_end - y_start
-                note_y = self.y + y_start
-                label = Label(
-                    text=f"C{octave_num}",
-                    font_size=dp(9),
-                    color=(0, 0, 0, 1),
-                    size_hint=(None, None),
-                    size=(self.width, note_h),
-                    center_x=self.center_x,
-                    center_y=note_y + note_h / 2,
-                    halign='center',
-                    valign='middle',
-                )
-                # Kivy's text_size is needed for alignment to work correctly
-                label.text_size = label.size
-                self.add_widget(label)
+            # --- Add C note labels via canvas textures ---
+            Color(1, 1, 1, 1)
+            for i in range(start_idx, end_idx + 1):
+                if (i % 12) == 0:
+                    octave_num = (i // 12) - 1
+                    texture = self.get_note_texture(f"C{octave_num}")
+                    y_start = round(i * self.note_height)
+                    y_end = round((i + 1) * self.note_height)
+                    note_h = y_end - y_start
+                    # Center the label texture
+                    tex_w, tex_h = texture.size
+                    pos_x = self.x + (self.width - tex_w) / 2
+                    pos_y = self.y + y_start + (note_h - tex_h) / 2
+                    Rectangle(texture=texture, pos=(pos_x, pos_y), size=texture.size)

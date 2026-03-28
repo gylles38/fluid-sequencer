@@ -222,7 +222,7 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = target_event
 
             self.editor.is_dirty = True
-            self.draw()
+            self.redraw()
             return True
 
         # Regression Fix: Returning True if grabbed ensures the touch is consumed and not passed to ScrollView
@@ -415,7 +415,7 @@ class EditableMidiGrid(PianoRoll):
                         self._store_selection_states_if_needed(note)
                         
                         self.editor.selected_event = event # Gardé pour compatibilité, mais moins utile en multi-select
-                        self.draw()
+                        self.redraw()
 
                         touch.grab(self)
                         return True
@@ -439,7 +439,7 @@ class EditableMidiGrid(PianoRoll):
             self.canvas.after.add(self._selection_group)
 
             touch.grab(self)
-            self.draw()
+            self.redraw()
             return True
 
         if edit_mode == 'insert':
@@ -454,7 +454,7 @@ class EditableMidiGrid(PianoRoll):
                 track.add_event(Event(start_time=quantized_beat, notes=[new_note]))
 
             self.editor.is_dirty = True
-            self.draw()
+            self.redraw()
             # This was the missing call from the review
             self.editor._record_state()
             return True
@@ -473,7 +473,7 @@ class EditableMidiGrid(PianoRoll):
                             if not event.notes and not event.cc_messages:
                                 track.events.remove(event)
                             self.editor.is_dirty = True
-                            self.draw()
+                            self.redraw()
                             self.editor._record_state()
                             return True
 
@@ -514,7 +514,7 @@ class EditableMidiGrid(PianoRoll):
 
         self._drag_mode = None
         touch.ungrab(self)
-        self.draw() # Redessine la grille pour afficher l'état final
+        self.redraw() # Redessine la grille pour afficher l'état final
         return True
 
     def _apply_multi_selection_changes(self) -> None:
@@ -961,6 +961,9 @@ class PianoRollEditor(FloatingWindow):
     display_beat = NumericProperty(0.0)
     saved_scroll_x = NumericProperty(0.0)
     last_playback_state = StringProperty("stopped")
+    _current_cursor = StringProperty('arrow')
+    _hover_update_event = None
+    _record_state_event = None
 
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
@@ -1090,7 +1093,7 @@ class PianoRollEditor(FloatingWindow):
                     self.ids.status_label.text = f"Note: {note_name}, Velocity: {self.hovered_note.velocity}"
                     
                     # Optionnel : redessiner la grille si la couleur dépend de la vélocité
-                    self.ids.grid_viewer.grid.draw()
+                    self.ids.grid_viewer.grid.redraw()
                     
                     # Enregistrement pour le Undo/Redo
                     self._record_state()
@@ -1214,19 +1217,27 @@ class PianoRollEditor(FloatingWindow):
                 # On redessine la grille
                 #if hasattr(self.ids.ruler, 'redraw'):
                 #    self.ids.ruler.redraw()
-                self.ids.grid_viewer.grid.draw()                
+                self.ids.grid_viewer.grid.redraw()
                 return True # Indique que l'événement a été géré
 
         return False
 
     def undo(self) -> None:
         """Restores the previous state from the history manager."""
+        # Force pending state to be recorded before undoing
+        if self._record_state_event:
+            self._do_record_state()
+
         previous_state = self.history.undo()
         if previous_state is not None:
             self._apply_state(previous_state)
 
     def redo(self) -> None:
         """Restores the next state from the history manager."""
+        # Force pending state to be recorded (though redo usually implies we just undid)
+        if self._record_state_event:
+            self._do_record_state()
+
         next_state = self.history.redo()
         if next_state is not None:
             self._apply_state(next_state)
@@ -1331,7 +1342,7 @@ class PianoRollEditor(FloatingWindow):
         self.selected_notes = new_selection
         # Explicitly update the grid's property to ensure the visual update.
         self.ids.grid_viewer.grid.selected_notes = self.selected_notes
-        self.ids.grid_viewer.grid.draw()
+        self.ids.grid_viewer.grid.redraw()
         self._update_undo_redo_buttons_state()
         self.is_dirty = True
 
@@ -1368,7 +1379,7 @@ class PianoRollEditor(FloatingWindow):
         if is_cut:
             self._delete_selected_notes()
             self._record_state()
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid_viewer.grid.redraw()
 
     def _paste_selection(self) -> None:
         """Colle les notes à la position de la tête de lecture sans doublons."""
@@ -1415,7 +1426,7 @@ class PianoRollEditor(FloatingWindow):
             self.selected_notes = new_selection
             self.is_dirty = True
             self._record_state()
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid_viewer.grid.redraw()
 
     def _select_all_notes(self) -> None:
         """Sélectionne toutes les notes présentes dans la piste actuelle."""
@@ -1425,7 +1436,7 @@ class PianoRollEditor(FloatingWindow):
         
         if all_notes:
             self.selected_notes = all_notes
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid_viewer.grid.redraw()
      
     def _delete_selected_notes(self) -> None:
         """Supprime proprement toutes les notes sélectionnées."""
@@ -1441,14 +1452,25 @@ class PianoRollEditor(FloatingWindow):
         
         self.selected_notes = []
         self.is_dirty = True
+        self.ids.grid_viewer.grid.redraw()
         
     def _update_undo_redo_buttons_state(self) -> None:
         """Enables/disables the undo/redo buttons based on history."""
         self.ids.undo_button.disabled = not self.history.can_undo()
         self.ids.redo_button.disabled = not self.history.can_redo()
 
-    def _record_state(self) -> None:
+    def _record_state(self, immediate=False) -> None:
         """Records the current state of the track (events and selection) for undo/redo."""
+        if self._record_state_event:
+            self._record_state_event.cancel()
+            self._record_state_event = None
+
+        if immediate:
+            self._do_record_state()
+        else:
+            self._record_state_event = Clock.schedule_once(lambda dt: self._do_record_state(), 0.5)
+
+    def _do_record_state(self) -> None:
         # Performance Optimization: Build events_snapshot and selection_ids in a single pass
         events_snapshot = []
         selection_ids = []
@@ -1476,6 +1498,7 @@ class PianoRollEditor(FloatingWindow):
         }
         self.history.record_state(state)
         self._update_undo_redo_buttons_state()
+        self._record_state_event = None
 
     def _update_legacy_selection(self, *args) -> None:
         if self.selected_notes:
@@ -1494,6 +1517,11 @@ class PianoRollEditor(FloatingWindow):
         return f"{note}{octave}"
 
     def _on_mouse_pos(self, instance, pos) -> None:
+        if self._hover_update_event:
+            self._hover_update_event.cancel()
+        self._hover_update_event = Clock.schedule_once(lambda dt: self._do_mouse_pos_update(pos), 0.01)
+
+    def _do_mouse_pos_update(self, pos) -> None:
         if not self.ids:
             return
         grid_viewer = self.ids.get('grid_viewer')
@@ -1507,7 +1535,7 @@ class PianoRollEditor(FloatingWindow):
         # Disable heavy hover calculations during playback
         if self.sequencer_layout.sequencer.playback_state in ('playing', 'recording'):
             # Reset to a clean state and exit
-            Window.set_system_cursor('arrow')
+            self._set_system_cursor('arrow')
             piano_keyboard.highlighted_note = -1
             status_label.text = ""
             return
@@ -1567,29 +1595,42 @@ class PianoRollEditor(FloatingWindow):
                     status_label.text = f"Note: {note_name}"
                 
                 # Curseur
-                self._set_editor_cursor()
+                self._update_editor_cursor()
             else:
                 piano_keyboard.highlighted_note = -1
                 status_label.text = ""
+                self._set_system_cursor('arrow')
         else:
             # Hors de la grille
-            Window.set_system_cursor('arrow')
+            self._set_system_cursor('arrow')
             piano_keyboard.highlighted_note = -1
             status_label.text = ""
 
-    def _set_editor_cursor(self) -> None:
+    def _update_editor_cursor(self) -> None:
         """Gère l'apparence du curseur selon le mode d'édition"""
         mode: copy.Any | str = getattr(self, 'edit_mode', 'select')
-        if mode == 'insert': Window.set_system_cursor('crosshair')
-        elif mode == 'delete': Window.set_system_cursor('no')
-        elif mode == 'move': Window.set_system_cursor('hand')
-        else: Window.set_system_cursor('arrow')
+        cursor = 'arrow'
+        if mode == 'insert': cursor = 'crosshair'
+        elif mode == 'delete': cursor = 'no'
+        elif mode == 'move': cursor = 'hand'
+        self._set_system_cursor(cursor)
+
+    def _set_system_cursor(self, cursor_name):
+        if self._current_cursor != cursor_name:
+            self._current_cursor = cursor_name
+            Window.set_system_cursor(cursor_name)
 
     def on_dismiss(self) -> None:
         # --- Cleanup ---
         # Unbind all global window events to prevent memory leaks
         Window.unbind(on_key_down=self._on_key_down)
         Window.unbind(mouse_pos=self._on_mouse_pos)
+
+        if self._hover_update_event:
+            self._hover_update_event.cancel()
+
+        if self._record_state_event:
+            self._record_state_event.cancel()
 
         # Reset the cursor to default one last time to be safe
         Window.set_system_cursor('arrow')
@@ -1639,7 +1680,7 @@ class PianoRollEditor(FloatingWindow):
                         for child in tw.walk():
                             if child.__class__.__name__ == 'PianoRoll':
                                 # On appelle la méthode de dessin du PianoRoll de la fenêtre principale
-                                child.draw()
+                                child.redraw()
                         break
 
             # 3. Rafraîchissement de la LECTURE (Moteur MIDI)
@@ -1762,7 +1803,7 @@ class PianoRollEditor(FloatingWindow):
         if mode != 'move':
             if self.selected_notes:
                 self.selected_notes = []
-                self.ids.grid_viewer.grid.draw()
+                self.ids.grid_viewer.grid.redraw()
 
     def set_note_duration(self, dur, btn) -> None:
         self.base_note_duration = dur
@@ -1792,7 +1833,7 @@ class PianoRollEditor(FloatingWindow):
             for note in self.selected_notes:
                 note.duration = new_duration
             self.is_dirty = True
-            self.ids.grid_viewer.grid.draw()
+            self.ids.grid_viewer.grid.redraw()
 
     def _update_button_states(self, group, active_btn) -> None:
         """Met à jour l'apparence des boutons d'outils selon l'outil sélectionné."""
@@ -1863,6 +1904,10 @@ class PianoRollEditor(FloatingWindow):
 
     def _apply_zoom(self, new_pixels_per_beat) -> None:
         """Applique le zoom en tentant de conserver le centre de la vue."""
+        # Force pending state to be recorded before zooming if it affects duration or layout
+        if self._record_state_event:
+            self._do_record_state()
+
         scroll_view = self.ids.timeline_scroll
         
         # 1. Calculer le beat qui est actuellement au centre de l'écran
@@ -1902,7 +1947,7 @@ class PianoRollEditor(FloatingWindow):
         if hasattr(self.ids.ruler, 'redraw'):
             self.ids.ruler.redraw()
         
-        self.ids.grid_viewer.grid.draw()
+        self.ids.grid_viewer.grid.redraw()
 
     def _preview_note(self, pitch, velocity, duration) -> None:
         """Plays a single note through the sequencer's MIDI output for preview."""

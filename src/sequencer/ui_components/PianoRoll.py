@@ -106,16 +106,21 @@ class PianoRoll(Widget):
             white_keys_vertices = []
             octave_vertices = []
 
-            for i in range(128):
+            # Optimization: Only draw visible horizontal grid lines
+            start_pitch = max(0, int(viewport_y / self.note_height))
+            end_pitch = min(127, int((viewport_y + viewport_h) / self.note_height) + 1)
+
+            x1, x2 = viewport_x, viewport_x + viewport_w
+            for i in range(start_pitch, end_pitch + 1):
                 note_y = i * self.note_height
                 if (i % 12) in [1, 3, 6, 8, 10]:
-                    black_keys_vertices.extend([0, note_y, 0, 0, self.width, note_y, 0, 0])
+                    black_keys_vertices.extend([x1, note_y, 0, 0, x2, note_y, 0, 0])
                 else:
-                    white_keys_vertices.extend([0, note_y, 0, 0, self.width, note_y, 0, 0])
+                    white_keys_vertices.extend([x1, note_y, 0, 0, x2, note_y, 0, 0])
 
                 if (i % 12) == 11:
                     octave_line_y = note_y + self.note_height
-                    octave_vertices.extend([0, octave_line_y, 0, 0, self.width, octave_line_y, 0, 0])
+                    octave_vertices.extend([x1, octave_line_y, 0, 0, x2, octave_line_y, 0, 0])
 
             if black_keys_vertices:
                 Color(0.15, 0.15, 0.17, 1)

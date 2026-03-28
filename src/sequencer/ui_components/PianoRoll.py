@@ -2,7 +2,7 @@ from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, ListProperty
 from kivy.metrics import dp
-from kivy.graphics import Color, Rectangle, Line, Mesh
+from kivy.graphics import Color, Rectangle, Line, Mesh, PushMatrix, PopMatrix, Translate
 from kivy.clock import Clock
 import bisect
 from sequencer.models import MidiTrack
@@ -57,13 +57,16 @@ class PianoRoll(Widget):
         self._redraw_pending = False
         self.draw()
 
+    _color_cache = {}
     def _velocity_to_color(self, velocity):
         """Converts MIDI velocity (0-127) to a color for visualization."""
-        normalized_velocity = velocity / 127.0
-        red = normalized_velocity
-        blue = 1.0 - normalized_velocity
-        green = 0.3
-        return (red, green, blue, 0.9)
+        if velocity not in self._color_cache:
+            normalized_velocity = velocity / 127.0
+            red = normalized_velocity
+            blue = 1.0 - normalized_velocity
+            green = 0.3
+            self._color_cache[velocity] = (red, green, blue, 0.9)
+        return self._color_cache[velocity]
 
     def _get_viewport(self):
         """Calculates the visible viewport based on the parent ScrollView."""
@@ -73,28 +76,35 @@ class PianoRoll(Widget):
         viewport_h = self.height
 
         parent = self.parent
-        # Small optimization: cache the scrollview if found
-        if hasattr(self, '_scroll_view_cache') and self._scroll_view_cache and self._scroll_view_cache.parent:
-            parent = self._scroll_view_cache
+
+        # Robustly find the parent ScrollView
+        sv = None
+        curr = parent
+        while curr:
+            if isinstance(curr, ScrollView):
+                sv = curr
+                break
+            curr = curr.parent
+
+        if sv:
+            if not hasattr(self, '_sv_bound') or self._sv_bound is not sv:
+                # Unbind from old one if it changed
+                if hasattr(self, '_sv_bound') and self._sv_bound:
+                    try: self._sv_bound.unbind(scroll_x=self.redraw, scroll_y=self.redraw)
+                    except: pass
+                sv.bind(scroll_x=self.redraw, scroll_y=self.redraw)
+                self._sv_bound = sv
+
+            self._scroll_view_cache = sv
+            mw = max(0, self.width - sv.width)
+            mh = max(0, self.height - sv.height)
+            viewport_x = sv.scroll_x * mw if mw > 0 else 0
+            viewport_y = sv.scroll_y * mh if mh > 0 else 0
+            viewport_w = sv.width
+            viewport_h = sv.height
         else:
             self._scroll_view_cache = None
-
-        while parent:
-            if isinstance(parent, ScrollView):
-                if self._scroll_view_cache is not parent:
-                    # First time finding it (or finding a new one), bind to its scroll properties
-                    parent.bind(scroll_x=self.redraw, scroll_y=self.redraw)
-                self._scroll_view_cache = parent
-
-                # Use current dimensions to calculate precise viewport
-                mw = max(0, self.width - parent.width)
-                mh = max(0, self.height - parent.height)
-                viewport_x = parent.scroll_x * mw if mw > 0 else 0
-                viewport_y = parent.scroll_y * mh if mh > 0 else 0
-                viewport_w = parent.width
-                viewport_h = parent.height
-                break
-            parent = parent.parent
+            self._sv_bound = None
 
         return viewport_x, viewport_y, viewport_w, viewport_h
 
@@ -124,10 +134,11 @@ class PianoRoll(Widget):
 
         with self.canvas.before:
             PushMatrix()
+            # Transformation to local coordinates
             Translate(self.x, self.y, 0)
 
             Color(0.1, 0.1, 0.12, 1)
-            # Optimization: Only draw visible background
+            # Draw visible background (account for viewport and local origin)
             Rectangle(pos=(viewport_x, viewport_y), size=(viewport_w, viewport_h))
 
             # --- Optimized Grid using Mesh ---

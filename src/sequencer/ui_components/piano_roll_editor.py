@@ -113,8 +113,9 @@ class EditableMidiGrid(PianoRoll):
         if touch.grab_current is not self:
             return super(EditableMidiGrid, self).on_touch_move(touch)
 
-        # Robust coordinate transformation
-        local_pos = self.to_local(*touch.pos)
+        # In a RelativeLayout, touch.pos is already transformed to parent-local coordinates.
+        # Since this widget is at (0,0) in the container, touch.pos is already local.
+        local_pos = touch.pos
         
         if self._drag_mode == 'select':
             if self._selection_rect:
@@ -260,8 +261,9 @@ class EditableMidiGrid(PianoRoll):
                     }
 
     def on_touch_down(self, touch) -> None | bool:
-        # Use to_local for robust coordinate handling regardless of parent layout.
-        local_pos = self.to_local(*touch.pos)
+        # In a RelativeLayout, touch.pos is already transformed to parent-local coordinates.
+        # Since this widget is at (0,0) in the container, touch.pos is already local.
+        local_pos = touch.pos
 
         if not (0 <= local_pos[0] <= self.width and 0 <= local_pos[1] <= self.height):
             return super(EditableMidiGrid, self).on_touch_down(touch)
@@ -508,7 +510,7 @@ class EditableMidiGrid(PianoRoll):
         try:
             if self._drag_mode == 'select':
                 # Ensure final selection state is captured
-                self._update_selection_logic(self.to_local(*touch.pos))
+                self._update_selection_logic(touch.pos)
 
                 if self._selection_group:
                     try:
@@ -547,7 +549,10 @@ class EditableMidiGrid(PianoRoll):
                     self._selection_initial_states = None
 
                 if self._drag_mode in ('resize_start', 'resize_end', 'move'):
-                    self._set_system_cursor('arrow')
+                    if self.editor:
+                        self.editor._set_system_cursor('arrow')
+                    else:
+                        Window.set_system_cursor('arrow')
 
                 self._dragged_note = None
                 self._drag_event = None

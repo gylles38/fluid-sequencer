@@ -2,7 +2,7 @@ from kivy.uix.widget import Widget
 from kivy.uix.scrollview import ScrollView
 from kivy.properties import NumericProperty, ObjectProperty, ListProperty
 from kivy.metrics import dp
-from kivy.graphics import Color, Rectangle, Line, Mesh, PushMatrix, PopMatrix, Translate
+from kivy.graphics import Color, Rectangle, Line
 from kivy.clock import Clock
 import bisect
 from sequencer.models import MidiTrack
@@ -25,28 +25,46 @@ class PianoRoll(Widget):
     def __init__(self, **kwargs):
         super(PianoRoll, self).__init__(**kwargs)
         self.size_hint = (None, None)
-        self.height = 128 * self.note_height
         self._redraw_pending = False
         self._selected_ids_cache = None
         self._bound_svs = set()
 
         # Update width when beats or zoom changes
-        self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width)
-        # Redraw when state or geometry changes (debounced to avoid infinite loops)
-        self.bind(track=self.redraw, pos=self.redraw, size=self.redraw,
-                  drag_delta_beat=self.redraw, drag_delta_pitch=self.redraw)
+        self.bind(total_beats=self._update_geometry,
+                  pixels_per_beat=self._update_geometry,
+                  note_height=self._update_geometry)
+
+        # Redraw when state or geometry changes
+        self.bind(track=self.redraw,
+                  pos=self.redraw,
+                  size=self.redraw,
+                  drag_delta_beat=self.redraw,
+                  drag_delta_pitch=self.redraw)
+
         self.bind(selected_notes=self._on_selected_notes_change)
-        self._update_width()
+
+        self._update_geometry()
         self.redraw()
 
     def _on_selected_notes_change(self, *args):
         self._selected_ids_cache = None # Invalidate cache
         self.redraw()
 
-    def _update_width(self, *args):
+    def _update_geometry(self, *args):
+        """Update widget size based on track properties. Avoids redraw recursion."""
         new_width = self.total_beats * self.pixels_per_beat
-        if self.width != new_width:
+        new_height = 128 * self.note_height
+
+        size_changed = False
+        if abs(self.width - new_width) > 0.001:
             self.width = new_width
+            size_changed = True
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
+            size_changed = True
+
+        if size_changed:
+            self.redraw()
 
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""
@@ -54,14 +72,12 @@ class PianoRoll(Widget):
             return
         self._redraw_pending = True
         Clock.unschedule(self._do_redraw)
-        # Higher priority or next frame to ensure layout is stable
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
         self._redraw_pending = False
-        # IMPORTANT: Do not change self.width or self.height here.
-        # Changing size during draw triggers a re-layout, which triggers
-        # a redraw, leading to an infinite loop and freezing the UI.
+        if self.width <= 0 or self.height <= 0:
+            return
         self.draw()
 
     _color_cache = {}
@@ -76,221 +92,138 @@ class PianoRoll(Widget):
         return self._color_cache[velocity]
 
     def _get_viewport(self):
-        """Calculates the visible viewport by aggregating offsets from all parent ScrollViews."""
+        """
+        Calculate visible viewport by walking up the parent tree and aggregating
+        scroll offsets from all parent ScrollViews.
+        """
         vx, vy = 0, 0
         vw, vh = self.width, self.height
         x_res, y_res = False, False
 
-        # Clean up stale SV references to avoid memory leaks and ghost redraws
-        if hasattr(self, '_bound_svs'):
-            stale = [sid for sid in self._bound_svs if not any(id(c) == sid for c in self.walk_reverse())]
-            for sid in stale: self._bound_svs.remove(sid)
-
         curr = self.parent
         while curr:
             if isinstance(curr, ScrollView):
-                # Bind to all relevant ScrollViews to ensure updates on any scroll axis
+                # Bind to the scrollview once to ensure we redraw when it moves
                 if id(curr) not in self._bound_svs:
                     curr.bind(scroll_x=self.redraw, scroll_y=self.redraw)
                     self._bound_svs.add(id(curr))
 
+                # We aggregate scroll offsets. Usually, one SV handles X and another handles Y.
                 if curr.do_scroll_x and not x_res:
                     mw = max(0, self.width - curr.width)
-                    if mw > 0:
-                        vx = curr.scroll_x * mw
-                        vw = curr.width
-                        x_res = True
-
+                    vx = curr.scroll_x * mw
+                    vw = curr.width
+                    x_res = True
                 if curr.do_scroll_y and not y_res:
                     mh = max(0, self.height - curr.height)
-                    if mh > 0:
-                        vy = curr.scroll_y * mh
-                        vh = curr.height
-                        y_res = True
+                    vy = curr.scroll_y * mh
+                    vh = curr.height
+                    y_res = True
             curr = curr.parent
 
         return vx, vy, vw, vh
 
     def draw(self, *args):
-        if not self.canvas or not self.parent:
+        if not self.canvas:
             return
 
         self.canvas.before.clear()
         self.canvas.clear()
 
-        # Performance Optimization: Use a cached set for O(1) selection lookup.
-        if not hasattr(self, '_selected_ids_cache') or self._selected_ids_cache is None:
+        vx, vy, vw, vh = self._get_viewport()
+
+        with self.canvas.before:
+            # Background
+            Color(0.1, 0.1, 0.12, 1)
+            Rectangle(pos=(0, 0), size=self.size)
+
+            # --- Grid Lines ---
+            # Horizontal lines
+            start_pitch = max(0, int(vy / self.note_height))
+            end_pitch = min(127, int((vy + vh) / self.note_height) + 1)
+
+            for i in range(start_pitch, end_pitch + 1):
+                y = i * self.note_height
+                if (i % 12) in [1, 3, 6, 8, 10]: # Black key rows
+                    Color(0.15, 0.15, 0.17, 1)
+                    Rectangle(pos=(0, y), size=(self.width, self.note_height))
+
+                # Line between rows
+                Color(0.2, 0.2, 0.22, 1)
+                Line(points=[0, y, self.width, y], width=1)
+
+                # Octave line
+                if (i % 12) == 11: # Octave separation (between B and C)
+                    Color(0.8, 0.8, 0.8, 0.3)
+                    Line(points=[0, y + self.note_height, self.width, y + self.note_height], width=1.5)
+
+            # Vertical lines
+            ppb = self.pixels_per_beat
+            start_beat = max(0, int(vx / ppb))
+            end_beat = min(int(self.total_beats), int((vx + vw) / ppb) + 1)
+
+            for i in range(start_beat, end_beat + 1):
+                x = i * ppb
+                if i % self.beat_per_measure == 0:
+                    Color(0.8, 0.8, 0.8, 0.5)
+                    Line(points=[x, 0, x, self.height], width=1.2)
+                else:
+                    Color(0.5, 0.5, 0.5, 0.2)
+                    Line(points=[x, 0, x, self.height], width=1)
+
+        # --- Notes ---
+        if not (self.track and self.track.events):
+            return
+
+        if self._selected_ids_cache is None:
             self._selected_ids_cache = {id(n) for n in self.selected_notes}
             if self.editor and self.editor.selected_note:
                 self._selected_ids_cache.add(id(self.editor.selected_note))
 
         selected_ids = self._selected_ids_cache
 
-        # Performance Optimization: Calculate visible viewport across nested ScrollViews.
-        viewport_x, viewport_y, viewport_w, viewport_h = self._get_viewport()
+        with self.canvas:
+            search_beat = max(0, (vx / ppb) - 32)
+            start_idx = bisect.bisect_left(self.track.events, search_beat, key=lambda e: e.start_time)
 
-        # Guard against invalid dimensions
-        if viewport_w <= 0 or viewport_h <= 0 or self.pixels_per_beat <= 0 or self.note_height <= 0:
-            return
+            for i in range(start_idx, len(self.track.events)):
+                event = self.track.events[i]
+                note_x_orig = event.start_time * ppb
 
-        with self.canvas.before:
-            PushMatrix()
-            Translate(*self.pos, 0)
+                # Stop if past viewport (allowing for drag delta)
+                if note_x_orig > vx + vw + 32 * ppb:
+                    break
 
-            Color(0.1, 0.1, 0.12, 1)
-            # Only draw background for the visible area
-            Rectangle(pos=(viewport_x, viewport_y), size=(viewport_w, viewport_h))
+                for note in event.notes:
+                    is_selected = id(note) in selected_ids
 
-            # --- Optimized Grid using Mesh ---
-            black_keys_vertices = []
-            white_keys_vertices = []
-            octave_vertices = []
+                    eff_start = event.start_time + (self.drag_delta_beat if is_selected else 0)
+                    eff_pitch = note.pitch + (self.drag_delta_pitch if is_selected else 0)
 
-            start_pitch = max(0, int(viewport_y / self.note_height))
-            end_pitch = min(127, int((viewport_y + viewport_h) / self.note_height) + 1)
+                    x = eff_start * ppb
+                    y = eff_pitch * self.note_height
+                    w = note.duration * ppb
+                    h = self.note_height
 
-            x1, x2 = viewport_x, viewport_x + viewport_w
-            for i in range(start_pitch, end_pitch + 1):
-                note_y = i * self.note_height
-                if (i % 12) in [1, 3, 6, 8, 10]:
-                    black_keys_vertices.extend([x1, note_y, 0, 0, x2, note_y, 0, 0])
-                else:
-                    white_keys_vertices.extend([x1, note_y, 0, 0, x2, note_y, 0, 0])
+                    # Clipping
+                    if x + w < vx or x > vx + vw or y + h < vy or y > vy + vh:
+                        continue
 
-                if (i % 12) == 11:
-                    octave_line_y = note_y + self.note_height
-                    octave_vertices.extend([x1, octave_line_y, 0, 0, x2, octave_line_y, 0, 0])
+                    Color(*self._velocity_to_color(note.velocity))
+                    Rectangle(pos=(x, y), size=(w, h))
 
-            if black_keys_vertices:
-                Color(0.15, 0.15, 0.17, 1)
-                Mesh(vertices=black_keys_vertices, indices=list(range(len(black_keys_vertices)//4)), mode='lines')
-            if white_keys_vertices:
-                Color(0.2, 0.2, 0.22, 1)
-                Mesh(vertices=white_keys_vertices, indices=list(range(len(white_keys_vertices)//4)), mode='lines')
-            if octave_vertices:
-                Color(0.8, 0.8, 0.8, 0.6)
-                Mesh(vertices=octave_vertices, indices=list(range(len(octave_vertices)//4)), mode='lines')
+                    if is_selected:
+                        Color(1, 1, 1, 1)
+                        Line(rectangle=(x, y, w, h), width=dp(1.5))
+                    else:
+                        Color(0, 0, 0, 0.4)
+                        Line(rectangle=(x, y, w, h), width=1)
 
-            # Vertical grid lines
-            major_vertices = []
-            minor_vertices = []
-
-            start_beat = max(0, int(viewport_x / self.pixels_per_beat))
-            end_beat = min(int(self.total_beats), int((viewport_x + viewport_w) / self.pixels_per_beat) + 1)
-
-            y1, y2 = viewport_y, viewport_y + viewport_h
-
-            for i in range(start_beat, end_beat + 1):
-                x_pos = i * self.pixels_per_beat
-                if i % self.beat_per_measure == 0:
-                    major_vertices.extend([x_pos, y1, 0, 0, x_pos, y2, 0, 0])
-                else:
-                    minor_vertices.extend([x_pos, y1, 0, 0, x_pos, y2, 0, 0])
-
-            if major_vertices:
-                Color(0.8, 0.8, 0.8, 0.8)
-                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
-            if minor_vertices:
-                Color(0.5, 0.5, 0.5, 0.4)
-                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
-
-            PopMatrix()
-
-        # --- Notes ---
-        if isinstance(self.track, MidiTrack) and self.track.events:
-            with self.canvas:
-                PushMatrix()
-                Translate(*self.pos, 0)
-
-                search_beat = max(0, (viewport_x / self.pixels_per_beat) - 64)
-                start_idx = bisect.bisect_left(self.track.events, search_beat, key=lambda e: e.start_time)
-
-                selection_outline_vertices = []
-                note_mesh_data = {} # Color -> Vertices
-
-                for i in range(start_idx, len(self.track.events)):
-                    event = self.track.events[i]
-                    note_x = event.start_time * self.pixels_per_beat
-
-                    # Temporal clipping: stop if we've passed the viewport
-                    if note_x > viewport_x + viewport_w:
-                        break
-
-                    for note in event.notes:
-                        is_selected = id(note) in selected_ids
-
-                        # Apply virtual dragging deltas for selected notes
-                        eff_start_time = event.start_time + (self.drag_delta_beat if is_selected else 0)
-                        eff_pitch = note.pitch + (self.drag_delta_pitch if is_selected else 0)
-
-                        # Calculate screen positions using effective properties
-                        note_x = eff_start_time * self.pixels_per_beat
-                        note_y = eff_pitch * self.note_height
-                        note_width = note.duration * self.pixels_per_beat
-
-                        if note_x + note_width < viewport_x:
-                            continue
-
-                        # Pitch clipping: check if the note is vertically within view
-                        if note_y + self.note_height < viewport_y or note_y > viewport_y + viewport_h:
-                            continue
-
-                        note_color = self._velocity_to_color(note.velocity)
-
-                        # Performance Optimization: Batch note rendering using Mesh
-                        # We group by color to minimize state changes
-                        if note_color not in note_mesh_data:
-                            note_mesh_data[note_color] = []
-
-                        x, y, w, h = note_x, note_y, note_width, self.note_height
-                        # Two triangles per rectangle
-                        # Triangle 1: (x,y), (x+w,y), (x+w, y+h)
-                        # Triangle 2: (x,y), (x+w,y+h), (x, y+h)
-                        note_mesh_data[note_color].extend([
-                            x, y, 0, 0, x + w, y, 0, 0, x + w, y + h, 0, 0,
-                            x, y, 0, 0, x + w, y + h, 0, 0, x, y + h, 0, 0
-                        ])
-
-                        # Draw resize handles if the note is wide enough
-                        if note_width > dp(16):
-                            handle_width = min(dp(8), note_width / 4)
-                            handle_color = (min(1.0, note_color[0] * 1.2), min(1.0, note_color[1] * 1.2), min(1.0, note_color[2] * 1.2), 1.0)
-                            if handle_color not in note_mesh_data:
-                                note_mesh_data[handle_color] = []
-
-                            # Left handle
-                            note_mesh_data[handle_color].extend([
-                                x, y, 0, 0, x + handle_width, y, 0, 0, x + handle_width, y + h, 0, 0,
-                                x, y, 0, 0, x + handle_width, y + h, 0, 0, x, y + h, 0, 0
-                            ])
-                            # Right handle
-                            rx = x + w - handle_width
-                            note_mesh_data[handle_color].extend([
-                                rx, y, 0, 0, rx + handle_width, y, 0, 0, rx + handle_width, y + h, 0, 0,
-                                rx, y, 0, 0, rx + handle_width, y + h, 0, 0, rx, y + h, 0, 0
-                            ])
-
-                        # Performance Optimization: Batch selected note outlines using vertices
-                        if id(note) in selected_ids:
-                            # 4 lines per rectangle (8 points total for 'lines' mode)
-                            selection_outline_vertices.extend([
-                                x, y, 0, 0, x + w, y, 0, 0,
-                                x + w, y, 0, 0, x + w, y + h, 0, 0,
-                                x + w, y + h, 0, 0, x, y + h, 0, 0,
-                                x, y + h, 0, 0, x, y, 0, 0
-                            ])
-
-                # Execute batched note draws
-                for color, vertices in note_mesh_data.items():
-                    if vertices:
-                        Color(*color)
-                        Mesh(vertices=vertices, indices=list(range(len(vertices)//4)), mode='triangles')
-
-                if selection_outline_vertices:
-                    Color(1, 1, 1, 1)  # White outline
-                    Mesh(vertices=selection_outline_vertices, indices=list(range(len(selection_outline_vertices)//4)), mode='lines')
-
-                PopMatrix()
+                    if w > dp(16):
+                        handle_w = min(dp(8), w / 4)
+                        Color(1, 1, 1, 0.3)
+                        Rectangle(pos=(x, y), size=(handle_w, h))
+                        Rectangle(pos=(x + w - handle_w, y), size=(handle_w, h))
 
 
 class PianoRollViewer(ScrollView):
@@ -317,7 +250,6 @@ class PianoRollViewer(ScrollView):
         )
         self.add_widget(self.grid)
 
-        # Bind this viewer's width to the grid's width ("content-out" sizing)
         self.grid.bind(width=self.setter('width'))
 
     def on_track(self, instance, value):

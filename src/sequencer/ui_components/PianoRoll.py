@@ -28,6 +28,7 @@ class PianoRoll(Widget):
         self.height = 128 * self.note_height
         self._redraw_pending = False
         self._selected_ids_cache = None
+        self._bound_svs = set()
 
         # Update width when beats or zoom changes
         self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width)
@@ -73,8 +74,6 @@ class PianoRoll(Widget):
         vx, vy = 0, 0
         vw, vh = self.width, self.height
         x_res, y_res = False, False
-
-        if not hasattr(self, '_bound_svs'): self._bound_svs = set()
 
         curr = self.parent
         while curr:
@@ -153,13 +152,13 @@ class PianoRoll(Widget):
 
             if black_keys_vertices:
                 Color(0.15, 0.15, 0.17, 1)
-                Mesh(vertices=black_keys_vertices, mode='lines')
+                Mesh(vertices=black_keys_vertices, indices=list(range(len(black_keys_vertices)//4)), mode='lines')
             if white_keys_vertices:
                 Color(0.2, 0.2, 0.22, 1)
-                Mesh(vertices=white_keys_vertices, mode='lines')
+                Mesh(vertices=white_keys_vertices, indices=list(range(len(white_keys_vertices)//4)), mode='lines')
             if octave_vertices:
                 Color(0.8, 0.8, 0.8, 0.6)
-                Mesh(vertices=octave_vertices, mode='lines')
+                Mesh(vertices=octave_vertices, indices=list(range(len(octave_vertices)//4)), mode='lines')
 
             # Vertical grid lines
             major_vertices = []
@@ -179,10 +178,10 @@ class PianoRoll(Widget):
 
             if major_vertices:
                 Color(0.8, 0.8, 0.8, 0.8)
-                Mesh(vertices=major_vertices, mode='lines')
+                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
             if minor_vertices:
                 Color(0.5, 0.5, 0.5, 0.4)
-                Mesh(vertices=minor_vertices, mode='lines')
+                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
 
             PopMatrix()
 
@@ -272,12 +271,13 @@ class PianoRoll(Widget):
 
                 # Execute batched note draws
                 for color, vertices in note_mesh_data.items():
-                    Color(*color)
-                    Mesh(vertices=vertices, mode='triangles')
+                    if vertices:
+                        Color(*color)
+                        Mesh(vertices=vertices, indices=list(range(len(vertices)//4)), mode='triangles')
 
                 if selection_outline_vertices:
                     Color(1, 1, 1, 1)  # White outline
-                    Mesh(vertices=selection_outline_vertices, mode='lines')
+                    Mesh(vertices=selection_outline_vertices, indices=list(range(len(selection_outline_vertices)//4)), mode='lines')
 
                 PopMatrix()
 

@@ -18,7 +18,7 @@ import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
+from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
 import copy
 import mido

@@ -69,54 +69,46 @@ class PianoRoll(Widget):
         return self._color_cache[velocity]
 
     def _get_viewport(self):
-        """Calculates the visible viewport based on the parent ScrollView."""
-        viewport_x = 0
-        viewport_y = 0
-        viewport_w = self.width
-        viewport_h = self.height
+        """Calculates the visible viewport by aggregating offsets from all parent ScrollViews."""
+        vx, vy = 0, 0
+        vw, vh = self.width, self.height
+        x_res, y_res = False, False
 
-        parent = self.parent
+        if not hasattr(self, '_bound_svs'): self._bound_svs = set()
 
-        # Robustly find the parent ScrollView
-        sv = None
-        curr = parent
+        curr = self.parent
         while curr:
             if isinstance(curr, ScrollView):
-                sv = curr
-                break
+                # Bind to all relevant ScrollViews to ensure updates on any scroll axis
+                if id(curr) not in self._bound_svs:
+                    curr.bind(scroll_x=self.redraw, scroll_y=self.redraw)
+                    self._bound_svs.add(id(curr))
+
+                if curr.do_scroll_x and not x_res:
+                    mw = max(0, self.width - curr.width)
+                    if mw > 0:
+                        vx = curr.scroll_x * mw
+                        vw = curr.width
+                        x_res = True
+
+                if curr.do_scroll_y and not y_res:
+                    mh = max(0, self.height - curr.height)
+                    if mh > 0:
+                        vy = curr.scroll_y * mh
+                        vh = curr.height
+                        y_res = True
             curr = curr.parent
 
-        if sv:
-            if not hasattr(self, '_sv_bound') or self._sv_bound is not sv:
-                # Unbind from old one if it changed
-                if hasattr(self, '_sv_bound') and self._sv_bound:
-                    try: self._sv_bound.unbind(scroll_x=self.redraw, scroll_y=self.redraw)
-                    except: pass
-                sv.bind(scroll_x=self.redraw, scroll_y=self.redraw)
-                self._sv_bound = sv
-
-            self._scroll_view_cache = sv
-            mw = max(0, self.width - sv.width)
-            mh = max(0, self.height - sv.height)
-            viewport_x = sv.scroll_x * mw if mw > 0 else 0
-            viewport_y = sv.scroll_y * mh if mh > 0 else 0
-            viewport_w = sv.width
-            viewport_h = sv.height
-        else:
-            self._scroll_view_cache = None
-            self._sv_bound = None
-
-        return viewport_x, viewport_y, viewport_w, viewport_h
+        return vx, vy, vw, vh
 
     def draw(self, *args):
-        if not self.canvas:
+        if not self.canvas or not self.parent:
             return
 
         self.canvas.before.clear()
         self.canvas.clear()
 
         # Performance Optimization: Use a cached set for O(1) selection lookup.
-        # We only rebuild it if needed.
         if not hasattr(self, '_selected_ids_cache') or self._selected_ids_cache is None:
             self._selected_ids_cache = {id(n) for n in self.selected_notes}
             if self.editor and self.editor.selected_note:
@@ -124,21 +116,19 @@ class PianoRoll(Widget):
 
         selected_ids = self._selected_ids_cache
 
-        # Performance Optimization: Calculate visible viewport to skip rendering non-visible notes.
-        # This is crucial for long tracks with many notes to prevent UI thread freezes.
+        # Performance Optimization: Calculate visible viewport across nested ScrollViews.
         viewport_x, viewport_y, viewport_w, viewport_h = self._get_viewport()
 
-        # Robustness: ensure we have a valid viewport
-        viewport_w = max(viewport_w, 1)
-        viewport_h = max(viewport_h, 1)
+        # Guard against invalid dimensions
+        if viewport_w <= 0 or viewport_h <= 0 or self.pixels_per_beat <= 0 or self.note_height <= 0:
+            return
 
         with self.canvas.before:
             PushMatrix()
-            # Transformation to local coordinates
-            Translate(self.x, self.y, 0)
+            Translate(*self.pos, 0)
 
             Color(0.1, 0.1, 0.12, 1)
-            # Draw visible background (account for viewport and local origin)
+            # Only draw background for the visible area
             Rectangle(pos=(viewport_x, viewport_y), size=(viewport_w, viewport_h))
 
             # --- Optimized Grid using Mesh ---
@@ -146,7 +136,6 @@ class PianoRoll(Widget):
             white_keys_vertices = []
             octave_vertices = []
 
-            # Optimization: Only draw visible horizontal grid lines
             start_pitch = max(0, int(viewport_y / self.note_height))
             end_pitch = min(127, int((viewport_y + viewport_h) / self.note_height) + 1)
 
@@ -173,14 +162,11 @@ class PianoRoll(Widget):
                 Mesh(vertices=octave_vertices, mode='lines')
 
             # Vertical grid lines
-            # Performance Optimization: Only draw visible grid lines (and clip them vertically)
             major_vertices = []
             minor_vertices = []
 
-            start_beat = int(viewport_x / self.pixels_per_beat)
-            end_beat = int((viewport_x + viewport_w) / self.pixels_per_beat) + 1
-            start_beat = max(0, start_beat)
-            end_beat = min(int(self.total_beats), end_beat)
+            start_beat = max(0, int(viewport_x / self.pixels_per_beat))
+            end_beat = min(int(self.total_beats), int((viewport_x + viewport_w) / self.pixels_per_beat) + 1)
 
             y1, y2 = viewport_y, viewport_y + viewport_h
 
@@ -204,12 +190,8 @@ class PianoRoll(Widget):
         if isinstance(self.track, MidiTrack) and self.track.events:
             with self.canvas:
                 PushMatrix()
-                Translate(self.x, self.y, 0)
+                Translate(*self.pos, 0)
 
-                # Performance Optimization: Use binary search to find starting events
-                # We need events that could reach viewport_x. Since events are sorted by start_time,
-                # we search for events starting at or after (viewport_x / pixels_per_beat) - max_note_len.
-                # Assuming a safe max note length of 64 beats for clipping.
                 search_beat = max(0, (viewport_x / self.pixels_per_beat) - 64)
                 start_idx = bisect.bisect_left(self.track.events, search_beat, key=lambda e: e.start_time)
 

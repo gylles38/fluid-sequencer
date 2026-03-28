@@ -896,6 +896,7 @@ class PianoRollEditor(FloatingWindow):
     display_beat = NumericProperty(0.0)
     saved_scroll_x = NumericProperty(0.0)
     last_playback_state = StringProperty("stopped")
+    _scrolling_locked = False
 
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
@@ -936,8 +937,8 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        keyboard_sv.bind(scroll_y=lambda i, v: setattr(grid_viewer, 'scroll_y', v))
-        grid_viewer.bind(scroll_y=lambda i, v: setattr(keyboard_sv, 'scroll_y', v))
+        keyboard_sv.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(keyboard_sv, grid_viewer, v))
+        grid_viewer.bind(scroll_y=lambda i, v: self._sync_vertical_scrolls(grid_viewer, keyboard_sv, v))
 
         self.ids.piano_keyboard.height = self.ids.grid_viewer.grid.height
         self.ids.grid_viewer.grid.bind(height=self.ids.piano_keyboard.setter('height'))
@@ -1431,6 +1432,13 @@ class PianoRollEditor(FloatingWindow):
         else:
             self.selected_note = None
             self.selected_event = None
+
+    def _sync_vertical_scrolls(self, source_sv, target_sv, value):
+        """Helper to synchronize vertical scrolling between two ScrollViews."""
+        if not self._scrolling_locked:
+            self._scrolling_locked = True
+            target_sv.scroll_y = value
+            self._scrolling_locked = False
 
     def _pitch_to_note_name(self, pitch) -> str:
         """Converts a MIDI pitch number to its note name (e.g., 60 -> C4)."""

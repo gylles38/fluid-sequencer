@@ -131,22 +131,31 @@ class PianoRoll(Widget):
                 PushMatrix()
                 Translate(self.x, self.y)
 
-                # Performance optimization: use viewport clipping if parent is a ScrollView
-                scroll_view = None
+                # Performance optimization: use viewport clipping by searching for
+                # horizontal and vertical scroll containers in the parent hierarchy.
+                h_scroll = None
+                v_scroll = None
                 curr = self.parent
                 while curr:
                     if isinstance(curr, ScrollView):
-                        scroll_view = curr
-                        break
+                        if curr.do_scroll_x and not h_scroll:
+                            h_scroll = curr
+                        if curr.do_scroll_y and not v_scroll:
+                            v_scroll = curr
                     curr = curr.parent
 
-                if scroll_view:
-                    view_x = scroll_view.scroll_x * (self.width - scroll_view.width)
-                    view_w = scroll_view.width
-                    view_y = scroll_view.scroll_y * (self.height - scroll_view.height)
-                    view_h = scroll_view.height
+                # Calculate visible area
+                if h_scroll:
+                    view_x = h_scroll.scroll_x * max(0, self.width - h_scroll.width)
+                    view_w = h_scroll.width
                 else:
-                    view_x, view_y, view_w, view_h = 0, 0, self.width, self.height
+                    view_x, view_w = 0, self.width
+
+                if v_scroll:
+                    view_y = v_scroll.scroll_y * max(0, self.height - v_scroll.height)
+                    view_h = v_scroll.height
+                else:
+                    view_y, view_h = 0, self.height
 
                 # Use a set of IDs for O(1) selection lookup
                 sel_ids = self.selected_note_ids

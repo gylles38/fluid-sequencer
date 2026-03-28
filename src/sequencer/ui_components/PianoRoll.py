@@ -99,6 +99,9 @@ class PianoRoll(Widget):
         return viewport_x, viewport_y, viewport_w, viewport_h
 
     def draw(self, *args):
+        if not self.canvas:
+            return
+
         self.canvas.before.clear()
         self.canvas.clear()
 
@@ -115,9 +118,17 @@ class PianoRoll(Widget):
         # This is crucial for long tracks with many notes to prevent UI thread freezes.
         viewport_x, viewport_y, viewport_w, viewport_h = self._get_viewport()
 
+        # Robustness: ensure we have a valid viewport
+        viewport_w = max(viewport_w, 1)
+        viewport_h = max(viewport_h, 1)
+
         with self.canvas.before:
+            PushMatrix()
+            Translate(self.x, self.y, 0)
+
             Color(0.1, 0.1, 0.12, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            # Optimization: Only draw visible background
+            Rectangle(pos=(viewport_x, viewport_y), size=(viewport_w, viewport_h))
 
             # --- Optimized Grid using Mesh ---
             black_keys_vertices = []
@@ -142,16 +153,16 @@ class PianoRoll(Widget):
 
             if black_keys_vertices:
                 Color(0.15, 0.15, 0.17, 1)
-                Mesh(vertices=black_keys_vertices, indices=list(range(len(black_keys_vertices)//4)), mode='lines')
+                Mesh(vertices=black_keys_vertices, mode='lines')
             if white_keys_vertices:
                 Color(0.2, 0.2, 0.22, 1)
-                Mesh(vertices=white_keys_vertices, indices=list(range(len(white_keys_vertices)//4)), mode='lines')
+                Mesh(vertices=white_keys_vertices, mode='lines')
             if octave_vertices:
                 Color(0.8, 0.8, 0.8, 0.6)
-                Mesh(vertices=octave_vertices, indices=list(range(len(octave_vertices)//4)), mode='lines')
+                Mesh(vertices=octave_vertices, mode='lines')
 
             # Vertical grid lines
-            # Performance Optimization: Only draw visible grid lines
+            # Performance Optimization: Only draw visible grid lines (and clip them vertically)
             major_vertices = []
             minor_vertices = []
 
@@ -160,28 +171,35 @@ class PianoRoll(Widget):
             start_beat = max(0, start_beat)
             end_beat = min(int(self.total_beats), end_beat)
 
+            y1, y2 = viewport_y, viewport_y + viewport_h
+
             for i in range(start_beat, end_beat + 1):
                 x_pos = i * self.pixels_per_beat
                 if i % self.beat_per_measure == 0:
-                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    major_vertices.extend([x_pos, y1, 0, 0, x_pos, y2, 0, 0])
                 else:
-                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
+                    minor_vertices.extend([x_pos, y1, 0, 0, x_pos, y2, 0, 0])
 
             if major_vertices:
                 Color(0.8, 0.8, 0.8, 0.8)
-                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
+                Mesh(vertices=major_vertices, mode='lines')
             if minor_vertices:
                 Color(0.5, 0.5, 0.5, 0.4)
-                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
+                Mesh(vertices=minor_vertices, mode='lines')
+
+            PopMatrix()
 
         # --- Notes ---
         if isinstance(self.track, MidiTrack) and self.track.events:
             with self.canvas:
+                PushMatrix()
+                Translate(self.x, self.y, 0)
+
                 # Performance Optimization: Use binary search to find starting events
                 # We need events that could reach viewport_x. Since events are sorted by start_time,
                 # we search for events starting at or after (viewport_x / pixels_per_beat) - max_note_len.
-                # Assuming a safe max note length of 32 beats for clipping.
-                search_beat = max(0, (viewport_x / self.pixels_per_beat) - 32)
+                # Assuming a safe max note length of 64 beats for clipping.
+                search_beat = max(0, (viewport_x / self.pixels_per_beat) - 64)
                 start_idx = bisect.bisect_left(self.track.events, search_beat, key=lambda e: e.start_time)
 
                 selection_outline_vertices = []
@@ -262,16 +280,13 @@ class PianoRoll(Widget):
                 # Execute batched note draws
                 for color, vertices in note_mesh_data.items():
                     Color(*color)
-                    # Optimization: generate indices once and reuse or use direct length
-                    indices = range(len(vertices) // 4)
-                    Mesh(vertices=vertices, indices=list(indices), mode='triangles')
+                    Mesh(vertices=vertices, mode='triangles')
 
                 if selection_outline_vertices:
                     Color(1, 1, 1, 1)  # White outline
-                    indices = range(len(selection_outline_vertices) // 4)
-                    Mesh(vertices=selection_outline_vertices,
-                         indices=list(indices),
-                         mode='lines')
+                    Mesh(vertices=selection_outline_vertices, mode='lines')
+
+                PopMatrix()
 
 
 class PianoRollViewer(ScrollView):

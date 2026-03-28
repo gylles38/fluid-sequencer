@@ -469,6 +469,7 @@ class EditableMidiGrid(PianoRoll):
         if not self.editor or not self.editor.track_copy:
             return
 
+        newly_selected_ids = set()
         newly_selected = []
         x1, y1 = self._selection_start_pos
         x2, y2 = local_pos
@@ -495,13 +496,13 @@ class EditableMidiGrid(PianoRoll):
 
                 if sel_x < (note_x + note_width) and (sel_x + sel_w) > note_x and \
                     sel_y < (note_y + self.note_height) and (sel_y + sel_h) > note_y:
+                    newly_selected_ids.add(id(note))
                     newly_selected.append(note)
 
-        # Performance Optimization: Avoid full list comparison if lengths differ
-        if len(newly_selected) != len(self.editor.selected_notes) or newly_selected != self.editor.selected_notes:
+        # Performance Optimization: Use ID sets for O(S) selection comparison
+        current_ids = {id(n) for n in self.editor.selected_notes}
+        if newly_selected_ids != current_ids:
             self.editor.selected_notes = newly_selected
-            # We don't call redraw() here; the property change will trigger it if bound.
-            # PianoRoll already binds selected_notes to redraw.
 
     def on_touch_up(self, touch) -> None | bool:
         if touch.grab_current is not self:

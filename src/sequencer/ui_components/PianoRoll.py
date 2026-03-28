@@ -78,6 +78,9 @@ class PianoRoll(Widget):
 
         while parent:
             if isinstance(parent, ScrollView):
+                if not self._scroll_view_cache:
+                    # First time finding it, bind to its scroll properties
+                    parent.bind(scroll_x=self.redraw, scroll_y=self.redraw)
                 self._scroll_view_cache = parent
                 viewport_x = parent.scroll_x * max(0, self.width - parent.width)
                 viewport_y = parent.scroll_y * max(0, self.height - parent.height)
@@ -174,6 +177,8 @@ class PianoRoll(Widget):
                 start_idx = bisect.bisect_left(self.track.events, search_beat, key=lambda e: e.start_time)
 
                 selection_outline_vertices = []
+                note_mesh_data = {} # Color -> Vertices
+
                 for i in range(start_idx, len(self.track.events)):
                     event = self.track.events[i]
                     note_x = event.start_time * self.pixels_per_beat
@@ -195,23 +200,41 @@ class PianoRoll(Widget):
 
                         note_color = self._velocity_to_color(note.velocity)
 
-                        # Draw the main note body
-                        Color(*note_color)
-                        Rectangle(pos=(note_x, note_y), size=(note_width, self.note_height))
+                        # Performance Optimization: Batch note rendering using Mesh
+                        # We group by color to minimize state changes
+                        if note_color not in note_mesh_data:
+                            note_mesh_data[note_color] = []
+
+                        x, y, w, h = note_x, note_y, note_width, self.note_height
+                        # Two triangles per rectangle
+                        # Triangle 1: (x,y), (x+w,y), (x+w, y+h)
+                        # Triangle 2: (x,y), (x+w,y+h), (x, y+h)
+                        note_mesh_data[note_color].extend([
+                            x, y, 0, 0, x + w, y, 0, 0, x + w, y + h, 0, 0,
+                            x, y, 0, 0, x + w, y + h, 0, 0, x, y + h, 0, 0
+                        ])
 
                         # Draw resize handles if the note is wide enough
                         if note_width > dp(16):
                             handle_width = min(dp(8), note_width / 4)
                             handle_color = (min(1.0, note_color[0] * 1.2), min(1.0, note_color[1] * 1.2), min(1.0, note_color[2] * 1.2), 1.0)
-                            Color(*handle_color)
+                            if handle_color not in note_mesh_data:
+                                note_mesh_data[handle_color] = []
+
                             # Left handle
-                            Rectangle(pos=(note_x, note_y), size=(handle_width, self.note_height))
+                            note_mesh_data[handle_color].extend([
+                                x, y, 0, 0, x + handle_width, y, 0, 0, x + handle_width, y + h, 0, 0,
+                                x, y, 0, 0, x + handle_width, y + h, 0, 0, x, y + h, 0, 0
+                            ])
                             # Right handle
-                            Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, self.note_height))
+                            rx = x + w - handle_width
+                            note_mesh_data[handle_color].extend([
+                                rx, y, 0, 0, rx + handle_width, y, 0, 0, rx + handle_width, y + h, 0, 0,
+                                rx, y, 0, 0, rx + handle_width, y + h, 0, 0, rx, y + h, 0, 0
+                            ])
 
                         # Performance Optimization: Batch selected note outlines using vertices
                         if id(note) in selected_ids:
-                            x, y, w, h = note_x, note_y, note_width, self.note_height
                             # 4 lines per rectangle (8 points total for 'lines' mode)
                             selection_outline_vertices.extend([
                                 x, y, 0, 0, x + w, y, 0, 0,
@@ -219,6 +242,11 @@ class PianoRoll(Widget):
                                 x + w, y + h, 0, 0, x, y + h, 0, 0,
                                 x, y + h, 0, 0, x, y, 0, 0
                             ])
+
+                # Execute batched note draws
+                for color, vertices in note_mesh_data.items():
+                    Color(*color)
+                    Mesh(vertices=vertices, indices=list(range(len(vertices)//4)), mode='triangles')
 
                 if selection_outline_vertices:
                     Color(1, 1, 1, 1)  # White outline

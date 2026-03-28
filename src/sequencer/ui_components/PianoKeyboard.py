@@ -50,6 +50,9 @@ class PianoKeyboard(Widget):
         parent = self.parent
         while parent:
             if isinstance(parent, ScrollView):
+                if not hasattr(self, '_sv_bound'):
+                    parent.bind(scroll_y=self._redraw_on_schedule)
+                    self._sv_bound = True
                 viewport_y = parent.scroll_y * max(0, self.height - parent.height)
                 viewport_h = parent.height
                 break

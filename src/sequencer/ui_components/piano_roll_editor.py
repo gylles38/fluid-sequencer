@@ -125,8 +125,6 @@ class EditableMidiGrid(PianoRoll):
                     self._selection_border.rectangle = (self._selection_start_pos[0], self._selection_start_pos[1], width, height)
 
                 # Performance Optimization: Throttled selection recalculation.
-                # Update the visual rectangle in real-time, but only recalculate hit notes
-                # occasionally to prevent UI freezing on dense tracks.
                 if self._selection_update_event:
                     self._selection_update_event.cancel()
                 self._selection_update_event = Clock.schedule_once(lambda dt: self._update_selection_logic(local_pos), 0.02)
@@ -135,6 +133,9 @@ class EditableMidiGrid(PianoRoll):
 
         if self._dragged_note:
             if self._drag_mode == 'move':
+                # Performance Optimization: Use Virtual Dragging.
+                # Instead of modifying the model on every mouse move (which triggers O(N*S) redraws
+                # and expensive sorting), we only update the visual deltas.
                 new_x = local_pos[0] - self._drag_offset[0]
                 new_y = local_pos[1] - self._drag_offset[1]
 
@@ -147,27 +148,19 @@ class EditableMidiGrid(PianoRoll):
 
                 try:
                     master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
-                except (StopIteration, AttributeError):
-                    # Fallback for single note move if _multi_drag_data is missing
-                    self._drag_event.start_time = new_beat
-                    self._dragged_note.pitch = new_pitch
+                except (StopIteration, AttributeError, ValueError):
+                    self.drag_delta_beat = new_beat - (self._drag_event.start_time if self._drag_event else 0)
+                    self.drag_delta_pitch = new_pitch - self._dragged_note.pitch
                 else:
-                    delta_beat = new_beat - master_data['original_start']
-                    delta_pitch = new_pitch - master_data['original_pitch']
+                    self.drag_delta_beat = new_beat - master_data['original_start']
+                    self.drag_delta_pitch = new_pitch - master_data['original_pitch']
 
                     earliest_start = min(item['original_start'] for item in self._multi_drag_data)
-                    if earliest_start + delta_beat < 0:
-                        delta_beat = -earliest_start
-
-                    for item in self._multi_drag_data:
-                        target_new_beat = item['original_start'] + delta_beat
-                        target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
-                        new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
-                        item['parent_event'] = new_parent
-                        if item['note'] is self._dragged_note:
-                            self._drag_event = new_parent
+                    if earliest_start + self.drag_delta_beat < 0:
+                        self.drag_delta_beat = -earliest_start
 
             elif self._drag_mode == 'resize_end':
+                # Note: Resize is less expensive but could still benefit from debouncing if needed.
                 note_start_x = self._drag_event.start_time * self.pixels_per_beat
                 new_width = local_pos[0] - note_start_x
                 new_duration: float = max(0.1, round((new_width / self.pixels_per_beat) * 4) / 4)
@@ -512,41 +505,60 @@ class EditableMidiGrid(PianoRoll):
             self._selection_update_event.cancel()
             self._selection_update_event = None
 
-        if self._drag_mode == 'select':
-            # Ensure final selection state is captured
-            self._update_selection_logic(self.to_local(*touch.pos))
+        try:
+            if self._drag_mode == 'select':
+                # Ensure final selection state is captured
+                self._update_selection_logic(self.to_local(*touch.pos))
 
-            if self._selection_group:
-                try:
-                    self.canvas.after.remove(self._selection_group)
-                except ValueError:
-                    pass
-                self._selection_group = None
-                self._selection_rect = None
-            # Record the state after the selection is finalized.
-            self.editor._record_state()
+                if self._selection_group:
+                    try:
+                        self.canvas.after.remove(self._selection_group)
+                    except (ValueError, AttributeError):
+                        pass
+                    self._selection_group = None
+                    self._selection_rect = None
+                # Record the state after the selection is finalized.
+                self.editor._record_state()
 
-        if self._dragged_note:
-            if hasattr(self, '_multi_drag_data'):
-                self._multi_drag_data.clear()
+            if self._dragged_note:
+                if self._drag_mode == 'move':
+                    # Apply virtual deltas to the model now that the drag is finished
+                    if hasattr(self, '_multi_drag_data') and self._multi_drag_data:
+                        for item in self._multi_drag_data:
+                            target_new_beat = item['original_start'] + self.drag_delta_beat
+                            target_new_pitch = max(0, min(127, int(item['original_pitch'] + self.drag_delta_pitch)))
+                            new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
+                            item['parent_event'] = new_parent
+                    else:
+                        # Single note fallback
+                        target_new_beat = self._drag_event.start_time + self.drag_delta_beat
+                        target_new_pitch = max(0, min(127, int(self._dragged_note.pitch + self.drag_delta_pitch)))
+                        self._move_note_logic(self._dragged_note, target_new_beat, target_new_pitch, self._drag_event)
 
-            if self._selection_initial_states:
-                self._apply_multi_selection_changes()
-                self._selection_initial_states = None
+                    self.drag_delta_beat = 0
+                    self.drag_delta_pitch = 0
+                    self.editor.track_copy.events.sort(key=lambda e: e.start_time)
 
-            if self._drag_mode in ('resize_start', 'resize_end', 'move'):
-                Window.set_system_cursor('arrow')
-            if self._drag_mode == 'move':
-                # Tri final pour s'assurer que les événements déplacés sont dans le bon ordre
-                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
-            self._dragged_note = None
-            self._drag_event = None
+                if hasattr(self, '_multi_drag_data'):
+                    self._multi_drag_data.clear()
 
-            self.editor._record_state()
+                if self._selection_initial_states:
+                    self._apply_multi_selection_changes()
+                    self._selection_initial_states = None
 
-        self._drag_mode = None
-        touch.ungrab(self)
-        self.redraw() # Redessine la grille pour afficher l'état final
+                if self._drag_mode in ('resize_start', 'resize_end', 'move'):
+                    self._set_system_cursor('arrow')
+
+                self._dragged_note = None
+                self._drag_event = None
+
+                self.editor._record_state()
+
+        finally:
+            self._drag_mode = None
+            touch.ungrab(self)
+            self.redraw()
+
         return True
 
     def _apply_multi_selection_changes(self) -> None:
@@ -1354,11 +1366,11 @@ class PianoRollEditor(FloatingWindow):
 
     def _apply_state(self, state) -> None:
         """Applies a given state (events and selection) to the editor."""
-        # Reconstruct the events and notes from the snapshot.
+        # Reconstruct the events and notes from the compact tuple snapshot.
         new_events = []
-        for event_data in state['events']:
-            new_notes: list[Note] = [Note(**note_data) for note_data in event_data['notes']]
-            new_events.append(Event(start_time=float(event_data['start_time']), notes=new_notes))
+        for start_time, notes_data in state['events']:
+            new_notes = [Note(pitch=n[0], velocity=n[1], duration=n[2]) for n in notes_data]
+            new_events.append(Event(start_time=start_time, notes=new_notes))
 
         self.track_copy.events = new_events
 
@@ -1503,34 +1515,30 @@ class PianoRollEditor(FloatingWindow):
             self._record_state_event = Clock.schedule_once(lambda dt: self._do_record_state(), 0.5)
 
     def _do_record_state(self) -> None:
-        # Performance Optimization: Build events_snapshot and selection_ids in a single pass
-        events_snapshot = []
-        selection_ids = []
-
+        # Performance Optimization: Use a compact representation for snapshots.
+        # This reduces object allocation and GC pressure on tracks with many notes.
         if not self.track_copy:
             return
 
+        events_snapshot = []
+        selection_ids = []
         selected_ids = {id(n) for n in self.selected_notes}
 
+        # Tuple-based snapshot is significantly faster to create and store
         for event_idx, event in enumerate(self.track_copy.events):
             notes_snapshot = []
             for note_idx, note in enumerate(event.notes):
-                notes_snapshot.append({
-                    'pitch': int(note.pitch),
-                    'velocity': int(note.velocity),
-                    'duration': float(note.duration)
-                })
+                # (pitch, velocity, duration)
+                notes_snapshot.append((int(note.pitch), int(note.velocity), float(note.duration)))
                 if id(note) in selected_ids:
                     selection_ids.append((event_idx, note_idx))
 
-            events_snapshot.append({
-                'start_time': float(event.start_time),
-                'notes': notes_snapshot
-            })
+            # (start_time, notes_list)
+            events_snapshot.append((float(event.start_time), tuple(notes_snapshot)))
 
         state = {
-            'events': events_snapshot,
-            'selection': selection_ids
+            'events': tuple(events_snapshot),
+            'selection': tuple(selection_ids)
         }
         self.history.record_state(state)
         self._update_undo_redo_buttons_state()

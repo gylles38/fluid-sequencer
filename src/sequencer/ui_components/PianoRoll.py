@@ -19,6 +19,8 @@ class PianoRoll(Widget):
     note_height = NumericProperty(dp(12))
     editor = ObjectProperty(None, allownone=True)
     selected_notes = ListProperty([])
+    drag_delta_beat = NumericProperty(0.0)
+    drag_delta_pitch = NumericProperty(0)
 
     def __init__(self, **kwargs):
         super(PianoRoll, self).__init__(**kwargs)
@@ -30,7 +32,8 @@ class PianoRoll(Widget):
         # Update width when beats or zoom changes
         self.bind(total_beats=self._update_width, pixels_per_beat=self._update_width)
         # Redraw when state or geometry changes (debounced to avoid infinite loops)
-        self.bind(track=self.redraw, pos=self.redraw, size=self.redraw)
+        self.bind(track=self.redraw, pos=self.redraw, size=self.redraw,
+                  drag_delta_beat=self.redraw, drag_delta_pitch=self.redraw)
         self.bind(selected_notes=self._on_selected_notes_change)
         self._update_width()
         self.redraw()
@@ -78,16 +81,21 @@ class PianoRoll(Widget):
 
         while parent:
             if isinstance(parent, ScrollView):
-                if not self._scroll_view_cache:
-                    # First time finding it, bind to its scroll properties
+                if self._scroll_view_cache is not parent:
+                    # First time finding it (or finding a new one), bind to its scroll properties
                     parent.bind(scroll_x=self.redraw, scroll_y=self.redraw)
                 self._scroll_view_cache = parent
-                viewport_x = parent.scroll_x * max(0, self.width - parent.width)
-                viewport_y = parent.scroll_y * max(0, self.height - parent.height)
+
+                # Use current dimensions to calculate precise viewport
+                mw = max(0, self.width - parent.width)
+                mh = max(0, self.height - parent.height)
+                viewport_x = parent.scroll_x * mw if mw > 0 else 0
+                viewport_y = parent.scroll_y * mh if mh > 0 else 0
                 viewport_w = parent.width
                 viewport_h = parent.height
                 break
             parent = parent.parent
+
         return viewport_x, viewport_y, viewport_w, viewport_h
 
     def draw(self, *args):
@@ -188,7 +196,15 @@ class PianoRoll(Widget):
                         break
 
                     for note in event.notes:
-                        note_y = note.pitch * self.note_height
+                        is_selected = id(note) in selected_ids
+
+                        # Apply virtual dragging deltas for selected notes
+                        eff_start_time = event.start_time + (self.drag_delta_beat if is_selected else 0)
+                        eff_pitch = note.pitch + (self.drag_delta_pitch if is_selected else 0)
+
+                        # Calculate screen positions using effective properties
+                        note_x = eff_start_time * self.pixels_per_beat
+                        note_y = eff_pitch * self.note_height
                         note_width = note.duration * self.pixels_per_beat
 
                         if note_x + note_width < viewport_x:
@@ -246,12 +262,15 @@ class PianoRoll(Widget):
                 # Execute batched note draws
                 for color, vertices in note_mesh_data.items():
                     Color(*color)
-                    Mesh(vertices=vertices, indices=list(range(len(vertices)//4)), mode='triangles')
+                    # Optimization: generate indices once and reuse or use direct length
+                    indices = range(len(vertices) // 4)
+                    Mesh(vertices=vertices, indices=list(indices), mode='triangles')
 
                 if selection_outline_vertices:
                     Color(1, 1, 1, 1)  # White outline
+                    indices = range(len(selection_outline_vertices) // 4)
                     Mesh(vertices=selection_outline_vertices,
-                         indices=list(range(len(selection_outline_vertices)//4)),
+                         indices=list(indices),
                          mode='lines')
 
 

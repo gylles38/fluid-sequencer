@@ -1,4 +1,3 @@
-from turtle import position
 from .floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.app import App
@@ -109,40 +108,10 @@ class EditableMidiGrid(PianoRoll):
         if touch.grab_current is not self:
             return super(EditableMidiGrid, self).on_touch_move(touch)
 
-        local_pos = self.to_local(*touch.pos)
-        
-        if self._drag_mode == 'move' and self._dragged_note:
-            new_x = local_pos[0] - self._drag_offset[0]
-            new_beat = new_x / self.pixels_per_beat
-            new_pitch = int(local_pos[1] / self.note_height)
-
-            try:
-                master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
-            except (StopIteration, AttributeError):
-                print("Error: Drag data desynchronized. Cancelling drag.")
-                touch.ungrab(self)
-                self._dragged_note = None
-                self._drag_mode = None
-                return True
-            delta_beat = new_beat - master_data['original_start']
-            delta_pitch = new_pitch - master_data['original_pitch']
-
-            earliest_start = min(item['original_start'] for item in self._multi_drag_data)
-            if earliest_start + delta_beat < 0:
-                delta_beat = -earliest_start
-
-            for item in self._multi_drag_data:
-                target_new_beat = item['original_start'] + delta_beat
-                target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
-
-                # MODIFICATION ICI : On récupère le nouvel événement parent
-                # et on utilise l'identité 'is' pour être certain de ne pas se tromper de note
-                new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
-                item['parent_event'] = new_parent               
-
-            self.editor.is_dirty = True
-            self.draw()
-            return True 
+        # Regression Fix: Use touch.pos directly. In a child of RelativeLayout,
+        # touch.pos is already transformed to parent coordinates. Since the grid
+        # is at (0,0), this is local to the grid.
+        local_pos = touch.pos
         
         if self._drag_mode == 'select':
             if self._selection_rect:
@@ -170,12 +139,42 @@ class EditableMidiGrid(PianoRoll):
                 self.draw()
             return True
 
-
         if self._dragged_note:
-            if self._drag_mode == 'resize_end':
+            if self._drag_mode == 'move':
+                new_x = local_pos[0] - self._drag_offset[0]
+                new_y = local_pos[1] - self._drag_offset[1]
+
+                new_beat = new_x / self.pixels_per_beat
+                new_pitch = int(new_y / self.note_height)
+
+                # Quantize for visual feedback and snap
+                new_beat = round(new_beat * 4) / 4
+                new_pitch = max(0, min(127, new_pitch))
+
+                try:
+                    master_data = next(d for d in self._multi_drag_data if d['note'] is self._dragged_note)
+                except (StopIteration, AttributeError):
+                    # Fallback for single note move if _multi_drag_data is missing
+                    self._drag_event.start_time = new_beat
+                    self._dragged_note.pitch = new_pitch
+                else:
+                    delta_beat = new_beat - master_data['original_start']
+                    delta_pitch = new_pitch - master_data['original_pitch']
+
+                    earliest_start = min(item['original_start'] for item in self._multi_drag_data)
+                    if earliest_start + delta_beat < 0:
+                        delta_beat = -earliest_start
+
+                    for item in self._multi_drag_data:
+                        target_new_beat = item['original_start'] + delta_beat
+                        target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
+                        new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'])
+                        item['parent_event'] = new_parent
+
+            elif self._drag_mode == 'resize_end':
                 note_start_x = self._drag_event.start_time * self.pixels_per_beat
                 new_width = local_pos[0] - note_start_x
-                new_duration: float = max(0.1, round((new_width / self.pixels_per_beat) * 4) / 4) # Quantize to 16th notes
+                new_duration: float = max(0.1, round((new_width / self.pixels_per_beat) * 4) / 4)
                 self._dragged_note.duration = new_duration
 
             elif self._drag_mode == 'resize_start':
@@ -186,18 +185,11 @@ class EditableMidiGrid(PianoRoll):
                 if new_start_beat < note_end_time:
                     new_duration = note_end_time - new_start_beat
                     if new_duration >= 0.1:
-                        # --- Isolate the note from its original event ---
                         note_to_move = self._dragged_note
                         self._drag_event.notes.remove(note_to_move)
-
-                        # If the original event is now empty, remove it
                         if not self._drag_event.notes and not self._drag_event.cc_messages:
                             self.editor.track_copy.events.remove(self._drag_event)
-
-                        # Update the note's properties
                         note_to_move.duration = new_duration
-
-                        # Find or create a new event at the target beat
                         target_event = next((e for e in self.editor.track_copy.events if abs(e.start_time - new_start_beat) < 0.001), None)
                         if target_event:
                             if note_to_move not in target_event.notes:
@@ -205,25 +197,14 @@ class EditableMidiGrid(PianoRoll):
                         else:
                             target_event = Event(start_time=new_start_beat, notes=[note_to_move])
                             self.editor.track_copy.add_event(target_event)
-
-                        # Update the drag reference to the new event
                         self._drag_event = target_event
-
-            elif self._drag_mode == 'move':
-                new_x = local_pos[0] - self._drag_offset[0]
-                new_y = local_pos[1] - self._drag_offset[1]
-
-                # Quantize to 16th notes (4 positions per beat), same as resizing
-                new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
-                new_pitch: int = max(0, min(127, int(new_y / self.note_height)))
-
-                self._drag_event.start_time = new_beat
-                self._dragged_note.pitch = new_pitch
 
             self.editor.is_dirty = True
             self.draw()
             return True
-        return super(EditableMidiGrid, self).on_touch_move(touch)
+
+        # Regression Fix: Returning True if grabbed ensures the touch is consumed and not passed to ScrollView
+        return True
 
     def _move_note_logic(self, note, new_beat, new_pitch, source_event):
         track = self.editor.track_copy
@@ -272,10 +253,16 @@ class EditableMidiGrid(PianoRoll):
                     }
 
     def on_touch_down(self, touch) -> None | bool:
-        if not self.collide_point(*touch.pos):
+        # Regression Fix: Manual collision check against local coordinates.
+        # Since this widget is a child of a RelativeLayout, touch.pos is already
+        # relative to the parent's origin. Since the grid is at (0,0),
+        # touch.pos is already local to the grid.
+        if not (0 <= touch.x <= self.width and 0 <= touch.y <= self.height):
             return super(EditableMidiGrid, self).on_touch_down(touch)
 
-        local_pos = self.to_local(*touch.pos)
+        # Use touch.pos directly as it is already correctly transformed
+        # by the parent RelativeLayout.
+        local_pos = touch.pos
         clicked_beat = local_pos[0] / self.pixels_per_beat
         clicked_pitch = int(local_pos[1] / self.note_height)
 
@@ -305,6 +292,8 @@ class EditableMidiGrid(PianoRoll):
 
 
         if edit_mode == 'move':
+            # Rubber-band selection is only available in 'move' mode as requested.
+            # We first check for note clicks to prioritize direct editing.
             for event in reversed(track.events):
                 for note in reversed(event.notes):
                     note_x = event.start_time * self.pixels_per_beat
@@ -372,12 +361,12 @@ class EditableMidiGrid(PianoRoll):
                         return True
 
             # If no note was clicked, it's a click on an empty space.
-            # This action should clear any existing selection. To ensure the UI
-            # updates, we must re-assign the list, not clear it in-place.
+            # This action should clear any existing selection.
             if self.editor.selected_notes:
                 self.editor.selected_notes = []
+                self.editor._record_state()
 
-            # After clearing selection (if any), prepare for a potential rubber-band selection.
+            # Prepare for a potential rubber-band selection.
             self._drag_mode = 'select'
             self._selection_start_pos = local_pos
             self._selection_group = InstructionGroup()
@@ -518,7 +507,7 @@ class EditableMidiGrid(PianoRoll):
             new_event = Event(start_time=new_start_time, notes=[note])
             self.editor.track_copy.add_event(new_event)
 
-class EditablePianoRollViewer(ScrollView):
+class EditablePianoRollViewer(BoundedScrollView):
     editor = ObjectProperty()
     total_beats = NumericProperty(128.0)
     pixels_per_beat = NumericProperty(dp(100))
@@ -531,23 +520,43 @@ class EditablePianoRollViewer(ScrollView):
         self.size_hint_x = None
         self.do_scroll_x = False
         self.do_scroll_y = True
+
+        # Regression Fix: Wrapping the grid in a RelativeLayout container ensures
+        # it maintains stable local coordinates for drawing and touch processing,
+        # isolating it from ScrollView's internal coordinate shifts.
+        self.container = RelativeLayout(size_hint=(None, None))
+        self.add_widget(self.container)
+
         self.grid = EditableMidiGrid(editor=self.editor, track=self.track, total_beats=self.total_beats, pixels_per_beat=self.pixels_per_beat, note_height=self.note_height)
-        self.grid.editor = self.editor # Pass the editor instance to the grid
-        self.add_widget(self.grid)
-        self.grid.bind(width=self.setter('width'))
+        self.grid.editor = self.editor
+        self.container.add_widget(self.grid)
+
+        # Bind container size to grid, and viewer width to container
+        self.grid.bind(size=self.container.setter('size'))
+        self.container.bind(width=self.setter('width'))
 
     def on_touch_move(self, touch) -> bool | None:
-        # If the grid has grabbed the touch for a note drag/resize operation,
+        # If the grid has grabbed the touch for a selection or move operation,
         # we must not process it for scrolling. We consume the event by returning True.
         if touch.grab_current is self.grid:
             return True
         return super(EditablePianoRollViewer, self).on_touch_move(touch)
 
+    def on_touch_up(self, touch) -> bool | None:
+        # Regression Fix: Prevent vertical jumps or momentum scrolling on release
+        # when the interaction with the grid ends.
+        if touch.grab_current is self.grid:
+            return True
+        return super(EditablePianoRollViewer, self).on_touch_up(touch)
+
     def on_editor(self, i, v) -> None: self.grid.editor = v
     def on_track(self, i, v) -> None: self.grid.track = v
     def on_total_beats(self, i, v) -> None: self.grid.total_beats = v
     def on_pixels_per_beat(self, i, v) -> None: self.grid.pixels_per_beat = v
-    def on_note_height(self, i, v) -> None: self.grid.note_height = v
+    def on_note_height(self, i, v) -> None:
+        self.grid.note_height = v
+        # Regression Fix: Explicitly update the grid's height to match the full note range
+        self.grid.height = 128 * v
 
 
 # --- Builder String ---
@@ -805,7 +814,7 @@ Builder.load_string("""
                         pixels_per_beat: root.pixels_per_beat
                         note_height: root.note_height
                         bar_width: 0
-                        scroll_type: ['content']
+                        scroll_type: ['bars']
                         size_hint_y: 1
 
                     Widget:

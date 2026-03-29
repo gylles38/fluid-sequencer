@@ -873,8 +873,24 @@ class InputRoutingEditor(FloatingWindow):
         self.ids.grid.draw()
 
     def on_dismiss(self):
-        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
-        Window.unbind(on_key_down=self._on_key_down)
+        from kivy.logger import Logger
+        Logger.info(f"InputRoutingEditor: cleaning up {id(self)}")
+        try:
+            self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+            self.sequencer_layout.sequencer.unbind(current_routing_index=self.setter('current_routing_index'))
+            self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self.setter('end_pos_str'))
+        except Exception as e:
+            Logger.error(f"InputRoutingEditor: Error unbinding sequencer: {e}")
+
+        try:
+            Window.unbind(on_key_down=self._on_key_down)
+        except Exception as e:
+            Logger.error(f"InputRoutingEditor: Error unbinding keyboard: {e}")
+
+        if hasattr(self, '_playhead_event') and self._playhead_event:
+            self._playhead_event.cancel()
+            self._playhead_event = None
+
         super(InputRoutingEditor, self).on_dismiss()
 
     def dismiss(self, action=None, *args):

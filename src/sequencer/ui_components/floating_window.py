@@ -100,6 +100,8 @@ class FloatingWindow(RelativeLayout):
     min_height = NumericProperty(dp(250))
 
     def __init__(self, **kwargs):
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: __init__ {id(self)} (title={kwargs.get('title', 'Unknown')})")
         super().__init__(**kwargs)
         self._is_dragging = False
         self._is_resizing = False
@@ -120,7 +122,7 @@ class FloatingWindow(RelativeLayout):
 
     def _unlock_touch(self, dt):
         from kivy.logger import Logger
-        # Logger.info(f"FloatingWindow: {self.title} touch unlocked")
+        Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch unlocked")
         self._touch_lock = False
 
     def add_widget(self, widget, index=0, canvas=None):
@@ -141,7 +143,7 @@ class FloatingWindow(RelativeLayout):
             return False
 
         if getattr(self, '_touch_lock', False):
-            Logger.info(f"FloatingWindow: {self.title} touch rejected (locked)")
+            Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch rejected (locked)")
             return True
 
         if self.parent:
@@ -307,17 +309,23 @@ class FloatingWindow(RelativeLayout):
             self.is_maximized = False
 
     def dismiss(self, *args):
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: dismiss {self.title} ({id(self)})")
         if self.parent:
             self.parent.remove_widget(self)
         self.on_dismiss()
 
     def on_dismiss(self):
-        pass
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: on_dismiss {self.title} ({id(self)})")
 
     def on_open(self):
-        pass
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: on_open {self.title} ({id(self)})")
 
     def on_parent(self, widget, parent):
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: on_parent {self.title} ({id(self)}) parent={parent}")
         if parent:
             Clock.schedule_once(lambda dt: self.on_open(), 0)
 

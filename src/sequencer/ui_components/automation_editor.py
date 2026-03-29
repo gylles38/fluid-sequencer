@@ -983,15 +983,26 @@ class AutomationEditor(FloatingWindow):
 
     def on_dismiss(self):
         """Nettoyage des bindings et de l'horloge à la fermeture de l'éditeur."""
-        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+        from kivy.logger import Logger
+        Logger.info(f"AutomationEditor: cleaning up {id(self)}")
+
+        # Unbind sequencer properties
+        try:
+            self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+            self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self.setter('end_pos_str'))
+        except Exception as e:
+            Logger.error(f"AutomationEditor: Error unbinding sequencer: {e}")
 
         # 1. On libère le clavier
-        Window.unbind(on_key_down=self._on_key_down)
+        try:
+            Window.unbind(on_key_down=self._on_key_down)
+        except Exception as e:
+            Logger.error(f"AutomationEditor: Error unbinding keyboard: {e}")
         
         # 2. On arrête la mise à jour de la Playhead
-        if hasattr(self, '_playhead_event'):
+        if hasattr(self, '_playhead_event') and self._playhead_event:
             self._playhead_event.cancel()
-            # Alternativement : Clock.unschedule(self.update_playhead)
+            self._playhead_event = None
             
         super().on_dismiss()
 

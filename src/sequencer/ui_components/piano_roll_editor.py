@@ -1514,16 +1514,33 @@ class PianoRollEditor(FloatingWindow):
 
     def on_dismiss(self) -> None:
         # --- Cleanup ---
+        from kivy.logger import Logger
+        Logger.info(f"PianoRollEditor: cleaning up {id(self)}")
+
         # Unbind all global window events to prevent memory leaks
-        Window.unbind(on_key_down=self._on_key_down)
-        Window.unbind(mouse_pos=self._on_mouse_pos)
+        try:
+            Window.unbind(on_key_down=self._on_key_down)
+        except Exception as e:
+            Logger.error(f"PianoRollEditor: Error unbinding keyboard: {e}")
+
+        try:
+            Window.unbind(mouse_pos=self._on_mouse_pos)
+        except Exception as e:
+            Logger.error(f"PianoRollEditor: Error unbinding mouse: {e}")
 
         # Reset the cursor to default one last time to be safe
         Window.set_system_cursor('arrow')
 
-        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+        try:
+            self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+            self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self.setter('end_pos_str'))
+        except Exception as e:
+            Logger.error(f"PianoRollEditor: Error unbinding sequencer: {e}")
+
         if self._update_event:
             self._update_event.cancel()
+            self._update_event = None
+
         # Ensure the override is removed when the editor is closed
         if self.original_track_index in self.sequencer_layout.sequencer.track_overrides:
             del self.sequencer_layout.sequencer.track_overrides[self.original_track_index]

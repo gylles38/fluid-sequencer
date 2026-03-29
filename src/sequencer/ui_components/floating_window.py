@@ -104,6 +104,7 @@ class FloatingWindow(RelativeLayout):
         Logger.info(f"FloatingWindow: __init__ {id(self)} (title={kwargs.get('title', 'Unknown')})")
         super().__init__(**kwargs)
         self._is_dragging = False
+        self._is_dismissed = False
         self._is_resizing = False
         self._drag_start_touch_pos = (0, 0)
         self._drag_start_widget_pos = (0, 0)
@@ -138,12 +139,16 @@ class FloatingWindow(RelativeLayout):
 
     def on_touch_down(self, touch):
         from kivy.logger import Logger
+        # Logger.info(f"FloatingWindow: on_touch_down {self.title} ({id(self)}) at {touch.pos}")
 
         if not self.collide_point(*touch.pos):
             return False
 
+        # Capture original coordinates for chrome fallback
+        ox, oy = touch.x, touch.y
+
         if getattr(self, '_touch_lock', False):
-            Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch rejected (locked)")
+            # Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch rejected (locked)")
             return True
 
         if self.parent:
@@ -153,12 +158,12 @@ class FloatingWindow(RelativeLayout):
         # super().on_touch_down(touch) calls RelativeLayout.on_touch_down,
         # which correctly transforms coordinates for children.
         if super().on_touch_down(touch):
-            # Logger.info(f"FloatingWindow: {self.title} child handled touch")
             return True
 
         # 2. Chrome interaction logic (Dragging and Resizing)
-        local_pos = self.to_local(*touch.pos)
-        global_touch_pos = (touch.x, touch.y)
+        # Use captured original coordinates for reliable chrome collision
+        local_pos = self.to_local(ox, oy)
+        global_touch_pos = (ox, oy)
 
         # Check resize handle
         if 'resize_handle' in self.ids and self.ids.resize_handle.collide_point(*local_pos) and not self.is_maximized:
@@ -199,10 +204,15 @@ class FloatingWindow(RelativeLayout):
 
     def _bring_to_front(self):
         parent = self.parent
-        if parent:
+        if parent and len(parent.children) > 1:
             if parent.children[0] is not self:
-                parent.remove_widget(self)
-                parent.add_widget(self)
+                # We save the state so we know this is a move, not a dismiss
+                self._is_moving_to_front = True
+                try:
+                    parent.remove_widget(self)
+                    parent.add_widget(self)
+                finally:
+                    self._is_moving_to_front = False
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
@@ -309,8 +319,11 @@ class FloatingWindow(RelativeLayout):
             self.is_maximized = False
 
     def dismiss(self, *args):
+        if self._is_dismissed:
+            return
         from kivy.logger import Logger
         Logger.info(f"FloatingWindow: dismiss {self.title} ({id(self)})")
+        self._is_dismissed = True
         if self.parent:
             self.parent.remove_widget(self)
         self.on_dismiss()

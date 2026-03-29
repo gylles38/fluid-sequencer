@@ -58,10 +58,16 @@ class RoutingValueAxis(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.draw, size=self.draw, midi_tracks=self.draw, active_index=self.draw)
+        self.bind(pos=self.redraw, size=self.redraw, midi_tracks=self.redraw, active_index=self.redraw)
         self.labels = []
 
+    def redraw(self, *args):
+        """Debounced redraw of the routing axis."""
+        Clock.unschedule(self.draw)
+        Clock.schedule_once(self.draw, 0)
+
     def draw(self, *args):
+        if not self.canvas: return
         self.canvas.clear()
         self.clear_widgets()
         self.labels.clear()
@@ -590,9 +596,13 @@ class InputRoutingEditor(FloatingWindow):
         self.title = "MIDI Input Routing Editor"
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
+        self._seq_binding_end_pos = lambda inst, val: setattr(self, 'end_pos_str', val)
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self._seq_binding_end_pos)
+
         self.update_midi_tracks()
 
-        self.sequencer_layout.sequencer.bind(current_routing_index=self.setter('current_routing_index'))
+        self._seq_binding_routing = lambda inst, val: setattr(self, 'current_routing_index', val)
+        self.sequencer_layout.sequencer.bind(current_routing_index=self._seq_binding_routing)
         self.current_routing_index = self.sequencer_layout.sequencer.current_routing_index
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
 
@@ -877,8 +887,10 @@ class InputRoutingEditor(FloatingWindow):
         Logger.info(f"InputRoutingEditor: cleaning up {id(self)}")
         try:
             self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
-            self.sequencer_layout.sequencer.unbind(current_routing_index=self.setter('current_routing_index'))
-            self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self.setter('end_pos_str'))
+            if hasattr(self, '_seq_binding_routing'):
+                self.sequencer_layout.sequencer.unbind(current_routing_index=self._seq_binding_routing)
+            if hasattr(self, '_seq_binding_end_pos'):
+                self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self._seq_binding_end_pos)
         except Exception as e:
             Logger.error(f"InputRoutingEditor: Error unbinding sequencer: {e}")
 

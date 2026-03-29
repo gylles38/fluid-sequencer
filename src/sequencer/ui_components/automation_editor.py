@@ -92,10 +92,16 @@ class AutomationValueAxis(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.draw, size=self.draw, min_val=self.draw, max_val=self.draw)
+        self.bind(pos=self.redraw, size=self.redraw, min_val=self.redraw, max_val=self.redraw)
         self.labels = []
 
+    def redraw(self, *args):
+        """Debounced redraw of the value axis."""
+        Clock.unschedule(self.draw)
+        Clock.schedule_once(self.draw, 0)
+
     def draw(self, *args):
+        if not self.canvas: return
         self.canvas.clear()
         self.clear_widgets()
         self.labels.clear()
@@ -754,6 +760,9 @@ class AutomationEditor(FloatingWindow):
         # On extrait track et sequencer_layout de kwargs avant le super s'ils y sont
         # ou on s'assure qu'ils sont passés par propriétés.        
         super(AutomationEditor, self).__init__(**kwargs)
+        from kivy.logger import Logger
+        import time
+        start_time = time.time()
         self.source_track = self.track
         self.title = f"Automation: {self.track.name}"
 
@@ -762,11 +771,13 @@ class AutomationEditor(FloatingWindow):
             target_track_index=self.track.target_track_index,
             points=copy.deepcopy(self.track.points)
         )
+        Logger.info(f"AutomationEditor: deepcopy took {time.time() - start_time:.4f}s")
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
 
         # Bind end_pos_str to sequencer
         self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
-        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self.setter('end_pos_str'))
+        self._seq_binding_end_pos = lambda inst, val: setattr(self, 'end_pos_str', val)
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self._seq_binding_end_pos)
 
         # On stocke le paramètre souhaité
         self.selected_parameter = initial_param
@@ -899,8 +910,15 @@ class AutomationEditor(FloatingWindow):
         if 'playhead' not in self.ids:
             return
 
+        # Optimization: Don't update UI if beat hasn't changed
         sequencer = self.sequencer_layout.sequencer
-        current_beat = sequencer.current_beat 
+        current_beat = sequencer.current_beat
+
+        if abs(getattr(self, '_last_playhead_beat', -1) - current_beat) < 0.001 and \
+           sequencer.playback_state == getattr(self, 'last_playback_state', 'stopped'):
+            return
+        self._last_playhead_beat = current_beat
+
         current_state = sequencer.playback_state
 
         # --- RESET AU STOP ---
@@ -989,7 +1007,8 @@ class AutomationEditor(FloatingWindow):
         # Unbind sequencer properties
         try:
             self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
-            self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self.setter('end_pos_str'))
+            if hasattr(self, '_seq_binding_end_pos'):
+                self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self._seq_binding_end_pos)
         except Exception as e:
             Logger.error(f"AutomationEditor: Error unbinding sequencer: {e}")
 

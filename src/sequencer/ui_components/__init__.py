@@ -2,7 +2,6 @@
 import kivy
 kivy.require('2.3.1')
 
-from sequencer.ui_components import *  # Importe tous les imports communs
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 
 from kivy.metrics import dp

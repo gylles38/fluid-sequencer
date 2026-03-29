@@ -876,6 +876,9 @@ class PianoRollEditor(FloatingWindow):
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
         super(PianoRollEditor, self).__init__(**kwargs)
+        from kivy.logger import Logger
+        import time
+        start_time = time.time()
         self.source_track = self.track
         self.title = f"Piano Roll: {self.track.name}"
         self.original_track_index = self.sequencer_layout.sequencer.song.tracks.index(self.track)
@@ -895,12 +898,14 @@ class PianoRollEditor(FloatingWindow):
             record_mode=self.track.record_mode,
             is_metronome=self.track.is_metronome
         )
+        Logger.info(f"PianoRollEditor: deepcopy took {time.time() - start_time:.4f}s")
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
 
         # Bind the editor's end_pos_str to the main sequencer's property
         self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
-        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self.setter('end_pos_str'))
+        self._seq_binding_end_pos = lambda inst, val: setattr(self, 'end_pos_str', val)
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self._seq_binding_end_pos)
 
         Clock.schedule_once(self._post_kv_init)
         self._update_event = Clock.schedule_interval(self.update_playhead, 1/30.0)
@@ -912,19 +917,13 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        def sync_y(instance, value):
-            if instance is keyboard_sv:
-                if abs(timeline_scroll.scroll_y - value) > 0.001:
-                    timeline_scroll.scroll_y = value
-            else:
-                if abs(keyboard_sv.scroll_y - value) > 0.001:
-                    keyboard_sv.scroll_y = value
-
-        keyboard_sv.bind(scroll_y=sync_y)
-        timeline_scroll.bind(scroll_y=sync_y)
+        self._sync_y_binding = lambda inst, val: self._sync_vertical_scrolls(inst, val)
+        keyboard_sv.bind(scroll_y=self._sync_y_binding)
+        timeline_scroll.bind(scroll_y=self._sync_y_binding)
 
         self.ids.piano_keyboard.height = grid.height
-        grid.bind(height=self.ids.piano_keyboard.setter('height'))
+        self._grid_height_binding = lambda inst, val: setattr(self.ids.piano_keyboard, 'height', val)
+        grid.bind(height=self._grid_height_binding)
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -935,7 +934,11 @@ class PianoRollEditor(FloatingWindow):
 
         # Ensure ruler content width matches the grid
         self.ids.ruler.ruler_content.width = grid.width
-        grid.bind(width=lambda i, v: setattr(self.ids.ruler.ruler_content, 'width', v))
+        def _on_grid_width(inst, val):
+            if abs(self.ids.ruler.ruler_content.width - val) > 0.001:
+                self.ids.ruler.ruler_content.width = val
+        self._grid_width_binding = _on_grid_width
+        grid.bind(width=self._grid_width_binding)
 
         # Add the playback line here to ensure it's drawn on top
         grid.add_playback_line()
@@ -970,7 +973,8 @@ class PianoRollEditor(FloatingWindow):
         self.ids.ruler.redraw()
 
         # Bind selected_notes properties
-        self.bind(selected_notes=self.ids.grid.setter('selected_notes'))
+        self._selected_notes_binding = lambda inst, val: setattr(self.ids.grid, 'selected_notes', val)
+        self.bind(selected_notes=self._selected_notes_binding)
         self.bind(selected_notes=self._update_legacy_selection)
 
         # Record the initial state
@@ -1375,6 +1379,21 @@ class PianoRollEditor(FloatingWindow):
         self.ids.undo_button.disabled = not self.history.can_undo()
         self.ids.redo_button.disabled = not self.history.can_redo()
 
+    def _sync_vertical_scrolls(self, instance, value):
+        """Helper to synchronize vertical scrolling between two ScrollViews."""
+        if self._is_scrolling: return
+
+        keyboard_sv = self.ids.keyboard_sv
+        timeline_scroll = self.ids.timeline_scroll
+        target = timeline_scroll if instance is keyboard_sv else keyboard_sv
+
+        if abs(target.scroll_y - value) > 0.001:
+            self._is_scrolling = True
+            try:
+                target.scroll_y = value
+            finally:
+                self._is_scrolling = False
+
     def _record_state(self) -> None:
         """Records the current state of the track (events and selection) for undo/redo."""
         # Create a serializable snapshot of the events to avoid deepcopy issues with Kivy objects.
@@ -1533,9 +1552,24 @@ class PianoRollEditor(FloatingWindow):
 
         try:
             self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
-            self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self.setter('end_pos_str'))
+            if hasattr(self, '_seq_binding_end_pos'):
+                self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self._seq_binding_end_pos)
         except Exception as e:
             Logger.error(f"PianoRollEditor: Error unbinding sequencer: {e}")
+
+        # Unbind local UI bindings
+        try:
+            if hasattr(self, '_sync_y_binding'):
+                self.ids.keyboard_sv.unbind(scroll_y=self._sync_y_binding)
+                self.ids.timeline_scroll.unbind(scroll_y=self._sync_y_binding)
+            if hasattr(self, '_grid_height_binding'):
+                self.ids.grid.unbind(height=self._grid_height_binding)
+            if hasattr(self, '_grid_width_binding'):
+                self.ids.grid.unbind(width=self._grid_width_binding)
+            if hasattr(self, '_selected_notes_binding'):
+                self.unbind(selected_notes=self._selected_notes_binding)
+        except Exception as e:
+            Logger.error(f"PianoRollEditor: Error unbinding UI elements: {e}")
 
         if self._update_event:
             self._update_event.cancel()
@@ -1544,6 +1578,8 @@ class PianoRollEditor(FloatingWindow):
         # Ensure the override is removed when the editor is closed
         if self.original_track_index in self.sequencer_layout.sequencer.track_overrides:
             del self.sequencer_layout.sequencer.track_overrides[self.original_track_index]
+
+        super().on_dismiss()
 
 
     def dismiss(self, action=None, *args) -> None:
@@ -1604,9 +1640,15 @@ class PianoRollEditor(FloatingWindow):
 
     def update_playhead(self, dt) -> None:
         current_state = self.sequencer_layout.sequencer.playback_state
+        jack_beat = self.sequencer_layout.sequencer.current_beat
+
+        # Optimization: Don't update UI if beat hasn't changed
+        if abs(getattr(self, '_last_playhead_beat', -1) - jack_beat) < 0.001 and \
+           current_state == getattr(self, 'last_playback_state', 'stopped'):
+            return
+        self._last_playhead_beat = jack_beat
 
         # --- 1. POSITION JACK & SMOOTHING ---
-        jack_beat = self.sequencer_layout.sequencer.current_beat
         if current_state in ("playing", "recording"):
             safe_dt = min(dt, 1/15.0)
             beats_per_second = self.sequencer_layout.sequencer.song.tempo / 60.0

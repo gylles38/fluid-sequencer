@@ -85,8 +85,10 @@ class RulerContent(Widget):
     def _do_redraw(self, dt):
         # On calcule la largeur cible
         target_width = self.total_beats * self.pixels_per_beat
-        self.width = target_width # Met à jour le widget pour le ScrollView
+        if abs(self.width - target_width) > 0.001:
+            self.width = target_width # Met à jour le widget pour le ScrollView
         
+        if not self.canvas: return
         self.canvas.clear()
         
         c_bg = (0.18, 0.18, 0.18, 1)
@@ -213,12 +215,14 @@ class Ruler(BoxLayout):
                   spacing=self._update_left_panel_width)
 
     def _update_left_panel_width(self, *args):
-        self.ruler_left_panel.width = (
+        new_width = (
             self.info_width +
             self.controls_width +
             self.keyboard_width +
             (self.spacing * 2)
         )
+        if abs(self.ruler_left_panel.width - new_width) > 0.001:
+            self.ruler_left_panel.width = new_width
 
     def redraw(self, *args):
         self.ruler_content.redraw()

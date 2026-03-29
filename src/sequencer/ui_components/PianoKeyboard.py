@@ -14,10 +14,14 @@ class PianoKeyboard(Widget):
     highlighted_note = NumericProperty(-1)
 
     def on_note_height(self, instance, value):
-        self.height = round(128 * value) + self.bottom_padding
+        new_height = round(128 * value) + self.bottom_padding
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
 
     def on_bottom_padding(self, instance, value):
-        self.height = round(128 * self.note_height) + value
+        new_height = round(128 * self.note_height) + value
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
 
     def __init__(self, **kwargs):
         super(PianoKeyboard, self).__init__(**kwargs)
@@ -32,9 +36,11 @@ class PianoKeyboard(Widget):
 
     def _redraw_on_schedule(self, *args):
         # Schedule the redraw for the next frame to ensure all properties are updated.
-        Clock.schedule_once(self._redraw)
+        Clock.unschedule(self._redraw)
+        Clock.schedule_once(self._redraw, 0)
 
     def _redraw(self, *args):
+        if not self.canvas: return
         self.canvas.clear()
         self.clear_widgets()
 

@@ -30,8 +30,14 @@ class PianoRoll(Widget):
         self.redraw()
 
     def _update_size(self, *args):
-        self.width = self.total_beats * self.pixels_per_beat
-        self.height = round(128 * self.note_height) + self.bottom_padding
+        new_width = self.total_beats * self.pixels_per_beat
+        if abs(self.width - new_width) > 0.001:
+            self.width = new_width
+
+        new_height = round(128 * self.note_height) + self.bottom_padding
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
+
         for child in self.children:
             if child.size_hint_y == 1:
                 child.height = self.height

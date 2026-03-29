@@ -19,6 +19,10 @@ class PianoRoll(Widget):
     editor = ObjectProperty(None, allownone=True)
     selected_notes = ListProperty([])
 
+    # Visual offsets for "Virtual Dragging"
+    drag_delta_beat = NumericProperty(0)
+    drag_delta_pitch = NumericProperty(0)
+
     def __init__(self, **kwargs):
         super(PianoRoll, self).__init__(**kwargs)
         self.size_hint = (None, None)
@@ -26,7 +30,9 @@ class PianoRoll(Widget):
 
         self.bind(total_beats=self._update_size, pixels_per_beat=self._update_size,
                   note_height=self._update_size, bottom_padding=self._update_size)
-        self.bind(pos=self.redraw, size=self.redraw, track=self.redraw)
+        self.bind(pos=self.redraw, size=self.redraw, track=self.redraw,
+                  selected_notes=self.redraw,
+                  drag_delta_beat=self.redraw, drag_delta_pitch=self.redraw)
         self.redraw()
 
     def _update_size(self, *args):
@@ -127,10 +133,18 @@ class PianoRoll(Widget):
             with self.canvas:
                 for event in self.track.events:
                     for note in event.notes:
-                        x_start = round(event.start_time * self.pixels_per_beat)
-                        x_end = round((event.start_time + note.duration) * self.pixels_per_beat)
-                        y_start = round(note.pitch * self.note_height) + self.bottom_padding
-                        y_end = round((note.pitch + 1) * self.note_height) + self.bottom_padding
+                        # Draw outline for selected note.
+                        note_id = id(note)
+                        is_selected = note_id in selected_ids or note_id == single_selected_id
+
+                        # Apply virtual offsets to selected notes
+                        visual_beat_offset = self.drag_delta_beat if is_selected else 0
+                        visual_pitch_offset = self.drag_delta_pitch if is_selected else 0
+
+                        x_start = round((event.start_time + visual_beat_offset) * self.pixels_per_beat)
+                        x_end = round((event.start_time + visual_beat_offset + note.duration) * self.pixels_per_beat)
+                        y_start = round((note.pitch + visual_pitch_offset) * self.note_height) + self.bottom_padding
+                        y_end = round((note.pitch + visual_pitch_offset + 1) * self.note_height) + self.bottom_padding
 
                         note_x = self.x + x_start
                         note_y = self.y + y_start
@@ -152,10 +166,6 @@ class PianoRoll(Widget):
                             Rectangle(pos=(note_x, note_y), size=(handle_width, note_h))
                             # Right handle
                             Rectangle(pos=(note_x + note_width - handle_width, note_y), size=(handle_width, note_h))
-
-                        # Draw outline for selected note.
-                        note_id = id(note)
-                        is_selected = note_id in selected_ids or note_id == single_selected_id
 
                         if is_selected:
                             Color(1, 1, 1, 1)  # White outline

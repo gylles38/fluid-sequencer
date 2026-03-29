@@ -131,22 +131,11 @@ class EditableMidiGrid(PianoRoll):
                 if earliest_start + delta_beat < 0:
                     delta_beat = -earliest_start
 
-                # Optimisation : On pré-indexe les événements pour ce frame pour éviter O(S*E)
-                event_map = {round(e.start_time, 4): e for e in self.editor.track_copy.events}
-
-                for item in self._multi_drag_data:
-                    target_new_beat = item['original_start'] + delta_beat
-                    target_new_pitch = max(0, min(127, int(item['original_pitch'] + delta_pitch)))
-
-                    # Update the model live. We store the new parent to ensure subsequent moves
-                    # within the same drag can reliably remove the note from its previous location.
-                    new_parent = self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'], event_map)
-                    item['parent_event'] = new_parent
-
-                # Sort events once after moving everything to ensure consistency
-                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
-                self.editor.is_dirty = True
-                self.draw()
+                # Stability & Performance Fix: Virtual Dragging
+                # We only update the visual deltas during the move operation.
+                # The model is updated once on touch_up.
+                self.drag_delta_beat = delta_beat
+                self.drag_delta_pitch = delta_pitch
                 return True
         
         if self._drag_mode == 'select':
@@ -215,17 +204,15 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = target_event
 
             elif self._drag_mode == 'move':
-                # This block is for cases where _multi_drag_data might be missing
-                # but we are in move mode. Fallback to basic move.
+                # Single note fallback
                 new_x = local_pos[0] - self._drag_offset[0]
                 new_y = local_pos[1] - self._drag_offset[1]
 
                 new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
                 new_pitch: int = max(0, min(127, int((new_y - self.bottom_padding) / self.note_height)))
 
-                self._drag_event.start_time = new_beat
-                self._dragged_note.pitch = new_pitch
-                self.editor.track_copy.events.sort(key=lambda e: e.start_time)
+                self.drag_delta_beat = new_beat - self._drag_event.start_time
+                self.drag_delta_pitch = new_pitch - self._dragged_note.pitch
 
             self.editor.is_dirty = True
             self.draw()
@@ -235,24 +222,37 @@ class EditableMidiGrid(PianoRoll):
     def _move_note_logic(self, note, new_beat, new_pitch, source_event, event_map=None):
         track = self.editor.track_copy
         
-        # 1. Retrait par identité stricte
-        if source_event and note in source_event.notes:
+        # 1. Robust removal (ensure note is removed from previous event)
+        if source_event:
             source_event.notes = [n for n in source_event.notes if n is not note]
             if not source_event.notes and not source_event.cc_messages:
                 if source_event in track.events:
                     track.events.remove(source_event)
+        else:
+            # Search entire track if source_event is missing
+            for ev in list(track.events):
+                if any(n is note for n in ev.notes):
+                    ev.notes = [n for n in ev.notes if n is not note]
+                    if not ev.notes and not ev.cc_messages:
+                        track.events.remove(ev)
+                    break
 
-        # 2. Mise à jour des propriétés
+        # 2. Update properties
         note.pitch = int(new_pitch)
         
-        # 3. Placement et récupération du nouvel Event
+        # 3. Place into new/target event
         if event_map is not None:
             target_event = event_map.get(round(new_beat, 4))
         else:
             target_event = next((e for e in track.events if abs(e.start_time - new_beat) < 0.001), None)
         
         if target_event:
-            # On vérifie si CETTE instance n'y est pas déjà
+            # Important: Ensure the found event is actually in the track!
+            if target_event not in track.events:
+                track.events.append(target_event)
+                if event_map is not None:
+                    event_map[round(new_beat, 4)] = target_event
+
             if not any(n is note for n in target_event.notes):
                 target_event.notes.append(note)
             return target_event
@@ -261,7 +261,6 @@ class EditableMidiGrid(PianoRoll):
             track.events.append(new_event)
             if event_map is not None:
                 event_map[round(new_beat, 4)] = new_event
-            # Sorting removed from here; caller must sort at the end of the loop
             return new_event
 
     def _store_selection_states_if_needed(self, dragged_note) -> None:
@@ -451,6 +450,29 @@ class EditableMidiGrid(PianoRoll):
             self.editor._record_state()
 
         if self._dragged_note:
+            if self._drag_mode == 'move':
+                # Performance & Stability Fix: Apply the virtual drag to the real model
+                # only when the drag is finished (on touch_up).
+                if hasattr(self, '_multi_drag_data') and self._multi_drag_data:
+                    # Optimisation : On pré-indexe les événements pour éviter O(S*E)
+                    event_map = {round(e.start_time, 4): e for e in self.editor.track_copy.events}
+
+                    for item in self._multi_drag_data:
+                        target_new_beat = item['original_start'] + self.drag_delta_beat
+                        target_new_pitch = max(0, min(127, int(item['original_pitch'] + self.drag_delta_pitch)))
+
+                        # Update the model once
+                        self._move_note_logic(item['note'], target_new_beat, target_new_pitch, item['parent_event'], event_map)
+                else:
+                    # Single note fallback
+                    target_new_beat = self._drag_event.start_time + self.drag_delta_beat
+                    target_new_pitch = max(0, min(127, int(self._dragged_note.pitch + self.drag_delta_pitch)))
+                    self._move_note_logic(self._dragged_note, target_new_beat, target_new_pitch, self._drag_event)
+
+                # Reset visual offsets
+                self.drag_delta_beat = 0
+                self.drag_delta_pitch = 0
+
             if hasattr(self, '_multi_drag_data'):
                 self._multi_drag_data.clear()
 

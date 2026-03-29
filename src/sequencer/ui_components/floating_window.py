@@ -119,6 +119,8 @@ class FloatingWindow(RelativeLayout):
         Clock.schedule_once(self._unlock_touch, 0.3)
 
     def _unlock_touch(self, dt):
+        from kivy.logger import Logger
+        # Logger.info(f"FloatingWindow: {self.title} touch unlocked")
         self._touch_lock = False
 
     def add_widget(self, widget, index=0, canvas=None):
@@ -133,71 +135,64 @@ class FloatingWindow(RelativeLayout):
         self.ids.content_container.add_widget(widget, index, canvas)
 
     def on_touch_down(self, touch):
+        from kivy.logger import Logger
+
         if not self.collide_point(*touch.pos):
             return False
 
-        # Capture GLOBAL coordinates here before transformation
-        global_touch_pos = (touch.x, touch.y)
-
-        # Apply transformation to get local coordinates for collision checks
-        touch.push()
-        touch.apply_transform_2d(self.to_local)
-        local_pos = touch.pos
-
         if getattr(self, '_touch_lock', False):
-            touch.pop()
+            Logger.info(f"FloatingWindow: {self.title} touch rejected (locked)")
             return True
 
         if self.parent:
             Clock.schedule_once(lambda dt: self._bring_to_front(), 0)
 
-        # 1. Check resize handle first (chrome priority)
+        # 1. Try children first.
+        # super().on_touch_down(touch) calls RelativeLayout.on_touch_down,
+        # which correctly transforms coordinates for children.
+        if super().on_touch_down(touch):
+            # Logger.info(f"FloatingWindow: {self.title} child handled touch")
+            return True
+
+        # 2. Chrome interaction logic (Dragging and Resizing)
+        local_pos = self.to_local(*touch.pos)
+        global_touch_pos = (touch.x, touch.y)
+
+        # Check resize handle
         if 'resize_handle' in self.ids and self.ids.resize_handle.collide_point(*local_pos) and not self.is_maximized:
+            # Logger.info(f"FloatingWindow: {self.title} resizing started")
             if self.parent:
-                # Capture current absolute state
-                old_pos = self.pos[:]
-                old_size = self.size[:]
-                self.pos_hint = {}
-                self.size_hint = (None, None)
-                self.pos = old_pos
-                self.size = old_size
+                # Switch to absolute positioning
+                old_pos, old_size = self.pos[:], self.size[:]
+                self.pos_hint, self.size_hint = {}, (None, None)
+                self.pos, self.size = old_pos, old_size
 
                 self._is_resizing = True
                 self._resize_start_touch_pos = global_touch_pos
                 self._resize_start_widget_size = self.size[:]
                 self._resize_start_widget_pos = self.pos[:]
-                # Use real top as anchor to avoid jumps during move
                 self._resize_start_top = self.y + self.height
 
                 touch.grab(self)
-                touch.pop()
                 return True
 
-        # 2. Let children handle touch (like title bar buttons or content)
-        if super(RelativeLayout, self).on_touch_down(touch):
-            touch.pop()
-            return True
-
-        # 3. dragging logic (title bar)
+        # Check title bar for dragging
         if 'title_bar' in self.ids and self.ids.title_bar.collide_point(*local_pos) and not self.is_maximized:
+            # Logger.info(f"FloatingWindow: {self.title} dragging started")
             if self.parent:
-                # Capture current absolute state
-                old_pos = self.pos[:]
-                old_size = self.size[:]
-                self.pos_hint = {}
-                self.size_hint = (None, None)
-                self.pos = old_pos
-                self.size = old_size
+                # Switch to absolute positioning
+                old_pos, old_size = self.pos[:], self.size[:]
+                self.pos_hint, self.size_hint = {}, (None, None)
+                self.pos, self.size = old_pos, old_size
 
                 self._is_dragging = True
                 self._drag_start_touch_pos = global_touch_pos
                 self._drag_start_widget_pos = self.pos[:]
 
                 touch.grab(self)
-                touch.pop()
                 return True
 
-        touch.pop()
+        # Always swallow touch within the window bounds
         return True
 
     def _bring_to_front(self):

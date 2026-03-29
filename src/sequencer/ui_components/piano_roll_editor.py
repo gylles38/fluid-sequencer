@@ -788,15 +788,18 @@ Builder.load_string("""
                     bar_width: 0
                     scroll_type: ['bars']
 
-                    PianoKeyboard:
-                        id: piano_keyboard
-                        size_hint: (None, None)
+                    RelativeLayout:
+                        id: keyboard_container
+                        size_hint: None, None
                         width: self.parent.width
-                        note_height: root.note_height
+                        height: piano_keyboard.height + dp(17)
 
-                Widget: # Spacer to match horizontal scrollbar (bar_width + margin) of timeline_scroll
-                    size_hint_y: None
-                    height: dp(17)
+                        PianoKeyboard:
+                            id: piano_keyboard
+                            size_hint: (None, None)
+                            width: self.parent.width
+                            note_height: root.note_height
+                            pos: 0, dp(17)
 
             BoundedScrollView:
                 id: timeline_scroll
@@ -811,7 +814,7 @@ Builder.load_string("""
                     id: grid_container
                     size_hint: None, None
                     width: grid.width + dp(15)
-                    height: grid.height
+                    height: grid.height + dp(17)
 
                     EditableMidiGrid:
                         id: grid
@@ -821,7 +824,7 @@ Builder.load_string("""
                         pixels_per_beat: root.pixels_per_beat
                         note_height: root.note_height
                         size_hint: None, None
-                        pos: 0, 0
+                        pos: 0, dp(17)
 
         MDBoxLayout:
             size_hint_y: None
@@ -934,6 +937,8 @@ class PianoRollEditor(FloatingWindow):
 
         self.ids.piano_keyboard.height = grid.height
         grid.bind(height=self.ids.piano_keyboard.setter('height'))
+        grid.bind(height=lambda i, v: setattr(self.ids.keyboard_container, 'height', v + dp(17)))
+        grid.bind(height=lambda i, v: setattr(self.ids.grid_container, 'height', v + dp(17)))
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -1785,9 +1790,12 @@ class PianoRollEditor(FloatingWindow):
     def _center_view_on_c4(self) -> None:
         timeline_scroll = self.ids.timeline_scroll
         grid = self.ids.grid
-        max_scroll = (128 * self.note_height) - timeline_scroll.height
+        # Content height is now grid.height + dp(17)
+        max_scroll = (128 * self.note_height + dp(17)) - timeline_scroll.height
         if max_scroll > 0:
-            timeline_scroll.scroll_y = max(0.0, min(1.0, ((60 * self.note_height) - (self.height / 2)) / max_scroll))
+            # We want (60 * self.note_height + dp(17)) to be at the center of the viewport
+            target_y = (60 * self.note_height) + dp(17)
+            timeline_scroll.scroll_y = max(0.0, min(1.0, (target_y - (timeline_scroll.height / 2)) / max_scroll))
 
     def zoom_in(self) -> None:
         self._apply_zoom(self.pixels_per_beat * 1.25)

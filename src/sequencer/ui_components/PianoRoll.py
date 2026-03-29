@@ -32,10 +32,9 @@ class PianoRoll(Widget):
     def _update_size(self, *args):
         self.width = self.total_beats * self.pixels_per_beat
         self.height = round(128 * self.note_height) + self.bottom_padding
-        # Ensure children widgets are updated if any
         for child in self.children:
-             if child.size_hint_y == 1:
-                  child.height = self.height
+            if child.size_hint_y == 1:
+                child.height = self.height
 
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""

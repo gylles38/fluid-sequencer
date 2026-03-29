@@ -923,6 +923,9 @@ class PianoRollEditor(FloatingWindow):
         keyboard_sv.bind(scroll_y=sync_y)
         timeline_scroll.bind(scroll_y=sync_y)
 
+        self.ids.piano_keyboard.height = grid.height
+        grid.bind(height=self.ids.piano_keyboard.setter('height'))
+
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
         self.ids.ruler.keyboard_width = self.ids.keyboard_sv.width
@@ -933,9 +936,6 @@ class PianoRollEditor(FloatingWindow):
         # Ensure ruler content width matches the grid
         self.ids.ruler.ruler_content.width = grid.width
         grid.bind(width=lambda i, v: setattr(self.ids.ruler.ruler_content, 'width', v))
-
-        # Ensure grid_container width stays in sync with grid + padding
-        grid.bind(width=lambda i, v: setattr(self.ids.grid_container, 'width', v + dp(15)))
 
         # Add the playback line here to ensure it's drawn on top
         grid.add_playback_line()
@@ -1772,11 +1772,11 @@ class PianoRollEditor(FloatingWindow):
     def _center_view_on_c4(self) -> None:
         timeline_scroll = self.ids.timeline_scroll
         grid = self.ids.grid
-        # Content height is 128 * note_height + bottom_padding
+        # Total content height is 128 notes + padding
         total_content_height = (128 * self.note_height) + grid.bottom_padding
         max_scroll = total_content_height - timeline_scroll.height
         if max_scroll > 0:
-            # Note 60 is at y = 60 * note_height + bottom_padding
+            # Target C4 (note 60) which is at 60 * note_height + padding
             target_y = (60 * self.note_height) + grid.bottom_padding
             timeline_scroll.scroll_y = max(0.0, min(1.0, (target_y - (timeline_scroll.height / 2)) / max_scroll))
 

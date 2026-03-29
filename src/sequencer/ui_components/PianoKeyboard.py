@@ -25,8 +25,9 @@ class PianoKeyboard(Widget):
         self.height = round(128 * self.note_height) + self.bottom_padding
         self.width = dp(40)
 
-        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule, note_height=self._redraw_on_schedule,
-                  bottom_padding=self._redraw_on_schedule, highlighted_note=self._redraw_on_schedule)
+        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule,
+                  note_height=self._redraw_on_schedule, bottom_padding=self._redraw_on_schedule,
+                  highlighted_note=self._redraw_on_schedule)
         self._redraw_on_schedule()
 
     def _redraw_on_schedule(self, *args):

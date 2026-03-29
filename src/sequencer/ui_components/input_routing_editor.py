@@ -69,8 +69,10 @@ class RoutingValueAxis(Widget):
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
-        self._redraw_pending = False
-        self.draw()
+        try:
+            self.draw()
+        finally:
+            self._redraw_pending = False
 
     def draw(self, *args):
         if not self.canvas: return
@@ -141,10 +143,10 @@ class EditableRoutingGrid(Widget):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.draw,
-                  pixels_per_beat=self.draw, total_beats=self.draw,
-                  midi_tracks=self.draw, active_index=self.draw,
-                  drag_delta_beat=self.draw, drag_delta_value=self.draw)
+        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+                  pixels_per_beat=self.redraw, total_beats=self.redraw,
+                  midi_tracks=self.redraw, active_index=self.redraw,
+                  drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
@@ -161,8 +163,10 @@ class EditableRoutingGrid(Widget):
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
-        self._redraw_pending = False
-        self.draw()
+        try:
+            self.draw()
+        finally:
+            self._redraw_pending = False
 
     def _get_y_from_abs_idx(self, abs_idx):
         if not self.midi_tracks: return 0
@@ -735,8 +739,10 @@ class InputRoutingEditor(FloatingWindow):
         new_point = AutomationPoint(start_time=beat, value=value, parameter='input_routing', curve='none')
         self.track_copy.points.append(new_point)
         self.track_copy.points.sort(key=lambda p: p.start_time)
+
+        # Setting points will trigger grid.redraw via binding
         self.ids.grid.points = list(self.track_copy.points)
-        self.ids.grid.draw()
+
         self._record_state()
         self.is_dirty = True
 
@@ -749,7 +755,7 @@ class InputRoutingEditor(FloatingWindow):
                 self.ids.grid.selected_point = None
             self.update_status_bar(None)
             self.ids.grid.points = list(self.track_copy.points)
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
             self._record_state()
             self.is_dirty = True
 
@@ -770,7 +776,7 @@ class InputRoutingEditor(FloatingWindow):
     def _apply_state(self, state):
         self.track_copy.points = [AutomationPoint(**d) for d in state]
         self.ids.grid.points = list(self.track_copy.points)
-        self.ids.grid.draw()
+        self.ids.grid.redraw()
         self.is_dirty = True
 
     def zoom_in(self): self._apply_zoom(self.pixels_per_beat * 1.25)
@@ -942,7 +948,7 @@ class InputRoutingEditor(FloatingWindow):
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
         self.ids.ruler.total_beats = self.total_beats
         self.ids.ruler.redraw()
-        self.ids.grid.draw()
+        self.ids.grid.redraw()
 
     def on_dismiss(self):
         from kivy.logger import Logger

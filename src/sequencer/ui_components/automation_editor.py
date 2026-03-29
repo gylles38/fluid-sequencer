@@ -103,8 +103,10 @@ class AutomationValueAxis(Widget):
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
-        self._redraw_pending = False
-        self.draw()
+        try:
+            self.draw()
+        finally:
+            self._redraw_pending = False
 
     def draw(self, *args):
         if not self.canvas: return
@@ -205,8 +207,10 @@ class EditableAutomationGrid(Widget):
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
-        self._redraw_pending = False
-        self.draw()
+        try:
+            self.draw()
+        finally:
+            self._redraw_pending = False
 
     def on_touch_down(self, touch):
         # from kivy.logger import Logger
@@ -1184,6 +1188,7 @@ class AutomationEditor(FloatingWindow):
 
         self.visible_points = [p for p in self.track_copy.points if p.parameter == param]
         self.ids.grid.points = self.visible_points
+        self.ids.grid.redraw()
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         # --- Sécurité : Désactiver les raccourcis si un champ texte a le focus ---
@@ -1313,6 +1318,7 @@ class AutomationEditor(FloatingWindow):
         self.track_copy.points = [AutomationPoint(**data) for data in state]
         # Re-filter visible points based on the current parameter
         self.on_automation_selection_change(None, self.selected_parameter)
+        self.ids.grid.redraw()
         self.is_dirty = True
         self._update_undo_redo_buttons_state()
 
@@ -1330,6 +1336,7 @@ class AutomationEditor(FloatingWindow):
         )
         self.track_copy.points.append(new_point)
         self.on_automation_selection_change(None, self.selected_parameter) # Refresh view
+        self.ids.grid.redraw()
         self._record_state()
         self.is_dirty = True
 
@@ -1337,6 +1344,7 @@ class AutomationEditor(FloatingWindow):
         if point in self.track_copy.points:
             self.track_copy.points.remove(point)
             self.on_automation_selection_change(None, self.selected_parameter)
+            self.ids.grid.redraw()
             self._record_state()
             self.is_dirty = True
 
@@ -1369,7 +1377,7 @@ class AutomationEditor(FloatingWindow):
 
         # 5. Forcer le redessin du widget Grille
         if hasattr(self.ids, 'grid'):
-            self.ids.grid.draw_curve_and_points()
+            self.ids.grid.redraw()
 
     def show_curve_type_popup(self, point, touch):
         if self.selected_parameter == 'prog': 
@@ -1425,7 +1433,7 @@ class AutomationEditor(FloatingWindow):
         
         # On met à jour l'affichage (Barre de statut + Dessin)
         self.update_status_bar(point)
-        self.ids.grid.draw_curve_and_points()
+        self.ids.grid.redraw()
         
         self._record_state()
         self.is_dirty = True

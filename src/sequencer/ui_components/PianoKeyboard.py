@@ -42,7 +42,8 @@ class PianoKeyboard(Widget):
     def _redraw(self, *args):
         if not self.canvas: return
         self.canvas.clear()
-        self.clear_widgets()
+
+        if not hasattr(self, '_label_widgets'): self._label_widgets = []
 
         highlight_color = (0.3, 0.7, 1.0, 1) # A light blue color for highlighting
 
@@ -87,24 +88,33 @@ class PianoKeyboard(Widget):
                 Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=width)
 
         # Add C note labels
-        for i in range(128):
-            if (i % 12) == 0:
-                octave_num = (i // 12) - 1  # MIDI note 12 is C0, 24 is C1 etc.
-                y_start = round(i * self.note_height) + self.bottom_padding
-                y_end = round((i + 1) * self.note_height) + self.bottom_padding
-                note_h = y_end - y_start
-                note_y = self.y + y_start
-                label = Label(
-                    text=f"C{octave_num}",
-                    font_size=dp(9),
-                    color=(0, 0, 0, 1),
-                    size_hint=(None, None),
-                    size=(self.width, note_h),
-                    center_x=self.center_x,
-                    center_y=note_y + note_h / 2,
-                    halign='center',
-                    valign='middle',
-                )
-                # Kivy's text_size is needed for alignment to work correctly
-                label.text_size = label.size
-                self.add_widget(label)
+        octave_indices = [i for i in range(128) if (i % 12) == 0]
+
+        # Synchronize label widget count
+        while len(self._label_widgets) < len(octave_indices):
+            lbl = Label(
+                font_size=dp(9),
+                color=(0, 0, 0, 1),
+                size_hint=(None, None),
+                halign='center',
+                valign='middle'
+            )
+            self.add_widget(lbl)
+            self._label_widgets.append(lbl)
+        while len(self._label_widgets) > len(octave_indices):
+            lbl = self._label_widgets.pop()
+            self.remove_widget(lbl)
+
+        for idx, i in enumerate(octave_indices):
+            octave_num = (i // 12) - 1
+            y_start = round(i * self.note_height) + self.bottom_padding
+            y_end = round((i + 1) * self.note_height) + self.bottom_padding
+            note_h = y_end - y_start
+            note_y = self.y + y_start
+
+            label = self._label_widgets[idx]
+            label.text = f"C{octave_num}"
+            label.size = (self.width, note_h)
+            label.center_x = self.center_x
+            label.center_y = note_y + note_h / 2
+            label.text_size = label.size

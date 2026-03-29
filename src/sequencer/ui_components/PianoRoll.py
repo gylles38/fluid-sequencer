@@ -138,8 +138,8 @@ class PianoRoll(Widget):
                         is_selected = note_id in selected_ids or note_id == single_selected_id
 
                         # Apply virtual offsets to selected notes
-                        visual_beat_offset = self.drag_delta_beat if is_selected else 0
-                        visual_pitch_offset = self.drag_delta_pitch if is_selected else 0
+                        visual_beat_offset = float(self.drag_delta_beat if is_selected else 0)
+                        visual_pitch_offset = float(self.drag_delta_pitch if is_selected else 0)
 
                         x_start = round((event.start_time + visual_beat_offset) * self.pixels_per_beat)
                         x_end = round((event.start_time + visual_beat_offset + note.duration) * self.pixels_per_beat)

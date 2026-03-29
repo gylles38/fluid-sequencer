@@ -218,6 +218,9 @@ class FloatingWindow(RelativeLayout):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
 
+        # from kivy.logger import Logger
+        # Logger.info(f"FloatingWindow: on_touch_move {self.title} ({id(self)}) mode={'drag' if self._is_dragging else 'resize'}")
+
         if self._is_dragging:
             if self.parent:
                 # Calculate delta using window coordinates (touch.x, touch.y)

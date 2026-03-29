@@ -63,14 +63,20 @@ class RoutingValueAxis(Widget):
 
     def redraw(self, *args):
         """Debounced redraw of the routing axis."""
-        Clock.unschedule(self.draw)
-        Clock.schedule_once(self.draw, 0)
+        if not hasattr(self, '_redraw_pending'): self._redraw_pending = False
+        if self._redraw_pending: return
+        self._redraw_pending = True
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
+        self._redraw_pending = False
+        self.draw()
 
     def draw(self, *args):
         if not self.canvas: return
         self.canvas.clear()
-        self.clear_widgets()
-        self.labels.clear()
+
+        if not hasattr(self, '_label_widgets'): self._label_widgets = []
 
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
@@ -84,8 +90,17 @@ class RoutingValueAxis(Widget):
             return
 
         num_tracks = len(self.midi_tracks)
+
+        # Synchronize label widget count
+        while len(self._label_widgets) < num_tracks:
+            lbl = Label(font_size='10sp', halign='right', valign='middle')
+            self.add_widget(lbl)
+            self._label_widgets.append(lbl)
+        while len(self._label_widgets) > num_tracks:
+            lbl = self._label_widgets.pop()
+            self.remove_widget(lbl)
+
         for i, (abs_idx, name) in enumerate(self.midi_tracks):
-            # i=0 is bottom, i=num_tracks-1 is top
             y_pos = self.y + (i / max(1, num_tracks - 1)) * (self.height - dp(20)) + dp(10)
             if num_tracks == 1:
                 y_pos = self.y + self.height / 2
@@ -96,18 +111,12 @@ class RoutingValueAxis(Widget):
                     Color(0.2, 0.3, 0.4, 1)
                     Rectangle(pos=(self.x, y_pos - dp(10)), size=(self.width, dp(20)))
 
-            label = Label(
-                text=f"{abs_idx}: {name}",
-                font_size='10sp',
-                pos=(self.x, y_pos - dp(8)),
-                size=(self.width - dp(4), dp(16)),
-                halign='right',
-                valign='middle',
-                color=(1, 1, 1, 1) if is_active else (0.8, 0.8, 0.8, 1),
-                bold=is_active
-            )
-            self.labels.append(label)
-            self.add_widget(label)
+            label = self._label_widgets[i]
+            label.text = f"{abs_idx}: {name}"
+            label.pos = (self.x, y_pos - dp(8))
+            label.size = (self.width - dp(4), dp(16))
+            label.color = (1, 1, 1, 1) if is_active else (0.8, 0.8, 0.8, 1)
+            label.bold = is_active
 
 class EditableRoutingGrid(Widget):
     editor = ObjectProperty()
@@ -121,6 +130,10 @@ class EditableRoutingGrid(Widget):
     _drag_offset = (0, 0)
     selected_point = ObjectProperty(None, allownone=True)
 
+    # Virtual Dragging offsets
+    drag_delta_beat = NumericProperty(0)
+    drag_delta_value = NumericProperty(0)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.grid_widget = Widget(size_hint=(None, None))
@@ -130,13 +143,25 @@ class EditableRoutingGrid(Widget):
 
         self.bind(pos=self._update_layout, size=self._update_layout, points=self.draw,
                   pixels_per_beat=self.draw, total_beats=self.draw,
-                  midi_tracks=self.draw, active_index=self.draw)
+                  midi_tracks=self.draw, active_index=self.draw,
+                  drag_delta_beat=self.draw, drag_delta_value=self.draw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
         self.grid_widget.pos = self.pos
         self.curve_widget.size = self.size
         self.curve_widget.pos = self.pos
+        self.redraw()
+
+    def redraw(self, *args):
+        """Debounced redraw of the grid and curve."""
+        if not hasattr(self, '_redraw_pending'): self._redraw_pending = False
+        if self._redraw_pending: return
+        self._redraw_pending = True
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
+        self._redraw_pending = False
         self.draw()
 
     def _get_y_from_abs_idx(self, abs_idx):
@@ -188,7 +213,7 @@ class EditableRoutingGrid(Widget):
                 break
 
         self.selected_point = clicked_point
-        self.draw_curve_and_points()
+        self.redraw()
         self.editor.update_status_bar(clicked_point)
 
         if edit_mode == 'insert':
@@ -215,21 +240,20 @@ class EditableRoutingGrid(Widget):
             return super().on_touch_move(touch)
 
         if self._dragged_point:
-            # Subtract widget position from relative parent coordinates
             lx, ly = touch.x - self.x, touch.y - self.y
 
             new_x = lx - self._drag_offset[0]
             new_beat = new_x / self.pixels_per_beat
             quantized_beat = round(new_beat * 4) / 4
-            self._dragged_point.start_time = max(0, quantized_beat)
+            target_beat = max(0, quantized_beat)
+            self.drag_delta_beat = target_beat - self._dragged_point.start_time
 
-            # For routing, we allow vertical movement too?
             new_abs_idx = self._get_abs_idx_from_y(ly)
-            self._dragged_point.value = new_abs_idx
+            self.drag_delta_value = new_abs_idx - self._dragged_point.value
 
-            self.editor.is_dirty = True
-            self.draw_curve_and_points()
+            # Update status bar live with virtual values.
             self.editor.update_status_bar(self._dragged_point)
+
             return True
         return super().on_touch_move(touch)
 
@@ -237,10 +261,19 @@ class EditableRoutingGrid(Widget):
         if touch.grab_current is not self:
             return super().on_touch_up(touch)
         if self._dragged_point:
+            # Apply offsets to model
+            self._dragged_point.start_time += self.drag_delta_beat
+            self._dragged_point.value += self.drag_delta_value
+
+            # Reset offsets
+            self.drag_delta_beat = 0
+            self.drag_delta_value = 0
+
             self._dragged_point = None
             touch.ungrab(self)
+            self.editor.is_dirty = True
             self.editor._record_state()
-            self.draw_curve_and_points()
+            self.redraw()
             return True
         return super().on_touch_up(touch)
 
@@ -281,23 +314,36 @@ class EditableRoutingGrid(Widget):
 
             # Start from 0
             first_p = sorted_points[0]
-            points_to_draw.extend([self.x, self.y + self._get_y_from_abs_idx(first_p.value)])
+            is_dragged = (first_p is self._dragged_point)
+            v_off_start_y = self.drag_delta_value if is_dragged else 0
+            points_to_draw.extend([self.x, self.y + self._get_y_from_abs_idx(first_p.value + v_off_start_y)])
 
             for i in range(len(sorted_points)):
                 p = sorted_points[i]
-                x = p.start_time * self.pixels_per_beat
-                y = self._get_y_from_abs_idx(p.value)
+                is_dragged = (p is self._dragged_point)
+                v_off_x = self.drag_delta_beat if is_dragged else 0
+                v_off_y = self.drag_delta_value if is_dragged else 0
+
+                x = (p.start_time + v_off_x) * self.pixels_per_beat
+                y = self._get_y_from_abs_idx(p.value + v_off_y)
 
                 if i > 0:
                     # Vertical step from previous value
-                    prev_y = self._get_y_from_abs_idx(sorted_points[i-1].value)
+                    prev_p = sorted_points[i-1]
+                    is_dragged_prev = (prev_p is self._dragged_point)
+                    v_off_prev_y = self.drag_delta_value if is_dragged_prev else 0
+
+                    prev_y = self._get_y_from_abs_idx(prev_p.value + v_off_prev_y)
                     points_to_draw.extend([self.x + x, self.y + prev_y])
 
                 points_to_draw.extend([self.x + x, self.y + y])
 
             # End line
             final_x = self.total_beats * self.pixels_per_beat
-            points_to_draw.extend([self.x + final_x, self.y + self._get_y_from_abs_idx(sorted_points[-1].value)])
+            last_p = sorted_points[-1]
+            is_dragged_last = (last_p is self._dragged_point)
+            v_off_last_y = self.drag_delta_value if is_dragged_last else 0
+            points_to_draw.extend([self.x + final_x, self.y + self._get_y_from_abs_idx(last_p.value + v_off_last_y)])
 
             if len(points_to_draw) >= 4:
                 Line(points=points_to_draw, width=1.5)
@@ -306,8 +352,13 @@ class EditableRoutingGrid(Widget):
             point_radius = dp(4)
             selected_radius = dp(7)
             for p in sorted_points:
-                x = p.start_time * self.pixels_per_beat
-                y = self._get_y_from_abs_idx(p.value)
+                is_dragged = (p is self._dragged_point)
+                v_off_x = self.drag_delta_beat if is_dragged else 0
+                v_off_y = self.drag_delta_value if is_dragged else 0
+
+                x = (p.start_time + v_off_x) * self.pixels_per_beat
+                y = self._get_y_from_abs_idx(p.value + v_off_y)
+
                 if p == self.selected_point:
                     Color(1, 0.6, 0, 1)
                     Rectangle(pos=(self.x + x - selected_radius, self.y + y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
@@ -798,8 +849,19 @@ class InputRoutingEditor(FloatingWindow):
     def update_status_bar(self, point):
         if point:
             self.ids.edit_zone.opacity = 1
-            self.ids.input_beat.text = f"{point.start_time:.2f}"
-            self.ids.input_value.text = f"{int(point.value)}"
+
+            # Account for Virtual Dragging deltas
+            v_beat_off = 0
+            v_val_off = 0
+            if hasattr(self.ids.grid, '_dragged_point') and self.ids.grid._dragged_point is point:
+                v_beat_off = self.ids.grid.drag_delta_beat
+                v_val_off = self.ids.grid.drag_delta_value
+
+            display_beat = point.start_time + v_beat_off
+            display_value = point.value + v_val_off
+
+            self.ids.input_beat.text = f"{display_beat:.2f}"
+            self.ids.input_value.text = f"{int(display_value)}"
         else:
             self.ids.edit_zone.opacity = 0
 

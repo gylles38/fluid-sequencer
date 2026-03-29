@@ -923,9 +923,6 @@ class PianoRollEditor(FloatingWindow):
         keyboard_sv.bind(scroll_y=sync_y)
         timeline_scroll.bind(scroll_y=sync_y)
 
-        self.ids.piano_keyboard.height = grid.height
-        grid.bind(height=self.ids.piano_keyboard.setter('height'))
-
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
         self.ids.ruler.keyboard_width = self.ids.keyboard_sv.width

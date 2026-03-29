@@ -22,21 +22,23 @@ class PianoRoll(Widget):
     def __init__(self, **kwargs):
         super(PianoRoll, self).__init__(**kwargs)
         self.size_hint = (None, None)
-        self.height = 128 * self.note_height + self.bottom_padding
+        self._update_size()
 
-        self.bind(total_beats=self.redraw, pixels_per_beat=self.redraw, note_height=self.redraw,
-                  bottom_padding=self.redraw, track=self.redraw, pos=self.redraw, size=self.redraw)
+        self.bind(total_beats=self._update_size, pixels_per_beat=self._update_size,
+                  note_height=self._update_size, bottom_padding=self._update_size)
+        self.bind(pos=self.redraw, size=self.redraw, track=self.redraw)
         self.redraw()
 
-    def redraw(self, *args):
-        """Debounced redraw of grid and notes."""
+    def _update_size(self, *args):
         self.width = self.total_beats * self.pixels_per_beat
-        # Ensure height is exactly the same as the keyboard
         self.height = round(128 * self.note_height) + self.bottom_padding
         # Ensure children widgets are updated if any
         for child in self.children:
              if child.size_hint_y == 1:
                   child.height = self.height
+
+    def redraw(self, *args):
+        """Debounced redraw of grid and notes."""
         Clock.unschedule(self.draw)
         Clock.schedule_once(self.draw, 0)
 

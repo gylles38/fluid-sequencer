@@ -10,19 +10,23 @@ class PianoKeyboard(Widget):
     A widget that draws a vertical piano keyboard.
     """
     note_height = NumericProperty(round(dp(14)))
+    bottom_padding = NumericProperty(0)
     highlighted_note = NumericProperty(-1)
 
     def on_note_height(self, instance, value):
-        self.height = round(128 * value)
+        self.height = round(128 * value) + self.bottom_padding
+
+    def on_bottom_padding(self, instance, value):
+        self.height = round(128 * self.note_height) + value
 
     def __init__(self, **kwargs):
         super(PianoKeyboard, self).__init__(**kwargs)
         self.size_hint = (None, None)
-        self.height = round(128 * self.note_height)
+        self.height = round(128 * self.note_height) + self.bottom_padding
         self.width = dp(40)
 
         self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule, note_height=self._redraw_on_schedule,
-                  highlighted_note=self._redraw_on_schedule)
+                  bottom_padding=self._redraw_on_schedule, highlighted_note=self._redraw_on_schedule)
         self._redraw_on_schedule()
 
     def _redraw_on_schedule(self, *args):
@@ -43,8 +47,8 @@ class PianoKeyboard(Widget):
                         Color(*highlight_color)
                     else:
                         Color(0.95, 0.95, 0.95, 1)
-                    y_start = round(i * self.note_height)
-                    y_end = round((i + 1) * self.note_height)
+                    y_start = round(i * self.note_height) + self.bottom_padding
+                    y_end = round((i + 1) * self.note_height) + self.bottom_padding
                     Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
 
             # --- Draw Black Keys Backgrounds ---
@@ -54,13 +58,13 @@ class PianoKeyboard(Widget):
                         Color(*highlight_color)
                     else:
                         Color(0.1, 0.1, 0.1, 1)
-                    y_start = round(i * self.note_height)
-                    y_end = round((i + 1) * self.note_height)
+                    y_start = round(i * self.note_height) + self.bottom_padding
+                    y_end = round((i + 1) * self.note_height) + self.bottom_padding
                     Rectangle(pos=(self.x, self.y + y_start), size=(self.width * 0.65, y_end - y_start))
 
             # --- Draw EVERY Pitch Separator (Grid sync) ---
             for i in range(1, 129):
-                y_pos = round(i * self.note_height)
+                y_pos = round(i * self.note_height) + self.bottom_padding
                 # Octave line (below C)
                 if (i % 12) == 0:
                     Color(0.4, 0.4, 0.4, 0.8)
@@ -79,8 +83,8 @@ class PianoKeyboard(Widget):
         for i in range(128):
             if (i % 12) == 0:
                 octave_num = (i // 12) - 1  # MIDI note 12 is C0, 24 is C1 etc.
-                y_start = round(i * self.note_height)
-                y_end = round((i + 1) * self.note_height)
+                y_start = round(i * self.note_height) + self.bottom_padding
+                y_end = round((i + 1) * self.note_height) + self.bottom_padding
                 note_h = y_end - y_start
                 note_y = self.y + y_start
                 label = Label(

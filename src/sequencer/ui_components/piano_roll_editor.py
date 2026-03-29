@@ -124,7 +124,7 @@ class EditableMidiGrid(PianoRoll):
                 # Quantize delta_beat to 16th notes for snappy live dragging
                 delta_beat = round(raw_delta_beat * 4) / 4
 
-                new_pitch = int(local_pos[1] / self.note_height)
+                new_pitch = int((local_pos[1] - self.bottom_padding) / self.note_height)
                 delta_pitch = new_pitch - master_data['original_pitch']
 
                 earliest_start = min(item['original_start'] for item in self._multi_drag_data)
@@ -163,7 +163,7 @@ class EditableMidiGrid(PianoRoll):
                 for event in self.editor.track_copy.events:
                     for note in event.notes:
                         note_x = event.start_time * self.pixels_per_beat
-                        note_y = note.pitch * self.note_height
+                        note_y = note.pitch * self.note_height + self.bottom_padding
                         note_w = note.duration * self.pixels_per_beat
                         note_h = self.note_height
 
@@ -221,7 +221,7 @@ class EditableMidiGrid(PianoRoll):
                 new_y = local_pos[1] - self._drag_offset[1]
 
                 new_beat = round((new_x / self.pixels_per_beat) * 4) / 4
-                new_pitch: int = max(0, min(127, int(new_y / self.note_height)))
+                new_pitch: int = max(0, min(127, int((new_y - self.bottom_padding) / self.note_height)))
 
                 self._drag_event.start_time = new_beat
                 self._dragged_note.pitch = new_pitch
@@ -289,7 +289,7 @@ class EditableMidiGrid(PianoRoll):
 
         local_pos = self.to_local(*touch.pos)
         clicked_beat = local_pos[0] / self.pixels_per_beat
-        clicked_pitch = int(local_pos[1] / self.note_height)
+        clicked_pitch = int((local_pos[1] - self.bottom_padding) / self.note_height)
 
         edit_mode = self.editor.edit_mode
         track = self.editor.track_copy
@@ -301,7 +301,7 @@ class EditableMidiGrid(PianoRoll):
             for event in reversed(track.events):
                 for note in reversed(event.notes):
                     note_x = event.start_time * self.pixels_per_beat
-                    note_y = note.pitch * self.note_height
+                    note_y = note.pitch * self.note_height + self.bottom_padding
                     note_width = note.duration * self.pixels_per_beat
 
                     if note_x <= local_pos[0] <= note_x + note_width and \
@@ -320,7 +320,7 @@ class EditableMidiGrid(PianoRoll):
             for event in reversed(track.events):
                 for note in reversed(event.notes):
                     note_x = event.start_time * self.pixels_per_beat
-                    note_y = note.pitch * self.note_height
+                    note_y = note.pitch * self.note_height + self.bottom_padding
                     note_width = note.duration * self.pixels_per_beat
                     handle_width: float | int = min(dp(8), note_width / 4) if note_width > dp(16) else 0
 
@@ -788,18 +788,12 @@ Builder.load_string("""
                     bar_width: 0
                     scroll_type: ['bars']
 
-                    RelativeLayout:
-                        id: keyboard_container
-                        size_hint: None, None
+                    PianoKeyboard:
+                        id: piano_keyboard
+                        size_hint: (None, None)
                         width: self.parent.width
-                        height: piano_keyboard.height + dp(17)
-
-                        PianoKeyboard:
-                            id: piano_keyboard
-                            size_hint: (None, None)
-                            width: self.parent.width
-                            note_height: root.note_height
-                            pos: 0, dp(17)
+                        note_height: root.note_height
+                        bottom_padding: dp(17)
 
             BoundedScrollView:
                 id: timeline_scroll
@@ -810,21 +804,15 @@ Builder.load_string("""
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
-                RelativeLayout:
-                    id: grid_container
-                    size_hint: None, None
-                    width: grid.width + dp(15)
-                    height: grid.height + dp(17)
-
-                    EditableMidiGrid:
-                        id: grid
-                        editor: root
-                        track: root.track_copy
-                        total_beats: root.total_beats
-                        pixels_per_beat: root.pixels_per_beat
-                        note_height: root.note_height
-                        size_hint: None, None
-                        pos: 0, dp(17)
+                EditableMidiGrid:
+                    id: grid
+                    editor: root
+                    track: root.track_copy
+                    total_beats: root.total_beats
+                    pixels_per_beat: root.pixels_per_beat
+                    note_height: root.note_height
+                    size_hint: (None, None)
+                    bottom_padding: dp(17)
 
         MDBoxLayout:
             size_hint_y: None
@@ -937,8 +925,6 @@ class PianoRollEditor(FloatingWindow):
 
         self.ids.piano_keyboard.height = grid.height
         grid.bind(height=self.ids.piano_keyboard.setter('height'))
-        grid.bind(height=lambda i, v: setattr(self.ids.keyboard_container, 'height', v + dp(17)))
-        grid.bind(height=lambda i, v: setattr(self.ids.grid_container, 'height', v + dp(17)))
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -1475,8 +1461,7 @@ class PianoRollEditor(FloatingWindow):
         if timeline_scroll.collide_point(*timeline_scroll.parent.to_widget(*pos)):
             
             # CALCULS (Pitch et Temps)
-            # Note: on utilise int(ly / self.note_height)
-            pitch = int(ly / self.note_height)
+            pitch = int((ly - grid.bottom_padding) / self.note_height)
             current_beat = lx / self.pixels_per_beat
             
             if 0 <= pitch <= 127:
@@ -1790,11 +1775,12 @@ class PianoRollEditor(FloatingWindow):
     def _center_view_on_c4(self) -> None:
         timeline_scroll = self.ids.timeline_scroll
         grid = self.ids.grid
-        # Content height is now grid.height + dp(17)
-        max_scroll = (128 * self.note_height + dp(17)) - timeline_scroll.height
+        # Content height is 128 * note_height + bottom_padding
+        total_content_height = (128 * self.note_height) + grid.bottom_padding
+        max_scroll = total_content_height - timeline_scroll.height
         if max_scroll > 0:
-            # We want (60 * self.note_height + dp(17)) to be at the center of the viewport
-            target_y = (60 * self.note_height) + dp(17)
+            # Note 60 is at y = 60 * note_height + bottom_padding
+            target_y = (60 * self.note_height) + grid.bottom_padding
             timeline_scroll.scroll_y = max(0.0, min(1.0, (target_y - (timeline_scroll.height / 2)) / max_scroll))
 
     def zoom_in(self) -> None:

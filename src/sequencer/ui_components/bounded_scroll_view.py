@@ -1,5 +1,6 @@
 from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
+from .ui_utils import set_safe_cursor
 
 
 class BoundedScrollView(ScrollView):
@@ -9,12 +10,12 @@ class BoundedScrollView(ScrollView):
     """
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            Window.set_system_cursor('hand')
+            set_safe_cursor('hand')
             return super().on_touch_down(touch)
         return False
 
     def on_touch_up(self, touch):
-        Window.set_system_cursor('arrow')
+        set_safe_cursor('arrow')
         return super().on_touch_up(touch)
 
     def on_touch_move(self, touch):

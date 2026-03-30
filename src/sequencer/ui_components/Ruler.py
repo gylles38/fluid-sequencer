@@ -80,10 +80,14 @@ class RulerContent(Widget):
     def redraw(self, *args):
         """Debounced redraw of the ruler content."""
         if getattr(self, '_redraw_pending', False): return
+        from kivy.logger import Logger
+        Logger.info(f"RulerContent: redraw scheduled {id(self)}")
         self._redraw_pending = True
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
+        from kivy.logger import Logger
+        Logger.info(f"RulerContent: draw starting {id(self)}")
         try:
             # On calcule la largeur cible
             target_width = self.total_beats * self.pixels_per_beat

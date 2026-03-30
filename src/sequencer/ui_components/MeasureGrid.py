@@ -21,11 +21,20 @@ class MeasureGrid(Widget):
     def redraw(self, *args):
         """Debounced redraw of the measure lines."""
         if getattr(self, '_redraw_pending', False): return
+        from kivy.logger import Logger
+        # Logger.info(f"MeasureGrid: redraw scheduled {id(self)}")
         self._redraw_pending = True
-        Clock.schedule_once(self.draw_measure_lines, 0)
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
+        try:
+            self.draw_measure_lines()
+        finally:
+            self._redraw_pending = False
 
     def draw_measure_lines(self, *args):
-        self._redraw_pending = False
+        # from kivy.logger import Logger
+        # Logger.info(f"MeasureGrid: draw starting {id(self)}")
         if not self.canvas: return
         self.canvas.clear()
         

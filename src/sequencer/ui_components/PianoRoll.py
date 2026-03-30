@@ -51,8 +51,16 @@ class PianoRoll(Widget):
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""
         if getattr(self, '_redraw_pending', False): return
+        from kivy.logger import Logger
+        # Logger.info(f"PianoRoll: redraw scheduled {id(self)}")
         self._redraw_pending = True
-        Clock.schedule_once(self.draw, 0)
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
+        try:
+            self.draw()
+        finally:
+            self._redraw_pending = False
 
     def _velocity_to_color(self, velocity):
         """Converts MIDI velocity (0-127) to a color for visualization."""
@@ -63,7 +71,8 @@ class PianoRoll(Widget):
         return (red, green, blue, 0.9)
 
     def draw(self, *args):
-        self._redraw_pending = False
+        # from kivy.logger import Logger
+        # Logger.info(f"PianoRoll: draw starting {id(self)}")
         if not self.canvas: return
         self.canvas.clear()
 

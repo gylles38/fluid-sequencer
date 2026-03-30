@@ -37,11 +37,20 @@ class PianoKeyboard(Widget):
     def _redraw_on_schedule(self, *args):
         # Schedule the redraw for the next frame to ensure all properties are updated.
         if getattr(self, '_redraw_pending', False): return
+        from kivy.logger import Logger
+        # Logger.info(f"PianoKeyboard: redraw scheduled {id(self)}")
         self._redraw_pending = True
-        Clock.schedule_once(self._redraw, 0)
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
+        try:
+            self._redraw()
+        finally:
+            self._redraw_pending = False
 
     def _redraw(self, *args):
-        self._redraw_pending = False
+        # from kivy.logger import Logger
+        # Logger.info(f"PianoKeyboard: redraw starting {id(self)}")
         if not self.canvas: return
         self.canvas.clear()
 

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
-from kivy.properties import BooleanProperty, StringProperty
+from kivy.properties import BooleanProperty, StringProperty, ListProperty
 from kivy.event import EventDispatcher
 
 @dataclass
@@ -162,6 +162,7 @@ class AutomationTrack(BaseTrack, EventDispatcher):
     is_muted = BooleanProperty(False)
     is_solo = BooleanProperty(False)
     active_parameter = StringProperty('vol')
+    points = ListProperty([])
 
     def __init__(self, name: str, target_track_index: int, is_muted: bool = False,
                  is_solo: bool = False, points: List[AutomationPoint] = None,
@@ -174,16 +175,35 @@ class AutomationTrack(BaseTrack, EventDispatcher):
         self.points = points if points is not None else []
         self.active_parameter = active_parameter
 
+        # Caching for performance
+        self._cache_points_by_param = {}
+        self._cache_dirty = True
+        self.bind(points=self._invalidate_cache)
+
+    def _invalidate_cache(self, *args):
+        self._cache_dirty = True
+
     def add_point(self, point: AutomationPoint, sort: bool = True):
         """Adds an automation point and optionally keeps the list sorted."""
         self.points.append(point)
+        self._cache_dirty = True
         if sort:
             self.points.sort(key=lambda p: p.start_time)
 
     def get_value_at(self, beat: float, parameter: str = 'vol') -> float:
         import math
-        # 1. Filtrage et tri des points par paramètre
-        pts = sorted([p for p in self.points if p.parameter == parameter], key=lambda x: x.start_time)
+
+        # Optimization: Use cached and sorted points to avoid O(N log N) sort on every call
+        if self._cache_dirty:
+            new_cache = {}
+            for p in self.points:
+                new_cache.setdefault(p.parameter, []).append(p)
+            for p_list in new_cache.values():
+                p_list.sort(key=lambda x: x.start_time)
+            self._cache_points_by_param = new_cache
+            self._cache_dirty = False
+
+        pts = self._cache_points_by_param.get(parameter, [])
 
         if not pts:
             return 0.0 if parameter == 'pan' else 1.0

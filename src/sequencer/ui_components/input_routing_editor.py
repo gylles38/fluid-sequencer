@@ -79,6 +79,8 @@ class RoutingValueAxis(Widget):
         """Debounced redraw of the routing axis."""
         if getattr(self, '_redraw_pending', False): return
         self._redraw_pending = True
+        from kivy.logger import Logger
+        Logger.info(f"RoutingValueAxis: redraw scheduled {id(self)}")
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
@@ -159,6 +161,8 @@ class EditableRoutingGrid(Widget):
         """Debounced redraw of the grid and curve."""
         if getattr(self, '_redraw_pending', False): return
         self._redraw_pending = True
+        from kivy.logger import Logger
+        Logger.info(f"EditableRoutingGrid: redraw scheduled {id(self)}")
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
@@ -1000,9 +1004,9 @@ class InputRoutingEditor(FloatingWindow):
             Logger.error(f"InputRoutingEditor: Error unbinding sequencer: {e}")
 
         try:
-            Window.unbind(on_key_down=self._on_key_down)
-        except Exception as e:
-            Logger.error(f"InputRoutingEditor: Error unbinding keyboard: {e}")
+            for i in range(10):
+                Window.unbind(on_key_down=self._on_key_down)
+        except Exception: pass
 
         if hasattr(self, '_playhead_event') and self._playhead_event:
             self._playhead_event.cancel()

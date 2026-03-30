@@ -139,7 +139,7 @@ class FloatingWindow(RelativeLayout):
 
     def on_touch_down(self, touch):
         from kivy.logger import Logger
-        # Logger.info(f"FloatingWindow: on_touch_down {self.title} ({id(self)}) at {touch.pos}")
+        Logger.info(f"FloatingWindow: on_touch_down {self.title} ({id(self)}) at {touch.pos}")
 
         if not self.collide_point(*touch.pos):
             return False
@@ -203,9 +203,11 @@ class FloatingWindow(RelativeLayout):
         return True
 
     def _bring_to_front(self):
+        from kivy.logger import Logger
         parent = self.parent
         if parent and len(parent.children) > 1:
             if parent.children[0] is not self:
+                Logger.info(f"FloatingWindow: _bring_to_front {self.title} ({id(self)})")
                 # We save the state so we know this is a move, not a dismiss
                 self._is_moving_to_front = True
                 try:
@@ -222,8 +224,8 @@ class FloatingWindow(RelativeLayout):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
 
-        # from kivy.logger import Logger
-        # Logger.info(f"FloatingWindow: on_touch_move {self.title} ({id(self)}) mode={'drag' if self._is_dragging else 'resize'}")
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: on_touch_move {self.title} ({id(self)}) mode={'drag' if self._is_dragging else 'resize'}")
 
         if self._is_dragging:
             if self.parent:

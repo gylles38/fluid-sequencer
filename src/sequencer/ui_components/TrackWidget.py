@@ -2,6 +2,7 @@ from . import *  # Importe tous les imports communs
 import mido
 from sequencer.models import MidiTrack, AudioTrack, AutomationTrack
 from kivy.core.window import Window
+from .ui_utils import set_safe_cursor
 from .HoverBehavior import HoverBehavior, HoverableMDButton, HoverableButton
 from .TooltipMDIconButton import TooltipMDIconButton
 from kivymd.uix.slider import MDSlider
@@ -275,6 +276,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
     is_minimized = BooleanProperty(False)
     full_height = NumericProperty(dp(160))
     note_height = NumericProperty(round(dp(14)))
+    _is_updating_from_model = BooleanProperty(False)
         
     def __init__(self, track, track_index, sequencer_layout, **kwargs) -> None:
         kwargs.setdefault('orientation', 'vertical')
@@ -1053,11 +1055,11 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""
-        Window.set_system_cursor('hand')
+        set_safe_cursor('hand')
 
     def on_leave(self, *args):
         """Called when the mouse leaves the widget area."""
-        Window.set_system_cursor('arrow')
+        set_safe_cursor('arrow')
 
     def _update_handle_bg(self, instance, value):
         if hasattr(self, 'handle_bg_rect'):
@@ -1345,11 +1347,13 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
     def on_volume_change(self, instance, value) -> None:
         """Callback for when the user moves the volume slider."""
+        if self._is_updating_from_model: return
         self.volume_label.text = f"{int(value * 100)}"
         self.sequencer_layout.process_slider_command(f'volume {self.track_index} {value}')
 
     def on_pan_change(self, instance, value) -> None:
         """Callback for when the user moves the pan slider."""
+        if self._is_updating_from_model: return
         self.pan_label.text = f"{value:+.1f}"
         self.sequencer_layout.process_slider_command(f'pan {self.track_index} {value}')
 
@@ -1509,27 +1513,31 @@ class TrackWidget(HoverBehavior, BoxLayout):
         if not vol_slider or not pan_slider:
             return
 
-        found_vol = False
-        found_pan = False
+        self._is_updating_from_model = True
+        try:
+            found_vol = False
+            found_pan = False
 
-        # Cached reference to the targeted AutomationTrack
-        if not hasattr(self, '_cached_automation_track') or self._cached_automation_track is None:
-            self._cached_automation_track = next(
-                (t for t in self.sequencer_layout.sequencer.song.tracks
-                 if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index),
-                None
-            )
+            # Cached reference to the targeted AutomationTrack
+            if not hasattr(self, '_cached_automation_track') or self._cached_automation_track is None:
+                self._cached_automation_track = next(
+                    (t for t in self.sequencer_layout.sequencer.song.tracks
+                     if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index),
+                    None
+                )
 
-        t = self._cached_automation_track
-        if t:
-            # We assume 'vol' and 'pan' are standard for all targeted tracks
-            found_vol = any(p.parameter == 'vol' for p in t.points)
-            if found_vol:
-                vol_slider.value = t.get_value_at(current_beat, 'vol')
+            t = self._cached_automation_track
+            if t:
+                # We assume 'vol' and 'pan' are standard for all targeted tracks
+                found_vol = any(p.parameter == 'vol' for p in t.points)
+                if found_vol:
+                    vol_slider.value = t.get_value_at(current_beat, 'vol')
 
-            found_pan = any(p.parameter == 'pan' for p in t.points)
-            if found_pan:
-                pan_slider.value = t.get_value_at(current_beat, 'pan')
+                found_pan = any(p.parameter == 'pan' for p in t.points)
+                if found_pan:
+                    pan_slider.value = t.get_value_at(current_beat, 'pan')
+        finally:
+            self._is_updating_from_model = False
 
         # Mise à jour des drapeaux (utile pour changer l'opacité ou l'icône)
         self.vol_automated = found_vol

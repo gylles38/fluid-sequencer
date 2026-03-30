@@ -5,7 +5,7 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
-from .ui_utils import is_any_text_input_focused
+from .ui_utils import is_any_text_input_focused, set_safe_cursor
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -330,7 +330,7 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = event
                         self._drag_mode = 'resize_end'
                         self._store_selection_states_if_needed(note)
-                        Window.set_system_cursor('size_we')
+                        set_safe_cursor('size_we')
                         touch.grab(self)
                         return True
 
@@ -341,7 +341,7 @@ class EditableMidiGrid(PianoRoll):
                         self._drag_event = event
                         self._drag_mode = 'resize_start'
                         self._store_selection_states_if_needed(note)
-                        Window.set_system_cursor('size_we')
+                        set_safe_cursor('size_we')
                         touch.grab(self)
                         return True
 
@@ -481,7 +481,7 @@ class EditableMidiGrid(PianoRoll):
                 self._selection_initial_states = None
 
             if self._drag_mode in ('resize_start', 'resize_end', 'move'):
-                Window.set_system_cursor('arrow')
+                set_safe_cursor('arrow')
             if self._drag_mode == 'move':
                 # Tri final pour s'assurer que les événements déplacés sont dans le bon ordre
                 self.editor.track_copy.events.sort(key=lambda e: e.start_time)
@@ -1482,7 +1482,7 @@ class PianoRollEditor(FloatingWindow):
         # Disable heavy hover calculations during playback
         if self.sequencer_layout.sequencer.playback_state in ('playing', 'recording'):
             # Reset to a clean state and exit
-            Window.set_system_cursor('arrow')
+            set_safe_cursor('arrow')
             piano_keyboard.highlighted_note = -1
             status_label.text = ""
             return
@@ -1496,7 +1496,9 @@ class PianoRollEditor(FloatingWindow):
 
         # 2. On vérifie si la souris est dans la zone visible du ScrollView
         # On transforme les coordonnées fenêtre en coordonnées locales au parent du ScrollView
-        if timeline_scroll.collide_point(*timeline_scroll.parent.to_widget(*pos)):
+        # Transformation des coordonnées fenêtre en locales au parent du ScrollView pour collide_point
+        parent_local_pos = timeline_scroll.parent.to_widget(*pos)
+        if timeline_scroll.collide_point(*parent_local_pos):
             
             # CALCULS (Pitch et Temps)
             pitch = int((ly - grid.bottom_padding) / self.note_height)
@@ -1541,17 +1543,19 @@ class PianoRollEditor(FloatingWindow):
                 status_label.text = ""
         else:
             # Hors de la grille
-            Window.set_system_cursor('arrow')
+            set_safe_cursor('arrow')
             piano_keyboard.highlighted_note = -1
             status_label.text = ""
 
     def _set_editor_cursor(self) -> None:
         """Gère l'apparence du curseur selon le mode d'édition"""
         mode = getattr(self, 'edit_mode', 'select')
-        if mode == 'insert': Window.set_system_cursor('crosshair')
-        elif mode == 'delete': Window.set_system_cursor('no')
-        elif mode == 'move': Window.set_system_cursor('hand')
-        else: Window.set_system_cursor('arrow')
+        cursor = 'arrow'
+        if mode == 'insert': cursor = 'crosshair'
+        elif mode == 'delete': cursor = 'no'
+        elif mode == 'move': cursor = 'hand'
+
+        set_safe_cursor(cursor)
 
     def on_dismiss(self) -> None:
         # --- Cleanup ---
@@ -1559,18 +1563,20 @@ class PianoRollEditor(FloatingWindow):
         Logger.info(f"PianoRollEditor: cleaning up {id(self)}")
 
         # Unbind all global window events to prevent memory leaks
+        # We use a loop to ensure ALL instances of our method are unbound
+        # (Kivy sometimes allows multiple identical bindings)
         try:
-            Window.unbind(on_key_down=self._on_key_down)
-        except Exception as e:
-            Logger.error(f"PianoRollEditor: Error unbinding keyboard: {e}")
+            for i in range(10):
+                Window.unbind(on_key_down=self._on_key_down)
+        except Exception: pass
 
         try:
-            Window.unbind(mouse_pos=self._on_mouse_pos)
-        except Exception as e:
-            Logger.error(f"PianoRollEditor: Error unbinding mouse: {e}")
+            for i in range(10):
+                Window.unbind(mouse_pos=self._on_mouse_pos)
+        except Exception: pass
 
         # Reset the cursor to default one last time to be safe
-        Window.set_system_cursor('arrow')
+        set_safe_cursor('arrow')
 
         try:
             self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
@@ -1827,6 +1833,8 @@ class PianoRollEditor(FloatingWindow):
             return
         source_scroll_view._last_scroll_x = scroll_x_value
 
+        from kivy.logger import Logger
+        Logger.info(f"PianoRollEditor: sync_horizontal_scroll starting (source={id(source_scroll_view)}, val={scroll_x_value})")
         self._is_scrolling = True
         try:
             # Calculate absolute pixel offset from source
@@ -1854,6 +1862,8 @@ class PianoRollEditor(FloatingWindow):
         except (IndexError, AttributeError):
             pass
 
+        from kivy.logger import Logger
+        Logger.info("PianoRollEditor: sync_horizontal_scroll finished")
         self._is_scrolling = False
 
     def _center_view_on_c4(self) -> None:

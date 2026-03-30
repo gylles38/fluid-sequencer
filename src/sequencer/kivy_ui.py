@@ -2010,111 +2010,114 @@ class SequencerLayout(BoxLayout):
         if getattr(self, '_is_updating_track_list', False):
             return
         self._is_updating_track_list = True
+        try:
+            # Close floating windows of tracks that no longer exist
+            if self.window_manager:
+                for window in list(self.window_manager.children):
+                    if hasattr(window, 'source_track') and window.source_track not in self.sequencer.song.tracks:
+                        window.dismiss()
 
-        # Close floating windows of tracks that no longer exist
-        if self.window_manager:
-            for window in list(self.window_manager.children):
-                if hasattr(window, 'source_track') and window.source_track not in self.sequencer.song.tracks:
-                    window.dismiss()
+            final_total_beats = self.sequencer.get_song_length_in_beats()
+            self.ruler.total_beats = final_total_beats
+            self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
 
-        final_total_beats = self.sequencer.get_song_length_in_beats()
-        self.ruler.total_beats = final_total_beats
-        self.ruler.beats_per_measure = self.sequencer.song.time_signature_numerator
+            # Optimization: Reuse existing TrackWidget instances
+            existing_widgets = {id(w.track): w for w in self.track_widgets}
 
-        # Optimization: Reuse existing TrackWidget instances
-        existing_widgets = {id(w.track): w for w in self.track_widgets}
+            # Filtering tracks to show (excluding metronome)
+            tracks_indices_to_show = []
+            for i, track in enumerate(self.sequencer.song.tracks):
+                if not (isinstance(track, MidiTrack) and track.is_metronome):
+                    tracks_indices_to_show.append(i)
 
-        # Filtering tracks to show (excluding metronome)
-        tracks_indices_to_show = []
-        for i, track in enumerate(self.sequencer.song.tracks):
-            if not (isinstance(track, MidiTrack) and track.is_metronome):
-                tracks_indices_to_show.append(i)
+            # Get the visual order from the song model
+            display_order = self.sequencer.song.track_display_order
 
-        # Get the visual order from the song model
-        display_order = self.sequencer.song.track_display_order
+            # Filter display_order to only include existing tracks that are not metronome
+            ordered_indices = [idx for idx in display_order if idx in tracks_indices_to_show]
 
-        # Filter display_order to only include existing tracks that are not metronome
-        ordered_indices = [idx for idx in display_order if idx in tracks_indices_to_show]
+            # Add any missing indices (e.g. newly added tracks)
+            for idx in tracks_indices_to_show:
+                if idx not in ordered_indices:
+                    ordered_indices.append(idx)
 
-        # Add any missing indices (e.g. newly added tracks)
-        for idx in tracks_indices_to_show:
-            if idx not in ordered_indices:
-                ordered_indices.append(idx)
+            # Synchronize model if needed
+            if self.sequencer.song.track_display_order != ordered_indices:
+                self.sequencer.song.track_display_order = ordered_indices
 
-        # Synchronize model if needed
-        if self.sequencer.song.track_display_order != ordered_indices:
-            self.sequencer.song.track_display_order = ordered_indices
+            tracks_to_show = [self.sequencer.song.tracks[idx] for idx in ordered_indices]
 
-        tracks_to_show = [self.sequencer.song.tracks[idx] for idx in ordered_indices]
+            # Determine if we need to clear and re-add widgets
+            current_tracks_in_widgets = [w.track for w in self.track_widgets]
+            if current_tracks_in_widgets != tracks_to_show:
+                self.track_list_layout.clear_widgets()
+                new_track_widgets = []
+                for track in tracks_to_show:
+                    # Find the real track index in the full song.tracks list
+                    actual_track_index = self.sequencer.song.tracks.index(track)
 
-        # Determine if we need to clear and re-add widgets
-        current_tracks_in_widgets = [w.track for w in self.track_widgets]
-        if current_tracks_in_widgets != tracks_to_show:
-            self.track_list_layout.clear_widgets()
-            new_track_widgets = []
-            for track in tracks_to_show:
-                # Find the real track index in the full song.tracks list
-                actual_track_index = self.sequencer.song.tracks.index(track)
+                    if id(track) in existing_widgets:
+                        track_widget = existing_widgets[id(track)]
+                        track_widget.track_index = actual_track_index
+                    else:
+                        track_widget = TrackWidget(track=track, track_index=actual_track_index, sequencer_layout=self)
+                        if hasattr(track_widget, 'timeline_scroll'):
+                            track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
 
-                if id(track) in existing_widgets:
-                    track_widget = existing_widgets[id(track)]
-                    track_widget.track_index = actual_track_index
-                else:
-                    track_widget = TrackWidget(track=track, track_index=actual_track_index, sequencer_layout=self)
-                    if hasattr(track_widget, 'timeline_scroll'):
-                        track_widget.timeline_scroll.bind(scroll_x=self.sync_scroll_from_track)
+                    track_widget.total_beats = final_total_beats
+                    track_widget.pixels_per_beat = self.pixels_per_beat
+                    track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
 
-                track_widget.total_beats = final_total_beats
-                track_widget.pixels_per_beat = self.pixels_per_beat
-                track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
-
-                new_track_widgets.append(track_widget)
-                self.track_list_layout.add_widget(track_widget)
-                Clock.schedule_once(track_widget._update_graphics, 0)
-            self.track_widgets = new_track_widgets
-        else:
-            # Order is the same, just update properties
-            for i, track_widget in enumerate(self.track_widgets):
-                actual_track_index = self.sequencer.song.tracks.index(track_widget.track)
-                track_widget.track_index = actual_track_index
-                track_widget.total_beats = final_total_beats
-                track_widget.pixels_per_beat = self.pixels_per_beat
-                track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
-
-                if hasattr(track_widget, 'piano_roll'):
-                    track_widget.piano_roll.redraw()
-                elif hasattr(track_widget, 'measure_grid'):
-                    track_widget.measure_grid.redraw()
-
-        # Update ruler spacer widths and timeline width
-        if self.track_widgets:
-            first_track_widget = self.track_widgets[0]
-            self.ruler.info_width = first_track_widget.info_width
-            self.ruler.controls_width = first_track_widget.controls_width
-
-            if isinstance(first_track_widget.track, MidiTrack):
-                self.ruler.keyboard_width = first_track_widget.piano_keyboard.width
-                self.ruler.ruler_content.width = first_track_widget.piano_roll.width
+                    new_track_widgets.append(track_widget)
+                    self.track_list_layout.add_widget(track_widget)
+                    Clock.schedule_once(track_widget._update_graphics, 0)
+                self.track_widgets = new_track_widgets
             else:
-                self.ruler.keyboard_width = dp(40)
-                self.ruler.ruler_content.width = first_track_widget.timeline_container.width
+                # Order is the same, just update properties
+                for i, track_widget in enumerate(self.track_widgets):
+                    actual_track_index = self.sequencer.song.tracks.index(track_widget.track)
+                    track_widget.track_index = actual_track_index
+                    track_widget.total_beats = final_total_beats
+                    track_widget.pixels_per_beat = self.pixels_per_beat
+                    track_widget.beats_per_measure = self.sequencer.song.time_signature_numerator
 
-        # --- Bind scroll views for synchronization ---
-        # Horizontal scrolling is now managed by individual scroll views (grids and ruler)
-        # to keep the left panels fixed while maintaining perfect alignment.
+                    if hasattr(track_widget, 'piano_roll'):
+                        track_widget.piano_roll.redraw()
+                    elif hasattr(track_widget, 'measure_grid'):
+                        track_widget.measure_grid.redraw()
 
-        # First, unbind the persistent ruler scroll view to avoid duplicate bindings
-        self.ruler.scroll_view.funbind('scroll_x', self._synchronize_scroll)
+            # Update ruler spacer widths and timeline width
+            if self.track_widgets:
+                first_track_widget = self.track_widgets[0]
+                self.ruler.info_width = first_track_widget.info_width
+                self.ruler.controls_width = first_track_widget.controls_width
 
-        scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]
-        for sv in scroll_views:
-            # We use funbind/fbind with the direct method reference to prevent accumulation
-            sv.funbind('scroll_x', self._synchronize_scroll)
-            sv.fbind('scroll_x', self._synchronize_scroll)
-            sv.bind(on_scroll_stop=self._on_scroll_stop)
+                if isinstance(first_track_widget.track, MidiTrack):
+                    self.ruler.keyboard_width = first_track_widget.piano_keyboard.width
+                    self.ruler.ruler_content.width = first_track_widget.piano_roll.width
+                else:
+                    self.ruler.keyboard_width = dp(40)
+                    self.ruler.ruler_content.width = first_track_widget.timeline_container.width
 
-        self._is_updating_track_list = False
-            
+            # --- Bind scroll views for synchronization ---
+            # Horizontal scrolling is now managed by individual scroll views (grids and ruler)
+            # to keep the left panels fixed while maintaining perfect alignment.
+
+            # First, unbind the persistent ruler scroll view to avoid duplicate bindings
+            self.ruler.scroll_view.funbind('scroll_x', self._synchronize_scroll)
+
+            scroll_views = [self.ruler.scroll_view] + [t.timeline_scroll for t in self.track_widgets]
+            for sv in scroll_views:
+                # We use funbind/fbind with the direct method reference to prevent accumulation
+                sv.funbind('scroll_x', self._synchronize_scroll)
+                sv.fbind('scroll_x', self._synchronize_scroll)
+
+                # Check if already bound for on_scroll_stop to avoid leak
+                sv.unbind(on_scroll_stop=self._on_scroll_stop)
+                sv.bind(on_scroll_stop=self._on_scroll_stop)
+        finally:
+            self._is_updating_track_list = False
+
     def update_bridge_label(self, instance, value):
         if not self.sequencer.jack_manager.is_running:
             self.bridge_label.text = "Conductor: NO JACK"
@@ -2585,10 +2588,6 @@ class SequencerLayout(BoxLayout):
         return num_children
 
     def _synchronize_scroll(self, instance, value):
-        """
-        instance: le ScrollView qui a bougé (ex: source_sv)
-        value: la nouvelle valeur de scroll_x (entre 0 et 1)
-        """
         if self._is_scrolling:
             return
 
@@ -2610,7 +2609,7 @@ class SequencerLayout(BoxLayout):
                     track.timeline_scroll.scroll_x = value
         finally:
             self._is_scrolling = False
-                
+
     def _on_scroll_stop(self, scroll_view, *args):
         """Called when a user stops scrolling one of the timelines."""
         pass

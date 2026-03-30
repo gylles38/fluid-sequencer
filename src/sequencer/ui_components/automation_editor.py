@@ -210,10 +210,14 @@ class EditableAutomationGrid(Widget):
     def redraw(self, *args):
         """Debounced redraw of the grid and curve."""
         if getattr(self, '_redraw_pending', False): return
+        from kivy.logger import Logger
+        # Logger.info(f"EditableAutomationGrid: redraw scheduled {id(self)}")
         self._redraw_pending = True
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
+        # from kivy.logger import Logger
+        # Logger.info(f"EditableAutomationGrid: draw starting {id(self)}")
         try:
             self.draw()
         finally:
@@ -1133,11 +1137,11 @@ class AutomationEditor(FloatingWindow):
         except Exception as e:
             Logger.error(f"AutomationEditor: Error unbinding sequencer: {e}")
 
-        # 1. On libère le clavier
+        # 1. On libère le clavier (loop pour être sûr)
         try:
-            Window.unbind(on_key_down=self._on_key_down)
-        except Exception as e:
-            Logger.error(f"AutomationEditor: Error unbinding keyboard: {e}")
+            for i in range(10):
+                Window.unbind(on_key_down=self._on_key_down)
+        except Exception: pass
         
         # 2. On arrête la mise à jour de la Playhead
         if hasattr(self, '_playhead_event') and self._playhead_event:

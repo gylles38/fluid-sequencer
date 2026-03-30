@@ -85,7 +85,7 @@ class RoutingValueAxis(Widget):
 
     def _do_redraw(self, dt):
         try:
-            self.draw()
+            self.redraw()
         finally:
             self._redraw_pending = False
 
@@ -167,7 +167,7 @@ class EditableRoutingGrid(Widget):
 
     def _do_redraw(self, dt):
         try:
-            self.draw()
+            self.redraw()
         finally:
             self._redraw_pending = False
 

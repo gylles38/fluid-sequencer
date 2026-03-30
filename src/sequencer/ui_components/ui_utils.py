@@ -1,20 +1,125 @@
 from kivy.core.window import Window
 from kivy.uix.textinput import TextInput
 from kivy.logger import Logger
+from kivy.clock import Clock
+import weakref
+import time
+
+class CursorManager:
+    """
+    Centralized manager to handle cursor changes.
+    It debounces requests and applies only the latest request per frame
+    to prevent backend fighting and potential deadlocks.
+    """
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(CursorManager, cls).__new__(cls)
+            cls._instance.pending_cursor = None
+            cls._instance.current_cursor = 'arrow'
+            cls._instance._apply_event = None
+        return cls._instance
+
+    def request_cursor(self, cursor_name):
+        if self.current_cursor == cursor_name:
+            # Important: Still need to clear any pending that might be different
+            self.pending_cursor = None
+            return
+
+        # If a different cursor was already requested this frame,
+        # this new one will overwrite it.
+        self.pending_cursor = cursor_name
+        if not self._apply_event:
+            self._apply_event = Clock.schedule_once(self._apply_cursor, 0)
+
+    def _apply_cursor(self, dt):
+        self._apply_event = None
+        if self.pending_cursor and self.pending_cursor != self.current_cursor:
+            try:
+                # Logger.info(f"CursorManager: Applying cursor {self.pending_cursor}")
+                Window.set_system_cursor(self.pending_cursor)
+                self.current_cursor = self.pending_cursor
+            except Exception as e:
+                Logger.error(f"CursorManager: Failed to set cursor {self.pending_cursor}: {e}")
+        self.pending_cursor = None
 
 def set_safe_cursor(cursor_name):
-    """Sets the system cursor only if it's different from the current one."""
-    if not hasattr(Window, '_current_cursor'):
-        # Initialiser avec la valeur actuelle réelle si possible, sinon par défaut
-        Window._current_cursor = 'arrow'
+    """Sets the system cursor using the centralized CursorManager."""
+    CursorManager().request_cursor(cursor_name)
 
-    if Window._current_cursor != cursor_name:
-        try:
-            # Logger.info(f"UIUtils: Changing cursor from {Window._current_cursor} to {cursor_name}")
-            Window.set_system_cursor(cursor_name)
-            Window._current_cursor = cursor_name
-        except Exception as e:
-            Logger.error(f"UIUtils: Failed to set cursor {cursor_name}: {e}")
+
+class GlobalHoverManager:
+    """
+    Centralized manager for hover events to reduce the number of listeners on Window.mouse_pos.
+    This significantly improves performance and stability during layout changes (like re-parenting).
+    """
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(GlobalHoverManager, cls).__new__(cls)
+            cls._instance.widgets = [] # List of weakref.ref
+            cls._instance._last_pos = (0, 0)
+            cls._instance._last_dispatch_time = 0
+            cls._instance._bound = False
+            cls._instance._dispatch_event = None
+        return cls._instance
+
+    def register(self, widget):
+        # Use weakref to avoid memory leaks
+        ref = weakref.ref(widget)
+        if ref not in self.widgets:
+            self.widgets.append(ref)
+        self._ensure_bound()
+
+    def unregister(self, widget):
+        # We don't remove immediately to avoid issues during iteration
+        # instead we rely on dead weakrefs being cleaned up during dispatch
+        pass
+
+    def _ensure_bound(self):
+        if not self._bound:
+            Window.bind(mouse_pos=self._on_mouse_pos)
+            self._bound = True
+
+    def _on_mouse_pos(self, window, pos):
+        self._last_pos = pos
+        curr_time = time.time()
+
+        # Throttle to ~50 FPS for hover checks
+        if curr_time - self._last_dispatch_time < 0.02:
+            if not self._dispatch_event:
+                self._dispatch_event = Clock.schedule_once(self._do_dispatch, 0.02)
+            return
+
+        self._do_dispatch(0)
+
+    def _do_dispatch(self, dt):
+        self._dispatch_event = None
+        self._last_dispatch_time = time.time()
+
+        # Performance: Clear cursor pending if it matches current at start of dispatch
+        # (Though CursorManager handles this, it's a good extra guard)
+
+        still_alive = []
+        # Copy list for safe iteration
+        # Optimization: Sort widgets by depth to handle occlusion correctly
+        # (Actually, HoverBehavior already handles occlusion by checking root.children)
+
+        for ref in list(self.widgets):
+            widget = ref()
+            if widget:
+                try:
+                    # Direct call to the widget's internal hover handler
+                    if hasattr(widget, '_on_mouse_pos_internal'):
+                        widget._on_mouse_pos_internal(self._last_pos)
+                    still_alive.append(ref)
+                except Exception as e:
+                    # Logger.error(f"GlobalHoverManager: Error dispatching to {widget}: {e}")
+                    pass
+
+        self.widgets = still_alive
 
 def is_any_text_input_focused():
     """

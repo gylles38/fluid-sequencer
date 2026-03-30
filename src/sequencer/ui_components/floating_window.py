@@ -138,8 +138,8 @@ class FloatingWindow(RelativeLayout):
         self.ids.content_container.add_widget(widget, index, canvas)
 
     def on_touch_down(self, touch):
-        from kivy.logger import Logger
-        Logger.info(f"FloatingWindow: on_touch_down {self.title} ({id(self)}) at {touch.pos}")
+        # from kivy.logger import Logger
+        # Logger.info(f"FloatingWindow: on_touch_down {self.title} ({id(self)}) at {touch.pos}")
 
         if not self.collide_point(*touch.pos):
             return False
@@ -151,8 +151,11 @@ class FloatingWindow(RelativeLayout):
             # Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch rejected (locked)")
             return True
 
-        if self.parent:
-            Clock.schedule_once(lambda dt: self._bring_to_front(), 0)
+        if self.parent and self.parent.children[0] is not self:
+            # OPTIMIZATION: Debounced bring-to-front
+            if not hasattr(self, '_btf_event'): self._btf_event = None
+            if not self._btf_event:
+                self._btf_event = Clock.schedule_once(self._do_bring_to_front_debounced, 0.05)
 
         # 1. Try children first.
         # super().on_touch_down(touch) calls RelativeLayout.on_touch_down,
@@ -202,12 +205,16 @@ class FloatingWindow(RelativeLayout):
         # Always swallow touch within the window bounds
         return True
 
+    def _do_bring_to_front_debounced(self, dt):
+        self._btf_event = None
+        self._bring_to_front()
+
     def _bring_to_front(self):
         from kivy.logger import Logger
         parent = self.parent
         if parent and len(parent.children) > 1:
             if parent.children[0] is not self:
-                Logger.info(f"FloatingWindow: _bring_to_front {self.title} ({id(self)})")
+                # Logger.info(f"FloatingWindow: _bring_to_front {self.title} ({id(self)})")
                 # We save the state so we know this is a move, not a dismiss
                 self._is_moving_to_front = True
                 try:

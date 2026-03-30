@@ -719,6 +719,15 @@ class SequencerLayout(BoxLayout):
         if not self.sequencer.default_record_port:
             Clock.schedule_once(lambda dt: self.show_midi_settings(), 0.5)
 
+        # Implementation of a diagnostic heartbeat to detect app freezes
+        def diagnostic_heartbeat(dt):
+            # Use stdout to bypass Kivy logging locks if they exist
+            sys.stdout.write(f"[HEARTBEAT] {time.strftime('%H:%M:%S')} - App is alive\n")
+            sys.stdout.flush()
+
+        # Disable in production-like runs unless requested, keeping for this debug session
+        # Clock.schedule_interval(diagnostic_heartbeat, 2.0)
+
         Window.bind(on_key_down=self._on_keyboard_down)
 
     def move_to_beat(self, beat):

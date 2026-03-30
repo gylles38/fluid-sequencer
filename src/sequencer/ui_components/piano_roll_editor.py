@@ -5,7 +5,7 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
 from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
-from .ui_utils import is_any_text_input_focused, set_safe_cursor
+from .ui_utils import is_any_text_input_focused, set_safe_cursor, GlobalHoverManager
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -96,7 +96,7 @@ class EditableMidiGrid(PianoRoll):
 
     def add_playback_line(self) -> None:
         # Now handled by direct canvas drawing in draw()
-        self.draw()
+        self.redraw()
 
     def set_playback_line_x(self, x):
         self.playback_line_x = x
@@ -161,7 +161,7 @@ class EditableMidiGrid(PianoRoll):
                             newly_selected.append(note)
 
                 self.editor.selected_notes = newly_selected
-                self.draw()
+                self.redraw()
             return True
 
 
@@ -215,7 +215,7 @@ class EditableMidiGrid(PianoRoll):
                 self.drag_delta_pitch = new_pitch - self._dragged_note.pitch
 
             self.editor.is_dirty = True
-            self.draw()
+            self.redraw()
             return True
         return super(EditableMidiGrid, self).on_touch_move(touch)
 
@@ -377,7 +377,7 @@ class EditableMidiGrid(PianoRoll):
                         self._store_selection_states_if_needed(note)
                         
                         self.editor.selected_event = event # Gardé pour compatibilité, mais moins utile en multi-select
-                        self.draw()
+                        self.redraw()
 
                         touch.grab(self)
                         return True
@@ -398,7 +398,7 @@ class EditableMidiGrid(PianoRoll):
             self.canvas.after.add(self._selection_group)
 
             touch.grab(self)
-            self.draw()
+            self.redraw()
             return True
 
         if edit_mode == 'insert':
@@ -414,7 +414,7 @@ class EditableMidiGrid(PianoRoll):
                 track.events.sort(key=lambda e: e.start_time)
 
             self.editor.is_dirty = True
-            self.draw()
+            self.redraw()
             # This was the missing call from the review
             self.editor._record_state()
             return True
@@ -428,7 +428,7 @@ class EditableMidiGrid(PianoRoll):
                             event.notes.remove(note)
                             if not event.notes: track.events.remove(event)
                             self.editor.is_dirty = True
-                            self.draw()
+                            self.redraw()
                             self.editor._record_state()
                             return True
 
@@ -492,7 +492,7 @@ class EditableMidiGrid(PianoRoll):
 
         self._drag_mode = None
         touch.ungrab(self)
-        self.draw() # Redessine la grille pour afficher l'état final
+        self.redraw() # Redessine la grille pour afficher l'état final
         return True
 
     def _apply_multi_selection_changes(self) -> None:
@@ -1008,7 +1008,7 @@ class PianoRollEditor(FloatingWindow):
         Window.bind(on_key_down=self._on_key_down)
 
         # Mouse cursor logic
-        Window.bind(mouse_pos=self._on_mouse_pos)
+        GlobalHoverManager().register(self)
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         """Handle keyboard shortcuts for the editor."""
@@ -1035,7 +1035,7 @@ class PianoRollEditor(FloatingWindow):
                     self.ids.status_label.text = f"Note: {note_name}, Velocity: {self.hovered_note.velocity}"
                     
                     # Optionnel : redessiner la grille si la couleur dépend de la vélocité
-                    self.ids.grid.draw()
+                    self.ids.grid.redraw()
                     
                     # Enregistrement pour le Undo/Redo
                     self._record_state()
@@ -1159,7 +1159,7 @@ class PianoRollEditor(FloatingWindow):
                 # On redessine la grille
                 #if hasattr(self.ids.ruler, 'redraw'):
                 #    self.ids.ruler.redraw()
-                self.ids.grid.draw()
+                self.ids.grid.redraw()
                 return True # Indique que l'événement a été géré
 
         return False
@@ -1276,7 +1276,7 @@ class PianoRollEditor(FloatingWindow):
         self.selected_notes = new_selection
         # Explicitly update the grid's property to ensure the visual update.
         self.ids.grid.selected_notes = self.selected_notes
-        self.ids.grid.draw()
+        self.ids.grid.redraw()
         self._update_undo_redo_buttons_state()
         self.is_dirty = True
 
@@ -1314,7 +1314,7 @@ class PianoRollEditor(FloatingWindow):
         if is_cut:
             self._delete_selected_notes()
             self._record_state()
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
 
     def _paste_selection(self) -> None:
         """Colle les notes à la position de la tête de lecture sans doublons."""
@@ -1365,7 +1365,7 @@ class PianoRollEditor(FloatingWindow):
             self.track_copy.events.sort(key=lambda e: e.start_time)
             self.is_dirty = True
             self._record_state()
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
 
     def _select_all_notes(self) -> None:
         """Sélectionne toutes les notes présentes dans la piste actuelle."""
@@ -1376,7 +1376,7 @@ class PianoRollEditor(FloatingWindow):
         
         if all_notes:
             self.selected_notes = all_notes
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
      
     def _delete_selected_notes(self) -> None:
         """Supprime proprement toutes les notes sélectionnées."""
@@ -1469,7 +1469,7 @@ class PianoRollEditor(FloatingWindow):
         octave = (pitch // 12) - 1
         return f"{note}{octave}"
 
-    def _on_mouse_pos(self, instance, pos) -> None:
+    def _on_mouse_pos_internal(self, pos) -> None:
         timeline_scroll = self.ids.get('timeline_scroll')
         grid = self.ids.get('grid')
         piano_keyboard = self.ids.get('piano_keyboard')
@@ -1570,10 +1570,6 @@ class PianoRollEditor(FloatingWindow):
                 Window.unbind(on_key_down=self._on_key_down)
         except Exception: pass
 
-        try:
-            for i in range(10):
-                Window.unbind(mouse_pos=self._on_mouse_pos)
-        except Exception: pass
 
         # Reset the cursor to default one last time to be safe
         set_safe_cursor('arrow')
@@ -1645,7 +1641,7 @@ class PianoRollEditor(FloatingWindow):
                     # On parcourt les enfants du TrackWidget pour trouver le PianoRoll
                     # Dans votre structure, il est dans timeline_container
                     if hasattr(tw, 'piano_roll'):
-                        tw.piano_roll.draw()
+                        tw.piano_roll.redraw()
                     break
 
             # 3. Rafraîchissement de la LECTURE (Moteur MIDI)
@@ -1764,6 +1760,9 @@ class PianoRollEditor(FloatingWindow):
                 del sequencer.track_overrides[self.original_track_index]
 
     def set_edit_mode(self, mode, btn) -> None:
+        if self.edit_mode == mode:
+            return
+
         self.edit_mode = mode
         self._update_button_states(self.mode_buttons, btn)
 
@@ -1774,7 +1773,7 @@ class PianoRollEditor(FloatingWindow):
         if mode != 'move':
             if self.selected_notes:
                 self.selected_notes = []
-                self.ids.grid.draw()
+                self.ids.grid.redraw()
 
     def set_note_duration(self, dur, btn) -> None:
         self.base_note_duration = dur
@@ -1804,7 +1803,7 @@ class PianoRollEditor(FloatingWindow):
             for note in self.selected_notes:
                 note.duration = new_duration
             self.is_dirty = True
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
 
     def _update_button_states(self, group, active_btn) -> None:
         """Met à jour l'apparence des boutons d'outils selon l'outil sélectionné."""
@@ -1929,7 +1928,7 @@ class PianoRollEditor(FloatingWindow):
         if hasattr(self.ids.ruler, 'redraw'):
             self.ids.ruler.redraw()
         
-        self.ids.grid.draw()
+        self.ids.grid.redraw()
 
     def _preview_note(self, pitch, velocity, duration) -> None:
         """Plays a single note through the sequencer's MIDI output for preview."""

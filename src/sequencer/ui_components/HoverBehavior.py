@@ -1,7 +1,7 @@
 from kivy.core.window import Window
 from kivymd.uix.button import MDButton
 from kivy.uix.button import Button
-from .ui_utils import set_safe_cursor
+from .ui_utils import set_safe_cursor, GlobalHoverManager
 import time
 
 class HoverBehavior:
@@ -18,25 +18,17 @@ class HoverBehavior:
         self.bind(on_parent=self._on_hover_parent)
 
     def _on_hover_parent(self, instance, parent):
-        Window.unbind(mouse_pos=self._on_mouse_pos)
         if parent is not None:
-            Window.bind(mouse_pos=self._on_mouse_pos)
+            GlobalHoverManager().register(self)
         else:
             if self.hovered:
                 self.hovered = False
                 self.dispatch('on_leave')
 
-    def _on_mouse_pos(self, *args):
+    def _on_mouse_pos_internal(self, pos):
         if not self.get_root_window():
             return
 
-        # Throttling to avoid high frequency processing
-        current_time = time.time()
-        if hasattr(self, '_last_hover_update') and current_time - self._last_hover_update < 0.02:
-            return
-        self._last_hover_update = current_time
-
-        pos = args[1]
         # 1. Quick collision check first (Window coordinates)
         # Performance: avoid expensive tree walks if mouse is nowhere near
         wx, wy = self.to_window(0, 0)

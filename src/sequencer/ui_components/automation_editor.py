@@ -131,7 +131,7 @@ class AutomationValueAxis(Widget):
 
     def _do_redraw_axis(self, dt):
         try:
-            self.draw()
+            self.redraw()
         finally:
             self._redraw_pending = False
 
@@ -219,7 +219,7 @@ class EditableAutomationGrid(Widget):
         # from kivy.logger import Logger
         # Logger.info(f"EditableAutomationGrid: draw starting {id(self)}")
         try:
-            self.draw()
+            self.redraw()
         finally:
             self._redraw_pending = False
 

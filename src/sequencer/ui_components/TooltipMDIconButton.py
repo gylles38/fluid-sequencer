@@ -62,17 +62,24 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
     def _show_tooltip(self, dt):
         """Affiche et configure l'info-bulle."""
+        if not self.hovered: return # Case where we left before the timer fired
+
         self._ensure_tooltip_label()
         label = TooltipMDIconButton._tooltip_label
 
-        label.text = self.tooltip_text
-        label.texture_update()
-        natural_size = label.texture_size
-        label.size = (natural_size[0] + dp(20), dp(32))
+        # Optimize: Only update if text actually changed
+        if label.text != self.tooltip_text:
+            label.text = self.tooltip_text
+            label.texture_update()
+            natural_size = label.texture_size
+            label.size = (natural_size[0] + dp(20), dp(32))
 
         # Positionner l'info-bulle par rapport à la position actuelle de la souris
         x, y = Window.mouse_pos
         label.pos = (x + dp(15), y + dp(15))
+
+        if label.opacity < 0.1:
+            label.opacity = 1
 
         if label.parent is None:
             Window.add_widget(label)
@@ -87,7 +94,10 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
         label = TooltipMDIconButton._tooltip_label
         if label and label.parent:
-            Window.remove_widget(label)
+            label.opacity = 0
+            # To reduce layout pressure, we keep it in the window but hidden
+            # until another button needs it.
+            # Window.remove_widget(label)
 
     def on_release(self):
         """Force le masquage de l'info-bulle au clic."""

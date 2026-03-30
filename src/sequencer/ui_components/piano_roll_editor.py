@@ -1820,8 +1820,14 @@ class PianoRollEditor(FloatingWindow):
 
     def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value) -> None:
         if self._is_scrolling: return
-        self._is_scrolling = True
 
+        # Ignore micro-changes to prevent oscillations
+        if hasattr(source_scroll_view, '_last_scroll_x') and \
+           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.0001:
+            return
+        source_scroll_view._last_scroll_x = scroll_x_value
+
+        self._is_scrolling = True
         try:
             # Calculate absolute pixel offset from source
             content_width_source = source_scroll_view.children[0].width

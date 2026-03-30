@@ -58,13 +58,26 @@ class RoutingValueAxis(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.redraw, size=self.redraw, midi_tracks=self.redraw, active_index=self.redraw)
-        self.labels = []
+        self._label_widgets = []
+        self.bind(midi_tracks=self._update_label_widgets)
+        self.bind(pos=self.redraw, size=self.redraw, active_index=self.redraw)
+        Clock.schedule_once(lambda dt: self._update_label_widgets(), 0)
+
+    def _update_label_widgets(self, *args):
+        num_tracks = len(self.midi_tracks)
+        # Synchronize label widget count
+        while len(self._label_widgets) < num_tracks:
+            lbl = Label(font_size='10sp', halign='right', valign='middle')
+            self.add_widget(lbl)
+            self._label_widgets.append(lbl)
+        while len(self._label_widgets) > num_tracks:
+            lbl = self._label_widgets.pop()
+            self.remove_widget(lbl)
+        self.redraw()
 
     def redraw(self, *args):
         """Debounced redraw of the routing axis."""
-        if not hasattr(self, '_redraw_pending'): self._redraw_pending = False
-        if self._redraw_pending: return
+        if getattr(self, '_redraw_pending', False): return
         self._redraw_pending = True
         Clock.schedule_once(self._do_redraw, 0)
 
@@ -78,8 +91,6 @@ class RoutingValueAxis(Widget):
         if not self.canvas: return
         self.canvas.clear()
 
-        if not hasattr(self, '_label_widgets'): self._label_widgets = []
-
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
             Rectangle(pos=self.pos, size=self.size)
@@ -87,20 +98,9 @@ class RoutingValueAxis(Widget):
             Line(points=[self.right, self.y, self.right, self.top], width=1)
 
         if not self.midi_tracks:
-            label = Label(text="No MIDI tracks", pos=self.pos, size=self.size, color=(1, 0, 0, 1))
-            self.add_widget(label)
             return
 
         num_tracks = len(self.midi_tracks)
-
-        # Synchronize label widget count
-        while len(self._label_widgets) < num_tracks:
-            lbl = Label(font_size='10sp', halign='right', valign='middle')
-            self.add_widget(lbl)
-            self._label_widgets.append(lbl)
-        while len(self._label_widgets) > num_tracks:
-            lbl = self._label_widgets.pop()
-            self.remove_widget(lbl)
 
         for i, (abs_idx, name) in enumerate(self.midi_tracks):
             y_pos = self.y + (i / max(1, num_tracks - 1)) * (self.height - dp(20)) + dp(10)
@@ -157,8 +157,7 @@ class EditableRoutingGrid(Widget):
 
     def redraw(self, *args):
         """Debounced redraw of the grid and curve."""
-        if not hasattr(self, '_redraw_pending'): self._redraw_pending = False
-        if self._redraw_pending: return
+        if getattr(self, '_redraw_pending', False): return
         self._redraw_pending = True
         Clock.schedule_once(self._do_redraw, 0)
 
@@ -250,10 +249,14 @@ class EditableRoutingGrid(Widget):
             new_beat = new_x / self.pixels_per_beat
             quantized_beat = round(new_beat * 4) / 4
             target_beat = max(0, quantized_beat)
-            self.drag_delta_beat = target_beat - self._dragged_point.start_time
+            new_delta_beat = target_beat - self._dragged_point.start_time
+            if abs(self.drag_delta_beat - new_delta_beat) > 0.001:
+                self.drag_delta_beat = new_delta_beat
 
             new_abs_idx = self._get_abs_idx_from_y(ly)
-            self.drag_delta_value = new_abs_idx - self._dragged_point.value
+            new_delta_value = new_abs_idx - self._dragged_point.value
+            if abs(self.drag_delta_value - new_delta_value) > 0.001:
+                self.drag_delta_value = new_delta_value
 
             # Update status bar live with virtual values.
             self.editor.update_status_bar(self._dragged_point)
@@ -287,21 +290,38 @@ class EditableRoutingGrid(Widget):
             Color(0.1, 0.1, 0.1, 1)
             Rectangle(pos=self.pos, size=self.size)
 
-            Color(0.2, 0.2, 0.2, 1)
+            # --- Optimized Grid Lines using Mesh ---
+            major_vertices = []
+            minor_vertices = []
+
             for i in range(int(self.total_beats) + 1):
                 x = i * self.pixels_per_beat
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
-                Line(points=[self.x + x, self.y, self.x + x, self.y + self.height], width=1.5 if is_measure else 0.5)
+                if is_measure:
+                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                else:
+                    minor_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
 
             # Horizontal lines for each MIDI track
+            h_vertices = []
             for abs_idx, name in self.midi_tracks:
                 y = self._get_y_from_abs_idx(abs_idx)
                 if abs_idx == self.active_index:
                     Color(0.2, 0.3, 0.4, 0.5)
                     Rectangle(pos=(self.x, self.y + y - dp(10)), size=(self.width, dp(20)))
-                    Color(0.2, 0.2, 0.2, 1)
-                Line(points=[self.x, self.y + y, self.x + self.width, self.y + y], width=0.5)
+                h_vertices.extend([self.x, self.y + y, 0, 0, self.x + self.width, self.y + y, 0, 0])
+
+            Color(0.2, 0.2, 0.2, 1)
+            if major_vertices:
+                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
+
+            Color(0.2, 0.2, 0.2, 0.5)
+            if minor_vertices:
+                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
+
+            if h_vertices:
+                Mesh(vertices=h_vertices, indices=list(range(len(h_vertices)//4)), mode='lines')
 
         self.draw_curve_and_points()
 
@@ -662,7 +682,7 @@ class InputRoutingEditor(FloatingWindow):
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
 
         Clock.schedule_once(self._post_kv_init)
-        Clock.schedule_interval(self.update_playhead, 1/60)
+        self._playhead_event = None
 
     def _post_kv_init(self, dt):
         self.mode_buttons = {
@@ -700,6 +720,13 @@ class InputRoutingEditor(FloatingWindow):
         if 'playhead' not in self.ids: return
         sequencer = self.sequencer_layout.sequencer
         current_beat = sequencer.current_beat
+
+        # Optimization: only update if beat changed significantly
+        if abs(getattr(self, '_last_playhead_beat', -1) - current_beat) < 0.001 and \
+           sequencer.playback_state == getattr(self, 'last_playback_state', 'stopped'):
+            return
+        self._last_playhead_beat = current_beat
+        self.last_playback_state = sequencer.playback_state
 
         # Déplacement de la barre rouge
         self.ids.playhead.x = current_beat * self.pixels_per_beat
@@ -740,7 +767,8 @@ class InputRoutingEditor(FloatingWindow):
         self.track_copy.points.append(new_point)
         self.track_copy.points.sort(key=lambda p: p.start_time)
 
-        # Setting points will trigger grid.redraw via binding
+        # Setting points property will trigger grid.redraw via binding
+        # Use list() to ensure Kivy detects the change in the ListProperty
         self.ids.grid.points = list(self.track_copy.points)
 
         self._record_state()
@@ -819,10 +847,17 @@ class InputRoutingEditor(FloatingWindow):
             scroll_view.scroll_x = max(0, min(1, new_scroll_pixels / max_scroll))
 
         self.ids.ruler.redraw()
-        self.ids.grid.draw_curve_and_points()
+        self.ids.grid.redraw()
 
     def sync_horizontal_scroll(self, instance, value):
         if self._is_scrolling: return
+
+        # Ignore micro-changes to prevent oscillations
+        if hasattr(instance, '_last_scroll_x') and \
+           abs(instance._last_scroll_x - value) < 0.0001:
+            return
+        instance._last_scroll_x = value
+
         self._is_scrolling = True
 
         # Simple and direct synchronization for identical widths
@@ -889,7 +924,7 @@ class InputRoutingEditor(FloatingWindow):
 
             point.start_time = max(0, min(self.total_beats, new_beat))
             point.value = new_val
-            self.ids.grid.draw()
+            self.ids.grid.redraw()
             self.update_status_bar(point)
             self.is_dirty = True
             self._record_state()
@@ -949,6 +984,8 @@ class InputRoutingEditor(FloatingWindow):
         self.ids.ruler.total_beats = self.total_beats
         self.ids.ruler.redraw()
         self.ids.grid.redraw()
+        if not self._playhead_event:
+            self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
 
     def on_dismiss(self):
         from kivy.logger import Logger

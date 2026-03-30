@@ -50,7 +50,8 @@ class PianoRoll(Widget):
 
     def redraw(self, *args):
         """Debounced redraw of grid and notes."""
-        Clock.unschedule(self.draw)
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
         Clock.schedule_once(self.draw, 0)
 
     def _velocity_to_color(self, velocity):
@@ -62,6 +63,8 @@ class PianoRoll(Widget):
         return (red, green, blue, 0.9)
 
     def draw(self, *args):
+        self._redraw_pending = False
+        if not self.canvas: return
         self.canvas.clear()
 
         with self.canvas:

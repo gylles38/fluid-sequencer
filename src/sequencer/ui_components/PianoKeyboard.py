@@ -36,10 +36,12 @@ class PianoKeyboard(Widget):
 
     def _redraw_on_schedule(self, *args):
         # Schedule the redraw for the next frame to ensure all properties are updated.
-        Clock.unschedule(self._redraw)
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
         Clock.schedule_once(self._redraw, 0)
 
     def _redraw(self, *args):
+        self._redraw_pending = False
         if not self.canvas: return
         self.canvas.clear()
 

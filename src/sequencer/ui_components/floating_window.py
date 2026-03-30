@@ -209,8 +209,12 @@ class FloatingWindow(RelativeLayout):
                 # We save the state so we know this is a move, not a dismiss
                 self._is_moving_to_front = True
                 try:
+                    # Capture current state to prevent re-opening logic
+                    orig_unlock = getattr(self, '_touch_lock', False)
                     parent.remove_widget(self)
                     parent.add_widget(self)
+                    # Restore state
+                    self._touch_lock = orig_unlock
                 finally:
                     self._is_moving_to_front = False
 
@@ -334,6 +338,7 @@ class FloatingWindow(RelativeLayout):
     def on_dismiss(self):
         from kivy.logger import Logger
         Logger.info(f"FloatingWindow: on_dismiss {self.title} ({id(self)})")
+        self._touch_lock = True
 
     def on_open(self):
         from kivy.logger import Logger
@@ -342,7 +347,7 @@ class FloatingWindow(RelativeLayout):
     def on_parent(self, widget, parent):
         from kivy.logger import Logger
         Logger.info(f"FloatingWindow: on_parent {self.title} ({id(self)}) parent={parent}")
-        if parent:
+        if parent and not getattr(self, '_is_moving_to_front', False):
             Clock.schedule_once(lambda dt: self.on_open(), 0)
 
     def open(self):

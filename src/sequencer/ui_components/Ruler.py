@@ -79,82 +79,86 @@ class RulerContent(Widget):
         
     def redraw(self, *args):
         """Debounced redraw of the ruler content."""
-        Clock.unschedule(self._do_redraw)
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
-        # On calcule la largeur cible
-        target_width = self.total_beats * self.pixels_per_beat
-        if abs(self.width - target_width) > 0.001:
-            self.width = target_width # Met à jour le widget pour le ScrollView
+        try:
+            # On calcule la largeur cible
+            target_width = self.total_beats * self.pixels_per_beat
+            if abs(self.width - target_width) > 0.001:
+                self.width = target_width # Met à jour le widget pour le ScrollView
+
+            if not self.canvas: return
+            self.canvas.clear()
         
-        if not self.canvas: return
-        self.canvas.clear()
-        
-        c_bg = (0.18, 0.18, 0.18, 1)
-        c_measure = (0.8, 0.8, 0.8, 1)
-        c_beat = (0.4, 0.4, 0.4, 0.5)
-        c_white = (1, 1, 1, 1)
-        c_selection = (0.2, 0.6, 0.8, 0.5) # Bleu semi-transparent
-        c_selection_range = (0.2, 0.6, 0.8, 0.15)
+            c_bg = (0.18, 0.18, 0.18, 1)
+            c_measure = (0.8, 0.8, 0.8, 1)
+            c_beat = (0.4, 0.4, 0.4, 0.5)
+            c_white = (1, 1, 1, 1)
+            c_selection = (0.2, 0.6, 0.8, 0.5) # Bleu semi-transparent
+            c_selection_range = (0.2, 0.6, 0.8, 0.15)
 
-        with self.canvas:
-            Color(*c_bg)
-            Rectangle(pos=self.pos, size=(target_width, self.height))
+            with self.canvas:
+                Color(*c_bg)
+                Rectangle(pos=self.pos, size=(target_width, self.height))
 
-            # --- DESSIN DE LA SÉLECTION (PLAGE START/END) ---
-            if self.sequencer_layout and self.sequencer_layout.sequencer:
-                seq = self.sequencer_layout.sequencer
-                start_beat = seq.parse_position_to_beats(seq.ui_start_pos_str)
-                end_beat = seq.parse_position_to_beats(seq.ui_end_pos_str) if seq.ui_end_pos_str else None
+                # --- DESSIN DE LA SÉLECTION (PLAGE START/END) ---
+                if self.sequencer_layout and self.sequencer_layout.sequencer:
+                    seq = self.sequencer_layout.sequencer
+                    start_beat = seq.parse_position_to_beats(seq.ui_start_pos_str)
+                    end_beat = seq.parse_position_to_beats(seq.ui_end_pos_str) if seq.ui_end_pos_str else None
 
-                if start_beat is not None and end_beat is not None and end_beat > start_beat:
-                    Color(*c_selection_range)
-                    x_start = start_beat * self.pixels_per_beat
-                    x_end = end_beat * self.pixels_per_beat
-                    Rectangle(pos=(self.x + x_start, self.y), size=(x_end - x_start, self.height))
+                    if start_beat is not None and end_beat is not None and end_beat > start_beat:
+                        Color(*c_selection_range)
+                        x_start = start_beat * self.pixels_per_beat
+                        x_end = end_beat * self.pixels_per_beat
+                        Rectangle(pos=(self.x + x_start, self.y), size=(x_end - x_start, self.height))
 
-                if start_beat is not None:
-                    Color(*c_selection)
-                    x = start_beat * self.pixels_per_beat
-                    Rectangle(pos=(self.x + x, self.y), size=(dp(3), self.height))
+                    if start_beat is not None:
+                        Color(*c_selection)
+                        x = start_beat * self.pixels_per_beat
+                        Rectangle(pos=(self.x + x, self.y), size=(dp(3), self.height))
 
-                if end_beat is not None:
-                    Color(*c_selection)
-                    x = end_beat * self.pixels_per_beat
-                    Rectangle(pos=(self.x + x - dp(3), self.y), size=(dp(3), self.height))
+                    if end_beat is not None:
+                        Color(*c_selection)
+                        x = end_beat * self.pixels_per_beat
+                        Rectangle(pos=(self.x + x - dp(3), self.y), size=(dp(3), self.height))
 
-            # --- Optimized Grid Lines using Mesh ---
-            major_vertices = []
-            minor_vertices = []
+                # --- Optimized Grid Lines using Mesh ---
+                major_vertices = []
+                minor_vertices = []
 
-            for beat in range(int(self.total_beats) + 1):
-                x = beat * self.pixels_per_beat
-                if beat % self.beats_per_measure == 0:
-                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
-                else:
-                    minor_vertices.extend([self.x + x, self.y + self.height * 0.4, 0, 0, self.x + x, self.y + self.height * 0.6, 0, 0])
-
-            if major_vertices:
-                Color(*c_measure)
-                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
-
-            if minor_vertices:
-                Color(*c_beat)
-                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
-
-            # --- Labels ---
-            for beat in range(int(self.total_beats) + 1):
-                if beat % self.beats_per_measure == 0:
+                for beat in range(int(self.total_beats) + 1):
                     x = beat * self.pixels_per_beat
-                    measure_num = (beat // self.beats_per_measure) + 1
-                    texture = self.get_measure_texture(measure_num)
-                    Color(*c_white)
-                    Rectangle(
-                        texture=texture,
-                        pos=(int(self.x + x + self.label_padding_x), int(self.y + self.height * 0.2)),
-                        size=texture.size
-                    )
+                    if beat % self.beats_per_measure == 0:
+                        major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                    else:
+                        minor_vertices.extend([self.x + x, self.y + self.height * 0.4, 0, 0, self.x + x, self.y + self.height * 0.6, 0, 0])
+
+                if major_vertices:
+                    Color(*c_measure)
+                    Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
+
+                if minor_vertices:
+                    Color(*c_beat)
+                    Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
+
+                # --- Labels ---
+                for beat in range(int(self.total_beats) + 1):
+                    if beat % self.beats_per_measure == 0:
+                        x = beat * self.pixels_per_beat
+                        measure_num = (beat // self.beats_per_measure) + 1
+                        texture = self.get_measure_texture(measure_num)
+                        Color(*c_white)
+                        Rectangle(
+                            texture=texture,
+                            pos=(int(self.x + x + self.label_padding_x), int(self.y + self.height * 0.2)),
+                            size=texture.size
+                        )
+        finally:
+            self._redraw_pending = False
 
 class Ruler(BoxLayout):
     total_beats = NumericProperty(16)

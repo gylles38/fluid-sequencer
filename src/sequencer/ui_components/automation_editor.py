@@ -92,17 +92,44 @@ class AutomationValueAxis(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.redraw, size=self.redraw, min_val=self.redraw, max_val=self.redraw)
-        self.labels = []
+        self._label_widgets = {}
+        # We handle widget management separately from drawing to avoid layout loops
+        self.bind(min_val=self._update_label_widgets, max_val=self._update_label_widgets)
+        self.bind(pos=self.redraw, size=self.redraw)
+        Clock.schedule_once(lambda dt: self._update_label_widgets(), 0)
+
+    def _update_label_widgets(self, *args):
+        keys_needed = ['min', 'max']
+        if self.min_val < 0 < self.max_val:
+            keys_needed.append('zero')
+
+        # Add missing
+        for key in keys_needed:
+            if key not in self._label_widgets:
+                label = Label(
+                    font_size='10sp',
+                    halign='right',
+                    valign='middle',
+                    color=(0.8, 0.8, 0.8, 1)
+                )
+                self.add_widget(label)
+                self._label_widgets[key] = label
+
+        # Remove extra
+        to_remove = [k for k in self._label_widgets if k not in keys_needed]
+        for k in to_remove:
+            self.remove_widget(self._label_widgets[k])
+            del self._label_widgets[k]
+
+        self.redraw()
 
     def redraw(self, *args):
         """Debounced redraw of the value axis."""
-        if not hasattr(self, '_redraw_pending'): self._redraw_pending = False
-        if self._redraw_pending: return
+        if getattr(self, '_redraw_pending', False): return
         self._redraw_pending = True
-        Clock.schedule_once(self._do_redraw, 0)
+        Clock.schedule_once(self._do_redraw_axis, 0)
 
-    def _do_redraw(self, dt):
+    def _do_redraw_axis(self, dt):
         try:
             self.draw()
         finally:
@@ -112,22 +139,18 @@ class AutomationValueAxis(Widget):
         if not self.canvas: return
         self.canvas.clear()
 
-        # Optimization: Only manage labels if they changed or we need to reposition them.
-        # For simplicity and to break the layout loop, we'll use a local label list
-        # and only update positions instead of clear/add.
-        if not hasattr(self, '_label_widgets'): self._label_widgets = {}
-
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
             Rectangle(pos=self.pos, size=self.size)
             Color(0.4, 0.4, 0.4, 1)
             Line(points=[self.right, self.y, self.right, self.top], width=1)
 
-        # Draw labels based on the range
+        # Update positions of labels based on current size/pos/range
         v_range = self.max_val - self.min_val
-        if v_range == 0: return
+        if v_range == 0: v_range = 1.0
 
-        def update_label(key, value, y_align, text=None):
+        def reposition_label(key, value, y_align, text=None):
+            if key not in self._label_widgets: return
             if text is None: text = f"{value:.1f}"
             y_pos = self.y + ((value - self.min_val) / v_range) * self.height
 
@@ -138,30 +161,15 @@ class AutomationValueAxis(Widget):
             else: # Center
                 y_pos -= dp(8)
 
-            if key not in self._label_widgets:
-                label = Label(
-                    text=text,
-                    font_size='10sp',
-                    halign='right',
-                    valign='middle',
-                    color=(0.8, 0.8, 0.8, 1)
-                )
-                self.add_widget(label)
-                self._label_widgets[key] = label
-
             lbl = self._label_widgets[key]
             lbl.text = text
             lbl.pos = (self.x, y_pos)
             lbl.size = (self.width - dp(4), dp(16))
 
-        update_label('max', self.max_val, y_align='top')
-        update_label('min', self.min_val, y_align='bottom')
-
-        if self.min_val < 0 < self.max_val:
-            update_label('zero', 0.0, y_align='center')
-        elif 'zero' in self._label_widgets:
-            self.remove_widget(self._label_widgets['zero'])
-            del self._label_widgets['zero']
+        reposition_label('max', self.max_val, y_align='top')
+        reposition_label('min', self.min_val, y_align='bottom')
+        if 'zero' in self._label_widgets:
+            reposition_label('zero', 0.0, y_align='center')
 
 
 class EditableAutomationGrid(Widget):
@@ -201,8 +209,7 @@ class EditableAutomationGrid(Widget):
 
     def redraw(self, *args):
         """Debounced redraw of the grid and curve."""
-        if not hasattr(self, '_redraw_pending'): self._redraw_pending = False
-        if self._redraw_pending: return
+        if getattr(self, '_redraw_pending', False): return
         self._redraw_pending = True
         Clock.schedule_once(self._do_redraw, 0)
 
@@ -302,7 +309,9 @@ class EditableAutomationGrid(Widget):
             new_beat = new_x / self.pixels_per_beat
             quantized_beat = round(new_beat * 4) / 4
             target_beat = max(0, quantized_beat)
-            self.drag_delta_beat = target_beat - self._dragged_point.start_time
+            new_delta_beat = target_beat - self._dragged_point.start_time
+            if abs(self.drag_delta_beat - new_delta_beat) > 0.001:
+                self.drag_delta_beat = new_delta_beat
 
             # Visual Value Delta
             v_range = self.max_val - self.min_val
@@ -311,7 +320,9 @@ class EditableAutomationGrid(Widget):
             new_value_normalized = new_y / self.height
             new_value = self.min_val + new_value_normalized * v_range
             target_value = max(self.min_val, min(self.max_val, new_value))
-            self.drag_delta_value = target_value - self._dragged_point.value
+            new_delta_value = target_value - self._dragged_point.value
+            if abs(self.drag_delta_value - new_delta_value) > 0.001:
+                self.drag_delta_value = new_delta_value
 
             # Optimization: Defer model update to on_touch_up.
             # Update status bar live with virtual values.
@@ -352,20 +363,37 @@ class EditableAutomationGrid(Widget):
             Color(0.1, 0.1, 0.1, 1)
             Rectangle(pos=self.pos, size=self.size)
 
-            # --- Grid Lines ---
+            # --- Optimized Grid Lines using Mesh ---
+            major_vertices = []
+            minor_vertices = []
+
             # Vertical lines (beats)
-            Color(0.2, 0.2, 0.2, 1)
             for i in range(int(self.total_beats) + 1):
                 x = i * self.pixels_per_beat
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
-                Line(points=[self.x + x, self.y, self.x + x, self.y + self.height], width=1.5 if is_measure else 0.5)
+                if is_measure:
+                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                else:
+                    minor_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
 
             # Horizontal lines (values)
+            h_vertices = []
             num_h_lines = 10
             for i in range(num_h_lines + 1):
                 y = (i / num_h_lines) * self.height
-                Line(points=[self.x, self.y + y, self.x + self.width, self.y + y], width=0.5)
+                h_vertices.extend([self.x, self.y + y, 0, 0, self.x + self.width, self.y + y, 0, 0])
+
+            Color(0.2, 0.2, 0.2, 1)
+            if major_vertices:
+                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
+
+            Color(0.2, 0.2, 0.2, 0.5) # Subtler minor lines
+            if minor_vertices:
+                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
+
+            if h_vertices:
+                Mesh(vertices=h_vertices, indices=list(range(len(h_vertices)//4)), mode='lines')
 
         self.draw_curve_and_points()
 
@@ -933,12 +961,11 @@ class AutomationEditor(FloatingWindow):
         ruler.padding = [0, 0, 0, 0]
         
         ruler.redraw()
-        self.ids.grid.draw() # Calls draw_curve_and_points
+        self.ids.grid.redraw()
 
         # Démarrage de la playhead
-        if hasattr(self, '_playhead_event'):
-            self._playhead_event.cancel()
-        self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
+        if not getattr(self, '_playhead_event', None):
+            self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
         
     def _sync_ruler_scroll(self, instance, value):
         """Répercute le défilement de la grille sur la règle."""
@@ -1495,8 +1522,14 @@ class AutomationEditor(FloatingWindow):
 
     def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value):
         if self._is_scrolling: return
-        self._is_scrolling = True
 
+        # Ignore micro-changes to prevent oscillations
+        if hasattr(source_scroll_view, '_last_scroll_x') and \
+           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.0001:
+            return
+        source_scroll_view._last_scroll_x = scroll_x_value
+
+        self._is_scrolling = True
         try:
             # Calculate absolute pixel offset from source
             content_width_source = source_scroll_view.children[0].width

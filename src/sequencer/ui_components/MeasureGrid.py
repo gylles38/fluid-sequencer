@@ -20,10 +20,13 @@ class MeasureGrid(Widget):
 
     def redraw(self, *args):
         """Debounced redraw of the measure lines."""
-        Clock.unschedule(self.draw_measure_lines)
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
         Clock.schedule_once(self.draw_measure_lines, 0)
 
     def draw_measure_lines(self, *args):
+        self._redraw_pending = False
+        if not self.canvas: return
         self.canvas.clear()
         
         with self.canvas:

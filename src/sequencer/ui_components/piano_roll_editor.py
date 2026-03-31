@@ -1767,7 +1767,7 @@ class PianoRollEditor(FloatingWindow):
         self._update_button_states(self.mode_buttons, btn)
 
         # Trigger a cursor update in case the mouse is already over the grid
-        self._on_mouse_pos(None, Window.mouse_pos)
+        self._on_mouse_pos_internal(Window.mouse_pos)
 
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':

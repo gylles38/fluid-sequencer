@@ -878,7 +878,7 @@ class PianoRollEditor(FloatingWindow):
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
     note_height = NumericProperty(round(dp(14)))
-    edit_mode = StringProperty('insert')
+    edit_mode = StringProperty('move')
     note_duration = NumericProperty(1.0) # Default to quarter note
     base_note_duration = NumericProperty(1.0)
     dotted_mode = BooleanProperty(False)

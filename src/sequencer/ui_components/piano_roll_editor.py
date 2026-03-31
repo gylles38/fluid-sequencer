@@ -878,7 +878,8 @@ class PianoRollEditor(FloatingWindow):
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
     note_height = NumericProperty(round(dp(14)))
-    edit_mode = StringProperty('insert')
+    edit_mode = StringProperty('move')
+    
     note_duration = NumericProperty(1.0) # Default to quarter note
     base_note_duration = NumericProperty(1.0)
     dotted_mode = BooleanProperty(False)
@@ -1762,27 +1763,17 @@ class PianoRollEditor(FloatingWindow):
                 del sequencer.track_overrides[self.original_track_index]
 
     def set_edit_mode(self, mode, btn) -> None:
-        from kivy.logger import Logger
-        Logger.info(f"PianoRollEditor: set_edit_mode entry (mode={mode})")
-        if self.edit_mode == mode:
-            Logger.info(f"PianoRollEditor: mode {mode} already active, returning")
-            return
-
         self.edit_mode = mode
-        Logger.info(f"PianoRollEditor: updating button states")
         self._update_button_states(self.mode_buttons, btn)
 
         # Trigger a cursor update in case the mouse is already over the grid
-        Logger.info(f"PianoRollEditor: triggering manual mouse_pos update")
         self._on_mouse_pos_internal(Window.mouse_pos)
 
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':
             if self.selected_notes:
-                Logger.info(f"PianoRollEditor: clearing selection (was in move mode)")
                 self.selected_notes = []
                 self.ids.grid.redraw()
-        Logger.info(f"PianoRollEditor: set_edit_mode exit")
 
     def set_note_duration(self, dur, btn) -> None:
         self.base_note_duration = dur

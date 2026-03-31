@@ -52,7 +52,7 @@ class EditHistoryManager:
     def can_redo(self) -> bool:
         return self.index < len(self.history) - 1
 
-class RoutingValueAxis(Widget):
+class RoutingValueAxis(RelativeLayout):
     midi_tracks = ListProperty([]) # List of (absolute_index, track_name)
     active_index = NumericProperty(-1)
 
@@ -79,13 +79,13 @@ class RoutingValueAxis(Widget):
         """Debounced redraw of the routing axis."""
         if getattr(self, '_redraw_pending', False): return
         self._redraw_pending = True
-        from kivy.logger import Logger
-        Logger.info(f"RoutingValueAxis: redraw scheduled {id(self)}")
+        # from kivy.logger import Logger
+        # Logger.info(f"RoutingValueAxis: redraw scheduled {id(self)}")
         Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, dt):
         try:
-            self.redraw()
+            self.draw()
         finally:
             self._redraw_pending = False
 
@@ -95,9 +95,9 @@ class RoutingValueAxis(Widget):
 
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
             Color(0.4, 0.4, 0.4, 1)
-            Line(points=[self.right, self.y, self.right, self.top], width=1)
+            Line(points=[self.width, 0, self.width, self.height], width=1)
 
         if not self.midi_tracks:
             return
@@ -105,24 +105,24 @@ class RoutingValueAxis(Widget):
         num_tracks = len(self.midi_tracks)
 
         for i, (abs_idx, name) in enumerate(self.midi_tracks):
-            y_pos = self.y + (i / max(1, num_tracks - 1)) * (self.height - dp(20)) + dp(10)
+            y_pos = (i / max(1, num_tracks - 1)) * (self.height - dp(20)) + dp(10)
             if num_tracks == 1:
-                y_pos = self.y + self.height / 2
+                y_pos = self.height / 2
 
             is_active = (abs_idx == self.active_index)
             if is_active:
                 with self.canvas:
                     Color(0.2, 0.3, 0.4, 1)
-                    Rectangle(pos=(self.x, y_pos - dp(10)), size=(self.width, dp(20)))
+                    Rectangle(pos=(0, y_pos - dp(10)), size=(self.width, dp(20)))
 
             label = self._label_widgets[i]
             label.text = f"{abs_idx}: {name}"
-            label.pos = (self.x, y_pos - dp(8))
+            label.pos = (0, y_pos - dp(8))
             label.size = (self.width - dp(4), dp(16))
             label.color = (1, 1, 1, 1) if is_active else (0.8, 0.8, 0.8, 1)
             label.bold = is_active
 
-class EditableRoutingGrid(Widget):
+class EditableRoutingGrid(RelativeLayout):
     editor = ObjectProperty()
     points = ListProperty([])
     active_index = NumericProperty(-1)
@@ -140,22 +140,15 @@ class EditableRoutingGrid(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.grid_widget = Widget(size_hint=(None, None))
-        self.curve_widget = Widget(size_hint=(None, None))
+        self.grid_widget = Widget(size_hint=(1, 1), pos=(0, 0))
+        self.curve_widget = Widget(size_hint=(1, 1), pos=(0, 0))
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+        self.bind(pos=self.redraw, size=self.redraw, points=self.redraw,
                   pixels_per_beat=self.redraw, total_beats=self.redraw,
                   midi_tracks=self.redraw, active_index=self.redraw,
                   drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
-
-    def _update_layout(self, *args):
-        self.grid_widget.size = self.size
-        self.grid_widget.pos = self.pos
-        self.curve_widget.size = self.size
-        self.curve_widget.pos = self.pos
-        self.redraw()
 
     def redraw(self, *args):
         """Debounced redraw of the grid and curve."""
@@ -167,7 +160,7 @@ class EditableRoutingGrid(Widget):
 
     def _do_redraw(self, dt):
         try:
-            self.redraw()
+            self.draw()
         finally:
             self._redraw_pending = False
 
@@ -200,8 +193,8 @@ class EditableRoutingGrid(Widget):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
 
-        # Subtract widget position from relative parent coordinates
-        lx, ly = touch.x - self.x, touch.y - self.y
+        # In RelativeLayout, coordinates are already local.
+        lx, ly = touch.x, touch.y
         local_pos = (lx, ly)
 
         clicked_beat = lx / self.pixels_per_beat
@@ -247,7 +240,7 @@ class EditableRoutingGrid(Widget):
             return super().on_touch_move(touch)
 
         if self._dragged_point:
-            lx, ly = touch.x - self.x, touch.y - self.y
+            lx, ly = touch.x, touch.y
 
             new_x = lx - self._drag_offset[0]
             new_beat = new_x / self.pixels_per_beat
@@ -292,7 +285,7 @@ class EditableRoutingGrid(Widget):
         self.grid_widget.canvas.clear()
         with self.grid_widget.canvas:
             Color(0.1, 0.1, 0.1, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
 
             # --- Optimized Grid Lines using Mesh ---
             major_vertices = []
@@ -303,9 +296,9 @@ class EditableRoutingGrid(Widget):
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
                 if is_measure:
-                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                    major_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
                 else:
-                    minor_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                    minor_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
 
             # Horizontal lines for each MIDI track
             h_vertices = []
@@ -313,8 +306,8 @@ class EditableRoutingGrid(Widget):
                 y = self._get_y_from_abs_idx(abs_idx)
                 if abs_idx == self.active_index:
                     Color(0.2, 0.3, 0.4, 0.5)
-                    Rectangle(pos=(self.x, self.y + y - dp(10)), size=(self.width, dp(20)))
-                h_vertices.extend([self.x, self.y + y, 0, 0, self.x + self.width, self.y + y, 0, 0])
+                    Rectangle(pos=(0, y - dp(10)), size=(self.width, dp(20)))
+                h_vertices.extend([0, y, 0, 0, self.width, y, 0, 0])
 
             Color(0.2, 0.2, 0.2, 1)
             if major_vertices:
@@ -344,7 +337,7 @@ class EditableRoutingGrid(Widget):
             first_p = sorted_points[0]
             is_dragged = (first_p is self._dragged_point)
             v_off_start_y = self.drag_delta_value if is_dragged else 0
-            points_to_draw.extend([self.x, self.y + self._get_y_from_abs_idx(first_p.value + v_off_start_y)])
+            points_to_draw.extend([0, self._get_y_from_abs_idx(first_p.value + v_off_start_y)])
 
             for i in range(len(sorted_points)):
                 p = sorted_points[i]
@@ -362,16 +355,16 @@ class EditableRoutingGrid(Widget):
                     v_off_prev_y = self.drag_delta_value if is_dragged_prev else 0
 
                     prev_y = self._get_y_from_abs_idx(prev_p.value + v_off_prev_y)
-                    points_to_draw.extend([self.x + x, self.y + prev_y])
+                    points_to_draw.extend([x, prev_y])
 
-                points_to_draw.extend([self.x + x, self.y + y])
+                points_to_draw.extend([x, y])
 
             # End line
             final_x = self.total_beats * self.pixels_per_beat
             last_p = sorted_points[-1]
             is_dragged_last = (last_p is self._dragged_point)
             v_off_last_y = self.drag_delta_value if is_dragged_last else 0
-            points_to_draw.extend([self.x + final_x, self.y + self._get_y_from_abs_idx(last_p.value + v_off_last_y)])
+            points_to_draw.extend([final_x, self._get_y_from_abs_idx(last_p.value + v_off_last_y)])
 
             if len(points_to_draw) >= 4:
                 Line(points=points_to_draw, width=1.5)
@@ -389,10 +382,10 @@ class EditableRoutingGrid(Widget):
 
                 if p == self.selected_point:
                     Color(1, 0.6, 0, 1)
-                    Rectangle(pos=(self.x + x - selected_radius, self.y + y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
+                    Rectangle(pos=(x - selected_radius, y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
                 else:
                     Color(0.8, 0.8, 1, 0.9)
-                    Rectangle(pos=(self.x + x - point_radius, self.y + y - point_radius), size=(point_radius * 2, point_radius * 2))
+                    Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
 
 Builder.load_string("""
 <InputRoutingEditor>:

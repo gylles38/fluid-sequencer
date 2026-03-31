@@ -86,7 +86,7 @@ class EditHistoryManager:
         return self.index < len(self.history) - 1
 
 
-class AutomationValueAxis(Widget):
+class AutomationValueAxis(RelativeLayout):
     min_val = NumericProperty(0.0)
     max_val = NumericProperty(1.0)
 
@@ -131,7 +131,7 @@ class AutomationValueAxis(Widget):
 
     def _do_redraw_axis(self, dt):
         try:
-            self.redraw()
+            self.draw()
         finally:
             self._redraw_pending = False
 
@@ -141,9 +141,9 @@ class AutomationValueAxis(Widget):
 
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
             Color(0.4, 0.4, 0.4, 1)
-            Line(points=[self.right, self.y, self.right, self.top], width=1)
+            Line(points=[self.width, 0, self.width, self.height], width=1)
 
         # Update positions of labels based on current size/pos/range
         v_range = self.max_val - self.min_val
@@ -152,18 +152,18 @@ class AutomationValueAxis(Widget):
         def reposition_label(key, value, y_align, text=None):
             if key not in self._label_widgets: return
             if text is None: text = f"{value:.1f}"
-            y_pos = self.y + ((value - self.min_val) / v_range) * self.height
+            y_pos = ((value - self.min_val) / v_range) * self.height
 
             if y_align == 'bottom':
-                y_pos = self.y
+                y_pos = 0
             elif y_align == 'top':
-                y_pos = self.top - dp(16)
+                y_pos = self.height - dp(16)
             else: # Center
                 y_pos -= dp(8)
 
             lbl = self._label_widgets[key]
             lbl.text = text
-            lbl.pos = (self.x, y_pos)
+            lbl.pos = (0, y_pos)
             lbl.size = (self.width - dp(4), dp(16))
 
         reposition_label('max', self.max_val, y_align='top')
@@ -172,7 +172,7 @@ class AutomationValueAxis(Widget):
             reposition_label('zero', 0.0, y_align='center')
 
 
-class EditableAutomationGrid(Widget):
+class EditableAutomationGrid(RelativeLayout):
     editor = ObjectProperty()
     points = ListProperty([])
     pixels_per_beat = NumericProperty(dp(100))
@@ -190,22 +190,15 @@ class EditableAutomationGrid(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.grid_widget = Widget(size_hint=(None, None))
-        self.curve_widget = Widget(size_hint=(None, None))
+        self.grid_widget = Widget(size_hint=(1, 1), pos=(0, 0))
+        self.curve_widget = Widget(size_hint=(1, 1), pos=(0, 0))
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+        self.bind(pos=self.redraw, size=self.redraw, points=self.redraw,
                   pixels_per_beat=self.redraw, total_beats=self.redraw,
                   min_val=self.redraw, max_val=self.redraw,
                   drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
-
-    def _update_layout(self, *args):
-        self.grid_widget.size = self.size
-        self.grid_widget.pos = self.pos
-        self.curve_widget.size = self.size
-        self.curve_widget.pos = self.pos
-        self.redraw()
 
     def redraw(self, *args):
         """Debounced redraw of the grid and curve."""
@@ -219,7 +212,7 @@ class EditableAutomationGrid(Widget):
         # from kivy.logger import Logger
         # Logger.info(f"EditableAutomationGrid: draw starting {id(self)}")
         try:
-            self.redraw()
+            self.draw()
         finally:
             self._redraw_pending = False
 
@@ -231,8 +224,7 @@ class EditableAutomationGrid(Widget):
             return super().on_touch_down(touch)
 
         # In a RelativeLayout, touch.x and touch.y are already relative to the RL's origin.
-        # We need to subtract this widget's local position (x, y) relative to that RL.
-        lx, ly = touch.x - self.x, touch.y - self.y
+        lx, ly = touch.x, touch.y
         local_pos = (lx, ly)
 
         clicked_beat = lx / self.pixels_per_beat
@@ -365,7 +357,7 @@ class EditableAutomationGrid(Widget):
         with self.grid_widget.canvas:
             # Background
             Color(0.1, 0.1, 0.1, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
 
             # --- Optimized Grid Lines using Mesh ---
             major_vertices = []
@@ -377,16 +369,16 @@ class EditableAutomationGrid(Widget):
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
                 if is_measure:
-                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                    major_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
                 else:
-                    minor_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                    minor_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
 
             # Horizontal lines (values)
             h_vertices = []
             num_h_lines = 10
             for i in range(num_h_lines + 1):
                 y = (i / num_h_lines) * self.height
-                h_vertices.extend([self.x, self.y + y, 0, 0, self.x + self.width, self.y + y, 0, 0])
+                h_vertices.extend([0, y, 0, 0, self.width, y, 0, 0])
 
             Color(0.2, 0.2, 0.2, 1)
             if major_vertices:
@@ -446,7 +438,7 @@ class EditableAutomationGrid(Widget):
                 x1 = (p1.start_time + v_off1_x) * self.pixels_per_beat
                 y1 = (normalize(p1.value + v_off1_y) * self.height)
 
-                vertices.extend([self.x + x1, self.y, 0, 0, self.x + x1, self.y + y1, 0, 0])
+                vertices.extend([x1, 0, 0, 0, x1, y1, 0, 0])
                 indices.extend([v_index, v_index + 1])
                 v_index += 2
 
@@ -462,7 +454,7 @@ class EditableAutomationGrid(Widget):
                     if self.editor.selected_parameter == "prog":
                         # On crée un point intermédiaire à la même hauteur que p1, mais au temps de p2
                         # Cela crée la ligne horizontale de l'escalier
-                        vertices.extend([self.x + x2, self.y, 0, 0, self.x + x2, self.y + y1, 0, 0])
+                        vertices.extend([x2, 0, 0, 0, x2, y1, 0, 0])
                         indices.extend([v_index, v_index + 1])
                         v_index += 2
                     
@@ -487,7 +479,7 @@ class EditableAutomationGrid(Widget):
                             val2 = p2.value + v_off2_y
                             real_val = val1 + ratio * (val2 - val1)
                             curr_y = (normalize(real_val) * self.height)
-                            vertices.extend([self.x + curr_x, self.y, 0, 0, self.x + curr_x, self.y + curr_y, 0, 0])
+                            vertices.extend([curr_x, 0, 0, 0, curr_x, curr_y, 0, 0])
                             indices.extend([v_index, v_index + 1])
                             v_index += 2
 
@@ -499,7 +491,7 @@ class EditableAutomationGrid(Widget):
             final_x = self.total_beats * self.pixels_per_beat
             if last_x < final_x:
                 y_last = (normalize(last_p.value + v_off_last_y) * self.height)
-                vertices.extend([self.x + final_x, self.y, 0, 0, self.x + final_x, self.y + y_last, 0, 0])
+                vertices.extend([final_x, 0, 0, 0, final_x, y_last, 0, 0])
                 indices.extend([v_index, v_index + 1])
 
             Mesh(vertices=vertices, indices=indices, mode='triangle_strip')
@@ -521,7 +513,7 @@ class EditableAutomationGrid(Widget):
                 y1 = normalize(p1.value + v_off1_y) * self.height
                 x2 = (p2.start_time + v_off2_x) * self.pixels_per_beat
                 y2 = normalize(p2.value + v_off2_y) * self.height
-                Line(points=[self.x + x1, self.y + y1, self.x + x2, self.y + y2], width=1.2)
+                Line(points=[x1, y1, x2, y2], width=1.2)
 
             # 2. Dessiner les points normaux (on saute le sélectionné)
             for p in sorted_points:
@@ -534,7 +526,7 @@ class EditableAutomationGrid(Widget):
                 x = (p.start_time + v_off_x) * self.pixels_per_beat
                 y = normalize(p.value + v_off_y) * self.height
                 Color(0.8, 0.8, 1, 0.9)
-                Rectangle(pos=(self.x + x - point_radius, self.y + y - point_radius), size=(point_radius * 2, point_radius * 2))
+                Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
 
             # 3. Dessiner le point sélectionné en DERNIER (Orange et par-dessus)
             if self.selected_point:
@@ -546,7 +538,7 @@ class EditableAutomationGrid(Widget):
                 x = (p.start_time + v_off_x) * self.pixels_per_beat
                 y = normalize(p.value + v_off_y) * self.height
                 Color(1, 0.6, 0, 1) # Orange vif
-                Rectangle(pos=(self.x + x - selected_radius, self.y + y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
+                Rectangle(pos=(x - selected_radius, y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
 
 Builder.load_string("""
 <AutomationEditor>:
@@ -1403,8 +1395,7 @@ class AutomationEditor(FloatingWindow):
             self.update_status_bar(None)
 
         # 4. Gestion de l'historique (Undo)
-        if hasattr(self, 'undo_stack'):
-            self.undo_stack.append(copy.deepcopy(list(self.track_copy.points)))
+        self._record_state()
 
         # 5. Forcer le redessin du widget Grille
         if hasattr(self.ids, 'grid'):

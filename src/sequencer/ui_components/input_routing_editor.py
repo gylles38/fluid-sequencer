@@ -669,7 +669,7 @@ class InputRoutingEditor(FloatingWindow):
             self.track_copy = AutomationTrack(
                 name=self.track.name,
                 target_track_index=-1, # Global
-                points=copy.deepcopy(self.track.points)
+                points=copy.deepcopy(list(self.track.points))
             )
         super(InputRoutingEditor, self).__init__(**kwargs)
         self.title = "MIDI Input Routing Editor"
@@ -1016,7 +1016,7 @@ class InputRoutingEditor(FloatingWindow):
 
     def dismiss(self, action=None, *args):
         if action == 'save_and_close':
-            self.track.points = copy.deepcopy(self.track_copy.points)
+            self.track.points = copy.deepcopy(list(self.track_copy.points))
             self.is_dirty = False
             #if self.sequencer_layout.sequencer.jack_manager.is_running:
             #    self.sequencer_layout.sequencer.jack_manager.refresh_automation()
@@ -1031,7 +1031,7 @@ class InputRoutingEditor(FloatingWindow):
 
     def _handle_save_dialog(self, answer):
         if answer == 's':
-            self.track.points = copy.deepcopy(self.track_copy.points)
+            self.track.points = copy.deepcopy(list(self.track_copy.points))
             #if self.sequencer_layout.sequencer.jack_manager.is_running:
             #    self.sequencer_layout.sequencer.jack_manager.refresh_automation()
             self.sequencer_layout.sequencer.song_structure_changed += 1

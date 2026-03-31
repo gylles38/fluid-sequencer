@@ -884,7 +884,7 @@ class AutomationEditor(FloatingWindow):
         self.track_copy = AutomationTrack(
             name=self.track.name,
             target_track_index=self.track.target_track_index,
-            points=copy.deepcopy(self.track.points)
+            points=copy.deepcopy(list(self.track.points))
         )
         Logger.info(f"AutomationEditor: deepcopy took {time.time() - start_time:.4f}s")
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
@@ -1404,7 +1404,7 @@ class AutomationEditor(FloatingWindow):
 
         # 4. Gestion de l'historique (Undo)
         if hasattr(self, 'undo_stack'):
-            self.undo_stack.append(copy.deepcopy(self.track_copy.points))
+            self.undo_stack.append(copy.deepcopy(list(self.track_copy.points)))
 
         # 5. Forcer le redessin du widget Grille
         if hasattr(self.ids, 'grid'):
@@ -1591,7 +1591,7 @@ class AutomationEditor(FloatingWindow):
             
     def _save_changes(self):
         # 1. On applique les changements aux points (qu'ils soient vides ou modifiés)
-        self.track.points = copy.deepcopy(self.track_copy.points)
+        self.track.points = copy.deepcopy(list(self.track_copy.points))
         self.track.active_parameter = self.selected_parameter
         self.is_dirty = False
         

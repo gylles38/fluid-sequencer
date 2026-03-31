@@ -3474,8 +3474,7 @@
                     "curve_value": 1.0,
                     "__type__": "AutomationPoint"
                 }
-            ],
-            "active_parameter": "vol"
+            ]
         },
         "track_display_order": [
             0,

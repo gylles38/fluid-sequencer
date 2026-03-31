@@ -617,18 +617,24 @@ Builder.load_string("""
                 icon: 'pencil'
                 tooltip_text: "Insert Mode"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_edit_mode('insert', self)
             TooltipMDIconButton:
                 id: move_button
                 icon: 'cursor-move'
                 tooltip_text: "Move Mode"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_edit_mode('move', self)
             TooltipMDIconButton:
                 id: delete_button
                 icon: 'eraser'
                 tooltip_text: "Delete Mode"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_edit_mode('delete', self)
 
             MDDivider:
@@ -660,36 +666,48 @@ Builder.load_string("""
                 icon: 'music-note-whole'
                 tooltip_text: "Whole Note (4 beats)"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_note_duration(4.0, self)
             TooltipMDIconButton:
                 id: half_note_button
                 icon: 'music-note-half'
                 tooltip_text: "Half Note (2 beats)"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_note_duration(2.0, self)
             TooltipMDIconButton:
                 id: quarter_note_button
                 icon: 'music-note-quarter'
                 tooltip_text: "Quarter Note (1 beat)"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_note_duration(1.0, self)
             TooltipMDIconButton:
                 id: eighth_note_button
                 icon: 'music-note-eighth'
                 tooltip_text: "Eighth Note (0.5 beats)"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_note_duration(0.5, self)
             TooltipMDIconButton:
                 id: sixteenth_note_button
                 icon: 'music-note-sixteenth'
                 tooltip_text: "Sixteenth Note (0.25 beats)"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_note_duration(0.25, self)
             TooltipMDIconButton:
                 id: thirty_second_note_button
                 icon: 'music-note-thirty-second'
                 tooltip_text: "Thirty-second Note (0.125 beats)"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.set_note_duration(0.125, self)
 
             MDDivider:
@@ -700,6 +718,8 @@ Builder.load_string("""
                 icon: 'circle-small'
                 tooltip_text: "Dotted Note (Toggle)"
                 theme_icon_color: "Custom"
+                theme_bg_color: "Custom"
+                md_bg_color: 0, 0, 0, 0
                 on_press: root.toggle_dotted_mode()
 
             MDDivider:
@@ -989,8 +1009,14 @@ class PianoRollEditor(FloatingWindow):
             1.0: self.ids.quarter_note_button, 0.5: self.ids.eighth_note_button,
             0.25: self.ids.sixteenth_note_button, 0.125: self.ids.thirty_second_note_button
         }
-        self.set_edit_mode(self.edit_mode, self.mode_buttons[self.edit_mode])
-        self.set_note_duration(self.base_note_duration, self.duration_buttons[self.base_note_duration])
+        # Force initial state update even if default matches
+        initial_mode = self.edit_mode
+        self.edit_mode = 'none' # Temporary to trigger change
+        self.set_edit_mode(initial_mode, self.mode_buttons[initial_mode])
+
+        initial_dur = self.base_note_duration
+        self.base_note_duration = 0.0 # Temporary
+        self.set_note_duration(initial_dur, self.duration_buttons[initial_dur])
         self.on_playback_state_change(None, self.sequencer_layout.sequencer.playback_state)
         self.ids.ruler.redraw()
 
@@ -1009,6 +1035,9 @@ class PianoRollEditor(FloatingWindow):
 
         # Mouse cursor logic
         GlobalHoverManager().register(self)
+
+    def unregister_hover(self):
+        GlobalHoverManager().unregister(self)
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         """Handle keyboard shortcuts for the editor."""
@@ -1564,6 +1593,9 @@ class PianoRollEditor(FloatingWindow):
         from kivy.logger import Logger
         Logger.info(f"PianoRollEditor: cleaning up {id(self)}")
 
+        self.unregister_hover()
+        set_safe_cursor('arrow')
+
         # Unbind all global window events to prevent memory leaks
         # We use a loop to ensure ALL instances of our method are unbound
         # (Kivy sometimes allows multiple identical bindings)
@@ -1795,12 +1827,17 @@ class PianoRollEditor(FloatingWindow):
 
         # Update button appearance
         dotted_button = self.ids.dotted_button
+        orange_vif = [0.9, 0.7, 0, 1]
+        blanc_pur = [1, 1, 1, 1]
+        blanc_semi = [1, 1, 1, 0.8]
+        transparent = [0, 0, 0, 0]
+
         if self.dotted_mode:
-            dotted_button.md_bg_color = [0.9, 0.7, 0, 1] # Active color
-            dotted_button.icon_color = [1, 1, 1, 1]
+            dotted_button.md_bg_color = orange_vif # Active color
+            dotted_button.icon_color = blanc_pur
         else:
-            dotted_button.md_bg_color = [0, 0, 0, 0] # Transparent
-            dotted_button.icon_color = [1, 1, 1, 0.8]
+            dotted_button.md_bg_color = transparent # Inactive color
+            dotted_button.icon_color = blanc_semi
 
     def _update_note_duration(self) -> None:
         """Calculates the final note duration and applies it to all selected notes."""

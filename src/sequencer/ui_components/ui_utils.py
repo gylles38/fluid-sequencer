@@ -79,9 +79,8 @@ class GlobalHoverManager:
         self._ensure_bound()
 
     def unregister(self, widget):
-        # We don't remove immediately to avoid issues during iteration
-        # instead we rely on dead weakrefs being cleaned up during dispatch
-        pass
+        # Explicitly remove the widget from the list
+        self.widgets = [ref for ref in self.widgets if ref() is not widget and ref() is not None]
 
     def _ensure_bound(self):
         if not self._bound:

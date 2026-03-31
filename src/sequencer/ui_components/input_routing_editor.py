@@ -58,38 +58,13 @@ class RoutingValueAxis(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._label_widgets = []
-        self.bind(midi_tracks=self._update_label_widgets)
-        self.bind(pos=self.redraw, size=self.redraw, active_index=self.redraw)
-        Clock.schedule_once(lambda dt: self._update_label_widgets(), 0)
-
-    def _update_label_widgets(self, *args):
-        num_tracks = len(self.midi_tracks)
-        # Synchronize label widget count
-        while len(self._label_widgets) < num_tracks:
-            lbl = Label(font_size='10sp', halign='right', valign='middle')
-            self.add_widget(lbl)
-            self._label_widgets.append(lbl)
-        while len(self._label_widgets) > num_tracks:
-            lbl = self._label_widgets.pop()
-            self.remove_widget(lbl)
-        self.redraw()
-
-    def redraw(self, *args):
-        """Debounced redraw of the routing axis."""
-        if getattr(self, '_redraw_pending', False): return
-        self._redraw_pending = True
-        Clock.schedule_once(self._do_redraw, 0)
-
-    def _do_redraw(self, dt):
-        try:
-            self.draw()
-        finally:
-            self._redraw_pending = False
+        self.bind(pos=self.draw, size=self.draw, midi_tracks=self.draw, active_index=self.draw)
+        self.labels = []
 
     def draw(self, *args):
-        if not self.canvas: return
         self.canvas.clear()
+        self.clear_widgets()
+        self.labels.clear()
 
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
@@ -98,11 +73,13 @@ class RoutingValueAxis(Widget):
             Line(points=[self.right, self.y, self.right, self.top], width=1)
 
         if not self.midi_tracks:
+            label = Label(text="No MIDI tracks", pos=self.pos, size=self.size, color=(1, 0, 0, 1))
+            self.add_widget(label)
             return
 
         num_tracks = len(self.midi_tracks)
-
         for i, (abs_idx, name) in enumerate(self.midi_tracks):
+            # i=0 is bottom, i=num_tracks-1 is top
             y_pos = self.y + (i / max(1, num_tracks - 1)) * (self.height - dp(20)) + dp(10)
             if num_tracks == 1:
                 y_pos = self.y + self.height / 2
@@ -113,12 +90,18 @@ class RoutingValueAxis(Widget):
                     Color(0.2, 0.3, 0.4, 1)
                     Rectangle(pos=(self.x, y_pos - dp(10)), size=(self.width, dp(20)))
 
-            label = self._label_widgets[i]
-            label.text = f"{abs_idx}: {name}"
-            label.pos = (self.x, y_pos - dp(8))
-            label.size = (self.width - dp(4), dp(16))
-            label.color = (1, 1, 1, 1) if is_active else (0.8, 0.8, 0.8, 1)
-            label.bold = is_active
+            label = Label(
+                text=f"{abs_idx}: {name}",
+                font_size='10sp',
+                pos=(self.x, y_pos - dp(8)),
+                size=(self.width - dp(4), dp(16)),
+                halign='right',
+                valign='middle',
+                color=(1, 1, 1, 1) if is_active else (0.8, 0.8, 0.8, 1),
+                bold=is_active
+            )
+            self.labels.append(label)
+            self.add_widget(label)
 
 class EditableRoutingGrid(Widget):
     editor = ObjectProperty()

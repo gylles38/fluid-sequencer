@@ -878,7 +878,7 @@ class PianoRollEditor(FloatingWindow):
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(128)
     note_height = NumericProperty(round(dp(14)))
-    edit_mode = StringProperty('insert')
+    edit_mode = StringProperty('move')
     note_duration = NumericProperty(1.0) # Default to quarter note
     base_note_duration = NumericProperty(1.0)
     dotted_mode = BooleanProperty(False)
@@ -1797,10 +1797,10 @@ class PianoRollEditor(FloatingWindow):
         dotted_button = self.ids.dotted_button
         if self.dotted_mode:
             dotted_button.md_bg_color = [0.9, 0.7, 0, 1] # Active color
-            dotted_button.icon_color = [0.1, 0.1, 0.1, 1]
+            dotted_button.icon_color = [1, 1, 1, 1]
         else:
-            dotted_button.md_bg_color = [0.2, 0.2, 0.2, 1] # Inactive color
-            dotted_button.icon_color = [0.8, 0.8, 0.8, 1]
+            dotted_button.md_bg_color = [0, 0, 0, 0] # Transparent
+            dotted_button.icon_color = [1, 1, 1, 0.8]
 
     def _update_note_duration(self) -> None:
         """Calculates the final note duration and applies it to all selected notes."""
@@ -1818,17 +1818,18 @@ class PianoRollEditor(FloatingWindow):
         """Met à jour l'apparence des boutons d'outils selon l'outil sélectionné."""
         # from kivy.logger import Logger
         # Logger.info(f"PianoRollEditor: _update_button_states starting")
-        orange_vif = [1, 0.6, 0, 1]
+        orange_vif = [0.9, 0.7, 0, 1]
+        blanc_pur = [1, 1, 1, 1]
         blanc_semi = [1, 1, 1, 0.8]
+        transparent = [0, 0, 0, 0]
 
         for btn in group.values():
             if btn == active_btn:
-                # On force la couleur orange
-                btn.icon_color = orange_vif
-                # Optionnel : On peut aussi augmenter l'opacité pour plus de peps
+                btn.md_bg_color = orange_vif
+                btn.icon_color = blanc_pur
                 btn.opacity = 1.0
             else:
-                # On remet en blanc semi-transparent
+                btn.md_bg_color = transparent
                 btn.icon_color = blanc_semi
                 btn.opacity = 0.8
                 

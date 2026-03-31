@@ -24,8 +24,6 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
     def on_enter(self, *args):
         """Appelé lorsque la souris entre dans la zone du widget."""
-        from kivy.logger import Logger
-        Logger.info(f"TooltipMDIconButton: on_enter for {self.tooltip_text}")
         super().on_enter(*args) # For cursor change
         # Si une autre info-bulle est active, on la cache
         if TooltipMDIconButton._active_tooltip_instance and TooltipMDIconButton._active_tooltip_instance != self:
@@ -37,8 +35,6 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
     def on_leave(self, *args):
         """Appelé lorsque la souris quitte la zone du widget."""
-        from kivy.logger import Logger
-        Logger.info(f"TooltipMDIconButton: on_leave for {self.tooltip_text}")
         super().on_leave(*args) # For cursor change
         self._hide_tooltip()
         if TooltipMDIconButton._active_tooltip_instance == self:
@@ -66,8 +62,6 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
     def _show_tooltip(self, dt):
         """Affiche et configure l'info-bulle."""
-        if not self.hovered: return # Case where we left before the timer fired
-
         self._ensure_tooltip_label()
         label = TooltipMDIconButton._tooltip_label
 
@@ -82,9 +76,6 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
         x, y = Window.mouse_pos
         label.pos = (x + dp(15), y + dp(15))
 
-        if label.opacity < 0.1:
-            label.opacity = 1
-
         if label.parent is None:
             Window.add_widget(label)
 
@@ -98,10 +89,7 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
         label = TooltipMDIconButton._tooltip_label
         if label and label.parent:
-            label.opacity = 0
-            # To reduce layout pressure, we keep it in the window but hidden
-            # until another button needs it.
-            # Window.remove_widget(label)
+            Window.remove_widget(label)
 
     def on_release(self):
         """Force le masquage de l'info-bulle au clic."""

@@ -104,7 +104,6 @@ class FloatingWindow(RelativeLayout):
         Logger.info(f"FloatingWindow: __init__ {id(self)} (title={kwargs.get('title', 'Unknown')})")
         super().__init__(**kwargs)
         self._is_dragging = False
-        self._is_dismissed = False
         self._is_resizing = False
         self._drag_start_touch_pos = (0, 0)
         self._drag_start_widget_pos = (0, 0)
@@ -122,8 +121,6 @@ class FloatingWindow(RelativeLayout):
         Clock.schedule_once(self._unlock_touch, 0.3)
 
     def _unlock_touch(self, dt):
-        from kivy.logger import Logger
-        Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch unlocked")
         self._touch_lock = False
 
     def add_widget(self, widget, index=0, canvas=None):
@@ -138,104 +135,86 @@ class FloatingWindow(RelativeLayout):
         self.ids.content_container.add_widget(widget, index, canvas)
 
     def on_touch_down(self, touch):
-        from kivy.logger import Logger
+        #from kivy.logger import Logger
         # Logger.info(f"FloatingWindow: on_touch_down entry {self.title} at {touch.pos}")
 
         if not self.collide_point(*touch.pos):
             return False
 
-        # Capture original coordinates for chrome fallback
-        ox, oy = touch.x, touch.y
+        # Capture GLOBAL coordinates here before transformation
+        global_touch_pos = (touch.x, touch.y)
+
+        # Apply transformation to get local coordinates for collision checks
+        touch.push()
+        touch.apply_transform_2d(self.to_local)
+        local_pos = touch.pos
 
         if getattr(self, '_touch_lock', False):
-            # Logger.info(f"FloatingWindow: {self.title} touch rejected (locked)")
+            touch.pop()
             return True
 
-        if self.parent and self.parent.children[0] is not self:
-            # OPTIMIZATION: Debounced bring-to-front
-            if not hasattr(self, '_btf_event'): self._btf_event = None
-            if not self._btf_event:
-                # Logger.info(f"FloatingWindow: scheduling bring-to-front for {self.title}")
-                self._btf_event = Clock.schedule_once(self._do_bring_to_front_debounced, 0.05)
+        if self.parent:
+            Clock.schedule_once(lambda dt: self._bring_to_front(), 0)
 
-        # 1. Try children first.
-        # super().on_touch_down(touch) calls RelativeLayout.on_touch_down,
-        # which correctly transforms coordinates for children.
-        # Logger.info(f"FloatingWindow: dispatching to children")
-        if super().on_touch_down(touch):
-            # Logger.info(f"FloatingWindow: child handled touch")
-            return True
-
-        # 2. Chrome interaction logic (Dragging and Resizing)
-        # Use captured original coordinates for reliable chrome collision
-        local_pos = self.to_local(ox, oy)
-        global_touch_pos = (ox, oy)
-
-        # Check resize handle
+        # 1. Check resize handle first (chrome priority)
         if 'resize_handle' in self.ids and self.ids.resize_handle.collide_point(*local_pos) and not self.is_maximized:
-            # Logger.info(f"FloatingWindow: {self.title} resizing started")
             if self.parent:
-                # Switch to absolute positioning
-                old_pos, old_size = self.pos[:], self.size[:]
-                self.pos_hint, self.size_hint = {}, (None, None)
-                self.pos, self.size = old_pos, old_size
+                # Capture current absolute state
+                old_pos = self.pos[:]
+                old_size = self.size[:]
+                self.pos_hint = {}
+                self.size_hint = (None, None)
+                self.pos = old_pos
+                self.size = old_size
 
                 self._is_resizing = True
                 self._resize_start_touch_pos = global_touch_pos
                 self._resize_start_widget_size = self.size[:]
                 self._resize_start_widget_pos = self.pos[:]
+                # Use real top as anchor to avoid jumps during move
                 self._resize_start_top = self.y + self.height
 
                 touch.grab(self)
+                touch.pop()
                 return True
 
-        # Check title bar for dragging
+        # 2. Let children handle touch (like title bar buttons or content)
+        if super(RelativeLayout, self).on_touch_down(touch):
+            touch.pop()
+            return True
+
+        # 3. dragging logic (title bar)
         if 'title_bar' in self.ids and self.ids.title_bar.collide_point(*local_pos) and not self.is_maximized:
-            # Logger.info(f"FloatingWindow: {self.title} dragging started")
             if self.parent:
-                # Switch to absolute positioning
-                old_pos, old_size = self.pos[:], self.size[:]
-                self.pos_hint, self.size_hint = {}, (None, None)
-                self.pos, self.size = old_pos, old_size
+                # Capture current absolute state
+                old_pos = self.pos[:]
+                old_size = self.size[:]
+                self.pos_hint = {}
+                self.size_hint = (None, None)
+                self.pos = old_pos
+                self.size = old_size
 
                 self._is_dragging = True
                 self._drag_start_touch_pos = global_touch_pos
                 self._drag_start_widget_pos = self.pos[:]
 
                 touch.grab(self)
+                touch.pop()
                 return True
 
-        # Always swallow touch within the window bounds
+        touch.pop()
         return True
 
-    def _do_bring_to_front_debounced(self, dt):
-        self._btf_event = None
-        self._bring_to_front()
-
     def _bring_to_front(self):
-        from kivy.logger import Logger
         parent = self.parent
-        if parent and len(parent.children) > 1:
+        if parent:
             if parent.children[0] is not self:
-                # Logger.info(f"FloatingWindow: _bring_to_front {self.title} ({id(self)})")
-                # We save the state so we know this is a move, not a dismiss
-                self._is_moving_to_front = True
-                try:
-                    # Capture current state to prevent re-opening logic
-                    orig_unlock = getattr(self, '_touch_lock', False)
-                    parent.remove_widget(self)
-                    parent.add_widget(self)
-                    # Restore state
-                    self._touch_lock = orig_unlock
-                finally:
-                    self._is_moving_to_front = False
+                parent.remove_widget(self)
+                parent.add_widget(self)
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
-
-        from kivy.logger import Logger
-        Logger.info(f"FloatingWindow: on_touch_move {self.title} ({id(self)}) mode={'drag' if self._is_dragging else 'resize'}")
 
         if self._is_dragging:
             if self.parent:
@@ -338,28 +317,18 @@ class FloatingWindow(RelativeLayout):
             self.is_maximized = False
 
     def dismiss(self, *args):
-        if self._is_dismissed:
-            return
-        from kivy.logger import Logger
-        Logger.info(f"FloatingWindow: dismiss {self.title} ({id(self)})")
-        self._is_dismissed = True
         if self.parent:
             self.parent.remove_widget(self)
         self.on_dismiss()
 
     def on_dismiss(self):
-        from kivy.logger import Logger
-        Logger.info(f"FloatingWindow: on_dismiss {self.title} ({id(self)})")
-        self._touch_lock = True
+        pass
 
     def on_open(self):
-        from kivy.logger import Logger
-        Logger.info(f"FloatingWindow: on_open {self.title} ({id(self)})")
+        pass
 
     def on_parent(self, widget, parent):
-        from kivy.logger import Logger
-        Logger.info(f"FloatingWindow: on_parent {self.title} ({id(self)}) parent={parent}")
-        if parent and not getattr(self, '_is_moving_to_front', False):
+        if parent:
             Clock.schedule_once(lambda dt: self.on_open(), 0)
 
     def open(self):

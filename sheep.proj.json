@@ -3432,6 +3432,24 @@
                 "channels": 0,
                 "native_tempo": null,
                 "duration_beats": 235.566
+            },
+            {
+                "__type__": "MidiTrack",
+                "name": "hammond",
+                "is_muted": false,
+                "is_solo": false,
+                "is_metronome": false,
+                "channel": 0,
+                "volume": 0.8,
+                "pan": 0.0,
+                "velocity": 1.0,
+                "events": [],
+                "instrument": 0,
+                "bank_msb": null,
+                "bank_lsb": null,
+                "output_port_name": "hammond",
+                "input_port_name": "CollaB3:events-in",
+                "record_mode": "OFF"
             }
         ],
         "midi_mappings": [],
@@ -3440,12 +3458,38 @@
         "metronome_volume": 1.0,
         "metronome_pan": 0.0,
         "carla_project_path": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes-sheep.carxp",
-        "aj_snapshot_path": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes-sheep.ajs"
+        "aj_snapshot_path": "/media/gilles/ad5162c7-4a54-4183-8f67-401bc77d39f3/lmms/projects/rhodes-sheep.ajs",
+        "input_routing": {
+            "__type__": "AutomationTrack",
+            "name": "Input Routing",
+            "target_track_index": -1,
+            "is_muted": false,
+            "is_solo": false,
+            "points": [
+                {
+                    "start_time": 0.0,
+                    "parameter": "input_routing",
+                    "value": 0.0,
+                    "curve": "none",
+                    "curve_value": 1.0,
+                    "__type__": "AutomationPoint"
+                }
+            ],
+            "active_parameter": "vol"
+        },
+        "track_display_order": [
+            0,
+            4,
+            1,
+            2,
+            3
+        ]
     },
     "virtual_ports": [
         "rhodes",
         "bass",
-        "metro"
+        "metro",
+        "hammond"
     ],
     "control_port_name": null,
     "audio_player_command": "mpv --really-quiet --no-video --idle"

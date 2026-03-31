@@ -85,10 +85,14 @@ class HoverBehavior:
 
     def on_enter(self, *args):
         """Called when the mouse enters the widget area."""
+        # from kivy.logger import Logger
+        # Logger.info(f"HoverBehavior: on_enter for {self}")
         set_safe_cursor('hand')
 
     def on_leave(self, *args):
         """Called when the mouse leaves the widget area."""
+        # from kivy.logger import Logger
+        # Logger.info(f"HoverBehavior: on_leave for {self}")
         set_safe_cursor('arrow')
 
 class HoverableMDButton(MDButton, HoverBehavior):

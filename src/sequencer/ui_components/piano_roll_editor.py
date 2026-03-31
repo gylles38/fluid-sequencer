@@ -1470,6 +1470,8 @@ class PianoRollEditor(FloatingWindow):
         return f"{note}{octave}"
 
     def _on_mouse_pos_internal(self, pos) -> None:
+        # from kivy.logger import Logger
+        # Logger.info(f"PianoRollEditor: _on_mouse_pos_internal at {pos}")
         timeline_scroll = self.ids.get('timeline_scroll')
         grid = self.ids.get('grid')
         piano_keyboard = self.ids.get('piano_keyboard')
@@ -1760,20 +1762,27 @@ class PianoRollEditor(FloatingWindow):
                 del sequencer.track_overrides[self.original_track_index]
 
     def set_edit_mode(self, mode, btn) -> None:
+        from kivy.logger import Logger
+        Logger.info(f"PianoRollEditor: set_edit_mode entry (mode={mode})")
         if self.edit_mode == mode:
+            Logger.info(f"PianoRollEditor: mode {mode} already active, returning")
             return
 
         self.edit_mode = mode
+        Logger.info(f"PianoRollEditor: updating button states")
         self._update_button_states(self.mode_buttons, btn)
 
         # Trigger a cursor update in case the mouse is already over the grid
+        Logger.info(f"PianoRollEditor: triggering manual mouse_pos update")
         self._on_mouse_pos_internal(Window.mouse_pos)
 
         # If switching away from the selection-enabled mode, clear selection
         if mode != 'move':
             if self.selected_notes:
+                Logger.info(f"PianoRollEditor: clearing selection (was in move mode)")
                 self.selected_notes = []
                 self.ids.grid.redraw()
+        Logger.info(f"PianoRollEditor: set_edit_mode exit")
 
     def set_note_duration(self, dur, btn) -> None:
         self.base_note_duration = dur
@@ -1807,6 +1816,8 @@ class PianoRollEditor(FloatingWindow):
 
     def _update_button_states(self, group, active_btn) -> None:
         """Met à jour l'apparence des boutons d'outils selon l'outil sélectionné."""
+        # from kivy.logger import Logger
+        # Logger.info(f"PianoRollEditor: _update_button_states starting")
         orange_vif = [1, 0.6, 0, 1]
         blanc_semi = [1, 1, 1, 0.8]
 

@@ -24,6 +24,8 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
     def on_enter(self, *args):
         """Appelé lorsque la souris entre dans la zone du widget."""
+        from kivy.logger import Logger
+        Logger.info(f"TooltipMDIconButton: on_enter for {self.tooltip_text}")
         super().on_enter(*args) # For cursor change
         # Si une autre info-bulle est active, on la cache
         if TooltipMDIconButton._active_tooltip_instance and TooltipMDIconButton._active_tooltip_instance != self:
@@ -35,6 +37,8 @@ class TooltipMDIconButton(MDIconButton, HoverBehavior):
 
     def on_leave(self, *args):
         """Appelé lorsque la souris quitte la zone du widget."""
+        from kivy.logger import Logger
+        Logger.info(f"TooltipMDIconButton: on_leave for {self.tooltip_text}")
         super().on_leave(*args) # For cursor change
         self._hide_tooltip()
         if TooltipMDIconButton._active_tooltip_instance == self:

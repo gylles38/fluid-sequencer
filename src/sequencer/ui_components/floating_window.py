@@ -138,8 +138,8 @@ class FloatingWindow(RelativeLayout):
         self.ids.content_container.add_widget(widget, index, canvas)
 
     def on_touch_down(self, touch):
-        # from kivy.logger import Logger
-        # Logger.info(f"FloatingWindow: on_touch_down {self.title} ({id(self)}) at {touch.pos}")
+        from kivy.logger import Logger
+        # Logger.info(f"FloatingWindow: on_touch_down entry {self.title} at {touch.pos}")
 
         if not self.collide_point(*touch.pos):
             return False
@@ -148,19 +148,22 @@ class FloatingWindow(RelativeLayout):
         ox, oy = touch.x, touch.y
 
         if getattr(self, '_touch_lock', False):
-            # Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch rejected (locked)")
+            # Logger.info(f"FloatingWindow: {self.title} touch rejected (locked)")
             return True
 
         if self.parent and self.parent.children[0] is not self:
             # OPTIMIZATION: Debounced bring-to-front
             if not hasattr(self, '_btf_event'): self._btf_event = None
             if not self._btf_event:
+                # Logger.info(f"FloatingWindow: scheduling bring-to-front for {self.title}")
                 self._btf_event = Clock.schedule_once(self._do_bring_to_front_debounced, 0.05)
 
         # 1. Try children first.
         # super().on_touch_down(touch) calls RelativeLayout.on_touch_down,
         # which correctly transforms coordinates for children.
+        # Logger.info(f"FloatingWindow: dispatching to children")
         if super().on_touch_down(touch):
+            # Logger.info(f"FloatingWindow: child handled touch")
             return True
 
         # 2. Chrome interaction logic (Dragging and Resizing)

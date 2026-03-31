@@ -22,6 +22,8 @@ class CursorManager:
         return cls._instance
 
     def request_cursor(self, cursor_name):
+        from kivy.logger import Logger
+        # Logger.info(f"CursorManager: request_cursor(name={cursor_name})")
         if self.current_cursor == cursor_name:
             # Important: Still need to clear any pending that might be different
             self.pending_cursor = None
@@ -31,13 +33,16 @@ class CursorManager:
         # this new one will overwrite it.
         self.pending_cursor = cursor_name
         if not self._apply_event:
+            # Logger.info(f"CursorManager: scheduling apply_cursor")
             self._apply_event = Clock.schedule_once(self._apply_cursor, 0)
 
     def _apply_cursor(self, dt):
+        from kivy.logger import Logger
+        # Logger.info(f"CursorManager: _apply_cursor entry (pending={self.pending_cursor})")
         self._apply_event = None
         if self.pending_cursor and self.pending_cursor != self.current_cursor:
             try:
-                # Logger.info(f"CursorManager: Applying cursor {self.pending_cursor}")
+                Logger.info(f"CursorManager: APPLYING system cursor: {self.pending_cursor}")
                 Window.set_system_cursor(self.pending_cursor)
                 self.current_cursor = self.pending_cursor
             except Exception as e:
@@ -96,6 +101,8 @@ class GlobalHoverManager:
         self._do_dispatch(0)
 
     def _do_dispatch(self, dt):
+        from kivy.logger import Logger
+        # Logger.info(f"GlobalHoverManager: _do_dispatch entry")
         self._dispatch_event = None
         self._last_dispatch_time = time.time()
 

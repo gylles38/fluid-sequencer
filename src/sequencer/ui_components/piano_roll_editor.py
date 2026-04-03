@@ -28,16 +28,18 @@ class EditorPianoKeyboard(PianoKeyboard):
     """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
     def _redraw(self, *args):
         super()._redraw(*args)
-        # Re-apply styling to labels after the standard redraw
-        for child in self.children:
-            if isinstance(child, Label):
-                child.color = (0, 0, 0, 1) # Force black
-                child.bold = True
-                child.font_size = dp(11)
-                # Ensure it's centered relative to the keyboard widget itself
-                child.center_x = self.width / 2
-                if hasattr(child, 'texture_update'):
-                    child.texture_update()
+        # Immediately re-apply styling to labels after the base class positions them.
+        # This ensures they are visible even during high-frequency hover updates.
+        if hasattr(self, '_label_widgets'):
+            for lbl in self._label_widgets:
+                lbl.color = (0, 0, 0, 1) # Black text on white/light-grey keys
+                lbl.bold = True
+                lbl.font_size = dp(11)
+                lbl.opacity = 1
+                # Re-sync center_x with the keyboard's center in parent coordinates
+                lbl.center_x = self.center_x
+                if hasattr(lbl, 'texture_update'):
+                    lbl.texture_update()
 
 
 class EditHistoryManager:
@@ -826,6 +828,8 @@ Builder.load_string("""
                     do_scroll_y: True
                     bar_width: 0
                     scroll_type: ['bars', 'content']
+                    scroll_y: root.v_scroll_pos
+                    on_scroll_y: root.v_scroll_pos = self.scroll_y
 
                     EditorPianoKeyboard:
                         id: piano_keyboard
@@ -853,6 +857,8 @@ Builder.load_string("""
                 scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
+                scroll_y: root.v_scroll_pos
+                on_scroll_y: root.v_scroll_pos = self.scroll_y
 
                 EditableMidiGrid:
                     id: grid
@@ -922,6 +928,7 @@ class PianoRollEditor(FloatingWindow):
     display_beat = NumericProperty(0.0)
     saved_scroll_x = NumericProperty(0.0)
     last_playback_state = StringProperty("stopped")
+    v_scroll_pos = NumericProperty(0.5)
 
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
@@ -967,13 +974,22 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        # Robust vertical synchronization using setter to avoid recursion and handle viewport differences
-        keyboard_sv.bind(scroll_y=lambda inst, val: self._sync_vertical_scrolls(inst, val))
-        timeline_scroll.bind(scroll_y=lambda inst, val: self._sync_vertical_scrolls(inst, val))
+        # Force perfect vertical synchronization by ensuring identical viewport heights.
+        # timeline_scroll has a horizontal bar (dp(17)). keyboard_sv must match its viewport exactly.
+        def _sync_viewport_heights(*args):
+            target_h = timeline_scroll.height - dp(17)
+            if abs(keyboard_sv.height - target_h) > 0.1:
+                keyboard_sv.size_hint_y = None
+                keyboard_sv.height = target_h
+        timeline_scroll.bind(height=_sync_viewport_heights)
+        _sync_viewport_heights()
 
-        self.ids.piano_keyboard.height = grid.height
-        self._grid_height_binding = lambda inst, val: setattr(self.ids.piano_keyboard, 'height', val)
-        grid.bind(height=self._grid_height_binding)
+        # Force content heights to match exactly for percentage-based scroll_y alignment.
+        def _sync_content_heights(inst, val):
+            if abs(self.ids.piano_keyboard.height - val) > 0.1:
+                self.ids.piano_keyboard.height = val
+        grid.bind(height=_sync_content_heights)
+        _sync_content_heights(None, grid.height)
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -1171,11 +1187,11 @@ class PianoRollEditor(FloatingWindow):
                 octave_height_pixels = 12 * self.note_height
                 max_scroll_pixels = grid.height - timeline_scroll.height
                 if max_scroll_pixels > 0:
-                    current_scroll_pixels = timeline_scroll.scroll_y * max_scroll_pixels
+                    current_scroll_pixels = self.v_scroll_pos * max_scroll_pixels
                     direction: int = 1 if keyboard == 273 else -1 # Up is +, Down is -
                     new_scroll_pixels = current_scroll_pixels + (octave_height_pixels * direction)
                     new_scroll_pixels: int = max(0, min(new_scroll_pixels, max_scroll_pixels))
-                    timeline_scroll.scroll_y = new_scroll_pixels / max_scroll_pixels
+                    self.v_scroll_pos = new_scroll_pixels / max_scroll_pixels
                 return True
 
         # On vérifie aussi 'backspace' (8) qui est souvent utilisé pour supprimer
@@ -1185,8 +1201,8 @@ class PianoRollEditor(FloatingWindow):
                 # On enregistre l'état pour le Undo
                 self._record_state()
                 # On redessine la grille
-                #if hasattr(self.ids, 'ruler, 'redraw'):
-                #    self.ids.ruler.redraw()
+                if hasattr(self.ids, 'ruler') and hasattr(self.ids.ruler, 'redraw'):
+                    self.ids.ruler.redraw()
                 self.ids.grid.draw()
                 return True # Indique que l'événement a été géré
 
@@ -1428,24 +1444,6 @@ class PianoRollEditor(FloatingWindow):
         """Enables/disables the undo/redo buttons based on history."""
         self.ids.undo_button.disabled = not self.history.can_undo()
         self.ids.redo_button.disabled = not self.history.can_redo()
-
-    def _sync_vertical_scrolls(self, instance, value):
-        """Helper to synchronize vertical scrolling between two ScrollViews."""
-        if getattr(self, '_is_syncing_y', False): return
-
-        keyboard_sv = self.ids.get('keyboard_sv')
-        timeline_scroll = self.ids.get('timeline_scroll')
-        if not (keyboard_sv and timeline_scroll): return
-
-        target = timeline_scroll if instance is keyboard_sv else keyboard_sv
-
-        # Aggressive synchronization with minimal threshold
-        if abs(target.scroll_y - value) > 0.00001:
-            self._is_syncing_y = True
-            try:
-                target.scroll_y = value
-            finally:
-                self._is_syncing_y = False
 
     def _record_state(self) -> None:
         """Records the current state of the track (events and selection) for undo/redo."""
@@ -1896,7 +1894,7 @@ class PianoRollEditor(FloatingWindow):
         if max_scroll > 0:
             # Target C4 (note 60) which is at 60 * note_height + padding
             target_y = (60 * self.note_height) + grid.bottom_padding
-            timeline_scroll.scroll_y = max(0.0, min(1.0, (target_y - (timeline_scroll.height / 2)) / max_scroll))
+            self.v_scroll_pos = max(0.0, min(1.0, (target_y - (timeline_scroll.height / 2)) / max_scroll))
 
     def zoom_in(self) -> None:
         self._apply_zoom(self.pixels_per_beat * 1.25)

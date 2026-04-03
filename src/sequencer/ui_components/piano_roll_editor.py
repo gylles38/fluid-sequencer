@@ -49,15 +49,16 @@ class EditorPianoKeyboard(PianoKeyboard):
                     Color(0.95, 0.95, 0.95, 1)
 
                 # Math must match PianoRoll.py: round(pitch * note_height) + padding
-                y_start = round(i * self.note_height) + self.bottom_padding
-                y_end = round((i + 1) * self.note_height) + self.bottom_padding
+                # IMPORTANT: We subtract padding from the start to align with grid rows starting at 0
+                y_start = round(i * self.note_height)
+                y_end = round((i + 1) * self.note_height)
 
                 rect_width = self.width * 0.65 if is_black else self.width
                 Rectangle(pos=(self.x, self.y + y_start), size=(rect_width, y_end - y_start))
 
             # 2. Separators (Must match PianoRoll.py horizontal lines)
             for i in range(129):
-                y_pos = round(i * self.note_height) + self.bottom_padding
+                y_pos = round(i * self.note_height)
                 if (i % 12) == 0: # Octave boundary (C)
                     Color(0.4, 0.4, 0.45, 0.8) # Matches grid
                     width = 1.2
@@ -74,28 +75,36 @@ class EditorPianoKeyboard(PianoKeyboard):
         octave_indices = [i for i in range(128) if (i % 12) == 0]
         while len(self._label_widgets) < len(octave_indices):
             lbl = Label(size_hint=(None, None), halign='center', valign='middle')
-            self.add_widget(lbl)
+            self.add_widget(lbl, index=0) # Add at index 0 to ensure it's on top
             self._label_widgets.append(lbl)
         while len(self._label_widgets) > len(octave_indices):
             self.remove_widget(self._label_widgets.pop())
 
-        for idx, i in enumerate(octave_indices):
-            octave_num = (i // 12) - 1
-            y_start = round(i * self.note_height) + self.bottom_padding
-            y_end = round((i + 1) * self.note_height) + self.bottom_padding
-            note_h = y_end - y_start
+        # Schedule styling to ensure it sticks after Kivy's layout pass
+        Clock.schedule_once(self._style_labels, 0)
 
-            lbl = self._label_widgets[idx]
-            lbl.text = f"C{octave_num}"
-            lbl.color = [0, 0, 0, 1] # Forced black on white keys
-            lbl.bold = True
-            lbl.font_size = dp(11)
-            lbl.size = (self.width, note_h)
-            lbl.center_x = self.x + self.width / 2
-            lbl.center_y = self.y + y_start + note_h / 2
-            lbl.opacity = 1
-            if hasattr(lbl, 'texture_update'):
-                lbl.texture_update()
+    def _style_labels(self, dt):
+        nh = self.note_height
+        for i in range(128):
+            if (i % 12) == 0:
+                idx = i // 12
+                if idx < len(self._label_widgets):
+                    octave_num = idx - 1
+                    y_start = round(i * nh)
+                    y_end = round((i + 1) * nh)
+                    note_h = y_end - y_start
+
+                    lbl = self._label_widgets[idx]
+                    lbl.text = f"C{octave_num}"
+                    lbl.color = [0, 0, 0, 1] # Black
+                    lbl.bold = True
+                    lbl.font_size = dp(12)
+                    lbl.size = (self.width, note_h)
+                    lbl.center_x = self.x + self.width / 2
+                    lbl.center_y = self.y + y_start + note_h / 2
+                    lbl.opacity = 1
+                    if hasattr(lbl, 'texture_update'):
+                        lbl.texture_update()
 
 
 class EditHistoryManager:
@@ -892,7 +901,7 @@ Builder.load_string("""
                         size_hint: (None, None)
                         width: dp(60)
                         note_height: root.note_height
-                        bottom_padding: round(dp(17))
+                        bottom_padding: 0
 
                 # Spacer to match the horizontal scrollbar of the timeline grid.
                 # This ensures the keyboard viewport height matches the grid viewport height.
@@ -925,7 +934,7 @@ Builder.load_string("""
                     pixels_per_beat: root.pixels_per_beat
                     note_height: root.note_height
                     size_hint: (None, None)
-                    bottom_padding: round(dp(17))
+                    bottom_padding: 0
 
         MDBoxLayout:
             size_hint_y: None
@@ -1033,9 +1042,11 @@ class PianoRollEditor(FloatingWindow):
 
         # Force strict integer metrics to avoid sub-pixel alignment drift
         self.note_height = round(dp(14))
-        bp = round(dp(17))
-        self.ids.piano_keyboard.bottom_padding = bp
-        self.ids.grid.bottom_padding = bp
+
+        # We use 0 padding and rely on the spacer below the keyboard ScrollView
+        # to align the viewports perfectly.
+        self.ids.piano_keyboard.bottom_padding = 0
+        self.ids.grid.bottom_padding = 0
 
         # Force identical content heights to ensure scroll_y percentage mapping is 1:1.
         def _sync_content_heights(inst, val):
@@ -1941,12 +1952,12 @@ class PianoRollEditor(FloatingWindow):
     def _center_view_on_c4(self) -> None:
         timeline_scroll = self.ids.timeline_scroll
         grid = self.ids.grid
-        # Total content height is 128 notes + padding
-        total_content_height = (128 * self.note_height) + grid.bottom_padding
+        # Total content height is 128 notes
+        total_content_height = (128 * self.note_height)
         max_scroll = total_content_height - timeline_scroll.height
         if max_scroll > 0:
-            # Target C4 (note 60) which is at 60 * note_height + padding
-            target_y = (60 * self.note_height) + grid.bottom_padding
+            # Target C4 (note 60) which is at 60 * note_height
+            target_y = (60 * self.note_height)
             self.v_scroll_pos = max(0.0, min(1.0, (target_y - (timeline_scroll.height / 2)) / max_scroll))
 
     def zoom_in(self) -> None:

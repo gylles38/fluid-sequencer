@@ -24,6 +24,22 @@ import mido
 from sequencer.ui_components.HoverBehavior import HoverableButton
 
 
+class EditorPianoKeyboard(PianoKeyboard):
+    """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
+    def _redraw(self, *args):
+        super()._redraw(*args)
+        # Re-apply styling to labels after the standard redraw
+        for child in self.children:
+            if isinstance(child, Label):
+                child.color = (0, 0, 0, 1) # Force black
+                child.bold = True
+                child.font_size = dp(11)
+                # Ensure it's centered relative to the keyboard widget itself
+                child.center_x = self.width / 2
+                if hasattr(child, 'texture_update'):
+                    child.texture_update()
+
+
 class EditHistoryManager:
     """Manages undo/redo history using a single list and an index."""
     def __init__(self, max_history=31) -> None:  # 30 undo steps + initial state
@@ -811,7 +827,7 @@ Builder.load_string("""
                     bar_width: 0
                     scroll_type: ['bars', 'content']
 
-                    PianoKeyboard:
+                    EditorPianoKeyboard:
                         id: piano_keyboard
                         size_hint: (None, None)
                         width: dp(60)
@@ -979,34 +995,6 @@ class PianoRollEditor(FloatingWindow):
 
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
-
-        # Force keyboard labels to be visible and correctly colored
-        def _refresh_keyboard(dt):
-            if not hasattr(self.ids, 'piano_keyboard'):
-                return
-            kb = self.ids.piano_keyboard
-            kb.width = dp(60)
-            kb._redraw()
-
-            # Use a slightly different approach to ensure labels are visible on top
-            labels = [c for c in kb.children if isinstance(c, Label)]
-            for lbl in labels:
-                lbl.color = (0, 0, 0, 1) # Solid black
-                lbl.bold = True
-                lbl.font_size = dp(11)
-                # Re-center based on current keyboard geometry
-                lbl.width = kb.width
-                lbl.center_x = kb.width / 2
-                if hasattr(lbl, 'texture_update'):
-                    lbl.texture_update()
-                # Bring to front to ensure they are on top of the canvas-drawn keys
-                kb.remove_widget(lbl)
-                kb.add_widget(lbl)
-
-        # Schedule multiple times to catch any lazy rendering
-        Clock.schedule_once(_refresh_keyboard, 0.5)
-        Clock.schedule_once(_refresh_keyboard, 1.5)
-        Clock.schedule_once(_refresh_keyboard, 3.0)
 
         self._center_view_on_c4()
         current_beat = self.sequencer_layout.sequencer.current_beat
@@ -1452,7 +1440,7 @@ class PianoRollEditor(FloatingWindow):
         target = timeline_scroll if instance is keyboard_sv else keyboard_sv
 
         # Aggressive synchronization with minimal threshold
-        if abs(target.scroll_y - value) > 0.000001:
+        if abs(target.scroll_y - value) > 0.00001:
             self._is_syncing_y = True
             try:
                 target.scroll_y = value

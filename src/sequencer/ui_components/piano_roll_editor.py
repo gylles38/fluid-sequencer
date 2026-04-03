@@ -28,20 +28,22 @@ class EditorPianoKeyboard(PianoKeyboard):
     """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
     def _redraw(self, *args):
         super()._redraw(*args)
-        # Schedule the label styling to ensure it happens after all Kivy layout/render cycles
+        # Schedule the label styling pass to ensure it happens after all base redraw/layout operations.
+        # This prevents flickering or disappearing labels during interaction.
         Clock.schedule_once(self._force_label_style, 0)
 
     def _force_label_style(self, dt):
-        if hasattr(self, '_label_widgets'):
-            for lbl in self._label_widgets:
-                lbl.color = (0, 0, 0, 1)  # Force absolute black
-                lbl.bold = True
-                lbl.font_size = dp(12)
-                lbl.opacity = 1
-                # Use explicit centering based on parent widget bounds
-                lbl.center_x = self.x + self.width / 2
-                if hasattr(lbl, 'texture_update'):
-                    lbl.texture_update()
+        if not hasattr(self, '_label_widgets'):
+            return
+        for lbl in self._label_widgets:
+            lbl.color = (0, 0, 0, 1) # Absolute black on white keys
+            lbl.bold = True
+            lbl.font_size = dp(11)
+            lbl.opacity = 1
+            # Explicitly force position centering within the keyboard widget
+            lbl.center_x = self.x + self.width / 2
+            if hasattr(lbl, 'texture_update'):
+                lbl.texture_update()
 
 
 class EditHistoryManager:
@@ -840,7 +842,8 @@ Builder.load_string("""
                         note_height: root.note_height
                         bottom_padding: dp(17)
 
-                # Spacer to match the horizontal scrollbar of the timeline
+                # Spacer to match the horizontal scrollbar of the timeline grid.
+                # This ensures the keyboard viewport height matches the grid viewport height.
                 Widget:
                     size_hint_y: None
                     height: dp(17)
@@ -976,22 +979,15 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        # Force perfect vertical synchronization by ensuring identical viewport heights.
-        # timeline_scroll has a horizontal bar (dp(17)). keyboard_sv must match its viewport exactly.
-        def _sync_viewport_heights(*args):
-            target_h = timeline_scroll.height - dp(17)
-            if abs(keyboard_sv.height - target_h) > 0.1:
-                keyboard_sv.size_hint_y = None
-                keyboard_sv.height = target_h
-        timeline_scroll.bind(height=_sync_viewport_heights)
-        _sync_viewport_heights()
+        # Strict integer height alignment to prevent rounding drift
+        self.note_height = round(dp(14))
 
-        # Force content heights to match exactly for percentage-based scroll_y alignment.
+        # Force identical content heights to ensure scroll_y percentage mapping is 1:1.
+        self.ids.piano_keyboard.height = grid.height
         def _sync_content_heights(inst, val):
             if abs(self.ids.piano_keyboard.height - val) > 0.1:
                 self.ids.piano_keyboard.height = val
         grid.bind(height=_sync_content_heights)
-        _sync_content_heights(None, grid.height)
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout

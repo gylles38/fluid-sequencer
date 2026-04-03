@@ -28,16 +28,18 @@ class EditorPianoKeyboard(PianoKeyboard):
     """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
     def _redraw(self, *args):
         super()._redraw(*args)
-        # Immediately re-apply styling to labels after the base class positions them.
-        # This ensures they are visible even during high-frequency hover updates.
+        # Schedule the label styling to ensure it happens after all Kivy layout/render cycles
+        Clock.schedule_once(self._force_label_style, 0)
+
+    def _force_label_style(self, dt):
         if hasattr(self, '_label_widgets'):
             for lbl in self._label_widgets:
-                lbl.color = (0, 0, 0, 1) # Black text on white/light-grey keys
+                lbl.color = (0, 0, 0, 1)  # Force absolute black
                 lbl.bold = True
-                lbl.font_size = dp(11)
+                lbl.font_size = dp(12)
                 lbl.opacity = 1
-                # Re-sync center_x with the keyboard's center in parent coordinates
-                lbl.center_x = self.center_x
+                # Use explicit centering based on parent widget bounds
+                lbl.center_x = self.x + self.width / 2
                 if hasattr(lbl, 'texture_update'):
                     lbl.texture_update()
 

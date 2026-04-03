@@ -18,7 +18,7 @@ import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
+from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
 import mido
 from sequencer.ui_components.HoverBehavior import HoverableButton
@@ -34,9 +34,7 @@ class EditorPianoKeyboard(PianoKeyboard):
 
         if not hasattr(self, '_label_widgets'): self._label_widgets = []
 
-        # Use strictly rounded values to match PianoRoll.py math exactly
-        nh = round(self.note_height)
-        bp = round(self.bottom_padding)
+        # Match PianoRoll.py drawing logic exactly to ensure alignment
         highlight_color = (0.3, 0.7, 1.0, 1)
 
         with self.canvas:
@@ -50,15 +48,16 @@ class EditorPianoKeyboard(PianoKeyboard):
                 else:
                     Color(0.95, 0.95, 0.95, 1)
 
-                y_start = round(i * nh) + bp
-                y_end = round((i + 1) * nh) + bp
+                # Math must match PianoRoll.py: round(pitch * note_height) + padding
+                y_start = round(i * self.note_height) + self.bottom_padding
+                y_end = round((i + 1) * self.note_height) + self.bottom_padding
 
                 rect_width = self.width * 0.65 if is_black else self.width
                 Rectangle(pos=(self.x, self.y + y_start), size=(rect_width, y_end - y_start))
 
             # 2. Separators (Must match PianoRoll.py horizontal lines)
             for i in range(129):
-                y_pos = round(i * nh) + bp
+                y_pos = round(i * self.note_height) + self.bottom_padding
                 if (i % 12) == 0: # Octave boundary (C)
                     Color(0.4, 0.4, 0.45, 0.8) # Matches grid
                     width = 1.2
@@ -82,15 +81,15 @@ class EditorPianoKeyboard(PianoKeyboard):
 
         for idx, i in enumerate(octave_indices):
             octave_num = (i // 12) - 1
-            y_start = round(i * nh) + bp
-            y_end = round((i + 1) * nh) + bp
+            y_start = round(i * self.note_height) + self.bottom_padding
+            y_end = round((i + 1) * self.note_height) + self.bottom_padding
             note_h = y_end - y_start
 
             lbl = self._label_widgets[idx]
             lbl.text = f"C{octave_num}"
-            lbl.color = (0, 0, 0, 1) # Forced black on white keys
+            lbl.color = [0, 0, 0, 1] # Forced black on white keys
             lbl.bold = True
-            lbl.font_size = dp(10)
+            lbl.font_size = dp(11)
             lbl.size = (self.width, note_h)
             lbl.center_x = self.x + self.width / 2
             lbl.center_y = self.y + y_start + note_h / 2

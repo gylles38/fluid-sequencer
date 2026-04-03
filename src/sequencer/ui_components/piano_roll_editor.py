@@ -10,6 +10,7 @@ from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.label import Label
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -808,21 +809,32 @@ Builder.load_string("""
                     do_scroll_x: False
                     do_scroll_y: True
                     bar_width: 0
-                    scroll_type: ['bars']
+                    scroll_type: ['bars', 'content']
 
                     PianoKeyboard:
                         id: piano_keyboard
                         size_hint: (None, None)
-                        width: self.parent.width
+                        width: dp(60)
                         note_height: root.note_height
                         bottom_padding: dp(17)
+
+                # Spacer to match the horizontal scrollbar of the timeline
+                Widget:
+                    size_hint_y: None
+                    height: dp(17)
+                    canvas.before:
+                        Color:
+                            rgba: 0.15, 0.15, 0.15, 1
+                        Rectangle:
+                            pos: self.pos
+                            size: self.size
 
             BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: True
                 do_scroll_x: True
-                bar_width: dp(15)
-                scroll_type: ['bars']
+                bar_width: dp(17)
+                scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
@@ -939,9 +951,9 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        self._sync_y_binding = lambda inst, val: self._sync_vertical_scrolls(inst, val)
-        keyboard_sv.bind(scroll_y=self._sync_y_binding)
-        timeline_scroll.bind(scroll_y=self._sync_y_binding)
+        # Robust vertical synchronization using setter to avoid recursion and handle viewport differences
+        keyboard_sv.bind(scroll_y=lambda inst, val: self._sync_vertical_scrolls(inst, val))
+        timeline_scroll.bind(scroll_y=lambda inst, val: self._sync_vertical_scrolls(inst, val))
 
         self.ids.piano_keyboard.height = grid.height
         self._grid_height_binding = lambda inst, val: setattr(self.ids.piano_keyboard, 'height', val)
@@ -967,6 +979,34 @@ class PianoRollEditor(FloatingWindow):
 
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
+
+        # Force keyboard labels to be visible and correctly colored
+        def _refresh_keyboard(dt):
+            if not hasattr(self.ids, 'piano_keyboard'):
+                return
+            kb = self.ids.piano_keyboard
+            kb.width = dp(60)
+            kb._redraw()
+
+            # Use a slightly different approach to ensure labels are visible on top
+            labels = [c for c in kb.children if isinstance(c, Label)]
+            for lbl in labels:
+                lbl.color = (0, 0, 0, 1) # Solid black
+                lbl.bold = True
+                lbl.font_size = dp(11)
+                # Re-center based on current keyboard geometry
+                lbl.width = kb.width
+                lbl.center_x = kb.width / 2
+                if hasattr(lbl, 'texture_update'):
+                    lbl.texture_update()
+                # Bring to front to ensure they are on top of the canvas-drawn keys
+                kb.remove_widget(lbl)
+                kb.add_widget(lbl)
+
+        # Schedule multiple times to catch any lazy rendering
+        Clock.schedule_once(_refresh_keyboard, 0.5)
+        Clock.schedule_once(_refresh_keyboard, 1.5)
+        Clock.schedule_once(_refresh_keyboard, 3.0)
 
         self._center_view_on_c4()
         current_beat = self.sequencer_layout.sequencer.current_beat
@@ -1157,7 +1197,7 @@ class PianoRollEditor(FloatingWindow):
                 # On enregistre l'état pour le Undo
                 self._record_state()
                 # On redessine la grille
-                #if hasattr(self.ids.ruler, 'redraw'):
+                #if hasattr(self.ids, 'ruler, 'redraw'):
                 #    self.ids.ruler.redraw()
                 self.ids.grid.draw()
                 return True # Indique que l'événement a été géré
@@ -1403,18 +1443,21 @@ class PianoRollEditor(FloatingWindow):
 
     def _sync_vertical_scrolls(self, instance, value):
         """Helper to synchronize vertical scrolling between two ScrollViews."""
-        if self._is_scrolling: return
+        if getattr(self, '_is_syncing_y', False): return
 
-        keyboard_sv = self.ids.keyboard_sv
-        timeline_scroll = self.ids.timeline_scroll
+        keyboard_sv = self.ids.get('keyboard_sv')
+        timeline_scroll = self.ids.get('timeline_scroll')
+        if not (keyboard_sv and timeline_scroll): return
+
         target = timeline_scroll if instance is keyboard_sv else keyboard_sv
 
-        if abs(target.scroll_y - value) > 0.001:
-            self._is_scrolling = True
+        # Aggressive synchronization with minimal threshold
+        if abs(target.scroll_y - value) > 0.000001:
+            self._is_syncing_y = True
             try:
                 target.scroll_y = value
             finally:
-                self._is_scrolling = False
+                self._is_syncing_y = False
 
     def _record_state(self) -> None:
         """Records the current state of the track (events and selection) for undo/redo."""

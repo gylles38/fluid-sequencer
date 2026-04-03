@@ -27,21 +27,74 @@ from sequencer.ui_components.HoverBehavior import HoverableButton
 class EditorPianoKeyboard(PianoKeyboard):
     """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
     def _redraw(self, *args):
-        super()._redraw(*args)
-        # Schedule the label styling pass to ensure it happens after all base redraw/layout operations.
-        # This prevents flickering or disappearing labels during interaction.
-        Clock.schedule_once(self._force_label_style, 0)
+        # Full re-implementation to ensure perfect grid alignment and label visibility
+        self._redraw_pending = False
+        if not self.canvas: return
+        self.canvas.clear()
 
-    def _force_label_style(self, dt):
-        if not hasattr(self, '_label_widgets'):
-            return
-        for lbl in self._label_widgets:
-            lbl.color = (0, 0, 0, 1) # Absolute black on white keys
+        if not hasattr(self, '_label_widgets'): self._label_widgets = []
+
+        # Use strictly rounded values to match PianoRoll.py math exactly
+        nh = round(self.note_height)
+        bp = round(self.bottom_padding)
+        highlight_color = (0.3, 0.7, 1.0, 1)
+
+        with self.canvas:
+            # 1. Key backgrounds
+            for i in range(128):
+                is_black = (i % 12) in [1, 3, 6, 8, 10]
+                if i == self.highlighted_note:
+                    Color(*highlight_color)
+                elif is_black:
+                    Color(0.1, 0.1, 0.1, 1)
+                else:
+                    Color(0.95, 0.95, 0.95, 1)
+
+                y_start = round(i * nh) + bp
+                y_end = round((i + 1) * nh) + bp
+
+                rect_width = self.width * 0.65 if is_black else self.width
+                Rectangle(pos=(self.x, self.y + y_start), size=(rect_width, y_end - y_start))
+
+            # 2. Separators (Must match PianoRoll.py horizontal lines)
+            for i in range(129):
+                y_pos = round(i * nh) + bp
+                if (i % 12) == 0: # Octave boundary (C)
+                    Color(0.4, 0.4, 0.45, 0.8) # Matches grid
+                    width = 1.2
+                elif (i % 12) == 5: # E/F boundary
+                    Color(0.6, 0.6, 0.6, 0.6)
+                    width = 1.0
+                else:
+                    Color(0.7, 0.7, 0.7, 0.4)
+                    width = 0.6
+
+                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=width)
+
+        # 3. Note Labels (C-1 to C9)
+        octave_indices = [i for i in range(128) if (i % 12) == 0]
+        while len(self._label_widgets) < len(octave_indices):
+            lbl = Label(size_hint=(None, None), halign='center', valign='middle')
+            self.add_widget(lbl)
+            self._label_widgets.append(lbl)
+        while len(self._label_widgets) > len(octave_indices):
+            self.remove_widget(self._label_widgets.pop())
+
+        for idx, i in enumerate(octave_indices):
+            octave_num = (i // 12) - 1
+            y_start = round(i * nh) + bp
+            y_end = round((i + 1) * nh) + bp
+            note_h = y_end - y_start
+
+            lbl = self._label_widgets[idx]
+            lbl.text = f"C{octave_num}"
+            lbl.color = (0, 0, 0, 1) # Forced black on white keys
             lbl.bold = True
-            lbl.font_size = dp(11)
-            lbl.opacity = 1
-            # Explicitly force position centering within the keyboard widget
+            lbl.font_size = dp(10)
+            lbl.size = (self.width, note_h)
             lbl.center_x = self.x + self.width / 2
+            lbl.center_y = self.y + y_start + note_h / 2
+            lbl.opacity = 1
             if hasattr(lbl, 'texture_update'):
                 lbl.texture_update()
 
@@ -840,13 +893,13 @@ Builder.load_string("""
                         size_hint: (None, None)
                         width: dp(60)
                         note_height: root.note_height
-                        bottom_padding: dp(17)
+                        bottom_padding: round(dp(17))
 
                 # Spacer to match the horizontal scrollbar of the timeline grid.
                 # This ensures the keyboard viewport height matches the grid viewport height.
                 Widget:
                     size_hint_y: None
-                    height: dp(17)
+                    height: round(dp(17))
                     canvas.before:
                         Color:
                             rgba: 0.15, 0.15, 0.15, 1
@@ -858,7 +911,7 @@ Builder.load_string("""
                 id: timeline_scroll
                 do_scroll_y: True
                 do_scroll_x: True
-                bar_width: dp(17)
+                bar_width: round(dp(17))
                 scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
@@ -873,7 +926,7 @@ Builder.load_string("""
                     pixels_per_beat: root.pixels_per_beat
                     note_height: root.note_height
                     size_hint: (None, None)
-                    bottom_padding: dp(17)
+                    bottom_padding: round(dp(17))
 
         MDBoxLayout:
             size_hint_y: None
@@ -979,15 +1032,18 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        # Strict integer height alignment to prevent rounding drift
+        # Force strict integer metrics to avoid sub-pixel alignment drift
         self.note_height = round(dp(14))
+        bp = round(dp(17))
+        self.ids.piano_keyboard.bottom_padding = bp
+        self.ids.grid.bottom_padding = bp
 
         # Force identical content heights to ensure scroll_y percentage mapping is 1:1.
-        self.ids.piano_keyboard.height = grid.height
         def _sync_content_heights(inst, val):
-            if abs(self.ids.piano_keyboard.height - val) > 0.1:
+            if abs(self.ids.piano_keyboard.height - val) > 0.001:
                 self.ids.piano_keyboard.height = val
         grid.bind(height=_sync_content_heights)
+        self.ids.piano_keyboard.height = grid.height
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -1199,7 +1255,7 @@ class PianoRollEditor(FloatingWindow):
                 # On enregistre l'état pour le Undo
                 self._record_state()
                 # On redessine la grille
-                if hasattr(self.ids, 'ruler') and hasattr(self.ids.ruler, 'redraw'):
+                if 'ruler' in self.ids:
                     self.ids.ruler.redraw()
                 self.ids.grid.draw()
                 return True # Indique que l'événement a été géré

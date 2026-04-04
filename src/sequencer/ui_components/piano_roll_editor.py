@@ -55,21 +55,18 @@ class EditorPianoKeyboard(PianoKeyboard):
                 y_end = round((i + 1) * nh) + bp
 
                 rect_width = self.width * 0.65 if is_black else self.width
+                # Use raw self.y to match the floating-point mesh placement in PianoRoll.py
                 Rectangle(pos=(self.x, self.y + y_start), size=(rect_width, y_end - y_start))
 
             # 2. Separators
             for i in range(129):
                 y_pos = round(i * nh) + bp
-                # Match PianoRoll visual style exactly with 1px Rectangles
-                if (i % 12) == 0:
-                    Color(0.4, 0.4, 0.45, 0.8)
-                elif (i % 12) == 5:
-                    Color(0.6, 0.6, 0.6, 0.6)
-                else:
-                    Color(0.7, 0.7, 0.7, 0.4)
+                if (i % 12) == 0: Color(0.4, 0.4, 0.45, 0.8)
+                elif (i % 12) == 5: Color(0.6, 0.6, 0.6, 0.6)
+                else: Color(0.7, 0.7, 0.7, 0.4)
 
-                # Using Rectangle instead of Line for better alignment with Mesh grid
-                Rectangle(pos=(self.x, self.y + y_pos), size=(self.width, 1.0))
+                # Use Line with width 1.0 to match the centered Mesh lines in PianoRoll.py
+                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=1.0)
 
             # 3. Canvas Note Labels
             Color(0, 0, 0, 1)
@@ -90,7 +87,7 @@ class EditorPianoKeyboard(PianoKeyboard):
 
                     Rectangle(
                         texture=tex,
-                        pos=(self.x + (self.width - tex.width) / 2, self.y + y_start + (note_h - tex.height) / 2),
+                        pos=(round(self.x + (self.width - tex.width) / 2), round(self.y + y_start + (note_h - tex.height) / 2)),
                         size=tex.size
                     )
 
@@ -869,33 +866,27 @@ Builder.load_string("""
             orientation: 'horizontal'
             spacing: 0
 
-            BoxLayout:
-                orientation: 'vertical'
+            BoundedScrollView:
+                id: keyboard_sv
                 size_hint: (None, 1)
                 width: dp(60)
+                do_scroll_x: True
+                do_scroll_y: True
+                bar_width: round(dp(17))
+                bar_pos_x: 'bottom'
+                bar_color: [0, 0, 0, 0]
+                bar_inactive_color: [0, 0, 0, 0]
+                scroll_type: ['bars', 'content']
+                scroll_y: root.v_scroll_pos
+                on_scroll_y: root.v_scroll_pos = self.scroll_y
+                bar_margin: 0
 
-                BoundedScrollView:
-                    id: keyboard_sv
-                    size_hint: (None, 1)
+                EditorPianoKeyboard:
+                    id: piano_keyboard
+                    size_hint: (None, None)
                     width: dp(60)
-                    do_scroll_x: False
-                    do_scroll_y: True
-                    bar_width: 0
-                    scroll_type: ['bars', 'content']
-                    scroll_y: root.v_scroll_pos
-                    on_scroll_y: root.v_scroll_pos = self.scroll_y
-
-                    EditorPianoKeyboard:
-                        id: piano_keyboard
-                        size_hint: (None, None)
-                        width: dp(60)
-                        note_height: root.note_height
-                        bottom_padding: round(dp(17))
-
-                Widget:
-                    # Spacer to match the horizontal scrollbar height of the grid
-                    size_hint_y: None
-                    height: round(dp(17))
+                    note_height: root.note_height
+                    bottom_padding: round(dp(17))
 
             BoundedScrollView:
                 id: timeline_scroll

@@ -25,6 +25,24 @@ import mido
 from sequencer.ui_components.HoverBehavior import HoverableButton
 
 
+class EditorBoundedScrollView(BoundedScrollView):
+    """
+    Specialized ScrollView for the MIDI editor that prevents scrolling
+    when a note or a selection rectangle is being dragged in the child grid.
+    """
+    def on_touch_move(self, touch):
+        # We access the grid directly if it's the child
+        if self.children:
+            child = self.children[0]
+            # Handle note dragging, resizing, or rubber-band selection
+            if hasattr(child, '_drag_mode') and child._drag_mode and touch.grab_current is child:
+                # Still call Widget.on_touch_move to let coordinate transforms propagate if needed,
+                # but bypass ScrollView.on_touch_move which handles the scrolling logic.
+                # However, for Kivy's ScrollView, we just return True to consume and block scrolling.
+                return True
+        return super().on_touch_move(touch)
+
+
 class EditorPianoKeyboard(PianoKeyboard):
     """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
     def __init__(self, **kwargs):
@@ -866,7 +884,7 @@ Builder.load_string("""
             orientation: 'horizontal'
             spacing: 0
 
-            BoundedScrollView:
+            EditorBoundedScrollView:
                 id: keyboard_sv
                 size_hint: (None, 1)
                 width: dp(60)
@@ -888,7 +906,7 @@ Builder.load_string("""
                     note_height: root.note_height
                     bottom_padding: round(dp(17))
 
-            BoundedScrollView:
+            EditorBoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: True
                 do_scroll_x: True

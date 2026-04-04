@@ -27,68 +27,61 @@ from sequencer.ui_components.HoverBehavior import HoverableButton
 
 class EditorPianoKeyboard(PianoKeyboard):
     """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._tex_cache = {}
+
     def _redraw(self, *args):
         # Full re-implementation to ensure perfect grid alignment and label visibility via direct canvas drawing
         self._redraw_pending = False
         if not self.canvas: return
         self.canvas.clear()
-
-        # Remove any leftover Label widgets to avoid duplication/clipping
         self.clear_widgets()
 
-        # Match PianoRoll.py drawing logic exactly to ensure alignment
-        nh = round(self.note_height)
-        bp = round(self.bottom_padding)
+        # Math must match PianoRoll.py EXACTLY: round(i * note_height) + bottom_padding
+        nh = self.note_height
+        bp = self.bottom_padding
         highlight_color = (0.3, 0.7, 1.0, 1)
 
         with self.canvas:
             # 1. Key backgrounds
             for i in range(128):
                 is_black = (i % 12) in [1, 3, 6, 8, 10]
-                if i == self.highlighted_note:
-                    Color(*highlight_color)
-                elif is_black:
-                    Color(0.1, 0.1, 0.1, 1)
-                else:
-                    Color(0.95, 0.95, 0.95, 1)
+                if i == self.highlighted_note: Color(*highlight_color)
+                elif is_black: Color(0.1, 0.1, 0.1, 1)
+                else: Color(0.95, 0.95, 0.95, 1)
 
-                y_start = round(i * self.note_height) + bp
-                y_end = round((i + 1) * self.note_height) + bp
+                y_start = round(i * nh) + bp
+                y_end = round((i + 1) * nh) + bp
 
                 rect_width = self.width * 0.65 if is_black else self.width
                 Rectangle(pos=(self.x, self.y + y_start), size=(rect_width, y_end - y_start))
 
-            # 2. Separators (Must match PianoRoll.py horizontal lines)
+            # 2. Separators
             for i in range(129):
-                y_pos = round(i * self.note_height) + bp
-                if (i % 12) == 0: # Octave boundary (C)
-                    Color(0.4, 0.4, 0.45, 0.8) # Matches grid
-                    width = 1.2
-                elif (i % 12) == 5: # E/F boundary
-                    Color(0.6, 0.6, 0.6, 0.6)
-                    width = 1.0
-                else:
-                    Color(0.7, 0.7, 0.7, 0.4)
-                    width = 0.6
+                y_pos = round(i * nh) + bp
+                if (i % 12) == 0: Color(0.4, 0.4, 0.45, 0.8)
+                elif (i % 12) == 5: Color(0.6, 0.6, 0.6, 0.6)
+                else: Color(0.7, 0.7, 0.7, 0.4)
 
-                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=width)
+                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=1.0 if (i % 12) in (0, 5) else 0.6)
 
-            # 3. Direct Canvas Note Labels (C-1 to C9)
-            # Drawing text directly on the canvas is the most robust way to ensure visibility and alignment
-            Color(0, 0, 0, 1) # Black text
+            # 3. Canvas Note Labels
+            Color(0, 0, 0, 1)
             for i in range(128):
                 if (i % 12) == 0:
                     octave_num = (i // 12) - 1
-                    y_start = round(i * self.note_height) + bp
-                    y_end = round((i + 1) * self.note_height) + bp
+                    y_start = round(i * nh) + bp
+                    y_end = round((i + 1) * nh) + bp
                     note_h = y_end - y_start
 
-                    # Use CoreLabel to create a texture for the text
-                    label = CoreLabel(text=f"C{octave_num}", font_size=dp(11), bold=True)
-                    label.refresh()
-                    tex = label.texture
+                    text = f"C{octave_num}"
+                    if text not in self._tex_cache:
+                        lbl = CoreLabel(text=text, font_size=dp(11), bold=True)
+                        lbl.refresh()
+                        self._tex_cache[text] = lbl.texture
+                    tex = self._tex_cache[text]
 
-                    # Draw the texture centered on the white key
                     Rectangle(
                         texture=tex,
                         pos=(self.x + (self.width - tex.width) / 2, self.y + y_start + (note_h - tex.height) / 2),
@@ -1029,18 +1022,14 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        # Force strict integer metrics to avoid sub-pixel alignment drift
+        # Force integer metrics
         self.note_height = round(dp(14))
-        bp = round(dp(17))
-        self.ids.piano_keyboard.bottom_padding = bp
-        self.ids.grid.bottom_padding = bp
+        self.ids.piano_keyboard.bottom_padding = round(dp(17))
+        self.ids.grid.bottom_padding = round(dp(17))
 
-        # Force identical content heights to ensure scroll_y percentage mapping is 1:1.
-        def _sync_content_heights(inst, val):
-            if abs(self.ids.piano_keyboard.height - val) > 0.001:
-                self.ids.piano_keyboard.height = val
-        grid.bind(height=_sync_content_heights)
+        # Lock heights strictly
         self.ids.piano_keyboard.height = grid.height
+        grid.bind(height=self.ids.piano_keyboard.setter('height'))
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout

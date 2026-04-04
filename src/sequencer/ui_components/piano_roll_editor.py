@@ -60,18 +60,16 @@ class EditorPianoKeyboard(PianoKeyboard):
             # 2. Separators
             for i in range(129):
                 y_pos = round(i * nh) + bp
-                # Match PianoRoll/PianoKeyboard visual weight exactly
+                # Match PianoRoll visual style exactly with 1px Rectangles
                 if (i % 12) == 0:
                     Color(0.4, 0.4, 0.45, 0.8)
-                    w = 1.2
                 elif (i % 12) == 5:
                     Color(0.6, 0.6, 0.6, 0.6)
-                    w = 1.0
                 else:
                     Color(0.7, 0.7, 0.7, 0.4)
-                    w = 0.6
 
-                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=w)
+                # Using Rectangle instead of Line for better alignment with Mesh grid
+                Rectangle(pos=(self.x, self.y + y_pos), size=(self.width, 1.0))
 
             # 3. Canvas Note Labels
             Color(0, 0, 0, 1)
@@ -906,7 +904,7 @@ Builder.load_string("""
                 bar_width: round(dp(17))
                 scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
-                bar_margin: dp(2)
+                bar_margin: 0
                 scroll_y: root.v_scroll_pos
                 on_scroll_y: root.v_scroll_pos = self.scroll_y
 

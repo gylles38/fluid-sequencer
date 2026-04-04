@@ -55,17 +55,23 @@ class EditorPianoKeyboard(PianoKeyboard):
                 y_end = round((i + 1) * nh) + bp
 
                 rect_width = self.width * 0.65 if is_black else self.width
-                # Explicitly round self.y for sub-pixel accuracy
-                Rectangle(pos=(self.x, round(self.y) + y_start), size=(rect_width, y_end - y_start))
+                Rectangle(pos=(self.x, self.y + y_start), size=(rect_width, y_end - y_start))
 
             # 2. Separators
             for i in range(129):
                 y_pos = round(i * nh) + bp
-                if (i % 12) == 0: Color(0.4, 0.4, 0.45, 0.8)
-                elif (i % 12) == 5: Color(0.6, 0.6, 0.6, 0.6)
-                else: Color(0.7, 0.7, 0.7, 0.4)
+                # Match PianoRoll/PianoKeyboard visual weight exactly
+                if (i % 12) == 0:
+                    Color(0.4, 0.4, 0.45, 0.8)
+                    w = 1.2
+                elif (i % 12) == 5:
+                    Color(0.6, 0.6, 0.6, 0.6)
+                    w = 1.0
+                else:
+                    Color(0.7, 0.7, 0.7, 0.4)
+                    w = 0.6
 
-                Line(points=[self.x, round(self.y) + y_pos, self.x + self.width, round(self.y) + y_pos], width=1.0 if (i % 12) in (0, 5) else 0.6)
+                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=w)
 
             # 3. Canvas Note Labels
             Color(0, 0, 0, 1)
@@ -78,14 +84,15 @@ class EditorPianoKeyboard(PianoKeyboard):
 
                     text = f"C{octave_num}"
                     if text not in self._tex_cache:
-                        lbl = CoreLabel(text=text, font_size=dp(11), bold=True)
+                        # Match main track style: font_size=dp(9), bold=False
+                        lbl = CoreLabel(text=text, font_size=dp(9), bold=False)
                         lbl.refresh()
                         self._tex_cache[text] = lbl.texture
                     tex = self._tex_cache[text]
 
                     Rectangle(
                         texture=tex,
-                        pos=(self.x + (self.width - tex.width) / 2, round(self.y) + y_start + (note_h - tex.height) / 2),
+                        pos=(self.x + (self.width - tex.width) / 2, self.y + y_start + (note_h - tex.height) / 2),
                         size=tex.size
                     )
 
@@ -864,23 +871,33 @@ Builder.load_string("""
             orientation: 'horizontal'
             spacing: 0
 
-            BoundedScrollView:
-                id: keyboard_sv
+            BoxLayout:
+                orientation: 'vertical'
                 size_hint: (None, 1)
                 width: dp(60)
-                do_scroll_x: False
-                do_scroll_y: True
-                bar_width: 0
-                scroll_type: ['bars', 'content']
-                scroll_y: root.v_scroll_pos
-                on_scroll_y: root.v_scroll_pos = self.scroll_y
 
-                EditorPianoKeyboard:
-                    id: piano_keyboard
-                    size_hint: (None, None)
+                BoundedScrollView:
+                    id: keyboard_sv
+                    size_hint: (None, 1)
                     width: dp(60)
-                    note_height: root.note_height
-                    bottom_padding: round(dp(17))
+                    do_scroll_x: False
+                    do_scroll_y: True
+                    bar_width: 0
+                    scroll_type: ['bars', 'content']
+                    scroll_y: root.v_scroll_pos
+                    on_scroll_y: root.v_scroll_pos = self.scroll_y
+
+                    EditorPianoKeyboard:
+                        id: piano_keyboard
+                        size_hint: (None, None)
+                        width: dp(60)
+                        note_height: root.note_height
+                        bottom_padding: round(dp(17))
+
+                Widget:
+                    # Spacer to match the horizontal scrollbar height of the grid
+                    size_hint_y: None
+                    height: round(dp(17))
 
             BoundedScrollView:
                 id: timeline_scroll

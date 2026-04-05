@@ -37,12 +37,21 @@ class EditorBoundedScrollView(BoundedScrollView):
         if not self.collide_point(*touch.pos):
             return False
 
-        # Pre-set ScrollView flags for child interaction.
+        # 1. Handle mouse scrolling and scrollbar interaction directly.
+        # Check if the touch is within the vertical scrollbar area (right edge)
+        # or the horizontal scrollbar area (bottom edge).
+        local_x, local_y = self.to_local(*touch.pos)
+        is_in_vbar = local_x > self.width - self.bar_width
+        is_in_hbar = local_y < self.bar_width
+
+        if touch.is_mouse_scrolling or is_in_vbar or is_in_hbar:
+            return super().on_touch_down(touch)
+
+        # 2. Priority dispatch for grid interaction (selection, note dragging).
+        # We only do this for standard touches (not scrolling).
         touch.ud['sv.can_scroll_x'] = True
         touch.ud['sv.can_scroll_y'] = True
 
-        # Let children (the MIDI grid) handle the touch down FIRST via priority dispatch.
-        # This prevents ScrollView from claiming the touch for itself too early.
         touch.push()
         touch.apply_transform_2d(self.to_local)
         handled = False
@@ -53,12 +62,11 @@ class EditorBoundedScrollView(BoundedScrollView):
         touch.pop()
 
         if handled:
-            # Child claimed it. Aggressively disable scrolling for this touch sequence.
+            # Grid claimed it. Disable scrolling for this sequence.
             touch.ud['sv.can_scroll_x'] = False
             touch.ud['sv.can_scroll_y'] = False
             return True
 
-        # If no child handled it, proceed with standard ScrollView touch down logic.
         return super().on_touch_down(touch)
 
     def on_touch_move(self, touch):
@@ -403,6 +411,10 @@ class EditableMidiGrid(PianoRoll):
                     }
 
     def on_touch_down(self, touch) -> None | bool:
+        # Ignore mouse wheel scroll events to allow the parent ScrollView to handle them.
+        if touch.is_mouse_scrolling:
+            return False
+
         if not self.collide_point(*touch.pos):
             return super(EditableMidiGrid, self).on_touch_down(touch)
 

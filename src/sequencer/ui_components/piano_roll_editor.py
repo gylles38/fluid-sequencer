@@ -513,6 +513,11 @@ class EditableMidiGrid(PianoRoll):
                             self.editor._record_state()
                     else:
                         if not is_already_selected:
+                            # Fix: Always clear before re-assigning a single note.
+                            # Kivy's ListProperty might not trigger an 'on_selected_notes' event
+                            # if the new list [note] is considered equal to the old one (e.g. same pitch/duration/velocity)
+                            # but refers to a different Note object instance.
+                            self.editor.selected_notes = []
                             self.editor.selected_notes = [note]
                             self.editor._record_state()
 
@@ -545,6 +550,7 @@ class EditableMidiGrid(PianoRoll):
                 ctrl_pressed = 'ctrl' in Window.modifiers
                 if not ctrl_pressed:
                     if self.editor.selected_notes:
+                    # Clear selection when clicking on empty space
                         self.editor.selected_notes = []
 
                 # After potentially clearing selection, prepare for a potential rubber-band selection.
@@ -1551,6 +1557,8 @@ class PianoRollEditor(FloatingWindow):
                 all_notes.append(note)
         
         if all_notes:
+            # Fix: Always clear before re-assigning to trigger Kivy's ListProperty update.
+            self.selected_notes = []
             self.selected_notes = all_notes
             self.ids.grid.draw()
      

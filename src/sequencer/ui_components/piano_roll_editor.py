@@ -288,7 +288,15 @@ class EditableMidiGrid(PianoRoll):
                            sel_y < (note_y + note_h) and (sel_y + sel_h) > note_y:
                             newly_selected.append(note)
 
-                self.editor.selected_notes = newly_selected
+                if hasattr(self, '_initial_selection_for_drag') and self._initial_selection_for_drag:
+                    # Additive selection: initial notes + rectangle notes
+                    combined = list(self._initial_selection_for_drag)
+                    for n in newly_selected:
+                        if not any(n is sn for sn in combined):
+                            combined.append(n)
+                    self.editor.selected_notes = combined
+                else:
+                    self.editor.selected_notes = newly_selected
                 self.draw()
             return True
 
@@ -486,13 +494,25 @@ class EditableMidiGrid(PianoRoll):
                     # Check for note move
                     elif note_x <= local_pos[0] <= note_x + note_width and \
                          note_y <= local_pos[1] <= note_y + self.note_height:
-                        # --- CORRECTED SELECTION LOGIC ---
-                        # Use an identity check (`is`) to see if the *exact* note instance is already selected.
-                        # The `in` operator uses equality (`==`), which fails for identical but distinct notes.
+
+                        ctrl_pressed = 'ctrl' in Window.modifiers
                         is_already_selected: bool = any(note is sel_note for sel_note in self.editor.selected_notes)
-                        if not is_already_selected:
-                            self.editor.selected_notes = [note]
-                            self.editor._record_state()
+
+                        if ctrl_pressed:
+                            if is_already_selected:
+                                # Toggle OFF: Remove from selection
+                                self.editor.selected_notes = [n for n in self.editor.selected_notes if n is not note]
+                                self.editor._record_state()
+                                self.draw()
+                                return True # Don't start drag if we just unselected it
+                            else:
+                                # Toggle ON: Add to selection
+                                self.editor.selected_notes = list(self.editor.selected_notes) + [note]
+                                self.editor._record_state()
+                        else:
+                            if not is_already_selected:
+                                self.editor.selected_notes = [note]
+                                self.editor._record_state()
 
                         self._dragged_note = note
                         self._drag_event = event
@@ -524,12 +544,14 @@ class EditableMidiGrid(PianoRoll):
                         return True
 
             # If no note was clicked, it's a click on an empty space.
-            # This action should clear any existing selection. To ensure the UI
-            # updates, we must re-assign the list, not clear it in-place.
-            if self.editor.selected_notes:
-                self.editor.selected_notes = []
+            ctrl_pressed = 'ctrl' in Window.modifiers
+            if not ctrl_pressed:
+                if self.editor.selected_notes:
+                    self.editor.selected_notes = []
 
-            # After clearing selection (if any), prepare for a potential rubber-band selection.
+            # After potentially clearing selection, prepare for a potential rubber-band selection.
+            # We store the initial selection to allow additive rubber-band if Ctrl is held.
+            self._initial_selection_for_drag = list(self.editor.selected_notes) if ctrl_pressed else []
             self._drag_mode = 'select'
             self._selection_start_pos = local_pos
             self._selection_group = InstructionGroup()
@@ -583,6 +605,7 @@ class EditableMidiGrid(PianoRoll):
             return super(EditableMidiGrid, self).on_touch_up(touch)
 
         if self._drag_mode == 'select':
+            self._initial_selection_for_drag = None
             if self._selection_group:
                 try:
                     self.canvas.after.remove(self._selection_group)

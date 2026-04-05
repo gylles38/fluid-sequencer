@@ -1513,7 +1513,11 @@ class PianoRollEditor(FloatingWindow):
 
         # 2. Mettre à jour la sélection
         if new_selection:
+            # Force update of selected notes list
+            self.selected_notes = []
             self.selected_notes = new_selection
+            self.ids.grid.selected_notes = new_selection
+
             self.track_copy.events.sort(key=lambda e: e.start_time)
             self.is_dirty = True
             self._record_state()

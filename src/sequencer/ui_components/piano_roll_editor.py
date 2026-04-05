@@ -1374,7 +1374,7 @@ class PianoRollEditor(FloatingWindow):
         self.scroll_to_beat(target_beat)
 
     def scroll_to_beat(self, beat) -> None:
-        # ... (votre fonction actuelle reste inchangée) ...
+        """Scrolls the timeline to a specific beat, centering it if possible."""
         scroll_view = self.ids.timeline_scroll
         grid_width = self.total_beats * self.pixels_per_beat
         viewport_width = scroll_view.width
@@ -1383,7 +1383,8 @@ class PianoRollEditor(FloatingWindow):
             scroll_view.scroll_x = 0
             return
 
-        target_pixel = beat * self.pixels_per_beat
+        # Target centering the beat in the viewport
+        target_pixel = (beat * self.pixels_per_beat) - (viewport_width / 2)
         max_scroll = grid_width - viewport_width
         new_scroll_x = target_pixel / max_scroll
         
@@ -1888,6 +1889,9 @@ class PianoRollEditor(FloatingWindow):
         if state in ('playing', 'recording'):
             # When playback starts, apply the edited track as an override
             sequencer.track_overrides[self.original_track_index] = self.track_copy
+
+            # reposition to playhead
+            self.scroll_to_beat(sequencer.current_beat)
         else:
             # When playback stops, remove the override
             if self.original_track_index in sequencer.track_overrides:

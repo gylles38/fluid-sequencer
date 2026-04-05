@@ -433,139 +433,137 @@ class EditableMidiGrid(PianoRoll):
         edit_mode = self.editor.edit_mode
         track = self.editor.track_copy
 
-        # --- Note Preview Logic ---
-        note_to_preview = None
-        if edit_mode in ('insert', 'move'):
-            # Find if there's a note at the clicked position
-            for event in reversed(track.events):
-                for note in reversed(event.notes):
-                    note_x = event.start_time * self.pixels_per_beat
-                    note_y = note.pitch * self.note_height + self.bottom_padding
-                    note_width = note.duration * self.pixels_per_beat
+        # --- Hit Detection Logic ---
+        hit_note = None
+        hit_event = None
+        is_handle_start = False
+        is_handle_end = False
 
-                    if note_x <= local_pos[0] <= note_x + note_width and \
-                       note_y <= local_pos[1] <= note_y + self.note_height:
-                        note_to_preview = note
-                        break
-                if note_to_preview:
+        # Optimized single search for hit detection
+        for event in reversed(track.events):
+            # Optimization: events are sorted by start_time
+            note_x = event.start_time * self.pixels_per_beat
+            if note_x > local_pos[0] + dp(50): continue # Too far right
+
+            for note in reversed(event.notes):
+                # Must match PianoRoll.draw exactly
+                y_start = round(note.pitch * self.note_height) + self.bottom_padding
+                y_end = round((note.pitch + 1) * self.note_height) + self.bottom_padding
+                note_width = note.duration * self.pixels_per_beat
+
+                # Add a tiny 1dp tolerance for hit detection to make clicking easier
+                if (note_x - dp(1)) <= local_pos[0] <= (note_x + note_width + dp(1)) and \
+                   (y_start - dp(1)) <= local_pos[1] <= (y_end + dp(1)):
+                    hit_note = note
+                    hit_event = event
+
+                    # Detect handles if in move mode
+                    if edit_mode == 'move':
+                        handle_width: float | int = min(dp(8), note_width / 4) if note_width > dp(16) else 0
+                        if local_pos[0] <= note_x + handle_width:
+                            is_handle_start = True
+                        elif local_pos[0] >= note_x + note_width - handle_width:
+                            is_handle_end = True
                     break
+            if hit_note: break
 
-            velocity = note_to_preview.velocity if note_to_preview else 100
+        # --- Preview Logic ---
+        if edit_mode in ('insert', 'move'):
+            velocity = hit_note.velocity if hit_note else 100
+            pitch = hit_note.pitch if hit_note else clicked_pitch
             duration_in_seconds = (60.0 / self.editor.sequencer_layout.sequencer.song.tempo) * self.editor.note_duration
-            self.editor._preview_note(clicked_pitch, velocity, duration_in_seconds)
+            self.editor._preview_note(pitch, velocity, duration_in_seconds)
 
 
         if edit_mode == 'move':
-            for event in reversed(track.events):
-                for note in reversed(event.notes):
-                    note_x = event.start_time * self.pixels_per_beat
-                    note_y = note.pitch * self.note_height + self.bottom_padding
-                    note_width = note.duration * self.pixels_per_beat
-                    handle_width: float | int = min(dp(8), note_width / 4) if note_width > dp(16) else 0
+            if hit_note:
+                note = hit_note
+                event = hit_event
+                note_x = event.start_time * self.pixels_per_beat
+                note_y = round(note.pitch * self.note_height) + self.bottom_padding
 
-                    # Check for right handle resize
-                    if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
-                       note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'resize_end'
-                        self._store_selection_states_if_needed(note)
-                        Window.set_system_cursor('size_we')
-                        touch.grab(self)
-                        # Explicitly block ScrollView parents from stealing this touch
-                        touch.ud['sv.can_scroll_x'] = False
-                        touch.ud['sv.can_scroll_y'] = False
-                        return True
+                # Handle resizing
+                if is_handle_end:
+                    self._dragged_note = note
+                    self._drag_event = event
+                    self._drag_mode = 'resize_end'
+                    self._store_selection_states_if_needed(note)
+                    Window.set_system_cursor('size_we')
+                elif is_handle_start:
+                    self._dragged_note = note
+                    self._drag_event = event
+                    self._drag_mode = 'resize_start'
+                    self._store_selection_states_if_needed(note)
+                    Window.set_system_cursor('size_we')
+                else:
+                    # Note move / selection
+                    ctrl_pressed = 'ctrl' in Window.modifiers
+                    is_already_selected: bool = any(note is sel_note for sel_note in self.editor.selected_notes)
 
-                    # Check for left handle resize
-                    elif note_x <= local_pos[0] <= note_x + handle_width and \
-                            note_y <= local_pos[1] <= note_y + self.note_height:
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'resize_start'
-                        self._store_selection_states_if_needed(note)
-                        Window.set_system_cursor('size_we')
-                        touch.grab(self)
-                        # Explicitly block ScrollView parents from stealing this touch
-                        touch.ud['sv.can_scroll_x'] = False
-                        touch.ud['sv.can_scroll_y'] = False
-                        return True
-
-                    # Check for note move
-                    elif note_x <= local_pos[0] <= note_x + note_width and \
-                         note_y <= local_pos[1] <= note_y + self.note_height:
-
-                        ctrl_pressed = 'ctrl' in Window.modifiers
-                        is_already_selected: bool = any(note is sel_note for sel_note in self.editor.selected_notes)
-
-                        if ctrl_pressed:
-                            if is_already_selected:
-                                # Toggle OFF: Remove from selection
-                                self.editor.selected_notes = [n for n in self.editor.selected_notes if n is not note]
-                                self.editor._record_state()
-                                self.draw()
-                                return True # Don't start drag if we just unselected it
-                            else:
-                                # Toggle ON: Add to selection
-                                self.editor.selected_notes = list(self.editor.selected_notes) + [note]
-                                self.editor._record_state()
+                    if ctrl_pressed:
+                        if is_already_selected:
+                            # Toggle OFF: Remove from selection
+                            self.editor.selected_notes = [n for n in self.editor.selected_notes if n is not note]
+                            self.editor._record_state()
+                            self.draw()
+                            return True # Don't start drag if we just unselected it
                         else:
-                            if not is_already_selected:
-                                self.editor.selected_notes = [note]
-                                self.editor._record_state()
+                            # Toggle ON: Add to selection
+                            self.editor.selected_notes = list(self.editor.selected_notes) + [note]
+                            self.editor._record_state()
+                    else:
+                        if not is_already_selected:
+                            self.editor.selected_notes = [note]
+                            self.editor._record_state()
 
-                        self._dragged_note = note
-                        self._drag_event = event
-                        self._drag_mode = 'move'
-                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+                    self._dragged_note = note
+                    self._drag_event = event
+                    self._drag_mode = 'move'
+                    self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
 
-                        # --- AJOUT POUR LE MULTI-MOVE ---
-                        # On stocke la position de départ de TOUTES les notes sélectionnées
-                        self._multi_drag_data = []
-                        for ev in track.events:
-                            for n in ev.notes:
-                                if any(n is sn for sn in self.editor.selected_notes):
-                                    self._multi_drag_data.append({
-                                        'note': n,
-                                        'parent_event': ev,  # On mémorise l'événement actuel !
-                                        'original_start': ev.start_time,
-                                        'original_pitch': n.pitch
-                                    })
+                    # Store multi-drag data
+                    self._multi_drag_data = []
+                    for ev in track.events:
+                        for n in ev.notes:
+                            if any(n is sn for sn in self.editor.selected_notes):
+                                self._multi_drag_data.append({
+                                    'note': n,
+                                    'parent_event': ev,
+                                    'original_start': ev.start_time,
+                                    'original_pitch': n.pitch
+                                })
+                    self._store_selection_states_if_needed(note)
+                    self.editor.selected_event = event
 
-                        self._store_selection_states_if_needed(note)
-                        
-                        self.editor.selected_event = event # Gardé pour compatibilité, mais moins utile en multi-select
-                        self.draw()
+                self.draw()
+                touch.grab(self)
+                touch.ud['sv.can_scroll_x'] = False
+                touch.ud['sv.can_scroll_y'] = False
+                return True
+            else:
+                # If no note was clicked, it's a click on an empty space (rubber-band selection).
+                ctrl_pressed = 'ctrl' in Window.modifiers
+                if not ctrl_pressed:
+                    if self.editor.selected_notes:
+                        self.editor.selected_notes = []
 
-                        touch.grab(self)
-                        # Explicitly block ScrollView parents from stealing this touch
-                        touch.ud['sv.can_scroll_x'] = False
-                        touch.ud['sv.can_scroll_y'] = False
-                        return True
+                # After potentially clearing selection, prepare for a potential rubber-band selection.
+                # We store the initial selection to allow additive rubber-band if Ctrl is held.
+                self._initial_selection_for_drag = list(self.editor.selected_notes) if ctrl_pressed else []
+                self._drag_mode = 'select'
+                self._selection_start_pos = local_pos
+                self._selection_group = InstructionGroup()
+                self._selection_group.add(Color(1, 1, 1, 0.3))
+                self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
+                self._selection_group.add(self._selection_rect)
+                self.canvas.after.add(self._selection_group)
 
-            # If no note was clicked, it's a click on an empty space.
-            ctrl_pressed = 'ctrl' in Window.modifiers
-            if not ctrl_pressed:
-                if self.editor.selected_notes:
-                    self.editor.selected_notes = []
-
-            # After potentially clearing selection, prepare for a potential rubber-band selection.
-            # We store the initial selection to allow additive rubber-band if Ctrl is held.
-            self._initial_selection_for_drag = list(self.editor.selected_notes) if ctrl_pressed else []
-            self._drag_mode = 'select'
-            self._selection_start_pos = local_pos
-            self._selection_group = InstructionGroup()
-            self._selection_group.add(Color(1, 1, 1, 0.3))
-            self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
-            self._selection_group.add(self._selection_rect)
-            self.canvas.after.add(self._selection_group)
-
-            touch.grab(self)
-            # Explicitly block ScrollView parents from stealing this touch
-            touch.ud['sv.can_scroll_x'] = False
-            touch.ud['sv.can_scroll_y'] = False
-            self.draw()
-            return True
+                touch.grab(self)
+                # Explicitly block ScrollView parents from stealing this touch
+                touch.ud['sv.can_scroll_x'] = False
+                touch.ud['sv.can_scroll_y'] = False
+                self.draw()
+                return True
 
         if edit_mode == 'insert':
             # Quantize to 16th notes, which is a common default for piano rolls
@@ -585,18 +583,14 @@ class EditableMidiGrid(PianoRoll):
             self.editor._record_state()
             return True
 
-        elif edit_mode == 'delete':
-            for event in reversed(track.events):
-                max_duration = max((n.duration for n in event.notes), default=0)
-                if event.start_time <= clicked_beat < event.start_time + max_duration:
-                    for note in reversed(event.notes):
-                        if note.pitch == clicked_pitch:
-                            event.notes.remove(note)
-                            if not event.notes: track.events.remove(event)
-                            self.editor.is_dirty = True
-                            self.draw()
-                            self.editor._record_state()
-                            return True
+        elif edit_mode == 'delete' and hit_note:
+            hit_event.notes.remove(hit_note)
+            if not hit_event.notes and not hit_event.cc_messages:
+                track.events.remove(hit_event)
+            self.editor.is_dirty = True
+            self.draw()
+            self.editor._record_state()
+            return True
 
         return super(EditableMidiGrid, self).on_touch_down(touch)
 

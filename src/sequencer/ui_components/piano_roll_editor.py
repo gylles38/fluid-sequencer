@@ -1519,6 +1519,9 @@ class PianoRollEditor(FloatingWindow):
             self._record_state()
             self.ids.grid.draw()
 
+            # Scroller jusqu'à la position du collage (tête de lecture)
+            self.scroll_to_beat(target_beat)
+
     def _select_all_notes(self) -> None:
         """Sélectionne toutes les notes présentes dans la piste actuelle."""
         all_notes = []

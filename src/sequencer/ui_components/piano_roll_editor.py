@@ -1,11 +1,14 @@
-from .floating_window import FloatingWindow
+from sequencer.ui_components.floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
-from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
-from .ui_utils import is_any_text_input_focused
+from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
+from sequencer.ui_components.Ruler import Ruler
+from sequencer.ui_components.PianoKeyboard import PianoKeyboard
+from sequencer.ui_components.bounded_scroll_view import BoundedScrollView
+from sequencer.ui_components.ui_utils import is_any_text_input_focused
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
@@ -17,7 +20,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 import copy
 from sequencer.models import Event, Note, MidiTrack
-from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
+from sequencer.ui_components.SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
@@ -30,16 +33,56 @@ class EditorBoundedScrollView(BoundedScrollView):
     Specialized ScrollView for the MIDI editor that prevents scrolling
     when a note or a selection rectangle is being dragged in the child grid.
     """
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+
+        # super().on_touch_down in BoundedScrollView calls ScrollView.on_touch_down
+        res = super().on_touch_down(touch)
+
+        # If a descendant handled and grabbed the touch, we MUST block ScrollView's
+        # internal distance-based stealing logic by returning True and consuming the event.
+        if touch.grab_list:
+            for item in touch.grab_list:
+                try:
+                    # widget is a weakref proxy or object
+                    widget = item[0]() if isinstance(item, (tuple, list)) else item()
+                    if widget and widget is not self:
+                        # Check if grabber is our descendant
+                        p = widget
+                        while p:
+                            if p is self:
+                                # Descendant grabbed it. Ensure ScrollView doesn't steal it later.
+                                touch.ud['sv.can_scroll_x'] = False
+                                touch.ud['sv.can_scroll_y'] = False
+                                return True
+                            p = getattr(p, 'parent', None)
+                except: continue
+        return res
+
     def on_touch_move(self, touch):
-        # We access the grid directly if it's the child
-        if self.children:
-            child = self.children[0]
-            # Handle note dragging, resizing, or rubber-band selection
-            if hasattr(child, '_drag_mode') and child._drag_mode and touch.grab_current is child:
-                # Still call Widget.on_touch_move to let coordinate transforms propagate if needed,
-                # but bypass ScrollView.on_touch_move which handles the scrolling logic.
-                # However, for Kivy's ScrollView, we just return True to consume and block scrolling.
+        # If a descendant has grabbed the touch, we MUST return True to bypass
+        # ScrollView's on_touch_move (which is where displacement-based stealing happens).
+        if touch.grab_list:
+            for item in touch.grab_list:
+                try:
+                    widget = item[0]() if isinstance(item, (tuple, list)) else item()
+                    if widget and widget is not self:
+                        p = widget
+                        while p:
+                            if p is self:
+                                # Block ScrollView.on_touch_move.
+                                # Standard Widget.on_touch_move would just propagate,
+                                # but here we simply consume to stop the scroll logic.
+                                return True
+                            p = getattr(p, 'parent', None)
+                except: continue
+
+        # Safety fallback: if the grid child is in an active drag mode
+        if self.children and hasattr(self.children[0], '_drag_mode'):
+            if self.children[0]._drag_mode:
                 return True
+
         return super().on_touch_move(touch)
 
 
@@ -1897,17 +1940,18 @@ class PianoRollEditor(FloatingWindow):
             btn.canvas.ask_update()                
 
     def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value) -> None:
+        # Standard guard against recursive feedback
         if self._is_scrolling: return
 
-        # Ignore micro-changes to prevent oscillations
+        # Sensitivity threshold to prevent jitter and micro-feedback loops
         if hasattr(source_scroll_view, '_last_scroll_x') and \
-           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.0001:
+           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.00001:
             return
         source_scroll_view._last_scroll_x = scroll_x_value
 
         self._is_scrolling = True
         try:
-            # Calculate absolute pixel offset from source
+            # Calculate absolute pixel offset from source content
             content_width_source = source_scroll_view.children[0].width
             viewport_width_source = source_scroll_view.width
             max_scroll_source = max(0, content_width_source - viewport_width_source)
@@ -1916,6 +1960,7 @@ class PianoRollEditor(FloatingWindow):
             ruler_scroll = self.ids.ruler.scroll_view
             timeline_scroll = self.ids.timeline_scroll
 
+            # Apply synchronized scroll to all linked scroll views
             targets = [ruler_scroll, timeline_scroll]
             for sv in targets:
                 if sv is not source_scroll_view:
@@ -1931,8 +1976,9 @@ class PianoRollEditor(FloatingWindow):
                         continue
         except (IndexError, AttributeError):
             pass
-
-        self._is_scrolling = False
+        finally:
+            # Ensure guard is always reset even if logic fails
+            self._is_scrolling = False
 
     def _center_view_on_c4(self) -> None:
         timeline_scroll = self.ids.timeline_scroll

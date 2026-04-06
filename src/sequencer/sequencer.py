@@ -3150,12 +3150,8 @@ class Sequencer(EventDispatcher):
             # Trigger a UI refresh to redraw all tracks to the new length
             self.song_structure_changed += 1
 
-            # After the recording thread has stopped itself, we might not need to stop playback again
-            # as it might have already done so. However, calling it ensures a consistent state.
-            if self.playback_state != "stopped":
-                 self._stop_playback_transport()
-        else:
-            self._stop_playback_transport()
+        # Always stop the playback transport to ensure JACK is stopped
+        self._stop_playback_transport()
 
         # Update routing status immediately to reflect manual override if present
         self._update_current_routing()

@@ -95,38 +95,53 @@ class EditorPianoKeyboard(PianoKeyboard):
     """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._label_widgets = []
+        if not hasattr(self, '_label_widgets'):
+            self._label_widgets = []
+        self._redraw_pending = False
+        self.bind(size=self.trigger_redraw, pos=self.trigger_redraw,
+                  note_height=self.trigger_redraw, highlighted_note=self.trigger_redraw)
+
+    def trigger_redraw(self, *args):
+        if not self._redraw_pending:
+            self._redraw_pending = True
+            Clock.schedule_once(self._redraw, 0)
 
     def _redraw(self, *args):
         # Debounce/stability check
         self._redraw_pending = False
         if not self.canvas: return
 
-        # 1. Clear Canvas for key backgrounds and separators
-        self.canvas.before.clear()
+        # 1. Clear Canvas
+        self.canvas.clear()
 
         # Math must match PianoRoll.py EXACTLY
         nh = self.note_height
         bp = self.bottom_padding
         highlight_color = (0.3, 0.7, 1.0, 1)
 
-        with self.canvas.before:
-            # --- Key Backgrounds ---
+        with self.canvas:
+            # --- White Key Backgrounds ---
             for i in range(128):
-                is_black = (i % 12) in [1, 3, 6, 8, 10]
-                if i == self.highlighted_note: Color(*highlight_color)
-                elif is_black: Color(0.1, 0.1, 0.1, 1)
-                else: Color(0.95, 0.95, 0.95, 1)
+                if (i % 12) not in [1, 3, 6, 8, 10]:
+                    if i == self.highlighted_note: Color(*highlight_color)
+                    else: Color(0.95, 0.95, 0.95, 1)
+                    y_start = round(i * nh) + bp
+                    y_end = round((i + 1) * nh) + bp
+                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
 
-                y_start = round(i * nh) + bp
-                y_end = round((i + 1) * nh) + bp
-                rect_width = self.width * 0.65 if is_black else self.width
-                Rectangle(pos=(self.x, self.y + y_start), size=(rect_width, y_end - y_start))
+            # --- Black Key Backgrounds ---
+            for i in range(128):
+                if (i % 12) in [1, 3, 6, 8, 10]:
+                    if i == self.highlighted_note: Color(*highlight_color)
+                    else: Color(0.1, 0.1, 0.1, 1)
+                    y_start = round(i * nh) + bp
+                    y_end = round((i + 1) * nh) + bp
+                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width * 0.65, y_end - y_start))
 
             # --- Separators ---
             for i in range(129):
                 y_pos = round(i * nh) + bp
-                if (i % 12) == 0: Color(0.4, 0.4, 0.45, 0.8)
+                if (i % 12) == 0: Color(0.4, 0.4, 0.4, 0.8)
                 elif (i % 12) == 5: Color(0.6, 0.6, 0.6, 0.6)
                 else: Color(0.7, 0.7, 0.7, 0.4)
                 Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=1.0)
@@ -136,7 +151,8 @@ class EditorPianoKeyboard(PianoKeyboard):
 
         # Ensure we have enough Label widgets
         while len(self._label_widgets) < len(octave_indices):
-            lbl = Label(font_size=dp(10), color=(0, 0, 0, 1), size_hint=(None, None))
+            lbl = Label(font_size=dp(10), color=(0, 0, 0, 1), size_hint=(None, None),
+                        halign='right', valign='middle', bold=True)
             self.add_widget(lbl)
             self._label_widgets.append(lbl)
 
@@ -145,10 +161,13 @@ class EditorPianoKeyboard(PianoKeyboard):
             octave_num = (i // 12) - 1
             y_start = round(i * nh) + bp
             y_end = round((i + 1) * nh) + bp
+            note_h = y_end - y_start
             label = self._label_widgets[idx]
             label.text = f"C{octave_num}"
-            label.size = (self.width, y_end - y_start)
-            label.pos = (self.x, self.y + y_start)
+            label.size = (self.width - dp(5), note_h)
+            label.text_size = label.size
+            label.center_x = self.center_x - dp(2.5)
+            label.center_y = self.y + y_start + note_h / 2
 
 
 class EditHistoryManager:
@@ -968,8 +987,8 @@ Builder.load_string("""
                 id: keyboard_sv
                 size_hint: (None, 1)
                 width: dp(60)
-                do_scroll_x: True
-                do_scroll_y: True
+                do_scroll_x: False
+                do_scroll_y: False
                 bar_width: round(dp(17))
                 bar_pos_x: 'bottom'
                 bar_color: [0, 0, 0, 0]

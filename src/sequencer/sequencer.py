@@ -359,13 +359,41 @@ class Sequencer(EventDispatcher):
         """
         Unified listener thread that handles transport controls, MIDI mappings,
         and dispatches messages to the recording thread via a queue.
+        Includes automatic reconnection logic.
         """
-        try:
-            with mido.open_input(port_name) as inport:
-                print(f"[Sequencer] Unified MIDI input listener started on '{port_name}'")
+        print(f"[Sequencer] Unified MIDI input listener thread started for '{port_name}'")
+
+        while not stop_event.is_set():
+            inport = None
+            try:
+                # 1. Attempt to open the port (with multiple retries if not found)
+                retry_count = 0
+                while not stop_event.is_set() and inport is None:
+                    try:
+                        inport = mido.open_input(port_name)
+                        print(f"[Sequencer] Unified MIDI input listener successfully connected to '{port_name}'")
+                    except (IOError, RuntimeError, Exception):
+                        retry_count += 1
+                        if retry_count % 20 == 1: # Print log every 10 seconds (approx)
+                            print(f"[Sequencer] Waiting for MIDI device '{port_name}' (retry {retry_count})...")
+
+                        # Small wait before next attempt
+                        for _ in range(50): # 0.5s total wait, check stop_event frequently
+                            if stop_event.is_set(): break
+                            time.sleep(0.01)
+
+                if stop_event.is_set() or inport is None:
+                    break
+
+                # 2. Main message processing loop
                 while not stop_event.is_set():
                     # Optimization: Handle multiple messages per loop iteration
-                    for msg in inport.iter_pending():
+                    messages = list(inport.iter_pending())
+                    if not messages:
+                        time.sleep(0.005)
+                        continue
+
+                    for msg in messages:
                         # 1. Dispatch to recording queue (if active)
                         if self.is_recording:
                             self._midi_input_queue.put((port_name, msg))
@@ -413,11 +441,16 @@ class Sequencer(EventDispatcher):
                                         if self.is_recording:
                                             self._record_automation_from_mapping(mapping, msg.value)
 
-                    time.sleep(0.005) # Slightly faster polling for better responsiveness
-        except Exception as e:
-            print(f"\nError in unified MIDI input listener for port '{port_name}': {e}")
-        finally:
-            print(f"[Sequencer] Unified MIDI input listener stopped on '{port_name}'")
+            except Exception as e:
+                print(f"\n[Sequencer] Error in unified MIDI input listener for port '{port_name}': {e}")
+                print("[Sequencer] Attempting to reconnect...")
+            finally:
+                if inport:
+                    try: inport.close()
+                    except: pass
+                inport = None
+
+        print(f"[Sequencer] Unified MIDI input listener stopped for '{port_name}'")
 
     def reload_midi_mappings(self, filepath: str) -> str:
         """Loads a new MIDI mapping file and restarts the listeners if necessary."""
@@ -1927,7 +1960,13 @@ class Sequencer(EventDispatcher):
         try:
             # Update the song name to match the project basename
             self.song.name = basename
-            project_data = {"song": self.song, "virtual_ports": [vp.name for vp in self.virtual_ports], "control_port_name": self.control_port_name, "audio_player_command": self.audio_player_command}
+            project_data = {
+                "song": self.song,
+                "virtual_ports": [vp.name for vp in self.virtual_ports],
+                "control_port_name": self.control_port_name,
+                "default_record_port": self.default_record_port,
+                "audio_player_command": self.audio_player_command
+            }
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
             self.is_dirty = False
@@ -1954,10 +1993,17 @@ class Sequencer(EventDispatcher):
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
+
+            # --- Restore MIDI Ports ---
             self.unset_control_port()
             control_port_name = project_data.get("control_port_name")
             if control_port_name:
                 self.set_control_port(control_port_name)
+
+            default_record_port = project_data.get("default_record_port")
+            if default_record_port:
+                self.set_default_record_port(default_record_port)
+
             self.is_dirty = False
             self.last_project_basename = basename
             self.invalidate_song_length_cache()

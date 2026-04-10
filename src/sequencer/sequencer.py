@@ -359,8 +359,10 @@ class Sequencer(EventDispatcher):
     def normalize_midi_port_name(self, name: str) -> str:
         """Removes ALSA indices and other common noise from a port name."""
         if not name: return ""
-        # Remove trailing indices like " 24:0" or ":0"
-        return re.sub(r'[:\s]\d+[:\d]*$', '', name).strip()
+        # Remove trailing indices like " 24:0", ":0", " (24:0)", " 128:0", or "[24]"
+        # Handles various formats: "MPK249 24:0", "Midi Through:0", "Keypad (24:0)", "Port [24]"
+        res = re.sub(r'(\s+\d+:\d+.*$|:\d+.*$|\s+\(\d+:\d+.*\)$|\s+\[\d+\].*$)', '', name)
+        return res.strip()
 
     def _find_best_input_port_match(self, pattern: str) -> Optional[str]:
         """Finds the best matching available MIDI input port name."""
@@ -406,19 +408,33 @@ class Sequencer(EventDispatcher):
                 retry_count = 0
                 while not stop_event.is_set() and inport is None:
                     # Robust matching: find the actual port name currently available
+                    available = get_input_names()
+
+                    # Fuzzy match: try to find the device even if index changed
                     actual_port = self._find_best_input_port_match(port_name)
+
+                    if not actual_port and (port_name is None or port_name == "None"):
+                        # Fallback: if no port set, try to find ANY hardware keyboard
+                        for p in available:
+                            if "midi through" not in p.lower():
+                                actual_port = p
+                                break
 
                     if actual_port:
                         try:
+                            # Try to open the port. We use client_name to avoid conflicts
                             inport = mido.open_input(actual_port)
                             print(f"[Sequencer] Unified MIDI input listener successfully connected to '{actual_port}' (match for '{port_name}')")
-                        except (IOError, RuntimeError, Exception):
+                        except (IOError, RuntimeError, Exception) as e:
+                            print(f"[Sequencer] Failed to open matched port '{actual_port}': {e}")
                             inport = None
 
                     if inport is None:
+                        if retry_count % 50 == 0: # More frequent logging for debugging
+                             print(f"[Sequencer] Still waiting for MIDI device matching '{port_name}'...")
+                             print(f"[Sequencer] Available ports: {available}")
+
                         retry_count += 1
-                        if retry_count % 20 == 1: # Print log every 10 seconds (approx)
-                            print(f"[Sequencer] Waiting for MIDI device '{port_name}' (retry {retry_count})...")
 
                         # Small wait before next attempt
                         for _ in range(50): # 0.5s total wait, check stop_event frequently
@@ -440,6 +456,30 @@ class Sequencer(EventDispatcher):
                         # 1. Dispatch to recording queue (if active)
                         if self.is_recording:
                             self._midi_input_queue.put((port_name, msg))
+
+                        # --- MIDI Live Bridge (Play Instrument without recording) ---
+                        # Forward Note/Pitch/CC messages to the selected track if not recording.
+                        # We use identity check for port_name to ensure we only bridge the default record port.
+                        elif not self.is_recording and port_name == self.default_record_port:
+                            if msg.type in ('note_on', 'note_off', 'pitchwheel', 'control_change', 'program_change'):
+                                # Use current routing to find target
+                                target_idx = self.current_routing_index
+                                if target_idx == -1: # Fallback to first MIDI track if nothing selected
+                                    for i, t in enumerate(self.song.tracks):
+                                        if is_midi_track(t):
+                                            target_idx = i
+                                            break
+
+                                if 0 <= target_idx < len(self.song.tracks):
+                                    track = self.song.tracks[target_idx]
+                                    if is_midi_track(track) and track.output_port_name:
+                                        # Use jack_manager to get the open port
+                                        out_port = self.jack_manager.open_ports.get(track.output_port_name)
+                                        if out_port:
+                                            # Copy message and adjust channel to match track
+                                            try:
+                                                out_port.send(msg.copy(channel=track.channel))
+                                            except: pass
 
                         # 2. Handle Transport Controls (if Control Port is set to this port)
                         if port_name == self.control_port_name or port_name == self.default_record_port:

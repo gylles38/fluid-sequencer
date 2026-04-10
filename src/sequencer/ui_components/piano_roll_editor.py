@@ -10,6 +10,8 @@ from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.relativelayout import RelativeLayout
+from kivy.uix.label import Label
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -17,10 +19,148 @@ import copy
 from sequencer.models import Event, Note, MidiTrack
 from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
+from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
 import mido
 from sequencer.ui_components.HoverBehavior import HoverableButton
+
+
+class EditorBoundedScrollView(BoundedScrollView):
+    """
+    Specialized ScrollView for the MIDI editor that prevents scrolling
+    when a note or a selection rectangle is being dragged in the child grid.
+    """
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+
+        # 1. Handle mouse scrolling and scrollbar interaction directly.
+        local_x, local_y = self.to_local(*touch.pos)
+        is_in_vbar = local_x > self.width - self.bar_width
+        is_in_hbar = local_y < self.bar_width
+
+        if touch.is_mouse_scrolling or is_in_vbar or is_in_hbar:
+            return super().on_touch_down(touch)
+
+        # 2. Priority dispatch for grid interaction (selection, note dragging).
+        touch.ud['sv.can_scroll_x'] = True
+        touch.ud['sv.can_scroll_y'] = True
+
+        touch.push()
+        touch.apply_transform_2d(self.to_local)
+        handled = False
+        for child in reversed(self.children):
+            if child.dispatch('on_touch_down', touch):
+                handled = True
+                break
+        touch.pop()
+
+        if handled:
+            touch.ud['sv.can_scroll_x'] = False
+            touch.ud['sv.can_scroll_y'] = False
+            return True
+
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current and touch.grab_current is not self:
+            p = touch.grab_current
+            while p:
+                if p is self:
+                    return True
+                p = getattr(p, 'parent', None)
+
+        if self.children:
+            child = self.children[0]
+            if hasattr(child, '_drag_mode') and child._drag_mode:
+                return True
+
+        return super().on_touch_move(touch)
+
+
+class EditorPianoKeyboard(RelativeLayout):
+    """
+    Robust Piano Keyboard for the MIDI editor.
+    Uses RelativeLayout to ensure Labels are positioned correctly relative to the keys.
+    """
+    note_height = NumericProperty(round(dp(14)))
+    bottom_padding = NumericProperty(0)
+    highlighted_note = NumericProperty(-1)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint = (None, None)
+        self._label_widgets = []
+        self._redraw_pending = False
+        self.bind(note_height=self._update_height, bottom_padding=self._update_height)
+        self.bind(pos=self.trigger_redraw, size=self.trigger_redraw,
+                  highlighted_note=self.trigger_redraw)
+        self._update_height()
+
+    def _update_height(self, *args):
+        new_height = round(128 * self.note_height) + self.bottom_padding
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
+
+    def trigger_redraw(self, *args):
+        if not self._redraw_pending:
+            self._redraw_pending = True
+            Clock.schedule_once(self._redraw, 0)
+
+    def _redraw(self, *args):
+        self._redraw_pending = False
+        if not self.canvas: return
+        self.canvas.clear()
+
+        nh = self.note_height
+        bp = self.bottom_padding
+        highlight_color = (0.3, 0.7, 1.0, 1)
+
+        with self.canvas:
+            # White Keys
+            for i in range(128):
+                if (i % 12) not in [1, 3, 6, 8, 10]:
+                    if i == self.highlighted_note: Color(*highlight_color)
+                    else: Color(0.95, 0.95, 0.95, 1)
+                    y_start = round(i * nh) + bp
+                    y_end = round((i + 1) * nh) + bp
+                    Rectangle(pos=(0, y_start), size=(self.width, y_end - y_start))
+
+            # Black Keys
+            for i in range(128):
+                if (i % 12) in [1, 3, 6, 8, 10]:
+                    if i == self.highlighted_note: Color(*highlight_color)
+                    else: Color(0.1, 0.1, 0.1, 1)
+                    y_start = round(i * nh) + bp
+                    y_end = round((i + 1) * nh) + bp
+                    Rectangle(pos=(0, y_start), size=(self.width * 0.65, y_end - y_start))
+
+            # Separators
+            for i in range(129):
+                y_pos = round(i * nh) + bp
+                if (i % 12) == 0: Color(0.4, 0.4, 0.4, 0.8)
+                elif (i % 12) == 5: Color(0.6, 0.6, 0.6, 0.6)
+                else: Color(0.7, 0.7, 0.7, 0.4)
+                Line(points=[0, y_pos, self.width, y_pos], width=1.0)
+
+        # Note Labels
+        octave_indices = [i for i in range(128) if (i % 12) == 0]
+        while len(self._label_widgets) < len(octave_indices):
+            lbl = Label(font_size=dp(9), color=(0, 0, 0, 1), size_hint=(None, None),
+                        halign='center', valign='middle')
+            self.add_widget(lbl)
+            self._label_widgets.append(lbl)
+
+        for idx, i in enumerate(octave_indices):
+            octave_num = (i // 12) - 1
+            y_start = round(i * nh) + bp
+            y_end = round((i + 1) * nh) + bp
+            note_h = y_end - y_start
+            label = self._label_widgets[idx]
+            label.text = f"C{octave_num}"
+            label.size = (self.width, note_h)
+            label.text_size = label.size
+            label.pos = (0, y_start)
 
 
 class EditHistoryManager:
@@ -797,34 +937,34 @@ Builder.load_string("""
             orientation: 'horizontal'
             spacing: 0
 
-            BoxLayout:
-                orientation: 'vertical'
-                size_hint_x: None
+            EditorBoundedScrollView:
+                id: keyboard_sv
+                size_hint: (None, 1)
                 width: dp(60)
+                do_scroll_x: False
+                do_scroll_y: True
+                bar_width: round(dp(17))
+                bar_pos_x: 'bottom'
+                bar_color: [0, 0, 0, 0]
+                bar_inactive_color: [0, 0, 0, 0]
+                scroll_type: ['bars', 'content']
+                bar_margin: 0
 
-                BoundedScrollView:
-                    id: keyboard_sv
-                    size_hint: (1, 1)
-                    do_scroll_x: False
-                    do_scroll_y: True
-                    bar_width: 0
-                    scroll_type: ['bars']
+                EditorPianoKeyboard:
+                    id: piano_keyboard
+                    size_hint: (None, None)
+                    width: dp(60)
+                    note_height: root.note_height
+                    bottom_padding: round(dp(17))
 
-                    PianoKeyboard:
-                        id: piano_keyboard
-                        size_hint: (None, None)
-                        width: self.parent.width
-                        note_height: root.note_height
-                        bottom_padding: dp(17)
-
-            BoundedScrollView:
+            EditorBoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: True
                 do_scroll_x: True
-                bar_width: dp(15)
-                scroll_type: ['bars']
+                bar_width: round(dp(17))
+                scroll_type: ['bars', 'content']
                 bar_pos_x: 'bottom'
-                bar_margin: dp(2)
+                bar_margin: 0
 
                 EditableMidiGrid:
                     id: grid
@@ -884,6 +1024,7 @@ class PianoRollEditor(FloatingWindow):
     dotted_mode = BooleanProperty(False)
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
+    _is_v_scrolling = False
     _update_event = None
     end_pos_str = StringProperty('')
     selected_note = ObjectProperty(None, allownone=True) # Will be deprecated in favor of selected_notes
@@ -939,10 +1080,12 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        self._sync_y_binding = lambda inst, val: self._sync_vertical_scrolls(inst, val)
-        keyboard_sv.bind(scroll_y=self._sync_y_binding)
-        timeline_scroll.bind(scroll_y=self._sync_y_binding)
+        # Force integer metrics
+        self.note_height = round(dp(14))
+        self.ids.piano_keyboard.bottom_padding = round(dp(17))
+        self.ids.grid.bottom_padding = round(dp(17))
 
+        # Lock heights strictly
         self.ids.piano_keyboard.height = grid.height
         self._grid_height_binding = lambda inst, val: setattr(self.ids.piano_keyboard, 'height', val)
         grid.bind(height=self._grid_height_binding)
@@ -965,8 +1108,14 @@ class PianoRollEditor(FloatingWindow):
         # Add the playback line here to ensure it's drawn on top
         grid.add_playback_line()
 
-        ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
-        timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
+        self._sync_x_binding = self.sync_horizontal_scroll
+        ruler_scroll.bind(scroll_x=self._sync_x_binding)
+        timeline_scroll.bind(scroll_x=self._sync_x_binding)
+
+        # Bind vertical sync
+        self._sync_y_binding = self.sync_vertical_scroll
+        keyboard_sv.bind(scroll_y=self._sync_y_binding)
+        timeline_scroll.bind(scroll_y=self._sync_y_binding)
 
         self._center_view_on_c4()
         current_beat = self.sequencer_layout.sequencer.current_beat
@@ -1401,20 +1550,40 @@ class PianoRollEditor(FloatingWindow):
         self.ids.undo_button.disabled = not self.history.can_undo()
         self.ids.redo_button.disabled = not self.history.can_redo()
 
-    def _sync_vertical_scrolls(self, instance, value):
-        """Helper to synchronize vertical scrolling between two ScrollViews."""
-        if self._is_scrolling: return
+    def sync_vertical_scroll(self, source_scroll_view, scroll_y_value) -> None:
+        if self._is_v_scrolling: return
 
-        keyboard_sv = self.ids.keyboard_sv
-        timeline_scroll = self.ids.timeline_scroll
-        target = timeline_scroll if instance is keyboard_sv else keyboard_sv
+        # Sensitivity check
+        if hasattr(source_scroll_view, '_last_scroll_y') and \
+           abs(source_scroll_view._last_scroll_y - scroll_y_value) < 0.00001:
+            return
+        source_scroll_view._last_scroll_y = scroll_y_value
 
-        if abs(target.scroll_y - value) > 0.001:
-            self._is_scrolling = True
-            try:
-                target.scroll_y = value
-            finally:
-                self._is_scrolling = False
+        self._is_v_scrolling = True
+        try:
+            # Calculate absolute pixel offset (inverted since scroll_y 0 is bottom)
+            content_h = source_scroll_view.children[0].height
+            viewport_h = source_scroll_view.height
+            max_scroll = max(0, content_h - viewport_h)
+            pixel_offset = (1.0 - scroll_y_value) * max_scroll if max_scroll > 0 else 0
+
+            keyboard_sv = self.ids.keyboard_sv
+            timeline_scroll = self.ids.timeline_scroll
+
+            targets = [keyboard_sv, timeline_scroll]
+            for sv in targets:
+                if sv is not source_scroll_view:
+                    try:
+                        c_h = sv.children[0].height
+                        v_h = sv.height
+                        m_s = max(0, c_h - v_h)
+                        if m_s > 0:
+                            sv.scroll_y = max(0.0, min(1.0, 1.0 - (pixel_offset / m_s)))
+                        else:
+                            sv.scroll_y = 1.0
+                    except: continue
+        finally:
+            self._is_v_scrolling = False
 
     def _record_state(self) -> None:
         """Records the current state of the track (events and selection) for undo/redo."""
@@ -1584,6 +1753,9 @@ class PianoRollEditor(FloatingWindow):
             if hasattr(self, '_sync_y_binding'):
                 self.ids.keyboard_sv.unbind(scroll_y=self._sync_y_binding)
                 self.ids.timeline_scroll.unbind(scroll_y=self._sync_y_binding)
+            if hasattr(self, '_sync_x_binding'):
+                self.ids.ruler.scroll_view.unbind(scroll_x=self._sync_x_binding)
+                self.ids.timeline_scroll.unbind(scroll_x=self._sync_x_binding)
             if hasattr(self, '_grid_height_binding'):
                 self.ids.grid.unbind(height=self._grid_height_binding)
             if hasattr(self, '_grid_width_binding'):

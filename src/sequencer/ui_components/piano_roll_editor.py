@@ -1,173 +1,26 @@
-from sequencer.ui_components.floating_window import FloatingWindow
+from .floating_window import FloatingWindow
 from kivy.lang import Builder
 from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
-from sequencer.ui_components.TooltipMDIconButton import TooltipMDIconButton
-from sequencer.ui_components.Ruler import Ruler
-from sequencer.ui_components.PianoKeyboard import PianoKeyboard
-from sequencer.ui_components.bounded_scroll_view import BoundedScrollView
-from sequencer.ui_components.ui_utils import is_any_text_input_focused
+from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
+from .ui_utils import is_any_text_input_focused
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.label import Label
-from kivy.core.text import Label as CoreLabel
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.core.window import Window
 import copy
 from sequencer.models import Event, Note, MidiTrack
-from sequencer.ui_components.SaveDiscardCancelPopup import SaveDiscardCancelPopup
+from .SaveDiscardCancelPopup import SaveDiscardCancelPopup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, Line, PushMatrix, PopMatrix, Translate, InstructionGroup
+from kivy.graphics import Color, Rectangle, PushMatrix, PopMatrix, Translate, InstructionGroup
 from collections import deque
 import mido
 from sequencer.ui_components.HoverBehavior import HoverableButton
-
-
-class EditorBoundedScrollView(BoundedScrollView):
-    """
-    Specialized ScrollView for the MIDI editor that prevents scrolling
-    when a note or a selection rectangle is being dragged in the child grid.
-    """
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return False
-
-        # 1. Handle mouse scrolling and scrollbar interaction directly.
-        # Check if the touch is within the vertical scrollbar area (right edge)
-        # or the horizontal scrollbar area (bottom edge).
-        local_x, local_y = self.to_local(*touch.pos)
-        is_in_vbar = local_x > self.width - self.bar_width
-        is_in_hbar = local_y < self.bar_width
-
-        if touch.is_mouse_scrolling or is_in_vbar or is_in_hbar:
-            return super().on_touch_down(touch)
-
-        # 2. Priority dispatch for grid interaction (selection, note dragging).
-        # We only do this for standard touches (not scrolling).
-        touch.ud['sv.can_scroll_x'] = True
-        touch.ud['sv.can_scroll_y'] = True
-
-        touch.push()
-        touch.apply_transform_2d(self.to_local)
-        handled = False
-        for child in reversed(self.children):
-            if child.dispatch('on_touch_down', touch):
-                handled = True
-                break
-        touch.pop()
-
-        if handled:
-            # Grid claimed it. Disable scrolling for this sequence.
-            touch.ud['sv.can_scroll_x'] = False
-            touch.ud['sv.can_scroll_y'] = False
-            return True
-
-        return super().on_touch_down(touch)
-
-    def on_touch_move(self, touch):
-        # 1. Block scrolling if any child has grabbed the touch for interaction.
-        # This prevents the ScrollView from "stealing" the touch when the user drags
-        # a note or a selection rectangle.
-        if touch.grab_current and touch.grab_current is not self:
-            p = touch.grab_current
-            while p:
-                if p is self:
-                    # Child interaction active. Block parent scrolling.
-                    return True
-                p = getattr(p, 'parent', None)
-
-        # 2. Aggressive fallback for multi-selection/rubber-band.
-        # Even if not grabbed (though it should be), if we are in a drag mode, block.
-        if self.children:
-            child = self.children[0]
-            if hasattr(child, '_drag_mode') and child._drag_mode:
-                return True
-
-        return super().on_touch_move(touch)
-
-
-class EditorPianoKeyboard(PianoKeyboard):
-    """Subclass of PianoKeyboard that ensures labels are correctly styled and visible in the editor."""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if not hasattr(self, '_label_widgets'):
-            self._label_widgets = []
-        self._redraw_pending = False
-        self.bind(size=self.trigger_redraw, pos=self.trigger_redraw,
-                  note_height=self.trigger_redraw, highlighted_note=self.trigger_redraw)
-
-    def trigger_redraw(self, *args):
-        if not self._redraw_pending:
-            self._redraw_pending = True
-            Clock.schedule_once(self._redraw, 0)
-
-    def _redraw(self, *args):
-        # Debounce/stability check
-        self._redraw_pending = False
-        if not self.canvas: return
-
-        # 1. Clear Canvas
-        self.canvas.clear()
-
-        # Math must match PianoRoll.py EXACTLY
-        nh = self.note_height
-        bp = self.bottom_padding
-        highlight_color = (0.3, 0.7, 1.0, 1)
-
-        with self.canvas:
-            # --- White Key Backgrounds ---
-            for i in range(128):
-                if (i % 12) not in [1, 3, 6, 8, 10]:
-                    if i == self.highlighted_note: Color(*highlight_color)
-                    else: Color(0.95, 0.95, 0.95, 1)
-                    y_start = round(i * nh) + bp
-                    y_end = round((i + 1) * nh) + bp
-                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
-
-            # --- Black Key Backgrounds ---
-            for i in range(128):
-                if (i % 12) in [1, 3, 6, 8, 10]:
-                    if i == self.highlighted_note: Color(*highlight_color)
-                    else: Color(0.1, 0.1, 0.1, 1)
-                    y_start = round(i * nh) + bp
-                    y_end = round((i + 1) * nh) + bp
-                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width * 0.65, y_end - y_start))
-
-            # --- Separators ---
-            for i in range(129):
-                y_pos = round(i * nh) + bp
-                if (i % 12) == 0: Color(0.4, 0.4, 0.4, 0.8)
-                elif (i % 12) == 5: Color(0.6, 0.6, 0.6, 0.6)
-                else: Color(0.7, 0.7, 0.7, 0.4)
-                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=1.0)
-
-        # 2. Add/Position Note Labels (C-1 to C9)
-        octave_indices = [i for i in range(128) if (i % 12) == 0]
-
-        # Ensure we have enough Label widgets
-        while len(self._label_widgets) < len(octave_indices):
-            lbl = Label(font_size=dp(10), color=(0, 0, 0, 1), size_hint=(None, None),
-                        halign='right', valign='middle', bold=True)
-            self.add_widget(lbl)
-            self._label_widgets.append(lbl)
-
-        # Position labels
-        for idx, i in enumerate(octave_indices):
-            octave_num = (i // 12) - 1
-            y_start = round(i * nh) + bp
-            y_end = round((i + 1) * nh) + bp
-            note_h = y_end - y_start
-            label = self._label_widgets[idx]
-            label.text = f"C{octave_num}"
-            label.size = (self.width - dp(5), note_h)
-            label.text_size = label.size
-            label.center_x = self.center_x - dp(2.5)
-            label.center_y = self.y + y_start + note_h / 2
 
 
 class EditHistoryManager:
@@ -307,15 +160,7 @@ class EditableMidiGrid(PianoRoll):
                            sel_y < (note_y + note_h) and (sel_y + sel_h) > note_y:
                             newly_selected.append(note)
 
-                if hasattr(self, '_initial_selection_for_drag') and self._initial_selection_for_drag:
-                    # Additive selection: initial notes + rectangle notes
-                    combined = list(self._initial_selection_for_drag)
-                    for n in newly_selected:
-                        if not any(n is sn for sn in combined):
-                            combined.append(n)
-                    self.editor.selected_notes = combined
-                else:
-                    self.editor.selected_notes = newly_selected
+                self.editor.selected_notes = newly_selected
                 self.draw()
             return True
 
@@ -438,10 +283,6 @@ class EditableMidiGrid(PianoRoll):
                     }
 
     def on_touch_down(self, touch) -> None | bool:
-        # Ignore mouse wheel scroll events to allow the parent ScrollView to handle them.
-        if touch.is_mouse_scrolling:
-            return False
-
         if not self.collide_point(*touch.pos):
             return super(EditableMidiGrid, self).on_touch_down(touch)
 
@@ -452,143 +293,113 @@ class EditableMidiGrid(PianoRoll):
         edit_mode = self.editor.edit_mode
         track = self.editor.track_copy
 
-        # --- Hit Detection Logic ---
-        hit_note = None
-        hit_event = None
-        is_handle_start = False
-        is_handle_end = False
-
-        # Optimized single search for hit detection
-        for event in reversed(track.events):
-            # Optimization: events are sorted by start_time
-            note_x = event.start_time * self.pixels_per_beat
-            if note_x > local_pos[0] + dp(50): continue # Too far right
-
-            for note in reversed(event.notes):
-                # Must match PianoRoll.draw exactly
-                y_start = round(note.pitch * self.note_height) + self.bottom_padding
-                y_end = round((note.pitch + 1) * self.note_height) + self.bottom_padding
-                note_width = note.duration * self.pixels_per_beat
-
-                # Add a tiny 1dp tolerance for hit detection to make clicking easier
-                if (note_x - dp(1)) <= local_pos[0] <= (note_x + note_width + dp(1)) and \
-                   (y_start - dp(1)) <= local_pos[1] <= (y_end + dp(1)):
-                    hit_note = note
-                    hit_event = event
-
-                    # Detect handles if in move mode
-                    if edit_mode == 'move':
-                        handle_width: float | int = min(dp(8), note_width / 4) if note_width > dp(16) else 0
-                        if local_pos[0] <= note_x + handle_width:
-                            is_handle_start = True
-                        elif local_pos[0] >= note_x + note_width - handle_width:
-                            is_handle_end = True
-                    break
-            if hit_note: break
-
-        # --- Preview Logic ---
+        # --- Note Preview Logic ---
+        note_to_preview = None
         if edit_mode in ('insert', 'move'):
-            velocity = hit_note.velocity if hit_note else 100
-            pitch = hit_note.pitch if hit_note else clicked_pitch
+            # Find if there's a note at the clicked position
+            for event in reversed(track.events):
+                for note in reversed(event.notes):
+                    note_x = event.start_time * self.pixels_per_beat
+                    note_y = note.pitch * self.note_height + self.bottom_padding
+                    note_width = note.duration * self.pixels_per_beat
+
+                    if note_x <= local_pos[0] <= note_x + note_width and \
+                       note_y <= local_pos[1] <= note_y + self.note_height:
+                        note_to_preview = note
+                        break
+                if note_to_preview:
+                    break
+
+            velocity = note_to_preview.velocity if note_to_preview else 100
             duration_in_seconds = (60.0 / self.editor.sequencer_layout.sequencer.song.tempo) * self.editor.note_duration
-            self.editor._preview_note(pitch, velocity, duration_in_seconds)
+            self.editor._preview_note(clicked_pitch, velocity, duration_in_seconds)
 
 
         if edit_mode == 'move':
-            if hit_note:
-                note = hit_note
-                event = hit_event
-                note_x = event.start_time * self.pixels_per_beat
-                note_y = round(note.pitch * self.note_height) + self.bottom_padding
+            for event in reversed(track.events):
+                for note in reversed(event.notes):
+                    note_x = event.start_time * self.pixels_per_beat
+                    note_y = note.pitch * self.note_height + self.bottom_padding
+                    note_width = note.duration * self.pixels_per_beat
+                    handle_width: float | int = min(dp(8), note_width / 4) if note_width > dp(16) else 0
 
-                # Handle resizing
-                if is_handle_end:
-                    self._dragged_note = note
-                    self._drag_event = event
-                    self._drag_mode = 'resize_end'
-                    self._store_selection_states_if_needed(note)
-                    Window.set_system_cursor('size_we')
-                elif is_handle_start:
-                    self._dragged_note = note
-                    self._drag_event = event
-                    self._drag_mode = 'resize_start'
-                    self._store_selection_states_if_needed(note)
-                    Window.set_system_cursor('size_we')
-                else:
-                    # Note move / selection
-                    ctrl_pressed = 'ctrl' in Window.modifiers
-                    is_already_selected: bool = any(note is sel_note for sel_note in self.editor.selected_notes)
+                    # Check for right handle resize
+                    if note_x + note_width - handle_width <= local_pos[0] <= note_x + note_width and \
+                       note_y <= local_pos[1] <= note_y + self.note_height:
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'resize_end'
+                        self._store_selection_states_if_needed(note)
+                        Window.set_system_cursor('size_we')
+                        touch.grab(self)
+                        return True
 
-                    if ctrl_pressed:
-                        if is_already_selected:
-                            # Toggle OFF: Remove from selection
-                            self.editor.selected_notes = [n for n in self.editor.selected_notes if n is not note]
-                            self.editor._record_state()
-                            self.draw()
-                            return True # Don't start drag if we just unselected it
-                        else:
-                            # Toggle ON: Add to selection
-                            self.editor.selected_notes = list(self.editor.selected_notes) + [note]
-                            self.editor._record_state()
-                    else:
+                    # Check for left handle resize
+                    elif note_x <= local_pos[0] <= note_x + handle_width and \
+                            note_y <= local_pos[1] <= note_y + self.note_height:
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'resize_start'
+                        self._store_selection_states_if_needed(note)
+                        Window.set_system_cursor('size_we')
+                        touch.grab(self)
+                        return True
+
+                    # Check for note move
+                    elif note_x <= local_pos[0] <= note_x + note_width and \
+                         note_y <= local_pos[1] <= note_y + self.note_height:
+                        # --- CORRECTED SELECTION LOGIC ---
+                        # Use an identity check (`is`) to see if the *exact* note instance is already selected.
+                        # The `in` operator uses equality (`==`), which fails for identical but distinct notes.
+                        is_already_selected: bool = any(note is sel_note for sel_note in self.editor.selected_notes)
                         if not is_already_selected:
-                            # Fix: Always clear before re-assigning a single note.
-                            # Kivy's ListProperty might not trigger an 'on_selected_notes' event
-                            # if the new list [note] is considered equal to the old one (e.g. same pitch/duration/velocity)
-                            # but refers to a different Note object instance.
-                            self.editor.selected_notes = []
                             self.editor.selected_notes = [note]
                             self.editor._record_state()
 
-                    self._dragged_note = note
-                    self._drag_event = event
-                    self._drag_mode = 'move'
-                    self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
+                        self._dragged_note = note
+                        self._drag_event = event
+                        self._drag_mode = 'move'
+                        self._drag_offset = (local_pos[0] - note_x, local_pos[1] - note_y)
 
-                    # Store multi-drag data
-                    self._multi_drag_data = []
-                    for ev in track.events:
-                        for n in ev.notes:
-                            if any(n is sn for sn in self.editor.selected_notes):
-                                self._multi_drag_data.append({
-                                    'note': n,
-                                    'parent_event': ev,
-                                    'original_start': ev.start_time,
-                                    'original_pitch': n.pitch
-                                })
-                    self._store_selection_states_if_needed(note)
-                    self.editor.selected_event = event
+                        # --- AJOUT POUR LE MULTI-MOVE ---
+                        # On stocke la position de départ de TOUTES les notes sélectionnées
+                        self._multi_drag_data = []
+                        for ev in track.events:
+                            for n in ev.notes:
+                                if any(n is sn for sn in self.editor.selected_notes):
+                                    self._multi_drag_data.append({
+                                        'note': n,
+                                        'parent_event': ev,  # On mémorise l'événement actuel !
+                                        'original_start': ev.start_time,
+                                        'original_pitch': n.pitch
+                                    })
 
-                self.draw()
-                touch.grab(self)
-                touch.ud['sv.can_scroll_x'] = False
-                touch.ud['sv.can_scroll_y'] = False
-                return True
-            else:
-                # If no note was clicked, it's a click on an empty space (rubber-band selection).
-                ctrl_pressed = 'ctrl' in Window.modifiers
-                if not ctrl_pressed:
-                    if self.editor.selected_notes:
-                    # Clear selection when clicking on empty space
-                        self.editor.selected_notes = []
+                        self._store_selection_states_if_needed(note)
 
-                # After potentially clearing selection, prepare for a potential rubber-band selection.
-                # We store the initial selection to allow additive rubber-band if Ctrl is held.
-                self._initial_selection_for_drag = list(self.editor.selected_notes) if ctrl_pressed else []
-                self._drag_mode = 'select'
-                self._selection_start_pos = local_pos
-                self._selection_group = InstructionGroup()
-                self._selection_group.add(Color(1, 1, 1, 0.3))
-                self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
-                self._selection_group.add(self._selection_rect)
-                self.canvas.after.add(self._selection_group)
+                        self.editor.selected_event = event # Gardé pour compatibilité, mais moins utile en multi-select
+                        self.draw()
 
-                touch.grab(self)
-                # Explicitly block ScrollView parents from stealing this touch
-                touch.ud['sv.can_scroll_x'] = False
-                touch.ud['sv.can_scroll_y'] = False
-                self.draw()
-                return True
+                        touch.grab(self)
+                        return True
+
+            # If no note was clicked, it's a click on an empty space.
+            # This action should clear any existing selection. To ensure the UI
+            # updates, we must re-assign the list, not clear it in-place.
+            if self.editor.selected_notes:
+                self.editor.selected_notes = []
+
+            # After clearing selection (if any), prepare for a potential rubber-band selection.
+            self._drag_mode = 'select'
+            self._selection_start_pos = local_pos
+            self._selection_group = InstructionGroup()
+            self._selection_group.add(Color(1, 1, 1, 0.3))
+            self._selection_rect = Rectangle(pos=local_pos, size=(0, 0))
+            self._selection_group.add(self._selection_rect)
+            self.canvas.after.add(self._selection_group)
+
+            touch.grab(self)
+            self.draw()
+            return True
 
         if edit_mode == 'insert':
             # Quantize to 16th notes, which is a common default for piano rolls
@@ -608,14 +419,18 @@ class EditableMidiGrid(PianoRoll):
             self.editor._record_state()
             return True
 
-        elif edit_mode == 'delete' and hit_note:
-            hit_event.notes.remove(hit_note)
-            if not hit_event.notes and not hit_event.cc_messages:
-                track.events.remove(hit_event)
-            self.editor.is_dirty = True
-            self.draw()
-            self.editor._record_state()
-            return True
+        elif edit_mode == 'delete':
+            for event in reversed(track.events):
+                max_duration = max((n.duration for n in event.notes), default=0)
+                if event.start_time <= clicked_beat < event.start_time + max_duration:
+                    for note in reversed(event.notes):
+                        if note.pitch == clicked_pitch:
+                            event.notes.remove(note)
+                            if not event.notes: track.events.remove(event)
+                            self.editor.is_dirty = True
+                            self.draw()
+                            self.editor._record_state()
+                            return True
 
         return super(EditableMidiGrid, self).on_touch_down(touch)
 
@@ -624,7 +439,6 @@ class EditableMidiGrid(PianoRoll):
             return super(EditableMidiGrid, self).on_touch_up(touch)
 
         if self._drag_mode == 'select':
-            self._initial_selection_for_drag = None
             if self._selection_group:
                 try:
                     self.canvas.after.remove(self._selection_group)
@@ -983,34 +797,34 @@ Builder.load_string("""
             orientation: 'horizontal'
             spacing: 0
 
-            EditorBoundedScrollView:
-                id: keyboard_sv
-                size_hint: (None, 1)
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_x: None
                 width: dp(60)
-                do_scroll_x: False
-                do_scroll_y: False
-                bar_width: round(dp(17))
-                bar_pos_x: 'bottom'
-                bar_color: [0, 0, 0, 0]
-                bar_inactive_color: [0, 0, 0, 0]
-                scroll_type: ['bars', 'content']
-                bar_margin: 0
 
-                EditorPianoKeyboard:
-                    id: piano_keyboard
-                    size_hint: (None, None)
-                    width: dp(60)
-                    note_height: root.note_height
-                    bottom_padding: round(dp(17))
+                BoundedScrollView:
+                    id: keyboard_sv
+                    size_hint: (1, 1)
+                    do_scroll_x: False
+                    do_scroll_y: True
+                    bar_width: 0
+                    scroll_type: ['bars']
 
-            EditorBoundedScrollView:
+                    PianoKeyboard:
+                        id: piano_keyboard
+                        size_hint: (None, None)
+                        width: self.parent.width
+                        note_height: root.note_height
+                        bottom_padding: dp(17)
+
+            BoundedScrollView:
                 id: timeline_scroll
                 do_scroll_y: True
                 do_scroll_x: True
-                bar_width: round(dp(17))
-                scroll_type: ['bars', 'content']
+                bar_width: dp(15)
+                scroll_type: ['bars']
                 bar_pos_x: 'bottom'
-                bar_margin: 0
+                bar_margin: dp(2)
 
                 EditableMidiGrid:
                     id: grid
@@ -1020,7 +834,7 @@ Builder.load_string("""
                     pixels_per_beat: root.pixels_per_beat
                     note_height: root.note_height
                     size_hint: (None, None)
-                    bottom_padding: round(dp(17))
+                    bottom_padding: dp(17)
 
         MDBoxLayout:
             size_hint_y: None
@@ -1070,7 +884,6 @@ class PianoRollEditor(FloatingWindow):
     dotted_mode = BooleanProperty(False)
     is_dirty = BooleanProperty(False)
     _is_scrolling = False
-    _is_v_scrolling = False
     _update_event = None
     end_pos_str = StringProperty('')
     selected_note = ObjectProperty(None, allownone=True) # Will be deprecated in favor of selected_notes
@@ -1081,7 +894,6 @@ class PianoRollEditor(FloatingWindow):
     display_beat = NumericProperty(0.0)
     saved_scroll_x = NumericProperty(0.0)
     last_playback_state = StringProperty("stopped")
-    v_scroll_pos = NumericProperty(0.5)
 
     def __init__(self, **kwargs) -> None:
         self.history = EditHistoryManager()
@@ -1127,14 +939,13 @@ class PianoRollEditor(FloatingWindow):
         ruler_scroll = self.ids.ruler.scroll_view
         timeline_scroll = self.ids.timeline_scroll
 
-        # Force integer metrics
-        self.note_height = round(dp(14))
-        self.ids.piano_keyboard.bottom_padding = round(dp(17))
-        self.ids.grid.bottom_padding = round(dp(17))
+        self._sync_y_binding = lambda inst, val: self._sync_vertical_scrolls(inst, val)
+        keyboard_sv.bind(scroll_y=self._sync_y_binding)
+        timeline_scroll.bind(scroll_y=self._sync_y_binding)
 
-        # Lock heights strictly
         self.ids.piano_keyboard.height = grid.height
-        grid.bind(height=self.ids.piano_keyboard.setter('height'))
+        self._grid_height_binding = lambda inst, val: setattr(self.ids.piano_keyboard, 'height', val)
+        grid.bind(height=self._grid_height_binding)
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -1156,10 +967,6 @@ class PianoRollEditor(FloatingWindow):
 
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
-
-        # Bind vertical sync
-        keyboard_sv.bind(scroll_y=self.sync_vertical_scroll)
-        timeline_scroll.bind(scroll_y=self.sync_vertical_scroll)
 
         self._center_view_on_c4()
         current_beat = self.sequencer_layout.sequencer.current_beat
@@ -1336,11 +1143,11 @@ class PianoRollEditor(FloatingWindow):
                 octave_height_pixels = 12 * self.note_height
                 max_scroll_pixels = grid.height - timeline_scroll.height
                 if max_scroll_pixels > 0:
-                    current_scroll_pixels = self.v_scroll_pos * max_scroll_pixels
+                    current_scroll_pixels = timeline_scroll.scroll_y * max_scroll_pixels
                     direction: int = 1 if keyboard == 273 else -1 # Up is +, Down is -
                     new_scroll_pixels = current_scroll_pixels + (octave_height_pixels * direction)
                     new_scroll_pixels: int = max(0, min(new_scroll_pixels, max_scroll_pixels))
-                    self.v_scroll_pos = new_scroll_pixels / max_scroll_pixels
+                    timeline_scroll.scroll_y = new_scroll_pixels / max_scroll_pixels
                 return True
 
         # On vérifie aussi 'backspace' (8) qui est souvent utilisé pour supprimer
@@ -1350,8 +1157,8 @@ class PianoRollEditor(FloatingWindow):
                 # On enregistre l'état pour le Undo
                 self._record_state()
                 # On redessine la grille
-                if 'ruler' in self.ids:
-                    self.ids.ruler.redraw()
+                #if hasattr(self.ids.ruler, 'redraw'):
+                #    self.ids.ruler.redraw()
                 self.ids.grid.draw()
                 return True # Indique que l'événement a été géré
 
@@ -1416,7 +1223,7 @@ class PianoRollEditor(FloatingWindow):
         self.scroll_to_beat(target_beat)
 
     def scroll_to_beat(self, beat) -> None:
-        """Scrolls the timeline to a specific beat, centering it if possible."""
+        # ... (votre fonction actuelle reste inchangée) ...
         scroll_view = self.ids.timeline_scroll
         grid_width = self.total_beats * self.pixels_per_beat
         viewport_width = scroll_view.width
@@ -1425,8 +1232,7 @@ class PianoRollEditor(FloatingWindow):
             scroll_view.scroll_x = 0
             return
 
-        # Target centering the beat in the viewport
-        target_pixel = (beat * self.pixels_per_beat) - (viewport_width / 2)
+        target_pixel = beat * self.pixels_per_beat
         max_scroll = grid_width - viewport_width
         new_scroll_x = target_pixel / max_scroll
         
@@ -1555,18 +1361,11 @@ class PianoRollEditor(FloatingWindow):
 
         # 2. Mettre à jour la sélection
         if new_selection:
-            # Force update of selected notes list
-            self.selected_notes = []
             self.selected_notes = new_selection
-            self.ids.grid.selected_notes = new_selection
-
             self.track_copy.events.sort(key=lambda e: e.start_time)
             self.is_dirty = True
             self._record_state()
             self.ids.grid.draw()
-
-            # Scroller jusqu'à la position du collage (tête de lecture)
-            self.scroll_to_beat(target_beat)
 
     def _select_all_notes(self) -> None:
         """Sélectionne toutes les notes présentes dans la piste actuelle."""
@@ -1576,8 +1375,6 @@ class PianoRollEditor(FloatingWindow):
                 all_notes.append(note)
         
         if all_notes:
-            # Fix: Always clear before re-assigning to trigger Kivy's ListProperty update.
-            self.selected_notes = []
             self.selected_notes = all_notes
             self.ids.grid.draw()
      
@@ -1603,6 +1400,21 @@ class PianoRollEditor(FloatingWindow):
         """Enables/disables the undo/redo buttons based on history."""
         self.ids.undo_button.disabled = not self.history.can_undo()
         self.ids.redo_button.disabled = not self.history.can_redo()
+
+    def _sync_vertical_scrolls(self, instance, value):
+        """Helper to synchronize vertical scrolling between two ScrollViews."""
+        if self._is_scrolling: return
+
+        keyboard_sv = self.ids.keyboard_sv
+        timeline_scroll = self.ids.timeline_scroll
+        target = timeline_scroll if instance is keyboard_sv else keyboard_sv
+
+        if abs(target.scroll_y - value) > 0.001:
+            self._is_scrolling = True
+            try:
+                target.scroll_y = value
+            finally:
+                self._is_scrolling = False
 
     def _record_state(self) -> None:
         """Records the current state of the track (events and selection) for undo/redo."""
@@ -1940,9 +1752,6 @@ class PianoRollEditor(FloatingWindow):
         if state in ('playing', 'recording'):
             # When playback starts, apply the edited track as an override
             sequencer.track_overrides[self.original_track_index] = self.track_copy
-
-            # reposition to playhead
-            self.scroll_to_beat(sequencer.current_beat)
         else:
             # When playback stops, remove the override
             if self.original_track_index in sequencer.track_overrides:
@@ -2010,18 +1819,17 @@ class PianoRollEditor(FloatingWindow):
             btn.canvas.ask_update()                
 
     def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value) -> None:
-        # Standard guard against recursive feedback
         if self._is_scrolling: return
 
-        # Sensitivity threshold to prevent jitter and micro-feedback loops
+        # Ignore micro-changes to prevent oscillations
         if hasattr(source_scroll_view, '_last_scroll_x') and \
-           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.00001:
+           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.0001:
             return
         source_scroll_view._last_scroll_x = scroll_x_value
 
         self._is_scrolling = True
         try:
-            # Calculate absolute pixel offset from source content
+            # Calculate absolute pixel offset from source
             content_width_source = source_scroll_view.children[0].width
             viewport_width_source = source_scroll_view.width
             max_scroll_source = max(0, content_width_source - viewport_width_source)
@@ -2030,7 +1838,6 @@ class PianoRollEditor(FloatingWindow):
             ruler_scroll = self.ids.ruler.scroll_view
             timeline_scroll = self.ids.timeline_scroll
 
-            # Apply synchronized scroll to all linked scroll views
             targets = [ruler_scroll, timeline_scroll]
             for sv in targets:
                 if sv is not source_scroll_view:
@@ -2046,47 +1853,8 @@ class PianoRollEditor(FloatingWindow):
                         continue
         except (IndexError, AttributeError):
             pass
-        finally:
-            # Ensure guard is always reset even if logic fails
-            self._is_scrolling = False
 
-    def sync_vertical_scroll(self, source_scroll_view, scroll_y_value) -> None:
-        if self._is_v_scrolling: return
-
-        if hasattr(source_scroll_view, '_last_scroll_y') and \
-           abs(source_scroll_view._last_scroll_y - scroll_y_value) < 0.00001:
-            return
-        source_scroll_view._last_scroll_y = scroll_y_value
-
-        self._is_v_scrolling = True
-        try:
-            # Calculate absolute pixel offset (inverted since scroll_y 0 is bottom)
-            content_h = source_scroll_view.children[0].height
-            viewport_h = source_scroll_view.height
-            max_scroll = max(0, content_h - viewport_h)
-            pixel_offset = (1.0 - scroll_y_value) * max_scroll if max_scroll > 0 else 0
-
-            keyboard_sv = self.ids.keyboard_sv
-            timeline_scroll = self.ids.timeline_scroll
-
-            targets = [keyboard_sv, timeline_scroll]
-            for sv in targets:
-                if sv is not source_scroll_view:
-                    try:
-                        c_h = sv.children[0].height
-                        v_h = sv.height
-                        m_s = max(0, c_h - v_h)
-                        if m_s > 0:
-                            sv.scroll_y = max(0.0, min(1.0, 1.0 - (pixel_offset / m_s)))
-                        else:
-                            sv.scroll_y = 1.0
-                    except: continue
-
-            # Keep property in sync for state persistence/centering
-            self.v_scroll_pos = scroll_y_value
-
-        finally:
-            self._is_v_scrolling = False
+        self._is_scrolling = False
 
     def _center_view_on_c4(self) -> None:
         timeline_scroll = self.ids.timeline_scroll
@@ -2097,15 +1865,7 @@ class PianoRollEditor(FloatingWindow):
         if max_scroll > 0:
             # Target C4 (note 60) which is at 60 * note_height + padding
             target_y = (60 * self.note_height) + grid.bottom_padding
-            # Convert target pixel to scroll_y (0 to 1, where 1 is top)
-            # scroll_y = 1.0 - (pixel_offset / max_scroll)
-            # pixel_offset is distance from top of content to top of viewport.
-            # Here target_y is distance from bottom.
-            # Distance from top = total_content_height - target_y - (viewport_height/2)
-            offset_from_top = total_content_height - target_y - (timeline_scroll.height / 2)
-            self.v_scroll_pos = max(0.0, min(1.0, 1.0 - (offset_from_top / max_scroll)))
-            timeline_scroll.scroll_y = self.v_scroll_pos
-            self.ids.keyboard_sv.scroll_y = self.v_scroll_pos
+            timeline_scroll.scroll_y = max(0.0, min(1.0, (target_y - (timeline_scroll.height / 2)) / max_scroll))
 
     def zoom_in(self) -> None:
         self._apply_zoom(self.pixels_per_beat * 1.25)

@@ -16,6 +16,7 @@ from copy import deepcopy
 from dataclasses import asdict, is_dataclass, fields
 import json
 import math
+import re
 import mido
 import jack
 from mido import get_input_names, get_output_names, open_output # type: ignore
@@ -355,6 +356,41 @@ class Sequencer(EventDispatcher):
             # N'oubliez pas d'appeler cette fonction chaque fois que le tempo, le chemin d'un fichier audio, 
             # ou un événement de piste est modifié (ajout/suppression).
 
+    def normalize_midi_port_name(self, name: str) -> str:
+        """Removes ALSA indices and other common noise from a port name."""
+        if not name: return ""
+        # Remove trailing indices like " 24:0" or ":0"
+        return re.sub(r'[:\s]\d+[:\d]*$', '', name).strip()
+
+    def _find_best_input_port_match(self, pattern: str) -> Optional[str]:
+        """Finds the best matching available MIDI input port name."""
+        if not pattern: return None
+
+        try:
+            input_ports = get_input_names()
+        except:
+            return None
+
+        if not input_ports: return None
+
+        # 1. Exact match
+        if pattern in input_ports:
+            return pattern
+
+        # 2. Normalized match
+        norm_pattern = self.normalize_midi_port_name(pattern)
+        for p in input_ports:
+            if self.normalize_midi_port_name(p) == norm_pattern:
+                return p
+
+        # 3. Fuzzy substring match (case-insensitive)
+        pattern_lower = norm_pattern.lower()
+        for p in input_ports:
+            if pattern_lower in p.lower():
+                return p
+
+        return None
+
     def _midi_input_listener_loop(self, port_name: str, stop_event: threading.Event):
         """
         Unified listener thread that handles transport controls, MIDI mappings,
@@ -369,10 +405,17 @@ class Sequencer(EventDispatcher):
                 # 1. Attempt to open the port (with multiple retries if not found)
                 retry_count = 0
                 while not stop_event.is_set() and inport is None:
-                    try:
-                        inport = mido.open_input(port_name)
-                        print(f"[Sequencer] Unified MIDI input listener successfully connected to '{port_name}'")
-                    except (IOError, RuntimeError, Exception):
+                    # Robust matching: find the actual port name currently available
+                    actual_port = self._find_best_input_port_match(port_name)
+
+                    if actual_port:
+                        try:
+                            inport = mido.open_input(actual_port)
+                            print(f"[Sequencer] Unified MIDI input listener successfully connected to '{actual_port}' (match for '{port_name}')")
+                        except (IOError, RuntimeError, Exception):
+                            inport = None
+
+                    if inport is None:
                         retry_count += 1
                         if retry_count % 20 == 1: # Print log every 10 seconds (approx)
                             print(f"[Sequencer] Waiting for MIDI device '{port_name}' (retry {retry_count})...")
@@ -493,16 +536,16 @@ class Sequencer(EventDispatcher):
         Manages the unified MIDI input listener threads.
         """
         try:
-            input_ports = get_input_names()
-            if port_name not in input_ports:
-                return f"Error: MIDI input port '{port_name}' not found."
+            # Normalize the port name to ensure stable tracking and avoid duplicate listeners
+            # (e.g., if a port index changes from 24:0 to 28:0)
+            stable_name = self.normalize_midi_port_name(port_name)
 
             old_port = self.default_record_port
-            self.default_record_port = port_name
+            self.default_record_port = stable_name
             self.is_dirty = True
 
             # Stop old listener if it's no longer used as a control port
-            if old_port and old_port != port_name and old_port != self.control_port_name:
+            if old_port and old_port != stable_name and old_port != self.control_port_name:
                 self._stop_midi_listener(old_port)
 
             # Clear the queue to avoid processing stale messages
@@ -510,10 +553,10 @@ class Sequencer(EventDispatcher):
                 try: self._midi_input_queue.get_nowait()
                 except queue.Empty: break
 
-            # Start new listener
-            self._start_midi_listener(port_name)
+            # Start new listener (listener will use fuzzy matching to find the actual device)
+            self._start_midi_listener(stable_name)
 
-            return f"Default record and unified MIDI input port set to: {port_name}"
+            return f"Default record and unified MIDI input port set to: {stable_name}"
         except Exception as e:
             return f"Error setting record port: {e}"
 
@@ -1815,18 +1858,21 @@ class Sequencer(EventDispatcher):
 
     def set_control_port(self, port_name: str) -> str:
         """Sets the MIDI input port for control messages and starts listening."""
+        # Normalize the port name to ensure stable tracking and avoid duplicate listeners
+        stable_name = self.normalize_midi_port_name(port_name)
+
         old_port = self.control_port_name
-        self.control_port_name = port_name
+        self.control_port_name = stable_name
         self.is_dirty = True
 
         # Stop old listener if it's no longer used as a record port
-        if old_port and old_port != port_name and old_port != self.default_record_port:
+        if old_port and old_port != stable_name and old_port != self.default_record_port:
             self._stop_midi_listener(old_port)
 
         # Start new listener
-        self._start_midi_listener(port_name)
+        self._start_midi_listener(stable_name)
 
-        return f"Control port set to '{port_name}'."
+        return f"Control port set to '{stable_name}'."
 
     def unset_control_port(self) -> str:
         """Stops listening for control messages and closes the port."""

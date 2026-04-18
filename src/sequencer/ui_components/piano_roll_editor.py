@@ -4,7 +4,10 @@ from kivy.app import App
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.divider import MDDivider
 from kivy.properties import ObjectProperty, NumericProperty, StringProperty, BooleanProperty, ListProperty
-from . import TooltipMDIconButton, Ruler, PianoKeyboard, BoundedScrollView
+from .TooltipMDIconButton import TooltipMDIconButton
+from .Ruler import Ruler
+from .PianoKeyboard import PianoKeyboard
+from .bounded_scroll_view import BoundedScrollView
 from .ui_utils import is_any_text_input_focused
 from sequencer.ui_components.PianoRoll import PianoRoll
 from kivy.uix.boxlayout import BoxLayout
@@ -78,89 +81,110 @@ class EditorBoundedScrollView(BoundedScrollView):
         return super().on_touch_move(touch)
 
 
-class EditorPianoKeyboard(RelativeLayout):
+class EditorPianoKeyboard(Widget):
     """
     Robust Piano Keyboard for the MIDI editor.
-    Uses RelativeLayout to ensure Labels are positioned correctly relative to the keys.
+    Mimics the exact implementation of the working PianoKeyboard from the main window.
     """
     note_height = NumericProperty(round(dp(14)))
     bottom_padding = NumericProperty(0)
     highlighted_note = NumericProperty(-1)
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.size_hint = (None, None)
-        self._label_widgets = []
-        self._redraw_pending = False
-        self.bind(note_height=self._update_height, bottom_padding=self._update_height)
-        self.bind(pos=self.trigger_redraw, size=self.trigger_redraw,
-                  highlighted_note=self.trigger_redraw)
-        self._update_height()
-
-    def _update_height(self, *args):
-        new_height = round(128 * self.note_height) + self.bottom_padding
+    def on_note_height(self, instance, value):
+        new_height = round(128 * value) + self.bottom_padding
         if abs(self.height - new_height) > 0.001:
             self.height = new_height
 
-    def trigger_redraw(self, *args):
-        if not self._redraw_pending:
-            self._redraw_pending = True
-            Clock.schedule_once(self._redraw, 0)
+    def on_bottom_padding(self, instance, value):
+        new_height = round(128 * self.note_height) + value
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
+
+    def __init__(self, **kwargs):
+        super(EditorPianoKeyboard, self).__init__(**kwargs)
+        self.size_hint = (None, None)
+        self.width = dp(60)
+        self._label_widgets = []
+        self._redraw_pending = False
+        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule,
+                  note_height=self._redraw_on_schedule, bottom_padding=self._redraw_on_schedule,
+                  highlighted_note=self._redraw_on_schedule)
+        self._redraw_on_schedule()
+
+    def _redraw_on_schedule(self, *args):
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
+        Clock.schedule_once(self._redraw, 0)
 
     def _redraw(self, *args):
         self._redraw_pending = False
         if not self.canvas: return
         self.canvas.clear()
 
-        nh = self.note_height
-        bp = self.bottom_padding
         highlight_color = (0.3, 0.7, 1.0, 1)
 
         with self.canvas:
-            # White Keys
+            # Main Background
+            Color(0.9, 0.9, 0.9, 1)
+            Rectangle(pos=self.pos, size=self.size)
+
+            # --- Draw White Keys backgrounds ---
             for i in range(128):
                 if (i % 12) not in [1, 3, 6, 8, 10]:
                     if i == self.highlighted_note: Color(*highlight_color)
                     else: Color(0.95, 0.95, 0.95, 1)
-                    y_start = round(i * nh) + bp
-                    y_end = round((i + 1) * nh) + bp
-                    Rectangle(pos=(0, y_start), size=(self.width, y_end - y_start))
+                    y_start = round(i * self.note_height) + self.bottom_padding
+                    y_end = round((i + 1) * self.note_height) + self.bottom_padding
+                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
 
-            # Black Keys
+            # --- Draw Black Keys Backgrounds ---
             for i in range(128):
                 if (i % 12) in [1, 3, 6, 8, 10]:
                     if i == self.highlighted_note: Color(*highlight_color)
                     else: Color(0.1, 0.1, 0.1, 1)
-                    y_start = round(i * nh) + bp
-                    y_end = round((i + 1) * nh) + bp
-                    Rectangle(pos=(0, y_start), size=(self.width * 0.65, y_end - y_start))
+                    y_start = round(i * self.note_height) + self.bottom_padding
+                    y_end = round((i + 1) * self.note_height) + self.bottom_padding
+                    Rectangle(pos=(self.x, self.y + y_start), size=(self.width * 0.65, y_end - y_start))
 
-            # Separators
-            for i in range(129):
-                y_pos = round(i * nh) + bp
-                if (i % 12) == 0: Color(0.4, 0.4, 0.4, 0.8)
-                elif (i % 12) == 5: Color(0.6, 0.6, 0.6, 0.6)
-                else: Color(0.7, 0.7, 0.7, 0.4)
-                Line(points=[0, y_pos, self.width, y_pos], width=1.0)
+            # --- Draw EVERY Pitch Separator ---
+            for i in range(1, 129):
+                y_pos = round(i * self.note_height) + self.bottom_padding
+                if (i % 12) == 0:
+                    Color(0.4, 0.4, 0.4, 0.8)
+                    width = 1.2
+                elif (i % 12) == 5:
+                    Color(0.6, 0.6, 0.6, 0.6)
+                    width = 1.0
+                else:
+                    Color(0.7, 0.7, 0.7, 0.4)
+                    width = 0.6
+                Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=width)
 
-        # Note Labels
+        # Add C note labels
         octave_indices = [i for i in range(128) if (i % 12) == 0]
+
         while len(self._label_widgets) < len(octave_indices):
-            lbl = Label(font_size=dp(9), color=(0, 0, 0, 1), size_hint=(None, None),
-                        halign='center', valign='middle')
+            lbl = Label(font_size=dp(10), color=(0, 0, 0, 1), size_hint=(None, None),
+                        halign='center', valign='middle', bold=True)
             self.add_widget(lbl)
             self._label_widgets.append(lbl)
+        while len(self._label_widgets) > len(octave_indices):
+            lbl = self._label_widgets.pop()
+            self.remove_widget(lbl)
 
         for idx, i in enumerate(octave_indices):
             octave_num = (i // 12) - 1
-            y_start = round(i * nh) + bp
-            y_end = round((i + 1) * nh) + bp
+            y_start = round(i * self.note_height) + self.bottom_padding
+            y_end = round((i + 1) * self.note_height) + self.bottom_padding
             note_h = y_end - y_start
+            note_y = self.y + y_start
+
             label = self._label_widgets[idx]
             label.text = f"C{octave_num}"
             label.size = (self.width, note_h)
+            label.center_x = self.center_x
+            label.center_y = note_y + note_h / 2
             label.text_size = label.size
-            label.pos = (0, y_start)
 
 
 class EditHistoryManager:
@@ -974,7 +998,7 @@ Builder.load_string("""
                     pixels_per_beat: root.pixels_per_beat
                     note_height: root.note_height
                     size_hint: (None, None)
-                    bottom_padding: dp(17)
+                    bottom_padding: round(dp(17))
 
         MDBoxLayout:
             size_hint_y: None
@@ -1086,9 +1110,12 @@ class PianoRollEditor(FloatingWindow):
         self.ids.grid.bottom_padding = round(dp(17))
 
         # Lock heights strictly
-        self.ids.piano_keyboard.height = grid.height
-        self._grid_height_binding = lambda inst, val: setattr(self.ids.piano_keyboard, 'height', val)
+        def sync_keyboard_height(inst, val):
+            if abs(self.ids.piano_keyboard.height - val) > 0.001:
+                self.ids.piano_keyboard.height = val
+        self._grid_height_binding = sync_keyboard_height
         grid.bind(height=self._grid_height_binding)
+        sync_keyboard_height(None, grid.height)
 
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
@@ -1422,6 +1449,8 @@ class PianoRollEditor(FloatingWindow):
                 if note_index < len(event.notes):
                     new_selection.append(event.notes[note_index])
 
+        # Force UI update by clearing first (handles value-based equality in ListProperty)
+        self.selected_notes = []
         self.selected_notes = new_selection
         # Explicitly update the grid's property to ensure the visual update.
         self.ids.grid.selected_notes = self.selected_notes
@@ -1510,6 +1539,8 @@ class PianoRollEditor(FloatingWindow):
 
         # 2. Mettre à jour la sélection
         if new_selection:
+            # Force UI update by clearing first
+            self.selected_notes = []
             self.selected_notes = new_selection
             self.track_copy.events.sort(key=lambda e: e.start_time)
             self.is_dirty = True
@@ -1551,37 +1582,19 @@ class PianoRollEditor(FloatingWindow):
         self.ids.redo_button.disabled = not self.history.can_redo()
 
     def sync_vertical_scroll(self, source_scroll_view, scroll_y_value) -> None:
-        if self._is_v_scrolling: return
-
-        # Sensitivity check
-        if hasattr(source_scroll_view, '_last_scroll_y') and \
-           abs(source_scroll_view._last_scroll_y - scroll_y_value) < 0.00001:
-            return
-        source_scroll_view._last_scroll_y = scroll_y_value
+        if getattr(self, '_is_v_scrolling', False): return
 
         self._is_v_scrolling = True
         try:
-            # Calculate absolute pixel offset (inverted since scroll_y 0 is bottom)
-            content_h = source_scroll_view.children[0].height
-            viewport_h = source_scroll_view.height
-            max_scroll = max(0, content_h - viewport_h)
-            pixel_offset = (1.0 - scroll_y_value) * max_scroll if max_scroll > 0 else 0
-
             keyboard_sv = self.ids.keyboard_sv
             timeline_scroll = self.ids.timeline_scroll
 
-            targets = [keyboard_sv, timeline_scroll]
-            for sv in targets:
-                if sv is not source_scroll_view:
-                    try:
-                        c_h = sv.children[0].height
-                        v_h = sv.height
-                        m_s = max(0, c_h - v_h)
-                        if m_s > 0:
-                            sv.scroll_y = max(0.0, min(1.0, 1.0 - (pixel_offset / m_s)))
-                        else:
-                            sv.scroll_y = 1.0
-                    except: continue
+            if source_scroll_view is keyboard_sv:
+                if abs(timeline_scroll.scroll_y - scroll_y_value) > 0.00001:
+                    timeline_scroll.scroll_y = scroll_y_value
+            elif source_scroll_view is timeline_scroll:
+                if abs(keyboard_sv.scroll_y - scroll_y_value) > 0.00001:
+                    keyboard_sv.scroll_y = scroll_y_value
         finally:
             self._is_v_scrolling = False
 

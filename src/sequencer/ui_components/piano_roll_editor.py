@@ -115,25 +115,32 @@ class EditorPianoKeyboard(RelativeLayout):
     def _redraw(self, *args):
         self._redraw_pending = False
         if not self.canvas: return
-        self.canvas.clear()
+
+        # Drawing background and keys in canvas.before to ensure they are under widgets
+        self.canvas.before.clear()
         highlight_color = (0.3, 0.7, 1.0, 1)
-        with self.canvas:
+
+        with self.canvas.before:
+            # Main Background
             Color(0.9, 0.9, 0.9, 1)
             Rectangle(pos=(0, 0), size=self.size)
+
             # White keys
             for i in range(128):
                 ys = round(i * self.note_height) + self.bottom_padding
-                ye = round((i + 1) * self.note_height) + self.bottom_padding
                 if (i % 12) not in [1, 3, 6, 8, 10]:
-                    Color(*(highlight_color if i == self.highlighted_note else (0.95, 0.95, 0.95, 1)))
-                    Rectangle(pos=(0, ys), size=(self.width, ye - ys))
+                    if i == self.highlighted_note: Color(*highlight_color)
+                    else: Color(0.95, 0.95, 0.95, 1)
+                    Rectangle(pos=(0, ys), size=(self.width, self.note_height))
+
             # Black keys
             for i in range(128):
                 ys = round(i * self.note_height) + self.bottom_padding
-                ye = round((i + 1) * self.note_height) + self.bottom_padding
                 if (i % 12) in [1, 3, 6, 8, 10]:
-                    Color(*(highlight_color if i == self.highlighted_note else (0.1, 0.1, 0.1, 1)))
-                    Rectangle(pos=(0, ys), size=(self.width * 0.65, ye - ys))
+                    if i == self.highlighted_note: Color(*highlight_color)
+                    else: Color(0.1, 0.1, 0.1, 1)
+                    Rectangle(pos=(0, ys), size=(self.width * 0.65, self.note_height))
+
             # Separators
             for i in range(1, 129):
                 yp = round(i * self.note_height) + self.bottom_padding
@@ -142,18 +149,23 @@ class EditorPianoKeyboard(RelativeLayout):
                 else: Color(0.7, 0.7, 0.7, 0.4)
                 Line(points=[0, yp, self.width, yp], width=1.1)
 
-        # Labels for C notes
+        # Update Octave Labels (C-1 to C9)
         indices = [i for i in range(128) if i % 12 == 0]
         while len(self._label_widgets) < len(indices):
-            lbl = Label(font_size=dp(10), color=(0, 0, 0, 1), size_hint=(None, None), halign="center", valign="middle", bold=True)
-            self.add_widget(lbl); self._label_widgets.append(lbl)
-        while len(self._label_widgets) > len(indices): self.remove_widget(self._label_widgets.pop())
+            lbl = Label(font_size=dp(11), color=(0, 0, 0, 1), size_hint=(None, None),
+                        halign='center', valign='middle', bold=True)
+            self.add_widget(lbl)
+            self._label_widgets.append(lbl)
+        while len(self._label_widgets) > len(indices):
+            self.remove_widget(self._label_widgets.pop())
+
         for idx, i in enumerate(indices):
             ys = round(i * self.note_height) + self.bottom_padding
-            ye = round((i + 1) * self.note_height) + self.bottom_padding
             lbl = self._label_widgets[idx]
-            lbl.text = f"C{i // 12 - 1}"; lbl.size = (self.width, ye - ys)
-            lbl.pos = (0, ys)
+            lbl.text = f"C{i // 12 - 1}"
+            lbl.size = (self.width, self.note_height * 2) # Slightly taller than one note
+            lbl.center_x = self.width / 2
+            lbl.center_y = ys + self.note_height / 2
             lbl.text_size = lbl.size
             lbl.texture_update()
 
@@ -924,6 +936,7 @@ Builder.load_string("""
             EditorBoundedScrollView:
                 id: timeline_scroll
                 scroll_y: keyboard_sv.scroll_y
+
                 do_scroll_y: True
                 do_scroll_x: True
                 bar_width: round(dp(17))

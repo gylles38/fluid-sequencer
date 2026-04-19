@@ -82,7 +82,7 @@ class EditorBoundedScrollView(BoundedScrollView):
 
 
 
-class EditorPianoKeyboard(RelativeLayout):
+class EditorPianoKeyboard(Widget):
     note_height = NumericProperty(round(dp(14)))
     bottom_padding = NumericProperty(0)
     highlighted_note = NumericProperty(-1)
@@ -101,7 +101,9 @@ class EditorPianoKeyboard(RelativeLayout):
         self.width = dp(60)
         self._label_widgets = []
         self._update_total_height()
-        self.bind(size=self._redraw_on_schedule,
+        # Bind to pos so we redraw when scrolling (important for absolute coords)
+        self.bind(pos=self._redraw_on_schedule,
+                  size=self._redraw_on_schedule,
                   note_height=self._redraw_on_schedule,
                   bottom_padding=self._redraw_on_schedule,
                   highlighted_note=self._redraw_on_schedule)
@@ -116,30 +118,32 @@ class EditorPianoKeyboard(RelativeLayout):
         self._redraw_pending = False
         if not self.canvas: return
 
-        # Drawing background and keys in canvas.before to ensure they are under widgets
+        # Draw on canvas.before to stay behind Label children
         self.canvas.before.clear()
         highlight_color = (0.3, 0.7, 1.0, 1)
 
         with self.canvas.before:
-            # Main Background
+            # Background
             Color(0.9, 0.9, 0.9, 1)
-            Rectangle(pos=(0, 0), size=self.size)
+            Rectangle(pos=self.pos, size=self.size)
 
             # White keys
             for i in range(128):
                 ys = round(i * self.note_height) + self.bottom_padding
+                ye = round((i + 1) * self.note_height) + self.bottom_padding
                 if (i % 12) not in [1, 3, 6, 8, 10]:
                     if i == self.highlighted_note: Color(*highlight_color)
                     else: Color(0.95, 0.95, 0.95, 1)
-                    Rectangle(pos=(0, ys), size=(self.width, self.note_height))
+                    Rectangle(pos=(self.x, self.y + ys), size=(self.width, ye - ys))
 
             # Black keys
             for i in range(128):
                 ys = round(i * self.note_height) + self.bottom_padding
+                ye = round((i + 1) * self.note_height) + self.bottom_padding
                 if (i % 12) in [1, 3, 6, 8, 10]:
                     if i == self.highlighted_note: Color(*highlight_color)
                     else: Color(0.1, 0.1, 0.1, 1)
-                    Rectangle(pos=(0, ys), size=(self.width * 0.65, self.note_height))
+                    Rectangle(pos=(self.x, self.y + ys), size=(self.width * 0.65, ye - ys))
 
             # Separators
             for i in range(1, 129):
@@ -147,9 +151,9 @@ class EditorPianoKeyboard(RelativeLayout):
                 if i % 12 == 0: Color(0.4, 0.4, 0.4, 0.8)
                 elif i % 12 == 5: Color(0.6, 0.6, 0.6, 0.6)
                 else: Color(0.7, 0.7, 0.7, 0.4)
-                Line(points=[0, yp, self.width, yp], width=1.1)
+                Line(points=[self.x, self.y + yp, self.x + self.width, self.y + yp], width=1.1)
 
-        # Update Octave Labels (C-1 to C9)
+        # Labels
         indices = [i for i in range(128) if i % 12 == 0]
         while len(self._label_widgets) < len(indices):
             lbl = Label(font_size=dp(11), color=(0, 0, 0, 1), size_hint=(None, None),
@@ -160,14 +164,17 @@ class EditorPianoKeyboard(RelativeLayout):
             self.remove_widget(self._label_widgets.pop())
 
         for idx, i in enumerate(indices):
+            octave_num = (i // 12) - 1
             ys = round(i * self.note_height) + self.bottom_padding
-            lbl = self._label_widgets[idx]
-            lbl.text = f"C{i // 12 - 1}"
-            lbl.size = (self.width, self.note_height * 2) # Slightly taller than one note
-            lbl.center_x = self.width / 2
-            lbl.center_y = ys + self.note_height / 2
-            lbl.text_size = lbl.size
-            lbl.texture_update()
+            ye = round((i + 1) * self.note_height) + self.bottom_padding
+
+            label = self._label_widgets[idx]
+            label.text = f"C{octave_num}"
+            label.size = (self.width, ye - ys)
+            label.center_x = self.center_x
+            label.center_y = self.y + ys + (ye - ys) / 2
+            label.text_size = label.size
+            label.texture_update()
 
 
 class EditHistoryManager:

@@ -16,7 +16,6 @@ from copy import deepcopy
 from dataclasses import asdict, is_dataclass, fields
 import json
 import math
-import re
 import mido
 import jack
 from mido import get_input_names, get_output_names, open_output # type: ignore
@@ -59,9 +58,10 @@ class Sequencer(EventDispatcher):
         self.config_manager = ConfigManager()
         self.midi_config = MidiConfig("config/midi_mappings.json")
         self.jack_manager = JackManager(self)
-        self._midi_input_threads = {} # port_name -> thread
-        self._midi_stop_events = {}   # port_name -> event
-        self._midi_input_queue = queue.Queue()
+        self.midi_listener_thread = None
+        self._midi_listener_stop_event = threading.Event()
+        self._transport_control_thread = None
+        self._transport_control_stop_event = threading.Event()
         self.control_port_name: Optional[str] = None
         self.open_ports = {}
         self.virtual_ports = []
@@ -356,247 +356,90 @@ class Sequencer(EventDispatcher):
             # N'oubliez pas d'appeler cette fonction chaque fois que le tempo, le chemin d'un fichier audio, 
             # ou un événement de piste est modifié (ajout/suppression).
 
-    def normalize_midi_port_name(self, name: str) -> str:
-        """Removes ALSA indices and other common noise from a port name."""
-        if not name: return ""
-        # Remove trailing indices like " 24:0", ":0", " (24:0)", " 128:0", or "[24]"
-        # Handles various formats: "MPK249 24:0", "Midi Through:0", "Keypad (24:0)", "Port [24]"
-        res = re.sub(r'(\s+\d+:\d+.*$|:\d+.*$|\s+\(\d+:\d+.*\)$|\s+\[\d+\].*$)', '', name)
-        return res.strip()
-
-    def _find_best_input_port_match(self, pattern: str) -> Optional[str]:
-        """Finds the best matching available MIDI input port name."""
-        if not pattern: return None
-
+    def _transport_control_listener_loop(self, port_name: str):
+        """
+        A dedicated thread that listens for transport control MIDI messages based on the loaded configuration.
+        """
         try:
-            input_ports = get_input_names()
-        except:
-            return None
+            with mido.open_input(port_name) as inport:
+                while not self._transport_control_stop_event.is_set():
+                    for msg in inport.iter_pending():
+                        if msg.type == 'control_change':
+                            control = msg.control
+                            value = msg.value
 
-        if not input_ports: return None
+                            # --- Handle Transport Controls ---
+                            if value == 127:
+                                if control == self.midi_config.get_transport_cc("play_pause"):
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
+                                elif control == self.midi_config.get_transport_cc("stop"):
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
+                                elif control == self.midi_config.get_transport_cc("record_arm"):
+                                    Clock.schedule_once(lambda dt: self.process_transport_command("record"))
+                                elif control == self.midi_config.get_transport_cc("rewind"):
+                                    Clock.schedule_once(lambda dt: self.seek("-1m"))
+                                elif control == self.midi_config.get_transport_cc("forward"):
+                                    Clock.schedule_once(lambda dt: self.seek("+1m"))
 
-        # 1. Exact match
-        if pattern in input_ports:
-            return pattern
+                            # --- Handle Volume Sliders & Solo Buttons ---
+                            for i in range(len(self.song.tracks)):
+                                # Volume
+                                if control == self.midi_config.get_volume_slider_cc(i):
+                                    volume_value = value / 127.0
+                                    Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
+                                    break # Found a match, no need to check other tracks for this CC
 
-        # 2. Normalized match
-        norm_pattern = self.normalize_midi_port_name(pattern)
-        for p in input_ports:
-            if self.normalize_midi_port_name(p) == norm_pattern:
-                return p
+                                # Solo
+                                if control == self.midi_config.get_track_solo_button_cc(i):
+                                    track = self.song.tracks[i]
+                                    is_solo = getattr(track, 'is_solo', False)
+                                    if (value == 127 and not is_solo) or (value == 0 and is_solo):
+                                        Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
+                                    break # Found a match
 
-        # 3. Fuzzy substring match (case-insensitive)
-        pattern_lower = norm_pattern.lower()
-        for p in input_ports:
-            if pattern_lower in p.lower():
-                return p
-
-        return None
-
-    def _midi_input_listener_loop(self, port_name: str, stop_event: threading.Event):
-        """
-        Unified listener thread that handles transport controls, MIDI mappings,
-        and dispatches messages to the recording thread via a queue.
-        Includes automatic reconnection logic.
-        """
-        print(f"[Sequencer] Unified MIDI input listener thread started for '{port_name}'")
-
-        while not stop_event.is_set():
-            inport = None
-            try:
-                # 1. Attempt to open the port (with multiple retries if not found)
-                retry_count = 0
-                while not stop_event.is_set() and inport is None:
-                    # Robust matching: find the actual port name currently available
-                    available = get_input_names()
-
-                    # Fuzzy match: try to find the device even if index changed
-                    actual_port = self._find_best_input_port_match(port_name)
-
-                    if not actual_port and (port_name is None or port_name == "None"):
-                        # Fallback: if no port set, try to find ANY hardware keyboard
-                        for p in available:
-                            if "midi through" not in p.lower():
-                                actual_port = p
-                                break
-
-                    if actual_port:
-                        try:
-                            # Try to open the port. We use client_name to avoid conflicts
-                            inport = mido.open_input(actual_port)
-                            print(f"[Sequencer] Unified MIDI input listener successfully connected to '{actual_port}' (match for '{port_name}')")
-                        except (IOError, RuntimeError, Exception) as e:
-                            print(f"[Sequencer] Failed to open matched port '{actual_port}': {e}")
-                            inport = None
-
-                    if inport is None:
-                        if retry_count % 50 == 0: # More frequent logging for debugging
-                             print(f"[Sequencer] Still waiting for MIDI device matching '{port_name}'...")
-                             print(f"[Sequencer] Available ports: {available}")
-
-                        retry_count += 1
-
-                        # Small wait before next attempt
-                        for _ in range(50): # 0.5s total wait, check stop_event frequently
-                            if stop_event.is_set(): break
-                            time.sleep(0.01)
-
-                if stop_event.is_set() or inport is None:
-                    break
-
-                # 2. Main message processing loop
-                while not stop_event.is_set():
-                    # Optimization: Handle multiple messages per loop iteration
-                    messages = list(inport.iter_pending())
-                    if not messages:
-                        time.sleep(0.005)
-                        continue
-
-                    for msg in messages:
-                        # 1. Dispatch to recording queue (if active)
-                        if self.is_recording:
-                            self._midi_input_queue.put((port_name, msg))
-
-                        # --- MIDI Live Bridge (Play Instrument without recording) ---
-                        # Forward Note/Pitch/CC messages to the selected track if not recording.
-                        # We use identity check for port_name to ensure we only bridge the default record port.
-                        elif not self.is_recording and port_name == self.default_record_port:
-                            if msg.type in ('note_on', 'note_off', 'pitchwheel', 'control_change', 'program_change'):
-                                # Use current routing to find target
-                                target_idx = self.current_routing_index
-                                if target_idx == -1: # Fallback to first MIDI track if nothing selected
-                                    for i, t in enumerate(self.song.tracks):
-                                        if is_midi_track(t):
-                                            target_idx = i
-                                            break
-
-                                if 0 <= target_idx < len(self.song.tracks):
-                                    track = self.song.tracks[target_idx]
-                                    if is_midi_track(track) and track.output_port_name:
-                                        # Use jack_manager to get the open port
-                                        out_port = self.jack_manager.open_ports.get(track.output_port_name)
-                                        if out_port:
-                                            # Copy message and adjust channel to match track
-                                            try:
-                                                out_port.send(msg.copy(channel=track.channel))
-                                            except: pass
-
-                        # 2. Handle Transport Controls (if Control Port is set to this port)
-                        if port_name == self.control_port_name or port_name == self.default_record_port:
-                            if msg.type == 'control_change':
-                                control = msg.control
-                                value = msg.value
-
-                                # --- Handle Transport Controls ---
-                                if value == 127:
-                                    if control == self.midi_config.get_transport_cc("play_pause"):
-                                        Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
-                                    elif control == self.midi_config.get_transport_cc("stop"):
-                                        Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
-                                    elif control == self.midi_config.get_transport_cc("record_arm"):
-                                        Clock.schedule_once(lambda dt: self.process_transport_command("record"))
-                                    elif control == self.midi_config.get_transport_cc("rewind"):
-                                        Clock.schedule_once(lambda dt: self.seek("-1m"))
-                                    elif control == self.midi_config.get_transport_cc("forward"):
-                                        Clock.schedule_once(lambda dt: self.seek("+1m"))
-
-                                # --- Handle Volume Sliders & Solo Buttons ---
-                                for i in range(len(self.song.tracks)):
-                                    # Volume
-                                    if control == self.midi_config.get_volume_slider_cc(i):
-                                        volume_value = value / 127.0
-                                        Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
-                                        break
-
-                                    # Solo
-                                    if control == self.midi_config.get_track_solo_button_cc(i):
-                                        track = self.song.tracks[i]
-                                        is_solo = getattr(track, 'is_solo', False)
-                                        if (value == 127 and not is_solo) or (value == 0 and is_solo):
-                                            Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
-                                        break
-
-                            # --- Handle MIDI Mappings ---
-                            if msg.type == 'control_change':
-                                for mapping in self.song.midi_mappings:
-                                    if mapping.channel == msg.channel and mapping.control == msg.control:
-                                        self._apply_midi_mapping_action(mapping, msg.value)
-                                        if self.is_recording:
-                                            self._record_automation_from_mapping(mapping, msg.value)
-
-            except Exception as e:
-                print(f"\n[Sequencer] Error in unified MIDI input listener for port '{port_name}': {e}")
-                print("[Sequencer] Attempting to reconnect...")
-            finally:
-                if inport:
-                    try: inport.close()
-                    except: pass
-                inport = None
-
-        print(f"[Sequencer] Unified MIDI input listener stopped for '{port_name}'")
+                    time.sleep(0.01)
+        except Exception as e:
+            print(f"\nError in transport control listener for port '{port_name}': {e}")
 
     def reload_midi_mappings(self, filepath: str) -> str:
-        """Loads a new MIDI mapping file and restarts the listeners if necessary."""
+        """Loads a new MIDI mapping file and restarts the listener if necessary."""
         self.midi_config.load_mappings(filepath)
 
-        # Restart all active listeners to pick up new mappings if they involve CCs
-        active_ports = list(self._midi_input_threads.keys())
-        for port in active_ports:
-            self._stop_midi_listener(port)
-            self._start_midi_listener(port)
+        # If a transport control port is active, restart it to apply the new mappings
+        if self.default_record_port and self._transport_control_thread and self._transport_control_thread.is_alive():
+            print("Restarting MIDI transport control listener to apply new mappings...")
+            return self.set_default_record_port(self.default_record_port)
 
-        return f"MIDI mappings loaded from {filepath}. {len(active_ports)} listeners restarted."
-
-    def _start_midi_listener(self, port_name: str):
-        """Starts a unified MIDI listener thread for a specific port if not already running."""
-        if port_name in self._midi_input_threads and self._midi_input_threads[port_name].is_alive():
-            return
-
-        stop_event = threading.Event()
-        thread = threading.Thread(
-            target=self._midi_input_listener_loop,
-            args=(port_name, stop_event),
-            daemon=True
-        )
-        self._midi_input_threads[port_name] = thread
-        self._midi_stop_events[port_name] = stop_event
-        thread.start()
-
-    def _stop_midi_listener(self, port_name: str):
-        """Stops the MIDI listener thread for a specific port."""
-        if port_name in self._midi_input_threads:
-            self._midi_stop_events[port_name].set()
-            self._midi_input_threads[port_name].join(timeout=1.0)
-            del self._midi_input_threads[port_name]
-            del self._midi_stop_events[port_name]
+        return f"MIDI mappings loaded from {filepath}. No transport listener was active."
 
     def set_default_record_port(self, port_name: str) -> str:
         """
         Sets the default MIDI input port for recording and transport controls.
-        Manages the unified MIDI input listener threads.
+        Manages the lifecycle of the transport control listener thread.
         """
         try:
-            # Normalize the port name to ensure stable tracking and avoid duplicate listeners
-            # (e.g., if a port index changes from 24:0 to 28:0)
-            stable_name = self.normalize_midi_port_name(port_name)
+            input_ports = get_input_names()
+            if port_name not in input_ports:
+                return f"Error: MIDI input port '{port_name}' not found."
 
-            old_port = self.default_record_port
-            self.default_record_port = stable_name
+            # Stop any existing listener before starting a new one
+            if self._transport_control_thread and self._transport_control_thread.is_alive():
+                self._transport_control_stop_event.set()
+                self._transport_control_thread.join(timeout=1.0)
+
+            self.default_record_port = port_name
             self.is_dirty = True
 
-            # Stop old listener if it's no longer used as a control port
-            if old_port and old_port != stable_name and old_port != self.control_port_name:
-                self._stop_midi_listener(old_port)
+            # Start the new listener thread
+            self._transport_control_stop_event.clear()
+            self._transport_control_thread = threading.Thread(
+                target=self._transport_control_listener_loop,
+                args=(port_name,),
+                daemon=True
+            )
+            self._transport_control_thread.start()
 
-            # Clear the queue to avoid processing stale messages
-            while not self._midi_input_queue.empty():
-                try: self._midi_input_queue.get_nowait()
-                except queue.Empty: break
-
-            # Start new listener (listener will use fuzzy matching to find the actual device)
-            self._start_midi_listener(stable_name)
-
-            return f"Default record and unified MIDI input port set to: {stable_name}"
+            return f"Default record and transport control port set to: {port_name}"
         except Exception as e:
             return f"Error setting record port: {e}"
 
@@ -1898,36 +1741,44 @@ class Sequencer(EventDispatcher):
 
     def set_control_port(self, port_name: str) -> str:
         """Sets the MIDI input port for control messages and starts listening."""
-        # Normalize the port name to ensure stable tracking and avoid duplicate listeners
-        stable_name = self.normalize_midi_port_name(port_name)
-
-        old_port = self.control_port_name
-        self.control_port_name = stable_name
-        self.is_dirty = True
-
-        # Stop old listener if it's no longer used as a record port
-        if old_port and old_port != stable_name and old_port != self.default_record_port:
-            self._stop_midi_listener(old_port)
-
-        # Start new listener
-        self._start_midi_listener(stable_name)
-
-        return f"Control port set to '{stable_name}'."
+        if self.midi_listener_thread and self.midi_listener_thread.is_alive():
+            return "A control port is already active. Please unset it first."
+        self.control_port_name = port_name
+        self._midi_listener_stop_event.clear()
+        self.midi_listener_thread = threading.Thread(target=self._midi_listener_loop, args=(port_name,))
+        self.midi_listener_thread.daemon = True
+        self.midi_listener_thread.start()
+        return f"Listening for control messages on '{port_name}'."
 
     def unset_control_port(self) -> str:
         """Stops listening for control messages and closes the port."""
-        port = self.control_port_name
-        if not port:
+        if not self.midi_listener_thread or not self.midi_listener_thread.is_alive():
             return "No active control port to unset."
-
+        self._midi_listener_stop_event.set()
+        if self.midi_listener_thread:
+            self.midi_listener_thread.join(timeout=1.0)
         self.control_port_name = None
+        return "Stopped listening for control messages."
 
-        # Stop listener only if not used as record port
-        if port != self.default_record_port:
-            self._stop_midi_listener(port)
-            return f"Stopped listening for control messages on '{port}'."
-
-        return "Control port unset (port remains active for recording)."
+    def _midi_listener_loop(self, port_name: str):
+        """
+        The main loop for the MIDI control message listener thread.
+        This loop handles live parameter changes and, if recording is active,
+        triggers the recording of automation points.
+        """
+        try:
+            with mido.open_input(port_name) as inport:
+                while not self._midi_listener_stop_event.is_set():
+                    for msg in inport.iter_pending():
+                        if msg.type == 'control_change':
+                            for mapping in self.song.midi_mappings:
+                                if mapping.channel == msg.channel and mapping.control == msg.control:
+                                    self._apply_midi_mapping_action(mapping, msg.value)
+                                    if self.is_recording:
+                                        self._record_automation_from_mapping(mapping, msg.value)
+                    time.sleep(0.01)
+        except Exception as e:
+            print(f"\nError in MIDI listener thread for port '{port_name}': {e}")
 
     def _get_parameter_value_from_cc(self, action: str, cc_value: int) -> float:
         """Converts a MIDI CC value (0-127) to a normalized parameter value."""
@@ -2046,13 +1897,7 @@ class Sequencer(EventDispatcher):
         try:
             # Update the song name to match the project basename
             self.song.name = basename
-            project_data = {
-                "song": self.song,
-                "virtual_ports": [vp.name for vp in self.virtual_ports],
-                "control_port_name": self.control_port_name,
-                "default_record_port": self.default_record_port,
-                "audio_player_command": self.audio_player_command
-            }
+            project_data = {"song": self.song, "virtual_ports": [vp.name for vp in self.virtual_ports], "control_port_name": self.control_port_name, "audio_player_command": self.audio_player_command}
             with open(project_filepath, 'w') as f:
                 json.dump(project_data, f, indent=4, cls=CustomSongEncoder)
             self.is_dirty = False
@@ -2079,17 +1924,10 @@ class Sequencer(EventDispatcher):
             self.virtual_ports = []
             for vp_name in project_data.get("virtual_ports", []):
                 self.create_virtual_port(vp_name)
-
-            # --- Restore MIDI Ports ---
             self.unset_control_port()
             control_port_name = project_data.get("control_port_name")
             if control_port_name:
                 self.set_control_port(control_port_name)
-
-            default_record_port = project_data.get("default_record_port")
-            if default_record_port:
-                self.set_default_record_port(default_record_port)
-
             self.is_dirty = False
             self.last_project_basename = basename
             self.invalidate_song_length_cache()
@@ -2304,12 +2142,6 @@ class Sequencer(EventDispatcher):
             self.jack_manager.stop()
             print("JACK engine stopped.")
 
-        # Stop all MIDI input listeners
-        active_ports = list(self._midi_input_threads.keys())
-        for port in active_ports:
-            self._stop_midi_listener(port)
-        print("MIDI input listeners stopped.")
-
         for port in self.virtual_ports:
             if not port.closed:
                 port.close()
@@ -2393,9 +2225,6 @@ class Sequencer(EventDispatcher):
         return 0.0
 
     def _recording_thread_main(self, initial_track_idx, start_beat, inport_name, num_beats_to_record, enable_thru):
-            """
-            Consumes MIDI messages from self._midi_input_queue (populated by the unified listener).
-            """
             # Le dictionnaire stockera: {pitch: (start_beat, velocity, track_idx)}
             open_notes = {}
             first_note_detected = False
@@ -2403,92 +2232,81 @@ class Sequencer(EventDispatcher):
             processed_tracks = set() # Tracks encountered during this session
 
             try:
-                print(f"[Sequencer] Recording thread consuming from queue for port: {inport_name}")
+                with mido.open_input(inport_name) as inport:
+                    print(f"Port d'entrée MIDI ouvert: {inport_name}")
+                    list(inport.iter_pending())
 
-                # Target track name for logging
-                initial_target_idx = self.jack_manager._get_input_routing_value(start_beat)
-                if initial_target_idx is not None and 0 <= initial_target_idx < len(self.song.tracks):
-                    target_name = self.song.tracks[initial_target_idx].name
-                else:
-                    target_name = "Dynamic Routing"
+                    # Target track name for logging
+                    initial_target_idx = self.jack_manager._get_input_routing_value(start_beat)
+                    if initial_target_idx is not None and 0 <= initial_target_idx < len(self.song.tracks):
+                        target_name = self.song.tracks[initial_target_idx].name
+                    else:
+                        target_name = "Dynamic Routing"
 
-                print(f"En attente de la première note sur '{target_name}'...")
+                    print(f"En attente de la première note sur '{target_name}'...")
 
-                pending_trigger_msg = None
-                while not self._stop_event.is_set() and not first_note_detected:
-                    if not self.is_recording:
-                         print("Recording armed state cancelled.")
-                         return
+                    pending_trigger_msg = None
+                    while not self._stop_event.is_set() and not first_note_detected:
+                        if not self.is_recording:
+                             print("Recording armed state cancelled.")
+                             return
 
-                    if self.playback_state == 'playing':
-                        first_note_detected = True
-                        recording_start_beat = self._get_current_beat()
-                        print(f"Enregistrement démarré à {self._format_beats_to_position(recording_start_beat)}")
-                        break
-
-                    # Check unified MIDI input queue
-                    try:
-                        p_name, msg = self._midi_input_queue.get(block=False)
-                        if p_name != inport_name:
-                            continue # Ignore messages from other ports in this thread
-
-                        # Any MIDI activity can trigger recording (Note, CC, Pitch, Program)
-                        is_trigger = False
-                        if msg.type == 'note_on' and msg.velocity > 0: is_trigger = True
-                        elif msg.type in ('control_change', 'pitchwheel', 'program_change'): is_trigger = True
-
-                        if is_trigger:
+                        if self.playback_state == 'playing':
                             first_note_detected = True
-                            pending_trigger_msg = msg
-                            # Start playback on main thread via Clock
-                            Clock.schedule_once(lambda dt: self.play(start_beat=start_beat))
-                            # Small delay to allow transport to start and get a reliable beat
-                            time.sleep(0.05)
                             recording_start_beat = self._get_current_beat()
-                            print(f"Enregistrement déclenché par {msg.type} à {self._format_beats_to_position(recording_start_beat)}")
-                            break
-                    except queue.Empty:
-                        pass
-
-                    time.sleep(0.01)
-
-                if not first_note_detected:
-                    self.is_recording = False
-                    return
-
-                while not self._stop_event.is_set():
-                    current_beat = self._get_current_beat()
-
-                    # Get current target track from MIDI routing
-                    target_idx = self.jack_manager._get_input_routing_value(current_beat)
-
-                    # Handle dynamic activation for OVERWRITE mode as soon as a track becomes the target
-                    if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
-                        if target_idx not in processed_tracks:
-                            track = self.song.tracks[target_idx]
-                            if is_midi_track(track):
-                                if track.record_mode == 'OVERWRITE':
-                                    # Truncate from the SESSION START instead of current_beat
-                                    # This ensures all "previous" notes (from start_beat) are cleared.
-                                    session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
-                                    self._truncate_track_for_recording(target_idx, start_beat, session_end_beat)
-                            processed_tracks.add(target_idx)
-
-                    # Process triggering message if any, then pull pending from queue
-                    msgs = []
-                    if pending_trigger_msg:
-                        msgs.append(pending_trigger_msg)
-                        pending_trigger_msg = None
-
-                    while True:
-                        try:
-                            p_name, msg = self._midi_input_queue.get(block=False)
-                            if p_name == inport_name:
-                                msgs.append(msg)
-                        except queue.Empty:
+                            print(f"Enregistrement démarré à {self._format_beats_to_position(recording_start_beat)}")
                             break
 
-                    for msg in msgs:
+                        msg = inport.poll()
+                        if msg:
+                            # Any MIDI activity can trigger recording (Note, CC, Pitch, Program)
+                            is_trigger = False
+                            if msg.type == 'note_on' and msg.velocity > 0: is_trigger = True
+                            elif msg.type in ('control_change', 'pitchwheel', 'program_change'): is_trigger = True
+
+                            if is_trigger:
+                                first_note_detected = True
+                                pending_trigger_msg = msg
+                                self.play(start_beat=start_beat)
+                                # Small delay to allow transport to start and get a reliable beat
+                                time.sleep(0.05)
+                                recording_start_beat = self._get_current_beat()
+                                print(f"Enregistrement déclenché par {msg.type} à {self._format_beats_to_position(recording_start_beat)}")
+                                break
+
+                        time.sleep(0.01)
+
+                    if not first_note_detected:
+                        self.is_recording = False
+                        return
+
+                    while not self._stop_event.is_set():
+                        current_beat = self._get_current_beat()
+
+                        # Get current target track from MIDI routing
+                        target_idx = self.jack_manager._get_input_routing_value(current_beat)
+
+                        # Handle dynamic activation for OVERWRITE mode as soon as a track becomes the target
+                        if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
+                            if target_idx not in processed_tracks:
+                                track = self.song.tracks[target_idx]
+                                if is_midi_track(track):
+                                    if track.record_mode == 'OVERWRITE':
+                                        # Truncate from the SESSION START instead of current_beat
+                                        # This ensures all "previous" notes (from start_beat) are cleared.
+                                        session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
+                                        self._truncate_track_for_recording(target_idx, start_beat, session_end_beat)
+                                processed_tracks.add(target_idx)
+
+                        # Process triggering message if any, then pull pending
+                        msgs = []
+                        if pending_trigger_msg:
+                            msgs.append(pending_trigger_msg)
+                            pending_trigger_msg = None
+
+                        msgs.extend(list(inport.iter_pending()))
+
+                        for msg in msgs:
                             if msg.type == 'note_on' and msg.velocity > 0:
                                 if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
                                     track = self.song.tracks[target_idx]
@@ -2574,14 +2392,14 @@ class Sequencer(EventDispatcher):
                                     if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
                                         self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
 
-                    if (num_beats_to_record is not None and
-                            current_beat >= (start_beat + num_beats_to_record)):
-                        Clock.schedule_once(lambda dt: self._stop_playback_transport())
-                        self._stop_event.set()
-                        break
+                        if (num_beats_to_record is not None and
+                                current_beat >= (start_beat + num_beats_to_record)):
+                            Clock.schedule_once(lambda dt: self._stop_playback_transport())
+                            self._stop_event.set()
+                            break
 
-                    # Polling often to avoid ALSA buffer overflow, but processing efficiently
-                    time.sleep(0.001)
+                        # Polling often to avoid ALSA buffer overflow, but processing efficiently
+                        time.sleep(0.001)
 
             except Exception as e:
                 print(f"Erreur lors de l'enregistrement: {e}")
@@ -3282,8 +3100,12 @@ class Sequencer(EventDispatcher):
             # Trigger a UI refresh to redraw all tracks to the new length
             self.song_structure_changed += 1
 
-        # Always stop the playback transport to ensure JACK is stopped
-        self._stop_playback_transport()
+            # After the recording thread has stopped itself, we might not need to stop playback again
+            # as it might have already done so. However, calling it ensures a consistent state.
+            if self.playback_state != "stopped":
+                 self._stop_playback_transport()
+        else:
+            self._stop_playback_transport()
 
         # Update routing status immediately to reflect manual override if present
         self._update_current_routing()

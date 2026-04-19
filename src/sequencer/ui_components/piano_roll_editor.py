@@ -82,7 +82,7 @@ class EditorBoundedScrollView(BoundedScrollView):
 
 
 
-class EditorPianoKeyboard(Widget):
+class EditorPianoKeyboard(RelativeLayout):
     note_height = NumericProperty(round(dp(14)))
     bottom_padding = NumericProperty(0)
     highlighted_note = NumericProperty(-1)
@@ -101,8 +101,9 @@ class EditorPianoKeyboard(Widget):
         self.width = dp(60)
         self._label_widgets = []
         self._update_total_height()
-        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule,
-                  note_height=self._redraw_on_schedule, bottom_padding=self._redraw_on_schedule,
+        self.bind(size=self._redraw_on_schedule,
+                  note_height=self._redraw_on_schedule,
+                  bottom_padding=self._redraw_on_schedule,
                   highlighted_note=self._redraw_on_schedule)
         self._redraw_on_schedule()
 
@@ -118,25 +119,30 @@ class EditorPianoKeyboard(Widget):
         highlight_color = (0.3, 0.7, 1.0, 1)
         with self.canvas:
             Color(0.9, 0.9, 0.9, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
+            # White keys
             for i in range(128):
+                ys = round(i * self.note_height) + self.bottom_padding
+                ye = round((i + 1) * self.note_height) + self.bottom_padding
                 if (i % 12) not in [1, 3, 6, 8, 10]:
                     Color(*(highlight_color if i == self.highlighted_note else (0.95, 0.95, 0.95, 1)))
-                    ys = round(i * self.note_height) + self.bottom_padding
-                    ye = round((i + 1) * self.note_height) + self.bottom_padding
-                    Rectangle(pos=(self.x, self.y + ys), size=(self.width, ye - ys))
+                    Rectangle(pos=(0, ys), size=(self.width, ye - ys))
+            # Black keys
             for i in range(128):
+                ys = round(i * self.note_height) + self.bottom_padding
+                ye = round((i + 1) * self.note_height) + self.bottom_padding
                 if (i % 12) in [1, 3, 6, 8, 10]:
                     Color(*(highlight_color if i == self.highlighted_note else (0.1, 0.1, 0.1, 1)))
-                    ys = round(i * self.note_height) + self.bottom_padding
-                    ye = round((i + 1) * self.note_height) + self.bottom_padding
-                    Rectangle(pos=(self.x, self.y + ys), size=(self.width * 0.65, ye - ys))
+                    Rectangle(pos=(0, ys), size=(self.width * 0.65, ye - ys))
+            # Separators
             for i in range(1, 129):
                 yp = round(i * self.note_height) + self.bottom_padding
                 if i % 12 == 0: Color(0.4, 0.4, 0.4, 0.8)
                 elif i % 12 == 5: Color(0.6, 0.6, 0.6, 0.6)
                 else: Color(0.7, 0.7, 0.7, 0.4)
-                Line(points=[self.x, self.y + yp, self.x + self.width, self.y + yp], width=1.1)
+                Line(points=[0, yp, self.width, yp], width=1.1)
+
+        # Labels for C notes
         indices = [i for i in range(128) if i % 12 == 0]
         while len(self._label_widgets) < len(indices):
             lbl = Label(font_size=dp(10), color=(0, 0, 0, 1), size_hint=(None, None), halign="center", valign="middle", bold=True)
@@ -147,8 +153,10 @@ class EditorPianoKeyboard(Widget):
             ye = round((i + 1) * self.note_height) + self.bottom_padding
             lbl = self._label_widgets[idx]
             lbl.text = f"C{i // 12 - 1}"; lbl.size = (self.width, ye - ys)
-            lbl.center_x = self.center_x; lbl.center_y = self.y + ys + (ye - ys) / 2
+            lbl.pos = (0, ys)
             lbl.text_size = lbl.size
+            lbl.texture_update()
+
 
 class EditHistoryManager:
     """Manages undo/redo history using a single list and an index."""
@@ -1042,14 +1050,6 @@ class PianoRollEditor(FloatingWindow):
         self.ids.piano_keyboard.bottom_padding = round(dp(17))
         self.ids.grid.bottom_padding = round(dp(17))
 
-        # Lock heights strictly
-        def sync_keyboard_height(inst, val):
-            if abs(self.ids.piano_keyboard.height - val) > 0.001:
-                self.ids.piano_keyboard.height = val
-        self._grid_height_binding = sync_keyboard_height
-        grid.bind(height=self._grid_height_binding)
-        sync_keyboard_height(None, grid.height)
-
         # --- ALIGNMENT SYNC ---
         # Ensure Ruler's alignment properties match the editor's layout
         self.ids.ruler.keyboard_width = self.ids.keyboard_sv.width
@@ -1684,8 +1684,6 @@ class PianoRollEditor(FloatingWindow):
             if hasattr(self, '_sync_x_binding'):
                 self.ids.ruler.scroll_view.unbind(scroll_x=self._sync_x_binding)
                 self.ids.timeline_scroll.unbind(scroll_x=self._sync_x_binding)
-            if hasattr(self, '_grid_height_binding'):
-                self.ids.grid.unbind(height=self._grid_height_binding)
             if hasattr(self, '_grid_width_binding'):
                 self.ids.grid.unbind(width=self._grid_width_binding)
             if hasattr(self, '_selected_notes_binding'):

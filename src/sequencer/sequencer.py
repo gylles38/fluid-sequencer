@@ -2243,7 +2243,7 @@ class Sequencer(EventDispatcher):
                 return 0.0
         return 0.0
 
-    def _recording_thread_main(self, initial_track_idx, start_beat, inport_name, num_beats_to_record, enable_thru):
+    def _recording_thread_main(self, initial_track_idx, start_beat, inport_name, num_beats_to_record, enable_thru, replace_notes_override=None):
             # Le dictionnaire stockera: {pitch: (start_beat, velocity, track_idx)}
             open_notes = {}
             first_note_detected = False
@@ -2330,7 +2330,9 @@ class Sequencer(EventDispatcher):
                             if target_idx not in processed_tracks:
                                 track = self.song.tracks[target_idx]
                                 if is_midi_track(track):
-                                    if track.record_mode == 'OVERWRITE':
+                                    # Use override if provided, otherwise fallback to track mode
+                                    should_replace = track.record_mode == 'OVERWRITE' if replace_notes_override is None else replace_notes_override
+                                    if should_replace:
                                         # Truncate from the SESSION START instead of current_beat
                                         # This ensures all "previous" notes (from start_beat) are cleared.
                                         session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
@@ -2633,24 +2635,11 @@ class Sequencer(EventDispatcher):
         return numerator / denominator
 
     def _start_recording_internal(self, track_index: Optional[int], start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: Optional[bool], enable_thru: bool):
-            # Truncation for OVERWRITE mode
-            end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
-            if track_index is not None:
-                target_track = self.song.tracks[track_index]
-                if is_midi_track(target_track):
-                    should_replace = target_track.record_mode == 'OVERWRITE' if replace_notes is None else replace_notes
-                    if should_replace:
-                        self._truncate_track_for_recording(track_index, start_beat, end_beat)
-            else:
-                # Dynamic Routing: Pre-truncate all tracks armed for OVERWRITE at session start
-                for i, track in enumerate(self.song.tracks):
-                    if is_midi_track(track) and track.record_mode == 'OVERWRITE':
-                        self._truncate_track_for_recording(i, start_beat, end_beat)
-
+            # NOUVEAU: La troncature est maintenant différée au moment où l'enregistrement commence réellement.
             self.is_recording = True
             self.recording_thread = threading.Thread(
                 target=self._recording_thread_main,
-                args=(track_index, start_beat, inport_name, num_beats_to_record, enable_thru)
+                args=(track_index, start_beat, inport_name, num_beats_to_record, enable_thru, replace_notes)
             )
             self.recording_thread.daemon = True
             self.recording_thread.start()

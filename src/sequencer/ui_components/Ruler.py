@@ -131,7 +131,7 @@ class RulerContent(Widget):
                 minor_vertices = []
 
                 for beat in range(int(self.total_beats) + 1):
-                    x = beat * self.pixels_per_beat
+                    x = round(beat * self.pixels_per_beat)
                     if beat % self.beats_per_measure == 0:
                         major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
                     else:
@@ -148,13 +148,13 @@ class RulerContent(Widget):
                 # --- Labels ---
                 for beat in range(int(self.total_beats) + 1):
                     if beat % self.beats_per_measure == 0:
-                        x = beat * self.pixels_per_beat
+                        x = round(beat * self.pixels_per_beat)
                         measure_num = (beat // self.beats_per_measure) + 1
                         texture = self.get_measure_texture(measure_num)
                         Color(*c_white)
                         Rectangle(
                             texture=texture,
-                            pos=(int(self.x + x + self.label_padding_x), int(self.y + self.height * 0.2)),
+                            pos=(self.x + x + self.label_padding_x, self.y + self.height * 0.2),
                             size=texture.size
                         )
         finally:

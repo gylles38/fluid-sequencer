@@ -100,8 +100,11 @@ class FloatingWindow(RelativeLayout):
     min_height = NumericProperty(dp(250))
 
     def __init__(self, **kwargs):
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: __init__ {id(self)} (title={kwargs.get('title', 'Unknown')})")
         super().__init__(**kwargs)
         self._is_dragging = False
+        self._is_dismissed = False
         self._is_resizing = False
         self._drag_start_touch_pos = (0, 0)
         self._drag_start_widget_pos = (0, 0)
@@ -119,6 +122,8 @@ class FloatingWindow(RelativeLayout):
         Clock.schedule_once(self._unlock_touch, 0.3)
 
     def _unlock_touch(self, dt):
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: {self.title} ({id(self)}) touch unlocked")
         self._touch_lock = False
 
     def add_widget(self, widget, index=0, canvas=None):
@@ -133,6 +138,9 @@ class FloatingWindow(RelativeLayout):
         self.ids.content_container.add_widget(widget, index, canvas)
 
     def on_touch_down(self, touch):
+        #from kivy.logger import Logger
+        # Logger.info(f"FloatingWindow: on_touch_down entry {self.title} at {touch.pos}")
+
         if not self.collide_point(*touch.pos):
             return False
 
@@ -153,6 +161,7 @@ class FloatingWindow(RelativeLayout):
 
         # 1. Check resize handle first (chrome priority)
         if 'resize_handle' in self.ids and self.ids.resize_handle.collide_point(*local_pos) and not self.is_maximized:
+
             if self.parent:
                 # Capture current absolute state
                 old_pos = self.pos[:]
@@ -180,6 +189,7 @@ class FloatingWindow(RelativeLayout):
 
         # 3. dragging logic (title bar)
         if 'title_bar' in self.ids and self.ids.title_bar.collide_point(*local_pos) and not self.is_maximized:
+
             if self.parent:
                 # Capture current absolute state
                 old_pos = self.pos[:]
@@ -202,14 +212,26 @@ class FloatingWindow(RelativeLayout):
 
     def _bring_to_front(self):
         parent = self.parent
-        if parent:
+        if parent and len(parent.children) > 1:
             if parent.children[0] is not self:
-                parent.remove_widget(self)
-                parent.add_widget(self)
+                # We save the state so we know this is a move, not a dismiss
+                self._is_moving_to_front = True
+                try:
+                    # Capture current state to prevent re-opening logic
+                    orig_unlock = getattr(self, '_touch_lock', False)
+                    parent.remove_widget(self)
+                    parent.add_widget(self)
+                    # Restore state
+                    self._touch_lock = orig_unlock
+                finally:
+                    self._is_moving_to_front = False
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
+
+        # from kivy.logger import Logger
+        # Logger.info(f"FloatingWindow: on_touch_move {self.title} ({id(self)}) mode={'drag' if self._is_dragging else 'resize'}")
 
         if self._is_dragging:
             if self.parent:
@@ -312,18 +334,28 @@ class FloatingWindow(RelativeLayout):
             self.is_maximized = False
 
     def dismiss(self, *args):
+        if self._is_dismissed:
+            return
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: dismiss {self.title} ({id(self)})")
+        self._is_dismissed = True
         if self.parent:
             self.parent.remove_widget(self)
         self.on_dismiss()
 
     def on_dismiss(self):
-        pass
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: on_dismiss {self.title} ({id(self)})")
+        self._touch_lock = True
 
     def on_open(self):
-        pass
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: on_open {self.title} ({id(self)})")
 
     def on_parent(self, widget, parent):
-        if parent:
+        from kivy.logger import Logger
+        Logger.info(f"FloatingWindow: on_parent {self.title} ({id(self)}) parent={parent}")
+        if parent and not getattr(self, '_is_moving_to_front', False):
             Clock.schedule_once(lambda dt: self.on_open(), 0)
 
     def open(self):

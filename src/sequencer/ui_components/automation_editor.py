@@ -92,13 +92,52 @@ class AutomationValueAxis(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.draw, size=self.draw, min_val=self.draw, max_val=self.draw)
-        self.labels = []
+        self._label_widgets = {}
+        # We handle widget management separately from drawing to avoid layout loops
+        self.bind(min_val=self._update_label_widgets, max_val=self._update_label_widgets)
+        self.bind(pos=self.redraw, size=self.redraw)
+        Clock.schedule_once(lambda dt: self._update_label_widgets(), 0)
+
+    def _update_label_widgets(self, *args):
+        keys_needed = ['min', 'max']
+        if self.min_val < 0 < self.max_val:
+            keys_needed.append('zero')
+
+        # Add missing
+        for key in keys_needed:
+            if key not in self._label_widgets:
+                label = Label(
+                    font_size='10sp',
+                    halign='right',
+                    valign='middle',
+                    color=(0.8, 0.8, 0.8, 1)
+                )
+                self.add_widget(label)
+                self._label_widgets[key] = label
+
+        # Remove extra
+        to_remove = [k for k in self._label_widgets if k not in keys_needed]
+        for k in to_remove:
+            self.remove_widget(self._label_widgets[k])
+            del self._label_widgets[k]
+
+        self.redraw()
+
+    def redraw(self, *args):
+        """Debounced redraw of the value axis."""
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
+        Clock.schedule_once(self._do_redraw_axis, 0)
+
+    def _do_redraw_axis(self, dt):
+        try:
+            self.draw()
+        finally:
+            self._redraw_pending = False
 
     def draw(self, *args):
+        if not self.canvas: return
         self.canvas.clear()
-        self.clear_widgets()
-        self.labels.clear()
 
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
@@ -106,11 +145,12 @@ class AutomationValueAxis(Widget):
             Color(0.4, 0.4, 0.4, 1)
             Line(points=[self.right, self.y, self.right, self.top], width=1)
 
-        # Draw labels based on the range
+        # Update positions of labels based on current size/pos/range
         v_range = self.max_val - self.min_val
-        if v_range == 0: return
+        if v_range == 0: v_range = 1.0
 
-        def add_label(value, y_align, text=None):
+        def reposition_label(key, value, y_align, text=None):
+            if key not in self._label_widgets: return
             if text is None: text = f"{value:.1f}"
             y_pos = self.y + ((value - self.min_val) / v_range) * self.height
 
@@ -121,22 +161,15 @@ class AutomationValueAxis(Widget):
             else: # Center
                 y_pos -= dp(8)
 
-            label = Label(
-                text=text,
-                font_size='10sp',
-                pos=(self.x, y_pos),
-                size=(self.width - dp(4), dp(16)),
-                halign='right',
-                valign='middle',
-                color=(0.8, 0.8, 0.8, 1)
-            )
-            self.labels.append(label)
-            self.add_widget(label)
+            lbl = self._label_widgets[key]
+            lbl.text = text
+            lbl.pos = (self.x, y_pos)
+            lbl.size = (self.width - dp(4), dp(16))
 
-        add_label(self.max_val, y_align='top')
-        add_label(self.min_val, y_align='bottom')
-        if self.min_val < 0 < self.max_val:
-            add_label(0.0, y_align='center')
+        reposition_label('max', self.max_val, y_align='top')
+        reposition_label('min', self.min_val, y_align='bottom')
+        if 'zero' in self._label_widgets:
+            reposition_label('zero', 0.0, y_align='center')
 
 
 class EditableAutomationGrid(Widget):
@@ -151,6 +184,10 @@ class EditableAutomationGrid(Widget):
     _drag_offset = (0, 0)
     selected_point = ObjectProperty(None, allownone=True)    
 
+    # Virtual Dragging offsets
+    drag_delta_beat = NumericProperty(0)
+    drag_delta_value = NumericProperty(0)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.grid_widget = Widget(size_hint=(None, None))
@@ -158,30 +195,49 @@ class EditableAutomationGrid(Widget):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.draw,
-                  pixels_per_beat=self.draw, total_beats=self.draw,
-                  min_val=self.draw, max_val=self.draw)
+        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+                  pixels_per_beat=self.redraw, total_beats=self.redraw,
+                  min_val=self.redraw, max_val=self.redraw,
+                  drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
 
     def _update_layout(self, *args):
         self.grid_widget.size = self.size
         self.grid_widget.pos = self.pos
         self.curve_widget.size = self.size
         self.curve_widget.pos = self.pos
-        self.draw()
+        self.redraw()
+
+    def redraw(self, *args):
+        """Debounced redraw of the grid and curve."""
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
+        Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, dt):
+        try:
+            self.draw()
+        finally:
+            self._redraw_pending = False
 
     def on_touch_down(self, touch):
+        # from kivy.logger import Logger
+        # Logger.info(f"EditableAutomationGrid: on_touch_down at {touch.pos}")
+
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
 
-        local_pos = self.to_local(*touch.pos)
-        # RELATIVELAYOUT: local_pos is already relative to (0,0)
-        clicked_beat = local_pos[0] / self.pixels_per_beat
+        # In a RelativeLayout, touch.x and touch.y are already relative to the RL's origin.
+        # We need to subtract this widget's local position (x, y) relative to that RL.
+        lx, ly = touch.x - self.x, touch.y - self.y
+        local_pos = (lx, ly)
+
+        clicked_beat = lx / self.pixels_per_beat
 
         v_range = self.max_val - self.min_val
         if v_range == 0: v_range = 1
         
-        # Valeur cliquée relative à la hauteur du widget
-        clicked_value = self.min_val + (local_pos[1] / self.height) * v_range
+        # Value clicked relative to widget height
+        clicked_value = self.min_val + (ly / self.height) * v_range
 
         edit_mode = self.editor.edit_mode
         
@@ -202,7 +258,7 @@ class EditableAutomationGrid(Widget):
 
         self.selected_point = clicked_point
         # Force le rafraîchissement pour l'orange
-        self.draw_curve_and_points()
+        self.redraw()
         # Mettre à jour la barre de statut via l'éditeur
         self.editor.update_status_bar(clicked_point)
         
@@ -223,15 +279,18 @@ class EditableAutomationGrid(Widget):
 
         elif edit_mode == 'move':
             if clicked_point:
-                # On synchronise les deux variables de sélection
+                # Synchronization of selection variables
                 self.editor.selected_point = clicked_point
                 self.selected_point = clicked_point 
                 
                 self._dragged_point = clicked_point
-                # Offset par rapport à la position réelle du point (en coordonnées locales)
-                self._drag_offset = (local_pos[0] - (clicked_point.start_time * self.pixels_per_beat)), \
-                                    (local_pos[1] - (((clicked_point.value - self.min_val) / v_range) * self.height))
+                # Local offset from real point position
+                px = clicked_point.start_time * self.pixels_per_beat
+                py = ((clicked_point.value - self.min_val) / v_range) * self.height
+                self._drag_offset = (lx - px, ly - py)
+
                 touch.grab(self)
+                return True
 
         return super().on_touch_down(touch)
 
@@ -239,30 +298,37 @@ class EditableAutomationGrid(Widget):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
 
+        # from kivy.logger import Logger
+        # Logger.info(f"EditableAutomationGrid: on_touch_move at {touch.pos}")
+
         if self._dragged_point:
-            local_pos = self.to_local(*touch.pos)
+            lx, ly = touch.x - self.x, touch.y - self.y
 
-            # --- Time (X-axis) Calculation ---
-            new_x = local_pos[0] - self._drag_offset[0]
-            # RELATIVELAYOUT: local_pos is already relative to (0,0)
+            # Visual Beat Delta
+            new_x = lx - self._drag_offset[0]
             new_beat = new_x / self.pixels_per_beat
-            quantized_beat = round(new_beat * 4) / 4 # Snap to 16th
-            self._dragged_point.start_time = max(0, quantized_beat)
+            quantized_beat = round(new_beat * 4) / 4
+            target_beat = max(0, quantized_beat)
+            new_delta_beat = target_beat - self._dragged_point.start_time
+            if abs(self.drag_delta_beat - new_delta_beat) > 0.001:
+                self.drag_delta_beat = new_delta_beat
 
-            # --- Value (Y-axis) Calculation ---
+            # Visual Value Delta
             v_range = self.max_val - self.min_val
             if v_range == 0: v_range = 1
-            new_y = local_pos[1] - self._drag_offset[1]
+            new_y = ly - self._drag_offset[1]
             new_value_normalized = new_y / self.height
             new_value = self.min_val + new_value_normalized * v_range
-            self._dragged_point.value = max(self.min_val, min(self.max_val, new_value))
+            target_value = max(self.min_val, min(self.max_val, new_value))
+            new_delta_value = target_value - self._dragged_point.value
+            if abs(self.drag_delta_value - new_delta_value) > 0.001:
+                self.drag_delta_value = new_delta_value
 
-            self.editor.is_dirty = True
-            self.draw_curve_and_points()
-            
-            # Mise à jour de la barre de statut pendant le drag
+            # Optimization: Defer model update to on_touch_up.
+            # Update status bar live with virtual values.
             self.editor.update_status_bar(self._dragged_point)
-                    
+
+            # Redraw is triggered by property bindings.
             return True
 
         return super().on_touch_move(touch)
@@ -272,9 +338,19 @@ class EditableAutomationGrid(Widget):
             return super().on_touch_up(touch)
 
         if self._dragged_point:
+            # Apply visual deltas to the real model
+            self._dragged_point.start_time += self.drag_delta_beat
+            self._dragged_point.value += self.drag_delta_value
+
+            # Reset visual offsets
+            self.drag_delta_beat = 0
+            self.drag_delta_value = 0
+
             self._dragged_point = None
             touch.ungrab(self)
+            self.editor.is_dirty = True
             self.editor._record_state()
+            self.redraw()
             return True
 
         return super().on_touch_up(touch)
@@ -287,24 +363,43 @@ class EditableAutomationGrid(Widget):
             Color(0.1, 0.1, 0.1, 1)
             Rectangle(pos=self.pos, size=self.size)
 
-            # --- Grid Lines ---
+            # --- Optimized Grid Lines using Mesh ---
+            major_vertices = []
+            minor_vertices = []
+
             # Vertical lines (beats)
-            Color(0.2, 0.2, 0.2, 1)
             for i in range(int(self.total_beats) + 1):
                 x = i * self.pixels_per_beat
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
-                Line(points=[self.x + x, self.y, self.x + x, self.y + self.height], width=1.5 if is_measure else 0.5)
+                if is_measure:
+                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                else:
+                    minor_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
 
             # Horizontal lines (values)
+            h_vertices = []
             num_h_lines = 10
             for i in range(num_h_lines + 1):
                 y = (i / num_h_lines) * self.height
-                Line(points=[self.x, self.y + y, self.x + self.width, self.y + y], width=0.5)
+                h_vertices.extend([self.x, self.y + y, 0, 0, self.x + self.width, self.y + y, 0, 0])
+
+            Color(0.2, 0.2, 0.2, 1)
+            if major_vertices:
+                Mesh(vertices=major_vertices, indices=list(range(len(major_vertices)//4)), mode='lines')
+
+            Color(0.2, 0.2, 0.2, 0.5) # Subtler minor lines
+            if minor_vertices:
+                Mesh(vertices=minor_vertices, indices=list(range(len(minor_vertices)//4)), mode='lines')
+
+            if h_vertices:
+                Mesh(vertices=h_vertices, indices=list(range(len(h_vertices)//4)), mode='lines')
 
         self.draw_curve_and_points()
 
     def draw_curve_and_points(self, *args):
+        # from kivy.logger import Logger
+        # Logger.info("EditableAutomationGrid: draw_curve_and_points START")
         # 1. On efface le calque de dessin (courbes + points carrés)
         self.curve_widget.canvas.clear()
         
@@ -326,7 +421,10 @@ class EditableAutomationGrid(Widget):
             vertices, indices, v_index = [], [], 0
 
             first_p = sorted_points[0]
-            first_x = first_p.start_time * self.pixels_per_beat
+            # Handle visual offsets
+            v_off_start = self.drag_delta_beat if (first_p is self._dragged_point) else 0
+            first_x = (first_p.start_time + v_off_start) * self.pixels_per_beat
+
             if first_x > 0:
                 vertices.extend([0, 0, 0, 0, 0, 0, 0, 0])
                 indices.extend([v_index, v_index + 1])
@@ -337,8 +435,12 @@ class EditableAutomationGrid(Widget):
 
             for i in range(len(sorted_points)):
                 p1 = sorted_points[i]
-                x1 = p1.start_time * self.pixels_per_beat
-                y1 = (normalize(p1.value) * self.height)
+                # Handle visual offsets
+                v_off1_x = self.drag_delta_beat if (p1 is self._dragged_point) else 0
+                v_off1_y = self.drag_delta_value if (p1 is self._dragged_point) else 0
+
+                x1 = (p1.start_time + v_off1_x) * self.pixels_per_beat
+                y1 = (normalize(p1.value + v_off1_y) * self.height)
 
                 vertices.extend([self.x + x1, self.y, 0, 0, self.x + x1, self.y + y1, 0, 0])
                 indices.extend([v_index, v_index + 1])
@@ -346,8 +448,11 @@ class EditableAutomationGrid(Widget):
 
                 if i < len(sorted_points) - 1:
                     p2 = sorted_points[i+1]
-                    x2 = p2.start_time * self.pixels_per_beat
-                    y2 = (normalize(p2.value) * self.height) # Position Y du point suivant
+                    v_off2_x = self.drag_delta_beat if (p2 is self._dragged_point) else 0
+                    v_off2_y = self.drag_delta_value if (p2 is self._dragged_point) else 0
+
+                    x2 = (p2.start_time + v_off2_x) * self.pixels_per_beat
+                    y2 = (normalize(p2.value + v_off2_y) * self.height)
 
                     # --- LOGIQUE EN ESCALIER POUR PROGRAM CHANGE ---
                     if self.editor.selected_parameter == "prog":
@@ -369,23 +474,27 @@ class EditableAutomationGrid(Widget):
                             t = step / num_steps
                             curr_x = x1 + t * (x2 - x1)
                             
-                            # MODIFICATION ICI : on passe c_val si c'est une sine
                             if p1.curve == "sine":
                                 ratio = _interp_sine(t, c_val)
                             else:
                                 ratio = interp_func(t)
                                 
-                            real_val = p1.value + ratio * (p2.value - p1.value)
+                            val1 = p1.value + v_off1_y
+                            val2 = p2.value + v_off2_y
+                            real_val = val1 + ratio * (val2 - val1)
                             curr_y = (normalize(real_val) * self.height)
                             vertices.extend([self.x + curr_x, self.y, 0, 0, self.x + curr_x, self.y + curr_y, 0, 0])
                             indices.extend([v_index, v_index + 1])
                             v_index += 2
 
             last_p = sorted_points[-1]
-            last_x = last_p.start_time * self.pixels_per_beat
+            v_off_last_x = self.drag_delta_beat if (last_p is self._dragged_point) else 0
+            v_off_last_y = self.drag_delta_value if (last_p is self._dragged_point) else 0
+
+            last_x = (last_p.start_time + v_off_last_x) * self.pixels_per_beat
             final_x = self.total_beats * self.pixels_per_beat
             if last_x < final_x:
-                y_last = (normalize(last_p.value) * self.height)
+                y_last = (normalize(last_p.value + v_off_last_y) * self.height)
                 vertices.extend([self.x + final_x, self.y, 0, 0, self.x + final_x, self.y + y_last, 0, 0])
                 indices.extend([v_index, v_index + 1])
 
@@ -399,25 +508,39 @@ class EditableAutomationGrid(Widget):
             Color(0.8, 0.8, 1, 0.9)
             for i in range(len(sorted_points) - 1):
                 p1, p2 = sorted_points[i], sorted_points[i+1]
-                x1 = p1.start_time * self.pixels_per_beat
-                y1 = normalize(p1.value) * self.height
-                x2 = p2.start_time * self.pixels_per_beat
-                y2 = normalize(p2.value) * self.height
+                v_off1_x = self.drag_delta_beat if (p1 is self._dragged_point) else 0
+                v_off1_y = self.drag_delta_value if (p1 is self._dragged_point) else 0
+                v_off2_x = self.drag_delta_beat if (p2 is self._dragged_point) else 0
+                v_off2_y = self.drag_delta_value if (p2 is self._dragged_point) else 0
+
+                x1 = (p1.start_time + v_off1_x) * self.pixels_per_beat
+                y1 = normalize(p1.value + v_off1_y) * self.height
+                x2 = (p2.start_time + v_off2_x) * self.pixels_per_beat
+                y2 = normalize(p2.value + v_off2_y) * self.height
                 Line(points=[self.x + x1, self.y + y1, self.x + x2, self.y + y2], width=1.2)
 
             # 2. Dessiner les points normaux (on saute le sélectionné)
             for p in sorted_points:
+                # Apply visual offsets for the dragged point
+                is_dragged = (p is self._dragged_point)
+                v_off_x = self.drag_delta_beat if is_dragged else 0
+                v_off_y = self.drag_delta_value if is_dragged else 0
+
                 if p == self.selected_point: continue
-                x = p.start_time * self.pixels_per_beat
-                y = normalize(p.value) * self.height
+                x = (p.start_time + v_off_x) * self.pixels_per_beat
+                y = normalize(p.value + v_off_y) * self.height
                 Color(0.8, 0.8, 1, 0.9)
                 Rectangle(pos=(self.x + x - point_radius, self.y + y - point_radius), size=(point_radius * 2, point_radius * 2))
 
             # 3. Dessiner le point sélectionné en DERNIER (Orange et par-dessus)
             if self.selected_point:
+                is_dragged = (self.selected_point is self._dragged_point)
+                v_off_x = self.drag_delta_beat if is_dragged else 0
+                v_off_y = self.drag_delta_value if is_dragged else 0
+
                 p = self.selected_point
-                x = p.start_time * self.pixels_per_beat
-                y = normalize(p.value) * self.height
+                x = (p.start_time + v_off_x) * self.pixels_per_beat
+                y = normalize(p.value + v_off_y) * self.height
                 Color(1, 0.6, 0, 1) # Orange vif
                 Rectangle(pos=(self.x + x - selected_radius, self.y + y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
 
@@ -586,21 +709,21 @@ Builder.load_string("""
                 min_val: root.min_val
                 max_val: root.max_val
 
-            ScrollView:
+            BoundedScrollView:
                 id: timeline_scroll
                 size_hint: (1, 1)
                 do_scroll_x: True
                 do_scroll_y: False
                 bar_width: dp(15)
-                scroll_type: ['bars', 'content']
+                scroll_type: ['bars']
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
                 # L'ENFANT UNIQUE DU SCROLLVIEW
-                FloatLayout:
+                RelativeLayout:
                     id: scroll_content
                     size_hint: None, 1
-                    width: grid.width
+                    width: grid.width + dp(15)
 
                     # 1. Le contenu principal (Grille + Sécurité)
                     BoxLayout:
@@ -748,6 +871,9 @@ class AutomationEditor(FloatingWindow):
         # On extrait track et sequencer_layout de kwargs avant le super s'ils y sont
         # ou on s'assure qu'ils sont passés par propriétés.        
         super(AutomationEditor, self).__init__(**kwargs)
+        from kivy.logger import Logger
+        import time
+        start_time = time.time()
         self.source_track = self.track
         self.title = f"Automation: {self.track.name}"
 
@@ -756,11 +882,13 @@ class AutomationEditor(FloatingWindow):
             target_track_index=self.track.target_track_index,
             points=copy.deepcopy(self.track.points)
         )
+        Logger.info(f"AutomationEditor: deepcopy took {time.time() - start_time:.4f}s")
         self.total_beats = self.sequencer_layout.sequencer.get_song_length_in_beats()
 
         # Bind end_pos_str to sequencer
         self.end_pos_str = self.sequencer_layout.sequencer.ui_end_pos_str
-        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self.setter('end_pos_str'))
+        self._seq_binding_end_pos = lambda inst, val: setattr(self, 'end_pos_str', val)
+        self.sequencer_layout.sequencer.bind(ui_end_pos_str=self._seq_binding_end_pos)
 
         # On stocke le paramètre souhaité
         self.selected_parameter = initial_param
@@ -833,12 +961,11 @@ class AutomationEditor(FloatingWindow):
         ruler.padding = [0, 0, 0, 0]
         
         ruler.redraw()
-        self.ids.grid.draw() # Calls draw_curve_and_points
+        self.ids.grid.redraw()
 
         # Démarrage de la playhead
-        if hasattr(self, '_playhead_event'):
-            self._playhead_event.cancel()
-        self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
+        if not getattr(self, '_playhead_event', None):
+            self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
         
     def _sync_ruler_scroll(self, instance, value):
         """Répercute le défilement de la grille sur la règle."""
@@ -869,13 +996,24 @@ class AutomationEditor(FloatingWindow):
     def update_status_bar(self, point):
         if point:
             self.ids.edit_zone.opacity = 1
-            self.ids.input_beat.text = f"{point.start_time:.2f}"
+
+            # Account for Virtual Dragging deltas in real-time display
+            v_beat_off = 0
+            v_val_off = 0
+            if hasattr(self.ids.grid, '_dragged_point') and self.ids.grid._dragged_point is point:
+                v_beat_off = self.ids.grid.drag_delta_beat
+                v_val_off = self.ids.grid.drag_delta_value
+
+            display_beat = point.start_time + v_beat_off
+            display_value = point.value + v_val_off
+
+            self.ids.input_beat.text = f"{display_beat:.2f}"
             
             # Valeur principale
             if self.selected_parameter in ["prog", "vel"]:
-                self.ids.input_value.text = f"{int(point.value)}"
+                self.ids.input_value.text = f"{int(display_value)}"
             else:
-                self.ids.input_value.text = f"{point.value:.3f}"
+                self.ids.input_value.text = f"{display_value:.3f}"
 
             # --- Gestion spécifique à la courbe Sine ---
             if point.curve == "sine":
@@ -893,8 +1031,15 @@ class AutomationEditor(FloatingWindow):
         if 'playhead' not in self.ids:
             return
 
+        # Optimization: Don't update UI if beat hasn't changed
         sequencer = self.sequencer_layout.sequencer
-        current_beat = sequencer.current_beat 
+        current_beat = sequencer.current_beat
+
+        if abs(getattr(self, '_last_playhead_beat', -1) - current_beat) < 0.001 and \
+           sequencer.playback_state == getattr(self, 'last_playback_state', 'stopped'):
+            return
+        self._last_playhead_beat = current_beat
+
         current_state = sequencer.playback_state
 
         # --- RESET AU STOP ---
@@ -977,15 +1122,27 @@ class AutomationEditor(FloatingWindow):
 
     def on_dismiss(self):
         """Nettoyage des bindings et de l'horloge à la fermeture de l'éditeur."""
-        self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+        from kivy.logger import Logger
+        Logger.info(f"AutomationEditor: cleaning up {id(self)}")
+
+        # Unbind sequencer properties
+        try:
+            self.sequencer_layout.sequencer.unbind(playback_state=self.on_playback_state_change)
+            if hasattr(self, '_seq_binding_end_pos'):
+                self.sequencer_layout.sequencer.unbind(ui_end_pos_str=self._seq_binding_end_pos)
+        except Exception as e:
+            Logger.error(f"AutomationEditor: Error unbinding sequencer: {e}")
 
         # 1. On libère le clavier
-        Window.unbind(on_key_down=self._on_key_down)
+        try:
+            Window.unbind(on_key_down=self._on_key_down)
+        except Exception as e:
+            Logger.error(f"AutomationEditor: Error unbinding keyboard: {e}")
         
         # 2. On arrête la mise à jour de la Playhead
-        if hasattr(self, '_playhead_event'):
+        if hasattr(self, '_playhead_event') and self._playhead_event:
             self._playhead_event.cancel()
-            # Alternativement : Clock.unschedule(self.update_playhead)
+            self._playhead_event = None
             
         super().on_dismiss()
 
@@ -1042,8 +1199,10 @@ class AutomationEditor(FloatingWindow):
 
     def on_automation_selection_change(self, instance, param):
         self.selected_parameter = param
+        if self.track:
+            self.track.active_parameter = param
 
-        if param in ["prog", "vel"]:
+        if param in ["prog", "vel"] or param.startswith("cc"):
             self.min_val, self.max_val = 0.0, 127.0
         elif param == "pan":
             self.min_val, self.max_val = -1.0, 1.0
@@ -1056,6 +1215,7 @@ class AutomationEditor(FloatingWindow):
 
         self.visible_points = [p for p in self.track_copy.points if p.parameter == param]
         self.ids.grid.points = self.visible_points
+        self.ids.grid.redraw()
 
     def _on_key_down(self, instance, keyboard, keycode, text, modifiers):
         # --- Sécurité : Désactiver les raccourcis si un champ texte a le focus ---
@@ -1185,6 +1345,7 @@ class AutomationEditor(FloatingWindow):
         self.track_copy.points = [AutomationPoint(**data) for data in state]
         # Re-filter visible points based on the current parameter
         self.on_automation_selection_change(None, self.selected_parameter)
+        self.ids.grid.redraw()
         self.is_dirty = True
         self._update_undo_redo_buttons_state()
 
@@ -1202,6 +1363,7 @@ class AutomationEditor(FloatingWindow):
         )
         self.track_copy.points.append(new_point)
         self.on_automation_selection_change(None, self.selected_parameter) # Refresh view
+        self.ids.grid.redraw()
         self._record_state()
         self.is_dirty = True
 
@@ -1209,6 +1371,7 @@ class AutomationEditor(FloatingWindow):
         if point in self.track_copy.points:
             self.track_copy.points.remove(point)
             self.on_automation_selection_change(None, self.selected_parameter)
+            self.ids.grid.redraw()
             self._record_state()
             self.is_dirty = True
 
@@ -1241,7 +1404,7 @@ class AutomationEditor(FloatingWindow):
 
         # 5. Forcer le redessin du widget Grille
         if hasattr(self.ids, 'grid'):
-            self.ids.grid.draw_curve_and_points()
+            self.ids.grid.redraw()
 
     def show_curve_type_popup(self, point, touch):
         if self.selected_parameter == 'prog': 
@@ -1297,7 +1460,7 @@ class AutomationEditor(FloatingWindow):
         
         # On met à jour l'affichage (Barre de statut + Dessin)
         self.update_status_bar(point)
-        self.ids.grid.draw_curve_and_points()
+        self.ids.grid.redraw()
         
         self._record_state()
         self.is_dirty = True
@@ -1359,8 +1522,14 @@ class AutomationEditor(FloatingWindow):
 
     def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value):
         if self._is_scrolling: return
-        self._is_scrolling = True
 
+        # Ignore micro-changes to prevent oscillations
+        if hasattr(source_scroll_view, '_last_scroll_x') and \
+           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.0001:
+            return
+        source_scroll_view._last_scroll_x = scroll_x_value
+
+        self._is_scrolling = True
         try:
             # Calculate absolute pixel offset from source
             content_width_source = source_scroll_view.children[0].width
@@ -1419,6 +1588,7 @@ class AutomationEditor(FloatingWindow):
     def _save_changes(self):
         # 1. On applique les changements aux points (qu'ils soient vides ou modifiés)
         self.track.points = copy.deepcopy(self.track_copy.points)
+        self.track.active_parameter = self.selected_parameter
         self.is_dirty = False
         
         # 2. On rafraîchit l'affichage des miniatures (Timeline)

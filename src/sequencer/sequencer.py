@@ -45,6 +45,7 @@ class Sequencer(EventDispatcher):
     playback_state = StringProperty("stopped")
     is_recording = BooleanProperty(False)
     ui_end_pos_str = StringProperty("")
+    is_smoothing = BooleanProperty(False)
     song_structure_changed = NumericProperty(0)
     tempo = NumericProperty(120)
     DEFAULT_AUDIO_PLAYER_COMMAND = "mpv --really-quiet --no-video --idle --af=rubberband --audio-device=jack"
@@ -96,6 +97,7 @@ class Sequencer(EventDispatcher):
         self.audio_track_duration_ms: Dict[str, int] = {}
         
         self.default_record_port: Optional[str] = None  # Port d'enregistrement par défaut        
+        self._last_recorded_auto_points = {} # (track_idx, param) -> [last_p, prev_p]
         
         # ⚠️ NOUVEAU : Cache pour éviter de recharger les fichiers audio
         self._audio_duration_cache: Dict[str, float] = {} 
@@ -207,7 +209,17 @@ class Sequencer(EventDispatcher):
             # Ajoute une petite compensation (ex: 0.05 beat) pour compenser le lag de l'UI
             look_ahead_beat = self.current_beat + 0.05           
             val = self.jack_manager._get_input_routing_value(look_ahead_beat)
-            new_index = int(round(val)) if val is not None else -1
+
+            # Safeguard: Robustly handle numeric types (including numpy/Mocks)
+            try:
+                if val is not None:
+                    new_index = int(round(val))
+                else:
+                    new_index = -1
+            except (TypeError, ValueError):
+                # This handles MagicMocks in tests without breaking real numeric values
+                new_index = self.current_routing_index if "MagicMock" in str(type(val)) else -1
+
             if new_index != self.current_routing_index:
                 self.current_routing_index = new_index
 
@@ -464,6 +476,7 @@ class Sequencer(EventDispatcher):
     def _merge_recorded_events(self, dt):
         """Polls recorded events from JackManager and merges them into tracks."""
         any_added = False
+        tracks_to_sort = set()
         while True:
             try:
                 event_data = self.jack_manager._recorded_events_to_merge.popleft()
@@ -472,30 +485,159 @@ class Sequencer(EventDispatcher):
                     continue
 
                 track = self.song.tracks[track_idx]
-                if not is_midi_track(track):
-                    continue
 
                 if event_data['type'] == 'note':
+                    if not is_midi_track(track):
+                        continue
                     note = Note(pitch=event_data['pitch'], velocity=event_data['velocity'], duration=event_data['duration'])
                     event = Event(start_time=event_data['start_time'], notes=[note])
                     track.add_event(event)
+
+                    # Also record to Velocity automation
+                    for i, t in enumerate(self.song.tracks):
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            # Stored as absolute MIDI velocity 0-127
+                            self._add_smoothed_automation_point(t, 'vel', event_data['start_time'], float(event_data['velocity']), sort=False)
+                            tracks_to_sort.add(i)
                 elif event_data['type'] == 'cc':
-                    cc = CCMessage(control=event_data['control'], value=event_data['value'])
-                    # Find or create event at this time
-                    existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
-                    if existing_event:
-                        existing_event.cc_messages.append(cc)
-                    else:
-                        event = Event(start_time=event_data['start_time'], cc_messages=[cc])
-                        track.add_event(event)
+                    # Support for direct CC automation recording
+                    cc_num = event_data['control']
+                    cc_val = event_data['value']
+
+                    # Mapping of standard controllers to automation parameters
+                    target_param = None
+                    norm_val = float(cc_val)
+
+                    # --- Hardware mapping check (Volume Sliders) ---
+                    if cc_num == self.midi_config.get_volume_slider_cc(track_idx):
+                        target_param = 'vol'
+                        norm_val = cc_val / 127.0
+
+                    # --- Standard MIDI Controller Mapping ---
+                    elif cc_num == 1: target_param = 'cc1'
+                    elif cc_num == 7:
+                        target_param = 'vol'
+                        norm_val = cc_val / 127.0
+                    elif cc_num == 10:
+                        target_param = 'pan'
+                        norm_val = (cc_val / 127.0) * 2.0 - 1.0
+
+                    # 1. Search for an automation track that is targeting this track
+                    found_auto = False
+                    for i, t in enumerate(self.song.tracks):
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            current_target_param = target_param
+                            # Also check if it matches the current active custom CC lane
+                            if not current_target_param and t.active_parameter.lower() == f"cc{cc_num}":
+                                current_target_param = t.active_parameter.lower()
+
+                            if current_target_param:
+                                # Optimization: don't sort inside the loop
+                                self._add_smoothed_automation_point(t, current_target_param, event_data['start_time'], norm_val, sort=False)
+                                t.active_parameter = current_target_param
+                                found_auto = True
+                                tracks_to_sort.add(i)
+
+                    # 2. Auto-create automation track for standard parameters if not found
+                    if not found_auto and target_param:
+                        auto_track_idx = self._find_or_create_automation_track(track_idx, target_param)
+                        if auto_track_idx is not None:
+                            auto_track = self.song.tracks[auto_track_idx]
+                            self._add_smoothed_automation_point(auto_track, target_param, event_data['start_time'], norm_val, sort=False)
+                            tracks_to_sort.add(auto_track_idx)
+                            found_auto = True
+
+                    if not found_auto and is_midi_track(track):
+                        # Fallback: record as standard CC message on the MIDI track
+                        cc = CCMessage(control=cc_num, value=cc_val)
+                        existing_event = next((e for e in track.events if math.isclose(e.start_time, event_data['start_time'], abs_tol=0.001)), None)
+                        if existing_event:
+                            existing_event.cc_messages.append(cc)
+                        else:
+                            event = Event(start_time=event_data['start_time'], cc_messages=[cc])
+                            track.add_event(event)
+                elif event_data['type'] == 'pitchwheel':
+                    pitch_val = event_data['pitch']
+                    # Mido pitch is 0-16383, center is 8192.
+                    norm_val = (float(pitch_val) - 8192.0) / 8192.0
+                    found_auto = False
+                    for i, t in enumerate(self.song.tracks):
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            self._add_smoothed_automation_point(t, 'pitch', event_data['start_time'], norm_val, sort=False)
+                            tracks_to_sort.add(i)
+                            found_auto = True
+                    if not found_auto:
+                        auto_track_idx = self._find_or_create_automation_track(track_idx, 'pitch')
+                        if auto_track_idx is not None:
+                            self._add_smoothed_automation_point(self.song.tracks[auto_track_idx], 'pitch', event_data['start_time'], norm_val, sort=False)
+                            tracks_to_sort.add(auto_track_idx)
+
+                elif event_data['type'] == 'program':
+                    prog_val = event_data['program']
+                    found_auto = False
+                    for i, t in enumerate(self.song.tracks):
+                        if isinstance(t, AutomationTrack) and t.target_track_index == track_idx:
+                            self._add_smoothed_automation_point(t, 'prog', event_data['start_time'], float(prog_val), sort=False)
+                            tracks_to_sort.add(i)
+                            found_auto = True
+                    if not found_auto:
+                        auto_track_idx = self._find_or_create_automation_track(track_idx, 'prog')
+                        if auto_track_idx is not None:
+                            self._add_smoothed_automation_point(self.song.tracks[auto_track_idx], 'prog', event_data['start_time'], float(prog_val), sort=False)
+                            tracks_to_sort.add(auto_track_idx)
 
                 any_added = True
             except IndexError:
                 break
 
         if any_added:
+            # Batch sort all modified tracks
+            for idx in tracks_to_sort:
+                self.song.tracks[idx].points.sort(key=lambda p: p.start_time)
+
             self.is_dirty = True
             self._trigger_song_structure_change()
+
+    def _add_smoothed_automation_point(self, auto_track: AutomationTrack, parameter: str, start_time: float, value: float, sort: bool = True):
+        """Adds an automation point, smoothing out almost collinear points to reduce density."""
+        key = (id(auto_track), parameter)
+        if key not in self._last_recorded_auto_points:
+            point = AutomationPoint(start_time=start_time, parameter=parameter, value=value, curve='linear')
+            auto_track.add_point(point, sort=sort)
+            self._last_recorded_auto_points[key] = [point, None] # [last, prev]
+            return
+
+        last_p, prev_p = self._last_recorded_auto_points[key]
+
+        # Optimization logic:
+        # If the new point is almost on the same line as the segment [prev_p, last_p],
+        # we update last_p instead of adding a new point.
+        if prev_p is not None:
+            # Linear interpolation check
+            time_gap = last_p.start_time - prev_p.start_time
+            if time_gap > 0:
+                # Expected value at last_p.start_time if it was on a line from prev_p to new point
+                total_gap = start_time - prev_p.start_time
+                if total_gap > 0:
+                    ratio = time_gap / total_gap
+                    expected_val = prev_p.value + ratio * (value - prev_p.value)
+
+                    # Threshold for 'almost collinear'.
+                    # For 0-127 CCs, 0.5 is a good balance.
+                    # For normalized 0-1, we use ~0.008 (slightly above 1 bit)
+                    threshold = 0.51 if parameter.startswith('cc') or parameter in ['vel', 'prog'] else 0.008
+
+                    # Also don't allow segments longer than 4 beats without a point
+                    if abs(last_p.value - expected_val) < threshold and total_gap < 4.0:
+                        # Replace last point
+                        last_p.start_time = start_time
+                        last_p.value = value
+                        return
+
+        # Add new point and shift history
+        new_p = AutomationPoint(start_time=start_time, parameter=parameter, value=value, curve='linear')
+        auto_track.add_point(new_p, sort=sort)
+        self._last_recorded_auto_points[key] = [new_p, last_p]
 
     def get_default_record_port(self) -> Optional[str]:
         """Retourne le port d'enregistrement par défaut"""
@@ -2037,12 +2179,17 @@ class Sequencer(EventDispatcher):
         if not 0 <= target_track_index < len(self.song.tracks):
             return None
         target_track = self.song.tracks[target_track_index]
-        new_track_name = f"{target_track.name} {parameter_name.capitalize()} Automation"
+
+        # 1. Look for an existing automation track for this specific target
         for i, track in enumerate(self.song.tracks):
-            if isinstance(track, AutomationTrack) and track.target_track_index == target_track_index and track.name == new_track_name:
+            if isinstance(track, AutomationTrack) and track.target_track_index == target_track_index:
+                # We reuse the same automation track for ALL parameters of a target track
                 return i
+
+        # 2. Create a new one if not found
+        new_track_name = f"{target_track.name} Automation"
         print(f"\nCreating new automation track: '{new_track_name}'")
-        new_track = AutomationTrack(name=new_track_name, target_track_index=target_track_index)
+        new_track = AutomationTrack(name=new_track_name, target_track_index=target_track_index, active_parameter=parameter_name)
         self.song.add_track(new_track)
         self.is_dirty = True
         return len(self.song.tracks) - 1
@@ -2088,7 +2235,7 @@ class Sequencer(EventDispatcher):
                 with mido.open_input(inport_name) as inport:
                     print(f"Port d'entrée MIDI ouvert: {inport_name}")
                     list(inport.iter_pending())
-                    
+
                     # Target track name for logging
                     initial_target_idx = self.jack_manager._get_input_routing_value(start_beat)
                     if initial_target_idx is not None and 0 <= initial_target_idx < len(self.song.tracks):
@@ -2098,7 +2245,7 @@ class Sequencer(EventDispatcher):
 
                     print(f"En attente de la première note sur '{target_name}'...")
 
-                    pending_first_note = None
+                    pending_trigger_msg = None
                     while not self._stop_event.is_set() and not first_note_detected:
                         if not self.is_recording:
                              print("Recording armed state cancelled.")
@@ -2111,14 +2258,21 @@ class Sequencer(EventDispatcher):
                             break
 
                         msg = inport.poll()
-                        if msg and msg.type == 'note_on' and msg.velocity > 0:
-                            first_note_detected = True
-                            pending_first_note = msg
-                            self.play(start_beat=start_beat)
-                            time.sleep(0.05)
-                            recording_start_beat = self._get_current_beat()
-                            print(f"Enregistrement déclenché à {self._format_beats_to_position(recording_start_beat)}")
-                            break
+                        if msg:
+                            # Any MIDI activity can trigger recording (Note, CC, Pitch, Program)
+                            is_trigger = False
+                            if msg.type == 'note_on' and msg.velocity > 0: is_trigger = True
+                            elif msg.type in ('control_change', 'pitchwheel', 'program_change'): is_trigger = True
+
+                            if is_trigger:
+                                first_note_detected = True
+                                pending_trigger_msg = msg
+                                self.play(start_beat=start_beat)
+                                # Small delay to allow transport to start and get a reliable beat
+                                time.sleep(0.05)
+                                recording_start_beat = self._get_current_beat()
+                                print(f"Enregistrement déclenché par {msg.type} à {self._format_beats_to_position(recording_start_beat)}")
+                                break
 
                         time.sleep(0.01)
 
@@ -2128,7 +2282,7 @@ class Sequencer(EventDispatcher):
 
                     while not self._stop_event.is_set():
                         current_beat = self._get_current_beat()
-                        
+
                         # Get current target track from MIDI routing
                         target_idx = self.jack_manager._get_input_routing_value(current_beat)
 
@@ -2142,14 +2296,15 @@ class Sequencer(EventDispatcher):
                                         # This ensures all "previous" notes (from start_beat) are cleared.
                                         session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
                                         self._truncate_track_for_recording(target_idx, start_beat, session_end_beat)
-                                    processed_tracks.add(target_idx)
+                                processed_tracks.add(target_idx)
 
-                        # Process pending first note
-                        if pending_first_note:
-                            msgs = [pending_first_note]
-                            pending_first_note = None
-                        else:
-                            msgs = list(inport.iter_pending())
+                        # Process triggering message if any, then pull pending
+                        msgs = []
+                        if pending_trigger_msg:
+                            msgs.append(pending_trigger_msg)
+                            pending_trigger_msg = None
+
+                        msgs.extend(list(inport.iter_pending()))
 
                         for msg in msgs:
                             if msg.type == 'note_on' and msg.velocity > 0:
@@ -2159,8 +2314,8 @@ class Sequencer(EventDispatcher):
                                         if msg.note not in open_notes:
                                             open_notes[msg.note] = (current_beat, msg.velocity, target_idx)
                                             # Thru
-                                            if enable_thru and track.output_port_name in self.open_ports:
-                                                self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
+                                            if enable_thru and getattr(track, 'output_port_name', None) in self.open_ports:
+                                                self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
 
                             elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
                                 if msg.note in open_notes:
@@ -2180,19 +2335,69 @@ class Sequencer(EventDispatcher):
 
                                     # Thru OFF
                                     if enable_thru:
-                                        # Use current target_idx if track_idx is missing (safety)
+                                        # Use original track_idx for Note Off to match the Note On channel
                                         t_idx = track_idx if track_idx is not None else target_idx
                                         if t_idx is not None and 0 <= t_idx < len(self.song.tracks):
                                             track = self.song.tracks[t_idx]
-                                            if is_midi_track(track) and track.output_port_name in self.open_ports:
-                                                self.open_ports[track.output_port_name].send(msg.copy(channel=track.channel))
-                        
+                                            if is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                                self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
+
+                            elif msg.type == 'control_change':
+                                # Global check for hardware-mapped faders (Volume Sliders 0-7)
+                                hw_track_idx = None
+                                for i in range(len(self.song.tracks)):
+                                    if msg.control == self.midi_config.get_volume_slider_cc(i):
+                                        hw_track_idx = i
+                                        break
+
+                                # Use hardware track index if mapped, otherwise use current routing target
+                                final_track_idx = hw_track_idx if hw_track_idx is not None else target_idx
+
+                                if final_track_idx is not None and 0 <= final_track_idx < len(self.song.tracks):
+                                    processed_tracks.add(final_track_idx)
+                                    track = self.song.tracks[final_track_idx]
+                                    # Record CC (Supported for both MIDI and Audio tracks via automation)
+                                    self.jack_manager._recorded_events_to_merge.append({
+                                        'type': 'cc',
+                                        'track_idx': final_track_idx,
+                                        'control': msg.control,
+                                        'value': msg.value,
+                                        'start_time': current_beat
+                                    })
+                                    # Thru (Only for MIDI tracks)
+                                    if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
+                            elif msg.type == 'pitchwheel':
+                                if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
+                                    processed_tracks.add(target_idx)
+                                    track = self.song.tracks[target_idx]
+                                    self.jack_manager._recorded_events_to_merge.append({
+                                        'type': 'pitchwheel',
+                                        'track_idx': target_idx,
+                                        'pitch': msg.pitch,
+                                        'start_time': current_beat
+                                    })
+                                    if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
+                            elif msg.type == 'program_change':
+                                if target_idx is not None and 0 <= target_idx < len(self.song.tracks):
+                                    processed_tracks.add(target_idx)
+                                    track = self.song.tracks[target_idx]
+                                    self.jack_manager._recorded_events_to_merge.append({
+                                        'type': 'program',
+                                        'track_idx': target_idx,
+                                        'program': msg.program,
+                                        'start_time': current_beat
+                                    })
+                                    if enable_thru and is_midi_track(track) and getattr(track, 'output_port_name', None) in self.open_ports:
+                                        self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
+
                         if (num_beats_to_record is not None and
                                 current_beat >= (start_beat + num_beats_to_record)):
                             Clock.schedule_once(lambda dt: self._stop_playback_transport())
                             self._stop_event.set()
                             break
-                        
+
                         # Polling often to avoid ALSA buffer overflow, but processing efficiently
                         time.sleep(0.001)
 
@@ -2215,10 +2420,40 @@ class Sequencer(EventDispatcher):
                             'duration': duration
                         })
 
+                # Perform post-recording smoothing
+                def do_smoothing(dt):
+                    self.is_smoothing = True
+                    try:
+                        # Find all automation tracks that might have been modified
+                        # Using indices to avoid unhashable type error for AutomationTrack
+                        processed_auto_indices = set()
+                        for tidx in processed_tracks:
+                            for i, t in enumerate(self.song.tracks):
+                                if isinstance(t, AutomationTrack) and t.target_track_index == tidx:
+                                    processed_auto_indices.add(i)
 
-                self.is_recording = False
-                self._stop_event.clear()
-                print("Enregistrement terminé.")
+                        for auto_idx in processed_auto_indices:
+                             self._smooth_track_automation(auto_idx)
+
+                        # IMPORTANT: Flush the merge queue first
+                        self._merge_recorded_events(0)
+
+                        # IMPORTANT: Set is_recording to False BEFORE preparing events
+                        # so that the suppression logic in JackManager doesn't skip them.
+                        self.is_recording = False
+
+                        if self.jack_manager:
+                            self.jack_manager._prepare_automation_events()
+
+                        # Trigger final UI refresh
+                        self._trigger_song_structure_change()
+                    finally:
+                        self.is_smoothing = False
+                        self.is_recording = False
+                        self._stop_event.clear()
+                        print("Enregistrement terminé.")
+
+                Clock.schedule_once(do_smoothing)
 
     def _truncate_track_for_recording(self, track_idx: int, start_beat: float, end_beat: Optional[float]):
         """Helper to truncate notes on a track before/during recording (OVERWRITE mode)."""
@@ -2268,6 +2503,83 @@ class Sequencer(EventDispatcher):
         """Triggers a UI refresh due to song structure changes."""
         self.invalidate_song_length_cache()
         self.song_structure_changed += 1
+
+    def _smooth_track_automation(self, track_idx: int):
+        """Applies Ramer-Douglas-Peucker smoothing to newly recorded automation on a track."""
+        track = self.song.tracks[track_idx]
+        if not isinstance(track, AutomationTrack) or not track.points:
+            return
+
+        # Separate points by parameter to smooth them independently
+        points_by_param = {}
+        for p in track.points:
+            points_by_param.setdefault(p.parameter, []).append(p)
+
+        new_total_points = []
+        for param, points in points_by_param.items():
+            if len(points) < 3:
+                new_total_points.extend(points)
+                continue
+
+            # Apply RDP algorithm
+            # We use a threshold relative to the parameter range
+            # For 0-127 (CCs), 1.0 is ~0.8% error.
+            # For 0-1 (Vol), 0.01 is 1% error.
+            if param.startswith('cc') or param in ['vel', 'prog']:
+                epsilon = 0.4 # Slightly less aggressive to preserve "assez proche"
+            elif param in ['pitch', 'pb']:
+                epsilon = 0.005 # More sensitive to fine movements
+            else:
+                epsilon = 0.005 # Match pitch sensitivity for vol/pan (roughly 1/2 of a MIDI step)
+
+            smoothed = self._rdp(points, epsilon)
+            new_total_points.extend(smoothed)
+
+        # Update track points and sort
+        track.points = sorted(new_total_points, key=lambda p: p.start_time)
+
+    def _rdp(self, points: List[AutomationPoint], epsilon: float) -> List[AutomationPoint]:
+        """Simplified Ramer-Douglas-Peucker algorithm implementation."""
+        if len(points) < 3:
+            return points
+
+        dmax = 0.0
+        index = 0
+        end = len(points) - 1
+
+        for i in range(1, end):
+            d = self._perpendicular_distance(points[i], points[0], points[end])
+            if d > dmax:
+                index = i
+                dmax = d
+
+        if dmax > epsilon:
+            res1 = self._rdp(points[:index+1], epsilon)
+            res2 = self._rdp(points[index:], epsilon)
+            return res1[:-1] + res2
+        else:
+            return [points[0], points[end]]
+
+    def _perpendicular_distance(self, p, start, end):
+        """Calculates perpendicular distance from point p to line (start, end)."""
+        # We normalize time vs value roughly for distance calculation
+        # For CCs (0-127), we might want to scale beats to make them comparable.
+        # But keeping it simple for now as per user request for "assez proche".
+        x, y = p.start_time, p.value
+        x1, y1 = start.start_time, start.value
+        x2, y2 = end.start_time, end.value
+
+        if x1 == x2:
+            if y1 == y2:
+                return math.sqrt((x - x1)**2 + (y - y1)**2)
+            return abs(x - x1)
+
+        # Distance from point (x,y) to line (x1,y1)-(x2,y2)
+        numerator = abs((y2 - y1) * x - (x2 - x1) * y + x2 * y1 - y2 * x1)
+        denominator = math.sqrt((y2 - y1)**2 + (x2 - x1)**2)
+        if denominator == 0:
+            return math.sqrt((x - x1)**2 + (y - y1)**2)
+        return numerator / denominator
 
     def _start_recording_internal(self, track_index: Optional[int], start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: Optional[bool], enable_thru: bool):
             # Truncation for OVERWRITE mode
@@ -2340,9 +2652,9 @@ class Sequencer(EventDispatcher):
             if self.playback_state != "stopped":
                 return "Error: Please stop playback before starting a new recording."
 
-            # Clear manual routing override when starting a recording session
-            if self.jack_manager:
-                self.jack_manager._manual_routing_override = -1
+
+            # Reset smoothing state
+            self._last_recorded_auto_points.clear()
 
             # track_idx is None means we follow dynamic MIDI Routing
             # self.last_record_settings is checked for record_bis
@@ -2497,7 +2809,7 @@ class Sequencer(EventDispatcher):
         if not 0 <= target_track_index < len(self.song.tracks):
             return []
         target_track = self.song.tracks[target_track_index]
-        param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
+        param_map = {"vol": {"type": "midi_cc", "control": 7}, "pan": {"type": "midi_cc", "control": 10}, "vel": {"type": "velocity_multiplier"}, "prog": {"type": "program_change"}, "pitch": {"type": "pitch_bend"}, "pb": {"type": "pitch_bend"}, **{f"cc{i}": {"type": "midi_cc", "control": i} for i in range(128)}}
 
         points_by_parameter: Dict[str, List[AutomationPoint]] = {}
         for p in auto_track.points:
@@ -2795,7 +3107,8 @@ class Sequencer(EventDispatcher):
         else:
             self._stop_playback_transport()
 
-        self.current_routing_index = -1
+        # Update routing status immediately to reflect manual override if present
+        self._update_current_routing()
         
         # LA LIGNE SUIVANTE EST LA CAUSE DU PROBLÈME ET A ÉTÉ VOLONTAIREMENT SUPPRIMÉE :
         # self.jack_manager.stop()

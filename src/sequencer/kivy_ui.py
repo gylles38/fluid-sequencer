@@ -91,6 +91,7 @@ class SequencerLayout(BoxLayout):
             
         self.sequencer.bind(playback_state=self.on_playback_state_change)
         self.sequencer.bind(is_recording=self.update_record_button_state)
+        self.sequencer.bind(is_smoothing=self.update_smoothing_status)
         self.sequencer.bind(song_structure_changed=self.on_song_structure_changed)
         self._transport_update_event = None # Pour stocker l'événement Clock
         self.current_command = ""
@@ -1657,6 +1658,16 @@ class SequencerLayout(BoxLayout):
         else:
             self.record_button.md_bg_color = default_color
 
+    def update_smoothing_status(self, instance, value):
+        """Updates the UI to reflect the smoothing process."""
+        if value:
+            self.output_label.text = "[color=ff9800]Smoothing recorded automation...[/color]"
+            self.output_label.markup = True
+        else:
+            # Clear smoothing message if it was the last thing shown
+            if "Smoothing" in self.output_label.text:
+                 self.output_label.text = "Recording complete. Automation smoothed."
+
     def update_record_button_state(self, *args):
         """Centralized method to update the record button's visual state."""
         # Stop any previous blinking timer
@@ -1995,6 +2006,11 @@ class SequencerLayout(BoxLayout):
 
 
     def update_track_list(self):
+        # Optimization: prevent rapid re-entry
+        if getattr(self, '_is_updating_track_list', False):
+            return
+        self._is_updating_track_list = True
+
         # Close floating windows of tracks that no longer exist
         if self.window_manager:
             for window in list(self.window_manager.children):
@@ -2070,7 +2086,7 @@ class SequencerLayout(BoxLayout):
                 elif hasattr(track_widget, 'measure_grid'):
                     track_widget.measure_grid.redraw()
 
-        # Bind ruler spacer widths and timeline width
+        # Update ruler spacer widths and timeline width
         if self.track_widgets:
             first_track_widget = self.track_widgets[0]
             self.ruler.info_width = first_track_widget.info_width
@@ -2078,18 +2094,10 @@ class SequencerLayout(BoxLayout):
 
             if isinstance(first_track_widget.track, MidiTrack):
                 self.ruler.keyboard_width = first_track_widget.piano_keyboard.width
-                # Bind width for dynamic changes if ever needed
-                first_track_widget.piano_keyboard.fbind('width', lambda i, v: setattr(self.ruler, 'keyboard_width', v))
-                # Ensure ruler content width matches the grid part of the piano roll
                 self.ruler.ruler_content.width = first_track_widget.piano_roll.width
-                first_track_widget.piano_roll.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
             else:
-                self.ruler.keyboard_width = dp(40) # Set to the same as keyboard width for alignment
+                self.ruler.keyboard_width = dp(40)
                 self.ruler.ruler_content.width = first_track_widget.timeline_container.width
-                first_track_widget.timeline_container.fbind('width', lambda i, v: setattr(self.ruler.ruler_content, 'width', v))
-
-            first_track_widget.fbind('info_width', lambda i, v: setattr(self.ruler, 'info_width', v))
-            first_track_widget.fbind('controls_width', lambda i, v: setattr(self.ruler, 'controls_width', v))
 
         # --- Bind scroll views for synchronization ---
         # Horizontal scrolling is now managed by individual scroll views (grids and ruler)
@@ -2104,6 +2112,8 @@ class SequencerLayout(BoxLayout):
             sv.funbind('scroll_x', self._synchronize_scroll)
             sv.fbind('scroll_x', self._synchronize_scroll)
             sv.bind(on_scroll_stop=self._on_scroll_stop)
+
+        self._is_updating_track_list = False
             
     def update_bridge_label(self, instance, value):
         if not self.sequencer.jack_manager.is_running:
@@ -2579,10 +2589,27 @@ class SequencerLayout(BoxLayout):
         instance: le ScrollView qui a bougé (ex: source_sv)
         value: la nouvelle valeur de scroll_x (entre 0 et 1)
         """
-        for track in self.track_widgets:
-            # On évite de synchroniser le widget qui est déjà la source
-            if track.timeline_scroll != instance:
-                track.timeline_scroll.scroll_x = value
+        if self._is_scrolling:
+            return
+
+        # Ignorer les changements insignifiants
+        if hasattr(instance, '_last_scroll_x') and abs(instance._last_scroll_x - value) < 0.0001:
+            return
+        instance._last_scroll_x = value
+
+        self._is_scrolling = True
+        try:
+            # Synchroniser la règle si elle n'est pas la source
+            if self.ruler.scroll_view != instance:
+                self.ruler.scroll_view.scroll_x = value
+
+            # Synchroniser toutes les pistes
+            for track in self.track_widgets:
+                # On évite de synchroniser le widget qui est déjà la source
+                if track.timeline_scroll != instance:
+                    track.timeline_scroll.scroll_x = value
+        finally:
+            self._is_scrolling = False
                 
     def _on_scroll_stop(self, scroll_view, *args):
         """Called when a user stops scrolling one of the timelines."""

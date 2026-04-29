@@ -173,7 +173,7 @@ class AutomationCurveWidget(Widget):
         param = value[0].parameter
         self.param_type = param
         
-        if param in ["prog", "vel"]:
+        if param in ["prog", "vel"] or param.startswith("cc"):
             self.min_val, self.max_val = 0.0, 127.0
         elif param == "pan":
             self.min_val, self.max_val = -1.0, 1.0

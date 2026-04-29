@@ -25,7 +25,7 @@ class AutomationControls(BoxLayout, EventDispatcher):
         self.width = 0
 
         param_map = {
-            'Volume': 'vol', 'Pan': 'pan', 'Velocity': 'vel', 'Program Change': 'prog'
+            'Volume': 'vol', 'Pan': 'pan', 'Velocity': 'vel', 'Program Change': 'prog', 'Modulation': 'cc1'
         }
 
         if self.track_type == 'midi':
@@ -34,6 +34,7 @@ class AutomationControls(BoxLayout, EventDispatcher):
                 ("swap-horizontal", "Pan", "pan"),
                 ("speedometer", "Velocity", "vel"),
                 ("music-box-outline", "Program Change", "prog"),
+                ("midi-port", "Modulation (CC 1)", "cc1"),
             ]
         else: # audio
             automation_types = [
@@ -57,12 +58,12 @@ class AutomationControls(BoxLayout, EventDispatcher):
             self.buttons[param_name] = button
             self.width += dp(36) + self.spacing
             
-        # Sélection automatique du premier bouton (Volume) au démarrage
+        # Sélection automatique du paramètre au démarrage (soit le paramètre déjà sélectionné, soit le premier par défaut)
         if automation_types:
-            first_param = automation_types[0][2] # Récupère 'vol'
+            initial_param = self.selected_param if self.selected_param else automation_types[0][2]
             # On utilise Clock.schedule_once pour s'assurer que l'App est bien prête
             # et que les couleurs peuvent être appliquées
-            Clock.schedule_once(lambda dt: self.select_param(first_param), 0)     
+            Clock.schedule_once(lambda dt: self.select_param(initial_param), 0)
 
     def select_param(self, param_name):
         if param_name == self.selected_param:

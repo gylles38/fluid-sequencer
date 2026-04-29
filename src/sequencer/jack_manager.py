@@ -547,13 +547,12 @@ class JackManager:
                 if 0 <= target_track_index < len(tracks):
                     target_track = tracks[target_track_index]
 
-                    # An automation track itself can be muted/soloed
-                    auto_track_should_play = (not hasattr(track, 'is_solo') or track.is_solo or not is_any_track_soloed) and \
-                                             (not hasattr(track, 'is_muted') or not track.is_muted)
-
-                    # The target track can also be muted/soloed
+                    # The target track can be muted/soloed
                     target_track_should_play = (not hasattr(target_track, 'is_solo') or target_track.is_solo or not is_any_track_soloed) and \
                                                (not hasattr(target_track, 'is_muted') or not target_track.is_muted)
+
+                    # An automation track is audible if its target is audible AND it is not specifically muted
+                    auto_track_should_play = target_track_should_play and (not hasattr(track, 'is_muted') or not track.is_muted)
 
                     # EXCEPTION for OVERWRITE mode: if the target track is being recorded, suppress its existing automation
                     if self.sequencer.is_recording and getattr(target_track, 'record_mode', 'OFF') == 'OVERWRITE':
@@ -1423,7 +1422,9 @@ class JackManager:
                     msg = mido.Message('pitchwheel', channel=target_track.channel, pitch=pb_value)
                     port.send(msg)
             elif param_config.get('type') == 'velocity_multiplier':
-                target_track.velocity = float(value)
+                # Input value is 0-127 (absolute velocity), we convert to 0-2.0 multiplier
+                # Reference is 100 for a 1.0 multiplier.
+                target_track.velocity = float(value) / 100.0
 
         elif isinstance(target_track, AudioTrack):
             ap = next((p for p in self.active_audio_processes if p.track_index == target_track_index), None)
@@ -1537,9 +1538,6 @@ class JackManager:
             current_transport_state = self.jack_client.transport_state
             if current_transport_state != self.last_transport_state:
                 if current_transport_state == jack.ROLLING:
-                    # Reset manual routing override when playback starts
-                    self._manual_routing_override = -1
-
                     # Selective unpause: only tracks that should be playing now
                     # NOTE: We access active_audio_processes without lock for RT safety.
                     # It's only modified in main thread during track add/start/stop.
@@ -1650,29 +1648,34 @@ class JackManager:
         """
         Returns the target track index for MIDI input routing at the given beat.
         Prioritization:
-        0. Manual override (only if transport is stopped).
-        1. Automation points on the routing track.
-        2. Armed track index (cached).
-        3. Final Fallback: First MIDI track (cached).
+        1. Manual Override Priority (Set by clicking a track in the UI).
+        2. Automation Priority (Wins during active playback/recording).
+        3. Armed Track Priority (RT safe).
+        4. Final Fallback: First MIDI track (cached).
         """
-        # 0. Manual Override Priority (Stopped state only)
-        if self._manual_routing_override != -1 and self.sequencer.playback_state == "stopped":
+        # 1. Manual Override Priority (Highest Priority when set)
+        # This ensures that clicking a track in the UI persistently routes MIDI to it.
+        # It is reset to -1 when playback starts to allow following automation.
+        if self._manual_routing_override != -1:
             return self._manual_routing_override
 
-        # 1. Automation Priority
-        if self._routing_track and self._routing_track.points:
+        playback_state = getattr(self.sequencer, 'playback_state', 'stopped')
+        is_logic_rolling = playback_state in ("playing", "recording")
+
+        # 2. Automation Priority (Follows the 'input_routing' automation track during playback)
+        if is_logic_rolling and self._routing_track and self._routing_track.points:
             routing_points = [p for p in self._routing_track.points if p.parameter == 'input_routing']
             if routing_points:
                 val = self._routing_track.get_value_at(beat, 'input_routing')
                 if val is not None:
                     return int(round(val))
 
-        # 2. Armed Track Priority (RT safe)
+        # 3. Armed Track Priority (RT safe)
         armed_idx = getattr(self, '_cached_armed_idx', None)
         if armed_idx is not None:
             return armed_idx
 
-        # 3. Final Fallback (RT safe)
+        # 4. Final Fallback (RT safe)
         fallback_idx = getattr(self, '_cached_first_midi_idx', None)
         return fallback_idx
 

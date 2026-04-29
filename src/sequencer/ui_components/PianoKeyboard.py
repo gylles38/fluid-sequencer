@@ -10,28 +10,42 @@ class PianoKeyboard(Widget):
     A widget that draws a vertical piano keyboard.
     """
     note_height = NumericProperty(round(dp(14)))
+    bottom_padding = NumericProperty(0)
     highlighted_note = NumericProperty(-1)
 
     def on_note_height(self, instance, value):
-        self.height = round(128 * value)
+        new_height = round(128 * value) + self.bottom_padding
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
+
+    def on_bottom_padding(self, instance, value):
+        new_height = round(128 * self.note_height) + value
+        if abs(self.height - new_height) > 0.001:
+            self.height = new_height
 
     def __init__(self, **kwargs):
         super(PianoKeyboard, self).__init__(**kwargs)
         self.size_hint = (None, None)
-        self.height = round(128 * self.note_height)
+        self.height = round(128 * self.note_height) + self.bottom_padding
         self.width = dp(40)
 
-        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule, note_height=self._redraw_on_schedule,
+        self.bind(pos=self._redraw_on_schedule, size=self._redraw_on_schedule,
+                  note_height=self._redraw_on_schedule, bottom_padding=self._redraw_on_schedule,
                   highlighted_note=self._redraw_on_schedule)
         self._redraw_on_schedule()
 
     def _redraw_on_schedule(self, *args):
         # Schedule the redraw for the next frame to ensure all properties are updated.
-        Clock.schedule_once(self._redraw)
+        if getattr(self, '_redraw_pending', False): return
+        self._redraw_pending = True
+        Clock.schedule_once(self._redraw, 0)
 
     def _redraw(self, *args):
+        self._redraw_pending = False
+        if not self.canvas: return
         self.canvas.clear()
-        self.clear_widgets()
+
+        if not hasattr(self, '_label_widgets'): self._label_widgets = []
 
         highlight_color = (0.3, 0.7, 1.0, 1) # A light blue color for highlighting
 
@@ -43,8 +57,8 @@ class PianoKeyboard(Widget):
                         Color(*highlight_color)
                     else:
                         Color(0.95, 0.95, 0.95, 1)
-                    y_start = round(i * self.note_height)
-                    y_end = round((i + 1) * self.note_height)
+                    y_start = round(i * self.note_height) + self.bottom_padding
+                    y_end = round((i + 1) * self.note_height) + self.bottom_padding
                     Rectangle(pos=(self.x, self.y + y_start), size=(self.width, y_end - y_start))
 
             # --- Draw Black Keys Backgrounds ---
@@ -54,13 +68,13 @@ class PianoKeyboard(Widget):
                         Color(*highlight_color)
                     else:
                         Color(0.1, 0.1, 0.1, 1)
-                    y_start = round(i * self.note_height)
-                    y_end = round((i + 1) * self.note_height)
+                    y_start = round(i * self.note_height) + self.bottom_padding
+                    y_end = round((i + 1) * self.note_height) + self.bottom_padding
                     Rectangle(pos=(self.x, self.y + y_start), size=(self.width * 0.65, y_end - y_start))
 
             # --- Draw EVERY Pitch Separator (Grid sync) ---
             for i in range(1, 129):
-                y_pos = round(i * self.note_height)
+                y_pos = round(i * self.note_height) + self.bottom_padding
                 # Octave line (below C)
                 if (i % 12) == 0:
                     Color(0.4, 0.4, 0.4, 0.8)
@@ -76,24 +90,33 @@ class PianoKeyboard(Widget):
                 Line(points=[self.x, self.y + y_pos, self.x + self.width, self.y + y_pos], width=width)
 
         # Add C note labels
-        for i in range(128):
-            if (i % 12) == 0:
-                octave_num = (i // 12) - 1  # MIDI note 12 is C0, 24 is C1 etc.
-                y_start = round(i * self.note_height)
-                y_end = round((i + 1) * self.note_height)
-                note_h = y_end - y_start
-                note_y = self.y + y_start
-                label = Label(
-                    text=f"C{octave_num}",
-                    font_size=dp(9),
-                    color=(0, 0, 0, 1),
-                    size_hint=(None, None),
-                    size=(self.width, note_h),
-                    center_x=self.center_x,
-                    center_y=note_y + note_h / 2,
-                    halign='center',
-                    valign='middle',
-                )
-                # Kivy's text_size is needed for alignment to work correctly
-                label.text_size = label.size
-                self.add_widget(label)
+        octave_indices = [i for i in range(128) if (i % 12) == 0]
+
+        # Synchronize label widget count
+        while len(self._label_widgets) < len(octave_indices):
+            lbl = Label(
+                font_size=dp(9),
+                color=(0, 0, 0, 1),
+                size_hint=(None, None),
+                halign='center',
+                valign='middle'
+            )
+            self.add_widget(lbl)
+            self._label_widgets.append(lbl)
+        while len(self._label_widgets) > len(octave_indices):
+            lbl = self._label_widgets.pop()
+            self.remove_widget(lbl)
+
+        for idx, i in enumerate(octave_indices):
+            octave_num = (i // 12) - 1
+            y_start = round(i * self.note_height) + self.bottom_padding
+            y_end = round((i + 1) * self.note_height) + self.bottom_padding
+            note_h = y_end - y_start
+            note_y = self.y + y_start
+
+            label = self._label_widgets[idx]
+            label.text = f"C{octave_num}"
+            label.size = (self.width, note_h)
+            label.center_x = self.center_x
+            label.center_y = note_y + note_h / 2
+            label.text_size = label.size

@@ -69,6 +69,7 @@ class CustomSongEncoder(json.JSONEncoder):
                 'is_muted': o.is_muted,
                 'is_solo': o.is_solo,
                 'points': o.points,
+                'active_parameter': o.active_parameter,
             }
         if is_dataclass(o):
             d = {f.name: getattr(o, f.name) for f in fields(o)}

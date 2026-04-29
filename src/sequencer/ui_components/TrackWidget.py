@@ -444,10 +444,11 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 track_type=automation_type
             )
             # Liez l'événement personnalisé à la méthode de mise à jour
+            self.automation_controls.selected_param = track.active_parameter
             self.automation_controls.bind(on_selection_change=self.update_automation_visibility)
             self.automation_controls.size_hint=(None, None)
             self.automation_controls.height = dp(36)
-            self.automation_controls.width = dp(100)
+            self.automation_controls.width = dp(200)
             self.automation_controls.pos_hint = {'center_y': 0.5}
             
             # On l'ajoute directement dans la colonne de gauche
@@ -813,13 +814,17 @@ class TrackWidget(HoverBehavior, BoxLayout):
                 # --- ÉTAPE 1 : IDENTIFIER LES PARAMÈTRES ---
                 # On définit les paramètres par défaut + ceux présents dans les points
                 params: set[str] = {"vol", "pan"} 
+                if hasattr(self, 'automation_controls'):
+                    if self.automation_controls.track_type == 'midi':
+                        params.update({"vel", "prog", "cc1"})
+
                 for p in self.track.points:
                     params.add(p.parameter)
 
                 # --- ÉTAPE 2 : CRÉER LES WIDGETS ---
                 for param in params:
                     min_v, max_v = 0.0, 1.0
-                    if param in ["prog", "vel"]: min_v, max_v = 0.0, 127.0
+                    if param in ["prog", "vel"] or param.startswith("cc"): min_v, max_v = 0.0, 127.0
                     elif param == "pan": min_v, max_v = -1.0, 1.0
 
                     is_vol: bool = (param == "vol")
@@ -867,14 +872,74 @@ class TrackWidget(HoverBehavior, BoxLayout):
         self.bind(track_index=self._on_track_index_change)
         
         # Liaison avec le séquenceur pour la mise à jour en temps réel
+        # We store these as local properties to allow robust unbinding in on_parent
+        self._seq_binding_beat = lambda inst, val: self.update_sliders_from_automation(val)
+        self._seq_binding_routing = lambda inst, val: self._sync_routing_status(inst, val)
+        self._seq_binding_recording = lambda inst, val: self._sync_recording_status(inst, val)
+
         self.sequencer_layout.sequencer.bind(
-            current_beat=lambda instance, val: self.update_sliders_from_automation(val),
-            current_routing_index=lambda inst, val: self._sync_routing_status(inst, val),
-            is_recording=lambda inst, val: self._sync_recording_status(inst, val)
+            current_beat=self._seq_binding_beat,
+            current_routing_index=self._seq_binding_routing,
+            is_recording=self._seq_binding_recording
         )
         
+        if isinstance(self.track, AutomationTrack):
+            self.track.bind(active_parameter=self._on_active_parameter_changed)
+
         # Appel initial pour régler les sliders au chargement du projet
         Clock.schedule_once(lambda dt: self.update_sliders_from_automation(self.sequencer_layout.sequencer.current_beat))
+
+    def on_parent(self, widget, parent):
+        """Clean up or restore bindings when the TrackWidget's parent changes."""
+        from kivy.logger import Logger
+
+        if parent is None:
+            # Robust cleanup of sequencer bindings
+            try:
+                seq = self.sequencer_layout.sequencer
+                seq.unbind(current_beat=self._seq_binding_beat)
+                seq.unbind(current_routing_index=self._seq_binding_routing)
+                seq.unbind(is_recording=self._seq_binding_recording)
+            except (AttributeError, Exception):
+                pass
+
+            if isinstance(self.track, AutomationTrack):
+                try:
+                    self.track.unbind(active_parameter=self._on_active_parameter_changed)
+                except (AttributeError, Exception):
+                    pass
+        else:
+            # Re-bind if we are being re-added (widget reuse)
+            # Reset cached references that might be stale
+            self._cached_automation_track = None
+
+            try:
+                seq = self.sequencer_layout.sequencer
+                # First try to unbind to avoid duplicate bindings
+                try:
+                    seq.unbind(current_beat=self._seq_binding_beat)
+                    seq.unbind(current_routing_index=self._seq_binding_routing)
+                    seq.unbind(is_recording=self._seq_binding_recording)
+                except: pass
+
+                seq.bind(current_beat=self._seq_binding_beat)
+                seq.bind(current_routing_index=self._seq_binding_routing)
+                seq.bind(is_recording=self._seq_binding_recording)
+            except (AttributeError, Exception):
+                pass
+
+            if isinstance(self.track, AutomationTrack):
+                try:
+                    self.track.unbind(active_parameter=self._on_active_parameter_changed)
+                except: pass
+                self.track.bind(active_parameter=self._on_active_parameter_changed)
+
+    def _on_active_parameter_changed(self, instance, value):
+        """Callback when the active parameter of the track changes in the model."""
+        if hasattr(self, 'automation_controls'):
+            # This prevents infinite loops as select_param checks for equality
+            self.automation_controls.selected_param = value
+        self.update_automation_visibility(None, value)
 
     def _get_target_track_name_for_tooltip(self) -> str:
         """Retourne le nom de la piste cible pour le tooltip."""
@@ -898,9 +963,10 @@ class TrackWidget(HoverBehavior, BoxLayout):
     def _sync_vertical_scrolls(self, source_sv, target_sv, value):
         """Helper to synchronize vertical scrolling between two ScrollViews."""
         if not self._scrolling_locked:
-            self._scrolling_locked = True
-            target_sv.scroll_y = value
-            self._scrolling_locked = False
+            if abs(target_sv.scroll_y - value) > 0.001:
+                self._scrolling_locked = True
+                target_sv.scroll_y = value
+                self._scrolling_locked = False
 
     def update_track_name_display(self):
         """Met à jour le texte du bouton d'index [#] et le tooltip de l'icône de ciblage."""
@@ -1146,33 +1212,38 @@ class TrackWidget(HoverBehavior, BoxLayout):
     def on_touch_down(self, touch):
         """
         Handle touch events for track selection.
-        If the sequencer is stopped and the user clicks on the track (but not on a control),
-        select this track's instrument.
+        If the sequencer is stopped and the user clicks on the track,
+        select this track's instrument immediately.
         """
         if self.collide_point(*touch.pos):
+            # 1. Immediate Track Selection (Regression Fix)
+            # We want clicking ANYWHERE on the track (info, controls, grid) to select it if stopped.
+            # We do this BEFORE dispatching to children to ensure it happens.
+            seq = self.sequencer_layout.sequencer
+            is_stopped = seq.playback_state in ("stopped", "paused")
+
+            # Special handling for mouse wheel (ignore for selection)
+            is_scroll = hasattr(touch, 'button') and touch.button in ('scrollup', 'scrolldown', 'scrollleft', 'scrollright')
+
+            if is_stopped and isinstance(self.track, MidiTrack) and not is_scroll:
+                # Manual override of the MIDI routing for the instrument selection.
+                seq.jack_manager._manual_routing_override = self.track_index
+                # Refresh UI immediately
+                seq.current_routing_index = self.track_index
+
+            # 2. Child Dispatch
             # Special case for ResizeHandle which is a direct child but we want to let it grab the touch
             if hasattr(self, 'resize_handle') and self.resize_handle.collide_point(*touch.pos):
                  return self.resize_handle.on_touch_down(touch)
 
-            # We let the default Kivy processing happen first for buttons/sliders.
-            # super().on_touch_down(touch) returns True if a child consumed the touch.
+            # Standard Kivy dispatch to buttons, sliders, and timeline grid.
             if super().on_touch_down(touch):
                 return True
 
-            # Ignore mouse wheel events for track selection
-            if hasattr(touch, 'button') and touch.button in ('scrollup', 'scrolldown', 'scrollleft', 'scrollright'):
-                return False
-
-            # If the touch wasn't consumed by a child (button, slider, etc.)
-            # and the sequencer is stopped, we select this track.
-            seq = self.sequencer_layout.sequencer
-            if seq.playback_state == "stopped":
-                # Manual override of the MIDI routing for the instrument selection.
-                # We tell the JackManager to target this track specifically.
-                seq.jack_manager._manual_routing_override = self.track_index
-                # We need to refresh the UI to show the new routing.
-                seq.current_routing_index = self.track_index
+            # If we selected the track, we return True to consume the touch if it wasn't a scroll.
+            if is_stopped and isinstance(self.track, MidiTrack) and not is_scroll:
                 return True
+
         return False
 
     def on_automation_selection_change(self, selected_param) -> None:
@@ -1197,6 +1268,9 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
     def update_automation_visibility(self, instance, selected_param):
         """Affiche le calque correspondant au bouton cliqué."""
+        if isinstance(self.track, AutomationTrack):
+            self.track.active_parameter = selected_param
+
         for curve in self.automation_curves:
             if curve.param_type == selected_param:
                 curve.opacity = 1
@@ -1424,6 +1498,12 @@ class TrackWidget(HoverBehavior, BoxLayout):
         if isinstance(self.track, AutomationTrack):
             return
 
+        # Optimization: only update if playback is active or beat changed significantly
+        if self.sequencer_layout.sequencer.playback_state == "stopped" and \
+           abs(getattr(self, '_last_beat_update', -1) - current_beat) < 0.01:
+            return
+        self._last_beat_update = current_beat
+
         vol_slider = getattr(self, 'volume_slider', None)
         pan_slider = getattr(self, 'pan_slider', None)
         if not vol_slider or not pan_slider:
@@ -1432,22 +1512,24 @@ class TrackWidget(HoverBehavior, BoxLayout):
         found_vol = False
         found_pan = False
 
-        # On cherche l'automation cible
-        for t in self.sequencer_layout.sequencer.song.tracks:
-            if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index:
-                
-                # VOLUME : On récupère les points pour ce paramètre précis
-                points_vol = [p for p in t.points if p.parameter == 'vol']
-                if points_vol:
-                    found_vol = True
-                    # ON APPLIQUE LA VALEUR (C'est ça qui fait bouger le slider)
-                    vol_slider.value = t.get_value_at(current_beat, 'vol')
-                
-                # PAN
-                points_pan = [p for p in t.points if p.parameter == 'pan']
-                if points_pan:
-                    found_pan = True
-                    pan_slider.value = t.get_value_at(current_beat, 'pan')
+        # Cached reference to the targeted AutomationTrack
+        if not hasattr(self, '_cached_automation_track') or self._cached_automation_track is None:
+            self._cached_automation_track = next(
+                (t for t in self.sequencer_layout.sequencer.song.tracks
+                 if isinstance(t, AutomationTrack) and t.target_track_index == self.track_index),
+                None
+            )
+
+        t = self._cached_automation_track
+        if t:
+            # We assume 'vol' and 'pan' are standard for all targeted tracks
+            found_vol = any(p.parameter == 'vol' for p in t.points)
+            if found_vol:
+                vol_slider.value = t.get_value_at(current_beat, 'vol')
+
+            found_pan = any(p.parameter == 'pan' for p in t.points)
+            if found_pan:
+                pan_slider.value = t.get_value_at(current_beat, 'pan')
 
         # Mise à jour des drapeaux (utile pour changer l'opacité ou l'icône)
         self.vol_automated = found_vol

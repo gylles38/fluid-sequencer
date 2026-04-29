@@ -694,7 +694,6 @@ Builder.load_string("""
             info_width: dp(60) 
             controls_width: 0
             keyboard_width: 0
-            bar_width: timeline_scroll.bar_width
             spacing: 0
             padding: [0, 0, 0, 0]
 
@@ -928,6 +927,13 @@ class AutomationEditor(FloatingWindow):
         timeline_scroll = self.ids.timeline_scroll
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
+
+        # MANDATORY: Fix viewports synchronization
+        def _sync_sv_width(inst, val):
+            if abs(self.ids.ruler.scroll_view.width - val) > 0.001:
+                self.ids.ruler.scroll_view.width = val
+        self.ids.timeline_scroll.bind(width=_sync_sv_width)
+        _sync_sv_width(None, self.ids.timeline_scroll.width)
 
     def _force_initial_selection(self, controls, param_name):
         # On sélectionne le paramètre passé en argument (au lieu de 'vol' en dur)
@@ -1523,41 +1529,17 @@ class AutomationEditor(FloatingWindow):
 
     def sync_horizontal_scroll(self, source_scroll_view, scroll_x_value):
         if self._is_scrolling: return
-
-        # Ignore micro-changes to prevent oscillations
-        if hasattr(source_scroll_view, '_last_scroll_x') and \
-           abs(source_scroll_view._last_scroll_x - scroll_x_value) < 0.0001:
-            return
-        source_scroll_view._last_scroll_x = scroll_x_value
-
         self._is_scrolling = True
         try:
-            # Calculate absolute pixel offset from source
-            content_width_source = source_scroll_view.children[0].width
-            viewport_width_source = source_scroll_view.width
-            max_scroll_source = max(0, content_width_source - viewport_width_source)
-            pixel_offset = scroll_x_value * max_scroll_source if max_scroll_source > 0 else 0
-
             ruler_scroll = self.ids.ruler.scroll_view
             timeline_scroll = self.ids.timeline_scroll
 
-            targets = [ruler_scroll, timeline_scroll]
-            for sv in targets:
-                if sv is not source_scroll_view:
-                    try:
-                        content_width = sv.children[0].width
-                        viewport_width = sv.width
-                        max_scroll = max(0, content_width - viewport_width)
-                        if max_scroll > 0:
-                            sv.scroll_x = max(0.0, min(1.0, pixel_offset / max_scroll))
-                        else:
-                            sv.scroll_x = 0
-                    except (IndexError, AttributeError):
-                        continue
-        except (IndexError, AttributeError):
-            pass
-
-        self._is_scrolling = False
+            if source_scroll_view is ruler_scroll:
+                timeline_scroll.scroll_x = scroll_x_value
+            else:
+                ruler_scroll.scroll_x = scroll_x_value
+        finally:
+            self._is_scrolling = False
 
     def play_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("play")
     def pause_pressed(self, *args) -> None: self.sequencer_layout.sequencer.process_transport_command("pause")

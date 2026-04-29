@@ -911,6 +911,7 @@ Builder.load_string("""
             controls_width: 0
             spacing: 0
             keyboard_width: dp(60)
+            bar_width: timeline_scroll.bar_width
             padding: [0, 0, 0, 0]
             label_padding_x: 0
 

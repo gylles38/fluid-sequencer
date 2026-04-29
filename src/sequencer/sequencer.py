@@ -10,6 +10,7 @@ from .config import MidiConfig
 from .config_manager import ConfigManager
 from .terminal_input import cancellable_input, UserInputCancelled
 from .jack_manager import JackManager
+from .midi_hub import MidiInputHub
 from .serialization import CustomSongEncoder, song_decoder
 from pydub import AudioSegment
 from copy import deepcopy
@@ -58,6 +59,7 @@ class Sequencer(EventDispatcher):
         self.config_manager = ConfigManager()
         self.midi_config = MidiConfig("config/midi_mappings.json")
         self.jack_manager = JackManager(self)
+        self.midi_hubs: Dict[str, MidiInputHub] = {}
         self.midi_listener_thread = None
         self._midi_listener_stop_event = threading.Event()
         self._transport_control_thread = None
@@ -155,6 +157,7 @@ class Sequencer(EventDispatcher):
             if self.playback_state in ["playing", "recording"] and time_since_play > 0.5:
                 print(f"[UI] Engine STOP detected par transport_query.")
                 self.playback_state = "stopped"
+                self.is_recording = False # Ensure recording state is cleared on engine stop
                 self.jack_manager.silence_all_midi_notes()
             elif self.playback_state == "paused" and current_frame == 0:
                 # Si on est en pause mais que le moteur est revenu à 0 alors qu'on n'était pas au début,
@@ -164,7 +167,8 @@ class Sequencer(EventDispatcher):
                     print(f"[UI] Engine RESET to 0 detected while paused. Switching to stopped.")
                     self.playback_state = "stopped"
         else: # Si JACK tourne
-            if self.playback_state in ["stopped", "paused"]:
+            # Only switch to playing if we haven't just sent a transport command (cooldown)
+            if self.playback_state in ["stopped", "paused"] and time.perf_counter() - self._last_transport_command_time > 0.5:
                 print(f"[UI] Engine ROLL detected par transport_query.")
                 self.playback_state = "playing"
                 
@@ -360,46 +364,50 @@ class Sequencer(EventDispatcher):
         """
         A dedicated thread that listens for transport control MIDI messages based on the loaded configuration.
         """
+        hub = self._get_midi_hub(port_name)
+        q = hub.subscribe()
         try:
-            with mido.open_input(port_name) as inport:
-                while not self._transport_control_stop_event.is_set():
-                    for msg in inport.iter_pending():
-                        if msg.type == 'control_change':
-                            control = msg.control
-                            value = msg.value
+            while not self._transport_control_stop_event.is_set():
+                try:
+                    msg = q.get(timeout=0.1)
+                    if msg.type == 'control_change':
+                        control = msg.control
+                        value = msg.value
 
-                            # --- Handle Transport Controls ---
-                            if value == 127:
-                                if control == self.midi_config.get_transport_cc("play_pause"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
-                                elif control == self.midi_config.get_transport_cc("stop"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
-                                elif control == self.midi_config.get_transport_cc("record_arm"):
-                                    Clock.schedule_once(lambda dt: self.process_transport_command("record"))
-                                elif control == self.midi_config.get_transport_cc("rewind"):
-                                    Clock.schedule_once(lambda dt: self.seek("-1m"))
-                                elif control == self.midi_config.get_transport_cc("forward"):
-                                    Clock.schedule_once(lambda dt: self.seek("+1m"))
+                        # --- Handle Transport Controls ---
+                        if value == 127:
+                            if control == self.midi_config.get_transport_cc("play_pause"):
+                                Clock.schedule_once(lambda dt: self.process_transport_command("play_pause"))
+                            elif control == self.midi_config.get_transport_cc("stop"):
+                                Clock.schedule_once(lambda dt: self.process_transport_command("stop"))
+                            elif control == self.midi_config.get_transport_cc("record_arm"):
+                                Clock.schedule_once(lambda dt: self.process_transport_command("record"))
+                            elif control == self.midi_config.get_transport_cc("rewind"):
+                                Clock.schedule_once(lambda dt: self.seek("-1m"))
+                            elif control == self.midi_config.get_transport_cc("forward"):
+                                Clock.schedule_once(lambda dt: self.seek("+1m"))
 
-                            # --- Handle Volume Sliders & Solo Buttons ---
-                            for i in range(len(self.song.tracks)):
-                                # Volume
-                                if control == self.midi_config.get_volume_slider_cc(i):
-                                    volume_value = value / 127.0
-                                    Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
-                                    break # Found a match, no need to check other tracks for this CC
+                        # --- Handle Volume Sliders & Solo Buttons ---
+                        for i in range(len(self.song.tracks)):
+                            # Volume
+                            if control == self.midi_config.get_volume_slider_cc(i):
+                                volume_value = value / 127.0
+                                Clock.schedule_once(lambda dt, ti=i, vol=volume_value: self.set_track_volume(ti, vol, api_mode=True))
+                                break # Found a match, no need to check other tracks for this CC
 
-                                # Solo
-                                if control == self.midi_config.get_track_solo_button_cc(i):
-                                    track = self.song.tracks[i]
-                                    is_solo = getattr(track, 'is_solo', False)
-                                    if (value == 127 and not is_solo) or (value == 0 and is_solo):
-                                        Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
-                                    break # Found a match
-
-                    time.sleep(0.01)
+                            # Solo
+                            if control == self.midi_config.get_track_solo_button_cc(i):
+                                track = self.song.tracks[i]
+                                is_solo = getattr(track, 'is_solo', False)
+                                if (value == 127 and not is_solo) or (value == 0 and is_solo):
+                                    Clock.schedule_once(lambda dt, ti=i: self.toggle_solo(ti))
+                                break # Found a match
+                except queue.Empty:
+                    continue
         except Exception as e:
             print(f"\nError in transport control listener for port '{port_name}': {e}")
+        finally:
+            hub.unsubscribe(q)
 
     def reload_midi_mappings(self, filepath: str) -> str:
         """Loads a new MIDI mapping file and restarts the listener if necessary."""
@@ -411,6 +419,13 @@ class Sequencer(EventDispatcher):
             return self.set_default_record_port(self.default_record_port)
 
         return f"MIDI mappings loaded from {filepath}. No transport listener was active."
+
+    def _get_midi_hub(self, port_name: str) -> MidiInputHub:
+        if port_name not in self.midi_hubs:
+            hub = MidiInputHub(port_name)
+            hub.start()
+            self.midi_hubs[port_name] = hub
+        return self.midi_hubs[port_name]
 
     def set_default_record_port(self, port_name: str) -> str:
         """
@@ -430,7 +445,7 @@ class Sequencer(EventDispatcher):
             self.default_record_port = port_name
             self.is_dirty = True
 
-            # Start the new listener thread
+            # Start the new listener thread using the MIDI hub
             self._transport_control_stop_event.clear()
             self._transport_control_thread = threading.Thread(
                 target=self._transport_control_listener_loop,
@@ -2142,6 +2157,10 @@ class Sequencer(EventDispatcher):
             self.jack_manager.stop()
             print("JACK engine stopped.")
 
+        for hub in self.midi_hubs.values():
+            hub.stop()
+        self.midi_hubs.clear()
+
         for port in self.virtual_ports:
             if not port.closed:
                 port.close()
@@ -2224,17 +2243,23 @@ class Sequencer(EventDispatcher):
                 return 0.0
         return 0.0
 
-    def _recording_thread_main(self, initial_track_idx, start_beat, inport_name, num_beats_to_record, enable_thru):
+    def _recording_thread_main(self, initial_track_idx, start_beat, inport_name, num_beats_to_record, enable_thru, replace_notes_override=None):
             # Le dictionnaire stockera: {pitch: (start_beat, velocity, track_idx)}
             open_notes = {}
             first_note_detected = False
             recording_start_beat = None
             processed_tracks = set() # Tracks encountered during this session
 
+            hub = self._get_midi_hub(inport_name)
+            q = hub.subscribe()
+
             try:
-                with mido.open_input(inport_name) as inport:
-                    print(f"Port d'entrée MIDI ouvert: {inport_name}")
-                    list(inport.iter_pending())
+                if True:
+                    print(f"Port d'entrée MIDI ouvert via Hub: {inport_name}")
+                    # Clear queue
+                    while not q.empty():
+                        try: q.get_nowait()
+                        except queue.Empty: break
 
                     # Target track name for logging
                     initial_target_idx = self.jack_manager._get_input_routing_value(start_beat)
@@ -2257,12 +2282,26 @@ class Sequencer(EventDispatcher):
                             print(f"Enregistrement démarré à {self._format_beats_to_position(recording_start_beat)}")
                             break
 
-                        msg = inport.poll()
+                        try:
+                            msg = q.get(timeout=0.01)
+                        except queue.Empty:
+                            msg = None
+
                         if msg:
                             # Any MIDI activity can trigger recording (Note, CC, Pitch, Program)
                             is_trigger = False
-                            if msg.type == 'note_on' and msg.velocity > 0: is_trigger = True
-                            elif msg.type in ('control_change', 'pitchwheel', 'program_change'): is_trigger = True
+                            if msg.type == 'note_on' and msg.velocity > 0:
+                                is_trigger = True
+                            elif msg.type in ('control_change', 'pitchwheel', 'program_change'):
+                                # Avoid transport controls triggering recording start
+                                is_transport = False
+                                if msg.type == 'control_change':
+                                    transport_ccs = self.midi_config.mappings.get("transport", {}).values()
+                                    if msg.control in transport_ccs:
+                                        is_transport = True
+
+                                if not is_transport:
+                                    is_trigger = True
 
                             if is_trigger:
                                 first_note_detected = True
@@ -2291,7 +2330,9 @@ class Sequencer(EventDispatcher):
                             if target_idx not in processed_tracks:
                                 track = self.song.tracks[target_idx]
                                 if is_midi_track(track):
-                                    if track.record_mode == 'OVERWRITE':
+                                    # Use override if provided, otherwise fallback to track mode
+                                    should_replace = track.record_mode == 'OVERWRITE' if replace_notes_override is None else replace_notes_override
+                                    if should_replace:
                                         # Truncate from the SESSION START instead of current_beat
                                         # This ensures all "previous" notes (from start_beat) are cleared.
                                         session_end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
@@ -2304,7 +2345,9 @@ class Sequencer(EventDispatcher):
                             msgs.append(pending_trigger_msg)
                             pending_trigger_msg = None
 
-                        msgs.extend(list(inport.iter_pending()))
+                        while not q.empty():
+                            try: msgs.append(q.get_nowait())
+                            except queue.Empty: break
 
                         for msg in msgs:
                             if msg.type == 'note_on' and msg.velocity > 0:
@@ -2343,6 +2386,11 @@ class Sequencer(EventDispatcher):
                                                 self.open_ports[track.output_port_name].send(msg.copy(channel=getattr(track, 'channel', 0)))
 
                             elif msg.type == 'control_change':
+                                # Ignore transport CCs for recording
+                                transport_ccs = self.midi_config.mappings.get("transport", {}).values()
+                                if msg.control in transport_ccs:
+                                    continue
+
                                 # Global check for hardware-mapped faders (Volume Sliders 0-7)
                                 hw_track_idx = None
                                 for i in range(len(self.song.tracks)):
@@ -2407,6 +2455,7 @@ class Sequencer(EventDispatcher):
                 traceback.print_exc()
             
             finally:
+                hub.unsubscribe(q)
                 current_beat = self._get_current_beat()
                 for note, (note_start, original_velocity, track_idx) in open_notes.items():
                     duration = current_beat - note_start
@@ -2444,6 +2493,10 @@ class Sequencer(EventDispatcher):
 
                         if self.jack_manager:
                             self.jack_manager._prepare_automation_events()
+                            # CRUCIAL: Resync playhead to current beat to update event indices
+                            # with newly merged notes.
+                            current_beat = self._get_current_beat()
+                            self.jack_manager._sync_playhead_to_beat(current_beat)
 
                         # Trigger final UI refresh
                         self._trigger_song_structure_change()
@@ -2582,24 +2635,11 @@ class Sequencer(EventDispatcher):
         return numerator / denominator
 
     def _start_recording_internal(self, track_index: Optional[int], start_beat: float, num_beats_to_record: Optional[float], inport_name: str, replace_notes: Optional[bool], enable_thru: bool):
-            # Truncation for OVERWRITE mode
-            end_beat = None if num_beats_to_record is None else start_beat + num_beats_to_record
-            if track_index is not None:
-                target_track = self.song.tracks[track_index]
-                if is_midi_track(target_track):
-                    should_replace = target_track.record_mode == 'OVERWRITE' if replace_notes is None else replace_notes
-                    if should_replace:
-                        self._truncate_track_for_recording(track_index, start_beat, end_beat)
-            else:
-                # Dynamic Routing: Pre-truncate all tracks armed for OVERWRITE at session start
-                for i, track in enumerate(self.song.tracks):
-                    if is_midi_track(track) and track.record_mode == 'OVERWRITE':
-                        self._truncate_track_for_recording(i, start_beat, end_beat)
-
+            # NOUVEAU: La troncature est maintenant différée au moment où l'enregistrement commence réellement.
             self.is_recording = True
             self.recording_thread = threading.Thread(
                 target=self._recording_thread_main,
-                args=(track_index, start_beat, inport_name, num_beats_to_record, enable_thru)
+                args=(track_index, start_beat, inport_name, num_beats_to_record, enable_thru, replace_notes)
             )
             self.recording_thread.daemon = True
             self.recording_thread.start()
@@ -2974,6 +3014,9 @@ class Sequencer(EventDispatcher):
             self.jack_manager._manual_routing_override = -1
 
     # 1. On change l'état IMMÉDIATEMENT (Optimisme)
+        if self.playback_state == "playing" and start_beat is None:
+            # If already playing and no specific start_beat, do nothing to avoid restart
+            return
         self.playback_state = "playing"
         self._last_play_click_time = time.perf_counter() # Pour le poll_engine_state
         self._last_transport_command_time = time.perf_counter()
@@ -3084,8 +3127,7 @@ class Sequencer(EventDispatcher):
 
     def stop(self):
         """Stops recording and/or playback."""
-        # 1. On change l'état LOCAL immédiatement pour bloquer le polling
-        self.playback_state = 'stopped'
+        # 1. Update command time to avoid immediate polling sync
         self._last_transport_command_time = time.perf_counter()
         
         if self.is_recording and self.recording_thread:
@@ -3100,12 +3142,8 @@ class Sequencer(EventDispatcher):
             # Trigger a UI refresh to redraw all tracks to the new length
             self.song_structure_changed += 1
 
-            # After the recording thread has stopped itself, we might not need to stop playback again
-            # as it might have already done so. However, calling it ensures a consistent state.
-            if self.playback_state != "stopped":
-                 self._stop_playback_transport()
-        else:
-            self._stop_playback_transport()
+        # Always ensure the transport is stopped and state is updated
+        self._stop_playback_transport()
 
         # Update routing status immediately to reflect manual override if present
         self._update_current_routing()

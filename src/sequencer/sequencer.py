@@ -167,7 +167,8 @@ class Sequencer(EventDispatcher):
                     print(f"[UI] Engine RESET to 0 detected while paused. Switching to stopped.")
                     self.playback_state = "stopped"
         else: # Si JACK tourne
-            if self.playback_state in ["stopped", "paused"]:
+            # Only switch to playing if we haven't just sent a transport command (cooldown)
+            if self.playback_state in ["stopped", "paused"] and time.perf_counter() - self._last_transport_command_time > 0.5:
                 print(f"[UI] Engine ROLL detected par transport_query.")
                 self.playback_state = "playing"
                 
@@ -2490,6 +2491,10 @@ class Sequencer(EventDispatcher):
 
                         if self.jack_manager:
                             self.jack_manager._prepare_automation_events()
+                            # CRUCIAL: Resync playhead to current beat to update event indices
+                            # with newly merged notes.
+                            current_beat = self._get_current_beat()
+                            self.jack_manager._sync_playhead_to_beat(current_beat)
 
                         # Trigger final UI refresh
                         self._trigger_song_structure_change()
@@ -3133,8 +3138,7 @@ class Sequencer(EventDispatcher):
 
     def stop(self):
         """Stops recording and/or playback."""
-        # 1. On change l'état LOCAL immédiatement pour bloquer le polling
-        self.playback_state = 'stopped'
+        # 1. Update command time to avoid immediate polling sync
         self._last_transport_command_time = time.perf_counter()
         
         if self.is_recording and self.recording_thread:
@@ -3149,12 +3153,8 @@ class Sequencer(EventDispatcher):
             # Trigger a UI refresh to redraw all tracks to the new length
             self.song_structure_changed += 1
 
-            # After the recording thread has stopped itself, we might not need to stop playback again
-            # as it might have already done so. However, calling it ensures a consistent state.
-            if self.playback_state != "stopped":
-                 self._stop_playback_transport()
-        else:
-            self._stop_playback_transport()
+        # Always ensure the transport is stopped and state is updated
+        self._stop_playback_transport()
 
         # Update routing status immediately to reflect manual override if present
         self._update_current_routing()

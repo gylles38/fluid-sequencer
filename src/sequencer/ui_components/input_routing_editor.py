@@ -659,6 +659,7 @@ class InputRoutingEditor(FloatingWindow):
         self._seq_binding_routing = lambda inst, val: setattr(self, 'current_routing_index', val)
         self.sequencer_layout.sequencer.bind(current_routing_index=self._seq_binding_routing)
         self.current_routing_index = self.sequencer_layout.sequencer.current_routing_index
+        self.display_beat = self.sequencer_layout.sequencer.current_beat
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
 
         Clock.schedule_once(self._post_kv_init)
@@ -699,25 +700,38 @@ class InputRoutingEditor(FloatingWindow):
     def update_playhead(self, dt):
         if 'playhead' not in self.ids: return
         sequencer = self.sequencer_layout.sequencer
-        current_beat = sequencer.current_beat
+        current_state = sequencer.playback_state
+        jack_beat = sequencer.current_beat
 
-        # Optimization: only update if beat changed significantly
-        if abs(getattr(self, '_last_playhead_beat', -1) - current_beat) < 0.001 and \
-           sequencer.playback_state == getattr(self, 'last_playback_state', 'stopped'):
+        # Optimization: only update if beat changed significantly or state changed
+        if abs(getattr(self, '_last_playhead_beat', -1) - jack_beat) < 0.001 and            current_state == getattr(self, 'last_playback_state', 'stopped'):
             return
-        self._last_playhead_beat = current_beat
-        self.last_playback_state = sequencer.playback_state
+        self._last_playhead_beat = jack_beat
 
-        # Déplacement de la barre rouge
-        self.ids.playhead.x = round(current_beat * self.pixels_per_beat)
+        # --- 1. POSITION JACK & SMOOTHING ---
+        if current_state in ("playing", "recording"):
+            safe_dt = min(dt, 1/15.0)
+            beats_per_second = sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
+
+            # Auto-scroll uniquement en lecture
+            self._scroll_to_logic(self.display_beat)
+        else:
+            self.display_beat = jack_beat
+
+        self.last_playback_state = current_state
+
+        # --- 2. MISE À JOUR VISUELLE ---
+        self.ids.playhead.x = round(self.display_beat * self.pixels_per_beat)
 
         # Mise à jour du texte M:B
         if not self.ids.pos_label.focus:
-            self.ids.pos_label.text = sequencer._format_beats_to_position(current_beat)
-
-        # Auto-scroll uniquement en lecture
-        if sequencer.playback_state == 'playing':
-            self._scroll_to_logic(current_beat)
+            self.ids.pos_label.text = sequencer._format_beats_to_position(self.display_beat)
 
     def _scroll_to_logic(self, current_beat):
         scroll_view = self.ids.timeline_scroll

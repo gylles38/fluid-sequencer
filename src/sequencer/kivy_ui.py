@@ -2013,14 +2013,6 @@ class SequencerLayout(BoxLayout):
             return
         self._is_updating_track_list = True
 
-        # Ensure Ruler ScrollView width exactly matches Track ScrollView width
-        # This accounts for the vertical scrollbar of the main scroll_view
-        if hasattr(self, 'scroll_view') and hasattr(self, 'ruler'):
-            ruler_sv = self.ruler.scroll_view
-            target_width = self.scroll_view.width
-            if abs(ruler_sv.width - target_width) > 0.001:
-                ruler_sv.width = target_width
-
         # Close floating windows of tracks that no longer exist
         if self.window_manager:
             for window in list(self.window_manager.children):

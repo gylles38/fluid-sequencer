@@ -912,6 +912,7 @@ Builder.load_string("""
             spacing: 0
             keyboard_width: dp(60)
             bar_width: timeline_scroll.bar_width
+            spacing: 0
             padding: [0, 0, 0, 0]
             label_padding_x: 0
 
@@ -1086,13 +1087,6 @@ class PianoRollEditor(FloatingWindow):
         self._grid_width_binding = _on_grid_width
         grid.bind(width=self._grid_width_binding)
 
-        # MANDATORY: Fix viewports synchronization
-        # The ruler's ScrollView must have the EXACT same width as the timeline's ScrollView
-        def _sync_sv_width(inst, val):
-            if abs(self.ids.ruler.scroll_view.width - val) > 0.001:
-                self.ids.ruler.scroll_view.width = val
-        self.ids.timeline_scroll.bind(width=_sync_sv_width)
-        _sync_sv_width(None, self.ids.timeline_scroll.width)
 
         # Add the playback line here to ensure it's drawn on top
         grid.add_playback_line()

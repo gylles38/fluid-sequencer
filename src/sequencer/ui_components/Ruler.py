@@ -168,12 +168,12 @@ class Ruler(BoxLayout):
     controls_width = NumericProperty(dp(430))
     keyboard_width = NumericProperty(dp(40))
     bar_width = NumericProperty(0)
-    spacing = NumericProperty(dp(12))
+    gap_width = NumericProperty(dp(12)) # Internal spacing used in tracks
     sequencer_layout = ObjectProperty(None)    
     
     def __init__(self, **kwargs):
-        # On extrait sequencer_layout avant le super() si on veut être prudent, 
-        # mais avec ObjectProperty déclaré plus haut, super() l'acceptera.
+        # Force BoxLayout spacing to 0 to avoid offset between placeholder and scrollview
+        kwargs['spacing'] = 0
         super().__init__(**kwargs)
         
         self.orientation = 'horizontal'
@@ -181,15 +181,14 @@ class Ruler(BoxLayout):
         self.height = dp(30)
 
         # --- CALCUL DE L'ALIGNEMENT PRÉCIS ---
-        # On doit additionner les largeurs ET les espacements (spacing)
-        # Dans TrackWidget, il y a souvent un spacing entre info/controls, 
-        # puis entre controls/keyboard, puis entre keyboard/timeline.
+        # On doit additionner les largeurs ET les espacements (gap_width)
+        # Dans TrackWidget, il y a 3 gaps: Info-Controls, Left-Keyboard, Keyboard-Timeline
         
         total_left_width = (
             self.info_width + 
             self.controls_width + 
             self.keyboard_width + 
-            (self.spacing * 2) # Ajustez ce multiplicateur selon le nombre de gaps dans TrackWidget
+            (self.gap_width * 3)
         )
 
         self.ruler_left_panel = Widget(size_hint_x=None, width=total_left_width)
@@ -221,14 +220,14 @@ class Ruler(BoxLayout):
                   info_width=self._update_left_panel_width,
                   controls_width=self._update_left_panel_width,
                   keyboard_width=self._update_left_panel_width,
-                  spacing=self._update_left_panel_width)
+                  gap_width=self._update_left_panel_width)
 
     def _update_left_panel_width(self, *args):
         new_width = (
             self.info_width +
             self.controls_width +
             self.keyboard_width +
-            (self.spacing * 2)
+            (self.gap_width * 3)
         )
         if abs(self.ruler_left_panel.width - new_width) > 0.001:
             self.ruler_left_panel.width = new_width

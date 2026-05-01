@@ -929,12 +929,6 @@ class AutomationEditor(FloatingWindow):
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
 
-        # MANDATORY: Fix viewports synchronization
-        def _sync_sv_width(inst, val):
-            if abs(self.ids.ruler.scroll_view.width - val) > 0.001:
-                self.ids.ruler.scroll_view.width = val
-        self.ids.timeline_scroll.bind(width=_sync_sv_width)
-        _sync_sv_width(None, self.ids.timeline_scroll.width)
 
     def _force_initial_selection(self, controls, param_name):
         # On sélectionne le paramètre passé en argument (au lieu de 'vol' en dur)
@@ -973,7 +967,7 @@ class AutomationEditor(FloatingWindow):
 
         # Démarrage de la playhead
         if not getattr(self, '_playhead_event', None):
-            self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
+            self._playhead_event = Clock.schedule_interval(self.update_playhead, 0)
         
     def _sync_ruler_scroll(self, instance, value):
         """Répercute le défilement de la grille sur la règle."""

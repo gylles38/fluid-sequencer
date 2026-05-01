@@ -660,8 +660,9 @@ class SequencerLayout(BoxLayout):
             info_width=dp(150),
             controls_width=dp(430),
             keyboard_width=dp(40),
-            bar_width=dp(15), # Width of the scrollbar in the tracks below
-            spacing=dp(12)
+            bar_width=0, # Width of the scrollbar in the tracks below (set to 0 as it overlaps)
+            track_spacing=dp(12),
+            num_gaps=3
         )
 
         # 2. Liaison (Binding) CRUCIAL pour l'affichage après la mesure 5

@@ -694,14 +694,15 @@ Builder.load_string("""
             info_width: dp(60) 
             controls_width: 0
             keyboard_width: 0
-            bar_width: timeline_scroll.bar_width
-            spacing: 0
+            num_gaps: 0
+            bar_width: 0
             padding: [0, 0, 0, 0]
 
         # Main Content Area (Grid + Value Axis)
         BoxLayout:
             id: main_content
             orientation: 'horizontal'
+            spacing: 0
 
             AutomationValueAxis:
                 id: value_axis

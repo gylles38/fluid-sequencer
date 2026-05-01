@@ -131,7 +131,7 @@ class RulerContent(Widget):
                 minor_vertices = []
 
                 for beat in range(int(self.total_beats) + 1):
-                    x = beat * self.pixels_per_beat
+                    x = round(beat * self.pixels_per_beat)
                     if beat % self.beats_per_measure == 0:
                         major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
                     else:
@@ -148,13 +148,13 @@ class RulerContent(Widget):
                 # --- Labels ---
                 for beat in range(int(self.total_beats) + 1):
                     if beat % self.beats_per_measure == 0:
-                        x = beat * self.pixels_per_beat
+                        x = round(beat * self.pixels_per_beat)
                         measure_num = (beat // self.beats_per_measure) + 1
                         texture = self.get_measure_texture(measure_num)
                         Color(*c_white)
                         Rectangle(
                             texture=texture,
-                            pos=(int(self.x + x + self.label_padding_x), int(self.y + self.height * 0.2)),
+                            pos=(self.x + x + self.label_padding_x, self.y + self.height * 0.2),
                             size=texture.size
                         )
         finally:
@@ -167,6 +167,7 @@ class Ruler(BoxLayout):
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
     keyboard_width = NumericProperty(dp(40))
+    bar_width = NumericProperty(0)
     spacing = NumericProperty(dp(12))
     sequencer_layout = ObjectProperty(None)    
     
@@ -206,6 +207,10 @@ class Ruler(BoxLayout):
         self.scroll_view.add_widget(self.ruler_content)
         self.add_widget(self.scroll_view)
 
+        # Right spacer to match vertical scrollbar of the content below
+        self.ruler_right_spacer = Widget(size_hint_x=None, width=self.bar_width)
+        self.add_widget(self.ruler_right_spacer)
+
         # Export du g_translate pour l'interface
         self.g_translate = self.ruler_content.g_translate
         
@@ -227,6 +232,10 @@ class Ruler(BoxLayout):
         )
         if abs(self.ruler_left_panel.width - new_width) > 0.001:
             self.ruler_left_panel.width = new_width
+
+    def on_bar_width(self, instance, value):
+        if hasattr(self, 'ruler_right_spacer'):
+            self.ruler_right_spacer.width = value
 
     def redraw(self, *args):
         self.ruler_content.redraw()

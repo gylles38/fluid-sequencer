@@ -13,7 +13,7 @@ class MeasureGrid(RelativeLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.redraw, size=self.redraw,
+        self.bind( size=self.redraw,
                   beat_per_measure=self.redraw, total_beats=self.redraw,
                   pixels_per_beat=self.redraw)
         self.redraw()

@@ -30,7 +30,7 @@ class PianoRoll(Widget):
 
         self.bind(total_beats=self._update_size, pixels_per_beat=self._update_size,
                   note_height=self._update_size, bottom_padding=self._update_size)
-        self.bind(pos=self.redraw, size=self.redraw, track=self.redraw,
+        self.bind( size=self.redraw, track=self.redraw,
                   selected_notes=self.redraw,
                   drag_delta_beat=self.redraw, drag_delta_pitch=self.redraw)
         self.redraw()

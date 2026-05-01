@@ -126,7 +126,7 @@ class EditableRoutingGrid(RelativeLayout):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+        self.bind( size=self._update_layout, points=self.redraw,
                   pixels_per_beat=self.redraw, total_beats=self.redraw,
                   midi_tracks=self.redraw, active_index=self.redraw,
                   drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
@@ -509,6 +509,7 @@ Builder.load_string("""
             num_gaps: 0
             controls_width: 0
             keyboard_width: 0
+            bar_width: 0
             spacing: 0
             padding: [0, 0, 0, 0]
 
@@ -528,10 +529,11 @@ Builder.load_string("""
                 id: timeline_scroll
                 do_scroll_x: True
                 do_scroll_y: False
-                bar_width: timeline_scroll.bar_width
+                bar_width: 0
                 scroll_type: ['bars']
+                effect_cls: "ScrollEffect"
                 bar_pos_x: 'bottom'
-                bar_margin: dp(2)
+                bar_margin: 0
 
                 # Utiliser un RelativeLayout pour superposer le contenu et la playhead
                 RelativeLayout:
@@ -743,119 +745,17 @@ class InputRoutingEditor(FloatingWindow):
         if playhead_pixel_x > trigger_point:
             target_view_start = playhead_pixel_x - trigger_point
             new_scroll_x = target_view_start / max_scroll_dist
-            scroll_view.scroll_x = max(0, min(1, new_scroll_x))
 
-    def set_edit_mode(self, mode, btn):
-        self.edit_mode = mode
-        for b in self.mode_buttons.values():
-            b.icon_color = [1, 1, 1, 0.8]
-        btn.icon_color = [1, 0.6, 0, 1]
+            clamped_scroll_x = max(0, min(1, new_scroll_x))
+            if abs(scroll_view.scroll_x - clamped_scroll_x) > 0.0001:
+                self._is_scrolling = True
+                scroll_view.scroll_x = clamped_scroll_x
+                scroll_view.update_from_scroll()
 
-    def add_point(self, beat, value):
-        new_point = AutomationPoint(start_time=beat, value=value, parameter='input_routing', curve='none')
-        self.track_copy.points.append(new_point)
-        self.track_copy.points.sort(key=lambda p: p.start_time)
-
-        # Setting points property will trigger grid.redraw via binding
-        # Use list() to ensure Kivy detects the change in the ListProperty
-        self.ids.grid.points = list(self.track_copy.points)
-
-        self._record_state()
-        self.is_dirty = True
-
-    def delete_point(self, point):
-        if point in self.track_copy.points:
-            self.track_copy.points.remove(point)
-            if self.selected_point == point:
-                self.selected_point = None
-            if self.ids.grid.selected_point == point:
-                self.ids.grid.selected_point = None
-            self.update_status_bar(None)
-            self.ids.grid.points = list(self.track_copy.points)
-            self.ids.grid.redraw()
-            self._record_state()
-            self.is_dirty = True
-
-    def undo(self):
-        state = self.history.undo()
-        if state: self._apply_state(state)
-
-    def redo(self):
-        state = self.history.redo()
-        if state: self._apply_state(state)
-
-    def _record_state(self):
-        state = [{'start_time': p.start_time, 'value': p.value, 'curve': p.curve, 'parameter': p.parameter} for p in self.track_copy.points]
-        self.history.record_state(state)
-        self.ids.undo_button.disabled = not self.history.can_undo()
-        self.ids.redo_button.disabled = not self.history.can_redo()
-
-    def _apply_state(self, state):
-        self.track_copy.points = [AutomationPoint(**d) for d in state]
-        self.ids.grid.points = list(self.track_copy.points)
-        self.ids.grid.redraw()
-        self.is_dirty = True
-
-    def zoom_in(self): self._apply_zoom(self.pixels_per_beat * 1.25)
-    def zoom_out(self): self._apply_zoom(max(dp(20), self.pixels_per_beat / 1.25))
-    def zoom_reset(self): self._apply_zoom(dp(100))
-
-    def _apply_zoom(self, new_pixels_per_beat):
-        """Applique le zoom en tentant de conserver le centre de la vue."""
-        scroll_view = self.ids.timeline_scroll
-
-        # 1. Calculer le beat qui est actuellement au centre de l'écran
-        old_total_width = self.total_beats * self.pixels_per_beat
-        viewport_width = scroll_view.width
-
-        if old_total_width > viewport_width:
-            center_pixel = (scroll_view.scroll_x * (old_total_width - viewport_width)) + (viewport_width / 2)
-        else:
-            center_pixel = viewport_width / 2
-        center_beat = center_pixel / self.pixels_per_beat
-
-        # 2. Appliquer le nouveau zoom
-        self.pixels_per_beat = new_pixels_per_beat
-
-        # 3. Recalculer le scroll_x pour que le center_beat reste au centre
-        Clock.schedule_once(lambda dt: self._update_scroll_after_zoom(center_beat), 0)
-
-    def _update_scroll_after_zoom(self, target_beat):
-        scroll_view = self.ids.timeline_scroll
-        new_total_width = self.total_beats * self.pixels_per_beat
-        viewport_width = scroll_view.width
-
-        self.ids.grid.width = new_total_width
-
-        if new_total_width <= viewport_width:
-            scroll_view.scroll_x = 0
-        else:
-            new_center_pixel = target_beat * self.pixels_per_beat
-            new_scroll_pixels = new_center_pixel - (viewport_width / 2)
-            max_scroll = new_total_width - viewport_width
-            scroll_view.scroll_x = max(0, min(1, new_scroll_pixels / max_scroll))
-
-        self.ids.ruler.redraw()
-        self.ids.grid.redraw()
-
-    def sync_horizontal_scroll(self, instance, value):
-        if self._is_scrolling: return
-
-        # Ignore micro-changes to prevent oscillations
-        if hasattr(instance, '_last_scroll_x') and \
-           abs(instance._last_scroll_x - value) < 0.0001:
-            return
-        instance._last_scroll_x = value
-
-        self._is_scrolling = True
-
-        # Simple and direct synchronization for identical widths
-        if instance is self.ids.ruler.scroll_view:
-            self.ids.timeline_scroll.scroll_x = value
-        else:
-            self.ids.ruler.scroll_view.scroll_x = value
-
-        self._is_scrolling = False
+                if hasattr(self.ids.ruler, 'scroll_view'):
+                    self.ids.ruler.scroll_view.scroll_x = clamped_scroll_x
+                    self.ids.ruler.scroll_view.update_from_scroll()
+                self._is_scrolling = False
 
     def play_pressed(self): self.sequencer_layout.sequencer.process_transport_command("play")
     def pause_pressed(self): self.sequencer_layout.sequencer.process_transport_command("pause")

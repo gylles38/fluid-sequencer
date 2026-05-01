@@ -95,7 +95,7 @@ class AutomationValueAxis(Widget):
         self._label_widgets = {}
         # We handle widget management separately from drawing to avoid layout loops
         self.bind(min_val=self._update_label_widgets, max_val=self._update_label_widgets)
-        self.bind(pos=self.redraw, size=self.redraw)
+        self.bind( size=self.redraw)
         Clock.schedule_once(lambda dt: self._update_label_widgets(), 0)
 
     def _update_label_widgets(self, *args):
@@ -195,7 +195,7 @@ class EditableAutomationGrid(Widget):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+        self.bind( size=self._update_layout, points=self.redraw,
                   pixels_per_beat=self.redraw, total_beats=self.redraw,
                   min_val=self.redraw, max_val=self.redraw,
                   drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
@@ -718,6 +718,7 @@ Builder.load_string("""
                 do_scroll_y: False
                 bar_width: dp(15)
                 scroll_type: ['bars']
+                effect_cls: "ScrollEffect"
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
@@ -975,6 +976,7 @@ class AutomationEditor(FloatingWindow):
         """Répercute le défilement de la grille sur la règle."""
         if hasattr(self.ids.ruler, 'scroll_view'):
             self.ids.ruler.scroll_view.scroll_x = value
+            self.ids.ruler.scroll_view.update_from_scroll()
 
     def on_playback_state_change(self, instance, state):
         play_btn = self.ids.get('play_button')

@@ -911,7 +911,7 @@ Builder.load_string("""
             controls_width: 0
             keyboard_width: dp(60)
             num_gaps: 0
-            bar_width: timeline_scroll.bar_width
+            bar_width: 0
             padding: [0, 0, 0, 0]
             label_padding_x: 0
 
@@ -932,6 +932,7 @@ Builder.load_string("""
                 bar_color: [0, 0, 0, 0]
                 bar_inactive_color: [0, 0, 0, 0]
                 scroll_type: ['bars', 'content']
+                effect_cls: "ScrollEffect"
                 bar_margin: 0
 
                 EditorPianoKeyboard:
@@ -949,6 +950,7 @@ Builder.load_string("""
                 do_scroll_x: True
                 bar_width: round(dp(17))
                 scroll_type: ['bars', 'content']
+                effect_cls: "ScrollEffect"
                 bar_pos_x: 'bottom'
                 bar_margin: 0
 

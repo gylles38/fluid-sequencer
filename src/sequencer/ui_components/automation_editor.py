@@ -1060,7 +1060,7 @@ class AutomationEditor(FloatingWindow):
             self.ids.ruler.g_translate.x = 0
             if hasattr(self.ids.grid, 'g_translate'):
                 self.ids.grid.g_translate = Translate(0, 0, 0)
-            self.scroll_to_beat(current_beat)
+            self.scroll_to_beat(jack_beat)
 
         self.last_playback_state = current_state
         
@@ -1071,9 +1071,7 @@ class AutomationEditor(FloatingWindow):
         if not self.ids.pos_label.focus:
             self.ids.pos_label.text = sequencer._format_beats_to_position(self.display_beat)
         
-        # Auto-scroll uniquement en lecture
-        if sequencer.playback_state == 'playing':
-            self._scroll_to_logic(current_beat)
+
 
     def scroll_to_beat(self, beat):
         """Défile la timeline pour afficher le beat spécifié."""

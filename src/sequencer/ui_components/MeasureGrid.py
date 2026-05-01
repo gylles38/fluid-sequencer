@@ -1,4 +1,4 @@
-from kivy.uix.widget import Widget
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.graphics import Color, Line, Mesh
 from kivy.properties import NumericProperty
 from kivy.metrics import dp

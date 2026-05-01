@@ -529,7 +529,7 @@ Builder.load_string("""
                 id: timeline_scroll
                 do_scroll_x: True
                 do_scroll_y: False
-                bar_width: 0
+                bar_width: dp(15)
                 scroll_type: ['bars']
                 effect_cls: "ScrollEffect"
                 bar_pos_x: 'bottom'
@@ -676,6 +676,99 @@ class InputRoutingEditor(FloatingWindow):
         self.ids.timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         self._record_state()
         Window.bind(on_key_down=self._on_key_down)
+
+
+    def set_edit_mode(self, mode, btn):
+        self.edit_mode = mode
+        for b in self.mode_buttons.values():
+            b.icon_color = [1, 1, 1, 0.8]
+        btn.icon_color = [1, 0.6, 0, 1]
+
+    def add_point(self, beat, value):
+        new_point = AutomationPoint(start_time=beat, value=value, parameter='input_routing', curve='none')
+        self.track_copy.points.append(new_point)
+        self.track_copy.points.sort(key=lambda p: p.start_time)
+        self.ids.grid.points = list(self.track_copy.points)
+        self._record_state()
+        self.is_dirty = True
+
+    def delete_point(self, point):
+        if point in self.track_copy.points:
+            self.track_copy.points.remove(point)
+            if self.selected_point == point:
+                self.selected_point = None
+            if self.ids.grid.selected_point == point:
+                self.ids.grid.selected_point = None
+            self.update_status_bar(None)
+            self.ids.grid.points = list(self.track_copy.points)
+            self.ids.grid.redraw()
+            self._record_state()
+            self.is_dirty = True
+
+    def undo(self):
+        state = self.history.undo()
+        if state: self._apply_state(state)
+
+    def redo(self):
+        state = self.history.redo()
+        if state: self._apply_state(state)
+
+    def _record_state(self):
+        state = [{'start_time': p.start_time, 'value': p.value, 'curve': p.curve, 'parameter': p.parameter} for p in self.track_copy.points]
+        self.history.record_state(state)
+        self.ids.undo_button.disabled = not self.history.can_undo()
+        self.ids.redo_button.disabled = not self.history.can_redo()
+
+    def _apply_state(self, state):
+        self.track_copy.points = [AutomationPoint(**d) for d in state]
+        self.ids.grid.points = list(self.track_copy.points)
+        self.ids.grid.redraw()
+        self.is_dirty = True
+
+    def zoom_in(self): self._apply_zoom(self.pixels_per_beat * 1.25)
+    def zoom_out(self): self._apply_zoom(max(dp(20), self.pixels_per_beat / 1.25))
+    def zoom_reset(self): self._apply_zoom(dp(100))
+
+    def _apply_zoom(self, new_pixels_per_beat):
+        """Applique le zoom en tentant de conserver le centre de la vue."""
+        scroll_view = self.ids.timeline_scroll
+        old_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+        if old_total_width > viewport_width:
+            center_pixel = (scroll_view.scroll_x * (old_total_width - viewport_width)) + (viewport_width / 2)
+        else:
+            center_pixel = viewport_width / 2
+        center_beat = center_pixel / self.pixels_per_beat
+        self.pixels_per_beat = new_pixels_per_beat
+        Clock.schedule_once(lambda dt: self._update_scroll_after_zoom(center_beat), 0)
+
+    def _update_scroll_after_zoom(self, target_beat):
+        scroll_view = self.ids.timeline_scroll
+        new_total_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+        self.ids.grid.width = new_total_width
+        if new_total_width <= viewport_width:
+            scroll_view.scroll_x = 0
+        else:
+            new_center_pixel = target_beat * self.pixels_per_beat
+            new_scroll_pixels = new_center_pixel - (viewport_width / 2)
+            max_scroll = new_total_width - viewport_width
+            scroll_view.scroll_x = max(0, min(1, new_scroll_pixels / max_scroll))
+        self.ids.ruler.redraw()
+        self.ids.grid.redraw()
+
+    def sync_horizontal_scroll(self, instance, value):
+        if self._is_scrolling: return
+        if hasattr(instance, '_last_scroll_x') and abs(instance._last_scroll_x - value) < 0.0001: return
+        instance._last_scroll_x = value
+        self._is_scrolling = True
+        if instance is self.ids.ruler.scroll_view:
+            self.ids.timeline_scroll.scroll_x = value
+            self.ids.timeline_scroll.update_from_scroll()
+        else:
+            self.ids.ruler.scroll_view.scroll_x = value
+            self.ids.ruler.scroll_view.update_from_scroll()
+        self._is_scrolling = False
 
     def update_midi_tracks(self):
         self.midi_tracks = [

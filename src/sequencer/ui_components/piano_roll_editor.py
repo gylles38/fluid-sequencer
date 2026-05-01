@@ -39,8 +39,8 @@ class EditorBoundedScrollView(BoundedScrollView):
 
         # 1. Handle mouse scrolling and scrollbar interaction directly.
         local_x, local_y = self.to_local(*touch.pos)
-        is_in_vbar = local_x > self.width - self.bar_width
-        is_in_hbar = local_y < self.bar_width
+        is_in_vbar = (self.do_scroll_y and self.bar_width > 0 and local_x > self.width - self.bar_width)
+        is_in_hbar = (self.do_scroll_x and self.bar_width > 0 and local_y < self.bar_width)
 
         if touch.is_mouse_scrolling or is_in_vbar or is_in_hbar:
             return super().on_touch_down(touch)
@@ -255,7 +255,7 @@ class EditableMidiGrid(PianoRoll):
     def set_playback_line_x(self, x):
         self.playback_line_x = x
         if self.playback_rect:
-            self.playback_rect.pos = (self.x + x, self.y)
+            self.playback_rect.pos = (self.x + round(x), self.y)
 
     def on_touch_move(self, touch) -> None | bool:
         if touch.grab_current is not self:
@@ -909,8 +909,9 @@ Builder.load_string("""
             height: dp(30)
             info_width: 0
             controls_width: 0
-            spacing: 0
             keyboard_width: dp(60)
+            num_gaps: 0
+            bar_width: 0
             padding: [0, 0, 0, 0]
             label_padding_x: 0
 
@@ -931,6 +932,7 @@ Builder.load_string("""
                 bar_color: [0, 0, 0, 0]
                 bar_inactive_color: [0, 0, 0, 0]
                 scroll_type: ['bars', 'content']
+                effect_cls: "ScrollEffect"
                 bar_margin: 0
 
                 EditorPianoKeyboard:
@@ -948,6 +950,7 @@ Builder.load_string("""
                 do_scroll_x: True
                 bar_width: round(dp(17))
                 scroll_type: ['bars', 'content']
+                effect_cls: "ScrollEffect"
                 bar_pos_x: 'bottom'
                 bar_margin: 0
 
@@ -1085,13 +1088,6 @@ class PianoRollEditor(FloatingWindow):
         self._grid_width_binding = _on_grid_width
         grid.bind(width=self._grid_width_binding)
 
-        # MANDATORY: Fix viewports synchronization
-        # The ruler's ScrollView must have the EXACT same width as the timeline's ScrollView
-        def _sync_sv_width(inst, val):
-            if abs(self.ids.ruler.scroll_view.width - val) > 0.001:
-                self.ids.ruler.scroll_view.width = val
-        self.ids.timeline_scroll.bind(width=_sync_sv_width)
-        _sync_sv_width(None, self.ids.timeline_scroll.width)
 
         # Add the playback line here to ensure it's drawn on top
         grid.add_playback_line()
@@ -1789,12 +1785,6 @@ class PianoRollEditor(FloatingWindow):
     def update_playhead(self, dt) -> None:
         current_state = self.sequencer_layout.sequencer.playback_state
         jack_beat = self.sequencer_layout.sequencer.current_beat
-
-        # Optimization: Don't update UI if beat hasn't changed
-        if abs(getattr(self, '_last_playhead_beat', -1) - jack_beat) < 0.001 and \
-           current_state == getattr(self, 'last_playback_state', 'stopped'):
-            return
-        self._last_playhead_beat = jack_beat
 
         # --- 1. POSITION JACK & SMOOTHING ---
         if current_state in ("playing", "recording"):

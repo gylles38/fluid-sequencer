@@ -1,11 +1,11 @@
-from kivy.uix.widget import Widget
+from kivy.uix.relativelayout import RelativeLayout
 from kivy.graphics import Color, Line, Mesh
 from kivy.properties import NumericProperty
 from kivy.metrics import dp
 from kivy.clock import Clock
 
 # --- Définition de MeasureGrid ---
-class MeasureGrid(Widget):
+class MeasureGrid(RelativeLayout):
     """Dessine les lignes de mesures verticales en arrière-plan."""
     beat_per_measure = NumericProperty(4)
     total_beats = NumericProperty(128) 
@@ -13,7 +13,7 @@ class MeasureGrid(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(pos=self.redraw, size=self.redraw,
+        self.bind( size=self.redraw,
                   beat_per_measure=self.redraw, total_beats=self.redraw,
                   pixels_per_beat=self.redraw)
         self.redraw()
@@ -37,10 +37,10 @@ class MeasureGrid(Widget):
                 x_pos = round(i * self.pixels_per_beat)
                 if i % self.beat_per_measure == 0:
                     # Major line
-                    major_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
+                    major_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
                 else:
                     # Minor line
-                    minor_vertices.extend([self.x + x_pos, self.y, 0, 0, self.x + x_pos, self.y + self.height, 0, 0])
+                    minor_vertices.extend([x_pos, 0, 0, 0, x_pos, self.height, 0, 0])
 
             if major_vertices:
                 Color(0.8, 0.8, 0.8, 0.8)

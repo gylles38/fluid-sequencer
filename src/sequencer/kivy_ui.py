@@ -660,7 +660,9 @@ class SequencerLayout(BoxLayout):
             info_width=dp(150),
             controls_width=dp(430),
             keyboard_width=dp(40),
-            spacing=dp(12)
+            bar_width=0, # Width of the scrollbar in the tracks below (set to 0 as it overlaps)
+            track_spacing=dp(12),
+            num_gaps=3
         )
 
         # 2. Liaison (Binding) CRUCIAL pour l'affichage après la mesure 5
@@ -673,7 +675,8 @@ class SequencerLayout(BoxLayout):
         # Conteneur pour la liste des pistes avec défilement
         # On désactive do_scroll_x pour garder les panneaux de gauche fixes.
         # La molette de la souris continuera de fonctionner normalement.
-        self.scroll_view = PriorityScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False, scroll_type=['bars', 'content'])
+        # Fixed bar_width to match Ruler's spacer for perfect alignment
+        self.scroll_view = PriorityScrollView(size_hint=(1, 1), do_scroll_y=True, do_scroll_x=False, scroll_type=['bars', 'content'], bar_width=dp(15))
         # 2. Le Layout qui contient les pistes
         # On le laisse à size_hint_x=1 pour qu'il s'adapte à la largeur de l'écran.
         self.track_list_layout = BoxLayout(
@@ -709,8 +712,8 @@ class SequencerLayout(BoxLayout):
         
         self.sequencer.bind(current_routing_index=self.update_bridge_label)
 
-        # Re-introducing a clock for smooth UI updates, but at a more reasonable rate
-        Clock.schedule_interval(self.update_playhead, 1/30.0)
+        # Re-introducing a clock for smooth UI updates, set to 0 for every frame
+        Clock.schedule_interval(self.update_playhead, 0)
 
         # Ajouter une variable pour stocker la position de fin pendant la pause
         self.saved_end_pos = ""
@@ -2592,21 +2595,16 @@ class SequencerLayout(BoxLayout):
         if self._is_scrolling:
             return
 
-        # Ignorer les changements insignifiants
-        if hasattr(instance, '_last_scroll_x') and abs(instance._last_scroll_x - value) < 0.0001:
-            return
-        instance._last_scroll_x = value
-
         self._is_scrolling = True
         try:
             # Synchroniser la règle si elle n'est pas la source
-            if self.ruler.scroll_view != instance:
+            if self.ruler.scroll_view is not instance:
                 self.ruler.scroll_view.scroll_x = value
 
             # Synchroniser toutes les pistes
             for track in self.track_widgets:
                 # On évite de synchroniser le widget qui est déjà la source
-                if track.timeline_scroll != instance:
+                if track.timeline_scroll is not instance:
                     track.timeline_scroll.scroll_x = value
         finally:
             self._is_scrolling = False

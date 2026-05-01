@@ -68,7 +68,7 @@ class RoutingValueAxis(Widget):
 
         with self.canvas:
             Color(0.2, 0.2, 0.2, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
             Color(0.4, 0.4, 0.4, 1)
             Line(points=[self.right, self.y, self.right, self.top], width=1)
 
@@ -103,7 +103,7 @@ class RoutingValueAxis(Widget):
             self.labels.append(label)
             self.add_widget(label)
 
-class EditableRoutingGrid(Widget):
+class EditableRoutingGrid(RelativeLayout):
     editor = ObjectProperty()
     points = ListProperty([])
     active_index = NumericProperty(-1)
@@ -126,7 +126,7 @@ class EditableRoutingGrid(Widget):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+        self.bind( size=self._update_layout, points=self.redraw,
                   pixels_per_beat=self.redraw, total_beats=self.redraw,
                   midi_tracks=self.redraw, active_index=self.redraw,
                   drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
@@ -271,20 +271,20 @@ class EditableRoutingGrid(Widget):
         self.grid_widget.canvas.clear()
         with self.grid_widget.canvas:
             Color(0.1, 0.1, 0.1, 1)
-            Rectangle(pos=self.pos, size=self.size)
+            Rectangle(pos=(0, 0), size=self.size)
 
             # --- Optimized Grid Lines using Mesh ---
             major_vertices = []
             minor_vertices = []
 
             for i in range(int(self.total_beats) + 1):
-                x = i * self.pixels_per_beat
+                x = round(i * self.pixels_per_beat)
                 if x > self.width: break
                 is_measure = i % self.beats_per_measure == 0
                 if is_measure:
-                    major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                    major_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
                 else:
-                    minor_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                    minor_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
 
             # Horizontal lines for each MIDI track
             h_vertices = []
@@ -292,8 +292,8 @@ class EditableRoutingGrid(Widget):
                 y = self._get_y_from_abs_idx(abs_idx)
                 if abs_idx == self.active_index:
                     Color(0.2, 0.3, 0.4, 0.5)
-                    Rectangle(pos=(self.x, self.y + y - dp(10)), size=(self.width, dp(20)))
-                h_vertices.extend([self.x, self.y + y, 0, 0, self.x + self.width, self.y + y, 0, 0])
+                    Rectangle(pos=(0, y - dp(10)), size=(self.width, dp(20)))
+                h_vertices.extend([0, y, 0, 0, self.width, y, 0, 0])
 
             Color(0.2, 0.2, 0.2, 1)
             if major_vertices:
@@ -323,7 +323,7 @@ class EditableRoutingGrid(Widget):
             first_p = sorted_points[0]
             is_dragged = (first_p is self._dragged_point)
             v_off_start_y = self.drag_delta_value if is_dragged else 0
-            points_to_draw.extend([self.x, self.y + self._get_y_from_abs_idx(first_p.value + v_off_start_y)])
+            points_to_draw.extend([0, self._get_y_from_abs_idx(first_p.value + v_off_start_y)])
 
             for i in range(len(sorted_points)):
                 p = sorted_points[i]
@@ -331,7 +331,7 @@ class EditableRoutingGrid(Widget):
                 v_off_x = self.drag_delta_beat if is_dragged else 0
                 v_off_y = self.drag_delta_value if is_dragged else 0
 
-                x = (p.start_time + v_off_x) * self.pixels_per_beat
+                x = round((p.start_time + v_off_x) * self.pixels_per_beat)
                 y = self._get_y_from_abs_idx(p.value + v_off_y)
 
                 if i > 0:
@@ -341,16 +341,16 @@ class EditableRoutingGrid(Widget):
                     v_off_prev_y = self.drag_delta_value if is_dragged_prev else 0
 
                     prev_y = self._get_y_from_abs_idx(prev_p.value + v_off_prev_y)
-                    points_to_draw.extend([self.x + x, self.y + prev_y])
+                    points_to_draw.extend([x, prev_y])
 
-                points_to_draw.extend([self.x + x, self.y + y])
+                points_to_draw.extend([x, y])
 
             # End line
-            final_x = self.total_beats * self.pixels_per_beat
+            final_x = round(self.total_beats * self.pixels_per_beat)
             last_p = sorted_points[-1]
             is_dragged_last = (last_p is self._dragged_point)
             v_off_last_y = self.drag_delta_value if is_dragged_last else 0
-            points_to_draw.extend([self.x + final_x, self.y + self._get_y_from_abs_idx(last_p.value + v_off_last_y)])
+            points_to_draw.extend([final_x, self._get_y_from_abs_idx(last_p.value + v_off_last_y)])
 
             if len(points_to_draw) >= 4:
                 Line(points=points_to_draw, width=1.5)
@@ -363,15 +363,15 @@ class EditableRoutingGrid(Widget):
                 v_off_x = self.drag_delta_beat if is_dragged else 0
                 v_off_y = self.drag_delta_value if is_dragged else 0
 
-                x = (p.start_time + v_off_x) * self.pixels_per_beat
+                x = round((p.start_time + v_off_x) * self.pixels_per_beat)
                 y = self._get_y_from_abs_idx(p.value + v_off_y)
 
                 if p == self.selected_point:
                     Color(1, 0.6, 0, 1)
-                    Rectangle(pos=(self.x + x - selected_radius, self.y + y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
+                    Rectangle(pos=(x - selected_radius, y - selected_radius), size=(selected_radius * 2, selected_radius * 2))
                 else:
                     Color(0.8, 0.8, 1, 0.9)
-                    Rectangle(pos=(self.x + x - point_radius, self.y + y - point_radius), size=(point_radius * 2, point_radius * 2))
+                    Rectangle(pos=(x - point_radius, y - point_radius), size=(point_radius * 2, point_radius * 2))
 
 Builder.load_string("""
 <InputRoutingEditor>:
@@ -506,14 +506,17 @@ Builder.load_string("""
             end_pos_str: root.end_pos_str
             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
             info_width: dp(120)
+            num_gaps: 0
             controls_width: 0
             keyboard_width: 0
+            bar_width: 0
             spacing: 0
             padding: [0, 0, 0, 0]
 
         BoxLayout:
             id: main_content
             orientation: 'horizontal'
+            spacing: 0
 
             RoutingValueAxis:
                 id: value_axis
@@ -528,19 +531,19 @@ Builder.load_string("""
                 do_scroll_y: False
                 bar_width: dp(15)
                 scroll_type: ['bars']
+                effect_cls: "ScrollEffect"
                 bar_pos_x: 'bottom'
-                bar_margin: dp(2)
+                bar_margin: 0
 
                 # Utiliser un RelativeLayout pour superposer le contenu et la playhead
                 RelativeLayout:
                     id: scroll_content
                     size_hint: None, 1
-                    width: grid.width + dp(15)
+                    width: grid.width
 
                     BoxLayout:
                         orientation: 'vertical'
                         size_hint: (1, 1)
-                        padding: [0, 0, 0, dp(15)]
 
                         # Grille d'automation (Routing)
                         EditableRoutingGrid:
@@ -554,10 +557,6 @@ Builder.load_string("""
                             midi_tracks: root.midi_tracks
                             beats_per_measure: root.sequencer_layout.sequencer.song.time_signature_numerator
                             active_index: root.current_routing_index
-
-                        Widget:
-                            size_hint_y: None
-                            height: dp(18)
 
                     # Playhead
                     Widget:
@@ -662,6 +661,7 @@ class InputRoutingEditor(FloatingWindow):
         self._seq_binding_routing = lambda inst, val: setattr(self, 'current_routing_index', val)
         self.sequencer_layout.sequencer.bind(current_routing_index=self._seq_binding_routing)
         self.current_routing_index = self.sequencer_layout.sequencer.current_routing_index
+        self.display_beat = self.sequencer_layout.sequencer.current_beat
         self.sequencer_layout.sequencer.bind(playback_state=self.on_playback_state_change)
 
         Clock.schedule_once(self._post_kv_init)
@@ -677,67 +677,6 @@ class InputRoutingEditor(FloatingWindow):
         self._record_state()
         Window.bind(on_key_down=self._on_key_down)
 
-    def update_midi_tracks(self):
-        self.midi_tracks = [
-            (i, t.name) for i, t in enumerate(self.sequencer_layout.sequencer.song.tracks)
-            if isinstance(t, MidiTrack)
-        ]
-
-    def scroll_to_beat(self, beat):
-        """Défile la timeline pour afficher le beat spécifié."""
-        scroll_view = self.ids.timeline_scroll
-        grid_width = self.total_beats * self.pixels_per_beat
-        viewport_width = scroll_view.width
-
-        if grid_width <= viewport_width:
-            scroll_view.scroll_x = 0
-            return
-
-        target_pixel = beat * self.pixels_per_beat
-        max_scroll = grid_width - viewport_width
-        new_scroll_x = target_pixel / max_scroll
-
-        scroll_view.scroll_x = max(0, min(1, new_scroll_x))
-
-    def update_playhead(self, dt):
-        if 'playhead' not in self.ids: return
-        sequencer = self.sequencer_layout.sequencer
-        current_beat = sequencer.current_beat
-
-        # Optimization: only update if beat changed significantly
-        if abs(getattr(self, '_last_playhead_beat', -1) - current_beat) < 0.001 and \
-           sequencer.playback_state == getattr(self, 'last_playback_state', 'stopped'):
-            return
-        self._last_playhead_beat = current_beat
-        self.last_playback_state = sequencer.playback_state
-
-        # Déplacement de la barre rouge
-        self.ids.playhead.x = current_beat * self.pixels_per_beat
-
-        # Mise à jour du texte M:B
-        if not self.ids.pos_label.focus:
-            self.ids.pos_label.text = sequencer._format_beats_to_position(current_beat)
-
-        # Auto-scroll uniquement en lecture
-        if sequencer.playback_state == 'playing':
-            self._scroll_to_logic(current_beat)
-
-    def _scroll_to_logic(self, current_beat):
-        scroll_view = self.ids.timeline_scroll
-        total_width = self.ids.grid.width
-        viewport_width = scroll_view.width
-
-        max_scroll_dist = total_width - viewport_width
-        if max_scroll_dist <= 0:
-            return
-
-        playhead_pixel_x = current_beat * self.pixels_per_beat
-        trigger_point = viewport_width * 0.5
-
-        if playhead_pixel_x > trigger_point:
-            target_view_start = playhead_pixel_x - trigger_point
-            new_scroll_x = target_view_start / max_scroll_dist
-            scroll_view.scroll_x = max(0, min(1, new_scroll_x))
 
     def set_edit_mode(self, mode, btn):
         self.edit_mode = mode
@@ -749,11 +688,7 @@ class InputRoutingEditor(FloatingWindow):
         new_point = AutomationPoint(start_time=beat, value=value, parameter='input_routing', curve='none')
         self.track_copy.points.append(new_point)
         self.track_copy.points.sort(key=lambda p: p.start_time)
-
-        # Setting points property will trigger grid.redraw via binding
-        # Use list() to ensure Kivy detects the change in the ListProperty
         self.ids.grid.points = list(self.track_copy.points)
-
         self._record_state()
         self.is_dirty = True
 
@@ -797,30 +732,21 @@ class InputRoutingEditor(FloatingWindow):
     def _apply_zoom(self, new_pixels_per_beat):
         """Applique le zoom en tentant de conserver le centre de la vue."""
         scroll_view = self.ids.timeline_scroll
-
-        # 1. Calculer le beat qui est actuellement au centre de l'écran
         old_total_width = self.total_beats * self.pixels_per_beat
         viewport_width = scroll_view.width
-
         if old_total_width > viewport_width:
             center_pixel = (scroll_view.scroll_x * (old_total_width - viewport_width)) + (viewport_width / 2)
         else:
             center_pixel = viewport_width / 2
         center_beat = center_pixel / self.pixels_per_beat
-
-        # 2. Appliquer le nouveau zoom
         self.pixels_per_beat = new_pixels_per_beat
-
-        # 3. Recalculer le scroll_x pour que le center_beat reste au centre
         Clock.schedule_once(lambda dt: self._update_scroll_after_zoom(center_beat), 0)
 
     def _update_scroll_after_zoom(self, target_beat):
         scroll_view = self.ids.timeline_scroll
         new_total_width = self.total_beats * self.pixels_per_beat
         viewport_width = scroll_view.width
-
         self.ids.grid.width = new_total_width
-
         if new_total_width <= viewport_width:
             scroll_view.scroll_x = 0
         else:
@@ -828,28 +754,101 @@ class InputRoutingEditor(FloatingWindow):
             new_scroll_pixels = new_center_pixel - (viewport_width / 2)
             max_scroll = new_total_width - viewport_width
             scroll_view.scroll_x = max(0, min(1, new_scroll_pixels / max_scroll))
-
         self.ids.ruler.redraw()
         self.ids.grid.redraw()
 
     def sync_horizontal_scroll(self, instance, value):
         if self._is_scrolling: return
-
-        # Ignore micro-changes to prevent oscillations
-        if hasattr(instance, '_last_scroll_x') and \
-           abs(instance._last_scroll_x - value) < 0.0001:
-            return
+        if hasattr(instance, '_last_scroll_x') and abs(instance._last_scroll_x - value) < 0.0001: return
         instance._last_scroll_x = value
-
         self._is_scrolling = True
-
-        # Simple and direct synchronization for identical widths
         if instance is self.ids.ruler.scroll_view:
             self.ids.timeline_scroll.scroll_x = value
+            self.ids.timeline_scroll.update_from_scroll()
         else:
             self.ids.ruler.scroll_view.scroll_x = value
-
+            self.ids.ruler.scroll_view.update_from_scroll()
         self._is_scrolling = False
+
+    def update_midi_tracks(self):
+        self.midi_tracks = [
+            (i, t.name) for i, t in enumerate(self.sequencer_layout.sequencer.song.tracks)
+            if isinstance(t, MidiTrack)
+        ]
+
+    def scroll_to_beat(self, beat):
+        """Défile la timeline pour afficher le beat spécifié."""
+        scroll_view = self.ids.timeline_scroll
+        grid_width = self.total_beats * self.pixels_per_beat
+        viewport_width = scroll_view.width
+
+        if grid_width <= viewport_width:
+            scroll_view.scroll_x = 0
+            return
+
+        target_pixel = beat * self.pixels_per_beat
+        max_scroll = grid_width - viewport_width
+        new_scroll_x = target_pixel / max_scroll
+
+        scroll_view.scroll_x = max(0, min(1, new_scroll_x))
+
+    def update_playhead(self, dt):
+        if 'playhead' not in self.ids: return
+        sequencer = self.sequencer_layout.sequencer
+        current_state = sequencer.playback_state
+        jack_beat = sequencer.current_beat
+
+        # --- 1. POSITION JACK & SMOOTHING ---
+        if current_state in ("playing", "recording"):
+            safe_dt = min(dt, 1/15.0)
+            beats_per_second = sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
+
+            # Auto-scroll uniquement en lecture
+            self._scroll_to_logic(self.display_beat)
+        else:
+            self.display_beat = jack_beat
+
+        self.last_playback_state = current_state
+
+        # --- 2. MISE À JOUR VISUELLE ---
+        self.ids.playhead.x = round(self.display_beat * self.pixels_per_beat)
+
+        # Mise à jour du texte M:B
+        if not self.ids.pos_label.focus:
+            self.ids.pos_label.text = sequencer._format_beats_to_position(self.display_beat)
+
+    def _scroll_to_logic(self, current_beat):
+        scroll_view = self.ids.timeline_scroll
+        total_width = self.ids.grid.width
+        viewport_width = scroll_view.width
+
+        max_scroll_dist = total_width - viewport_width
+        if max_scroll_dist <= 0:
+            return
+
+        playhead_pixel_x = current_beat * self.pixels_per_beat
+        trigger_point = viewport_width * 0.5
+
+        if playhead_pixel_x > trigger_point:
+            target_view_start = playhead_pixel_x - trigger_point
+            new_scroll_x = target_view_start / max_scroll_dist
+
+            clamped_scroll_x = max(0, min(1, new_scroll_x))
+            if abs(scroll_view.scroll_x - clamped_scroll_x) > 0.0001:
+                self._is_scrolling = True
+                scroll_view.scroll_x = clamped_scroll_x
+                scroll_view.update_from_scroll()
+
+                if hasattr(self.ids.ruler, 'scroll_view'):
+                    self.ids.ruler.scroll_view.scroll_x = clamped_scroll_x
+                    self.ids.ruler.scroll_view.update_from_scroll()
+                self._is_scrolling = False
 
     def play_pressed(self): self.sequencer_layout.sequencer.process_transport_command("play")
     def pause_pressed(self): self.sequencer_layout.sequencer.process_transport_command("pause")
@@ -864,7 +863,7 @@ class InputRoutingEditor(FloatingWindow):
                 target_beat = max(0, min(self.total_beats, target_beat))
                 seq.current_beat = target_beat
                 seq._resync_all_at_beat(target_beat)
-                self.ids.playhead.x = target_beat * self.pixels_per_beat
+                self.ids.playhead.x = round(target_beat * self.pixels_per_beat)
                 self._scroll_to_logic(target_beat)
             self.ids.pos_label.focus = False
         except:
@@ -968,7 +967,7 @@ class InputRoutingEditor(FloatingWindow):
         self.ids.ruler.redraw()
         self.ids.grid.redraw()
         if not self._playhead_event:
-            self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
+            self._playhead_event = Clock.schedule_interval(self.update_playhead, 0)
 
     def on_dismiss(self):
         from kivy.logger import Logger

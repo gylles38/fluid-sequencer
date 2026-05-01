@@ -95,7 +95,7 @@ class AutomationValueAxis(Widget):
         self._label_widgets = {}
         # We handle widget management separately from drawing to avoid layout loops
         self.bind(min_val=self._update_label_widgets, max_val=self._update_label_widgets)
-        self.bind(pos=self.redraw, size=self.redraw)
+        self.bind( size=self.redraw)
         Clock.schedule_once(lambda dt: self._update_label_widgets(), 0)
 
     def _update_label_widgets(self, *args):
@@ -195,7 +195,7 @@ class EditableAutomationGrid(Widget):
         self.add_widget(self.grid_widget)
         self.add_widget(self.curve_widget)
 
-        self.bind(pos=self._update_layout, size=self._update_layout, points=self.redraw,
+        self.bind( size=self._update_layout, points=self.redraw,
                   pixels_per_beat=self.redraw, total_beats=self.redraw,
                   min_val=self.redraw, max_val=self.redraw,
                   drag_delta_beat=self.redraw, drag_delta_value=self.redraw)
@@ -694,13 +694,15 @@ Builder.load_string("""
             info_width: dp(60) 
             controls_width: 0
             keyboard_width: 0
-            spacing: 0
+            num_gaps: 0
+            bar_width: 0
             padding: [0, 0, 0, 0]
 
         # Main Content Area (Grid + Value Axis)
         BoxLayout:
             id: main_content
             orientation: 'horizontal'
+            spacing: 0
 
             AutomationValueAxis:
                 id: value_axis
@@ -716,6 +718,7 @@ Builder.load_string("""
                 do_scroll_y: False
                 bar_width: dp(15)
                 scroll_type: ['bars']
+                effect_cls: "ScrollEffect"
                 bar_pos_x: 'bottom'
                 bar_margin: dp(2)
 
@@ -868,6 +871,7 @@ class AutomationEditor(FloatingWindow):
 
     def __init__(self, initial_param='vol', **kwargs):
         self.history = EditHistoryManager()
+        self.display_beat = 0.0
         # On extrait track et sequencer_layout de kwargs avant le super s'ils y sont
         # ou on s'assure qu'ils sont passés par propriétés.        
         super(AutomationEditor, self).__init__(**kwargs)
@@ -928,12 +932,6 @@ class AutomationEditor(FloatingWindow):
         ruler_scroll.bind(scroll_x=self.sync_horizontal_scroll)
         timeline_scroll.bind(scroll_x=self.sync_horizontal_scroll)
 
-        # MANDATORY: Fix viewports synchronization
-        def _sync_sv_width(inst, val):
-            if abs(self.ids.ruler.scroll_view.width - val) > 0.001:
-                self.ids.ruler.scroll_view.width = val
-        self.ids.timeline_scroll.bind(width=_sync_sv_width)
-        _sync_sv_width(None, self.ids.timeline_scroll.width)
 
     def _force_initial_selection(self, controls, param_name):
         # On sélectionne le paramètre passé en argument (au lieu de 'vol' en dur)
@@ -972,12 +970,13 @@ class AutomationEditor(FloatingWindow):
 
         # Démarrage de la playhead
         if not getattr(self, '_playhead_event', None):
-            self._playhead_event = Clock.schedule_interval(self.update_playhead, 1/60)
+            self._playhead_event = Clock.schedule_interval(self.update_playhead, 0)
         
     def _sync_ruler_scroll(self, instance, value):
         """Répercute le défilement de la grille sur la règle."""
         if hasattr(self.ids.ruler, 'scroll_view'):
             self.ids.ruler.scroll_view.scroll_x = value
+            self.ids.ruler.scroll_view.update_from_scroll()
 
     def on_playback_state_change(self, instance, state):
         play_btn = self.ids.get('play_button')
@@ -1035,39 +1034,44 @@ class AutomationEditor(FloatingWindow):
             self.ids.edit_zone.opacity = 0
 
     def update_playhead(self, dt):
-        if 'playhead' not in self.ids:
-            return
-
-        # Optimization: Don't update UI if beat hasn't changed
+        if 'playhead' not in self.ids: return
         sequencer = self.sequencer_layout.sequencer
-        current_beat = sequencer.current_beat
-
-        if abs(getattr(self, '_last_playhead_beat', -1) - current_beat) < 0.001 and \
-           sequencer.playback_state == getattr(self, 'last_playback_state', 'stopped'):
-            return
-        self._last_playhead_beat = current_beat
-
         current_state = sequencer.playback_state
+        jack_beat = sequencer.current_beat
 
-        # --- RESET AU STOP ---
+        # --- 1. POSITION JACK & SMOOTHING ---
+        if current_state in ("playing", "recording"):
+            safe_dt = min(dt, 1/15.0)
+            beats_per_second = sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
+
+            # Auto-scroll uniquement en lecture
+            self._scroll_to_logic(self.display_beat)
+        else:
+            self.display_beat = jack_beat
+
+        # --- 2. RESET AU STOP ---
         if current_state == "stopped" and getattr(self, 'last_playback_state', 'stopped') != "stopped":
             self.ids.ruler.g_translate.x = 0
-            self.ids.grid.g_translate = Translate(0, 0, 0) # Fallback optimization
-            self.scroll_to_beat(current_beat)
+            if hasattr(self.ids.grid, 'g_translate'):
+                self.ids.grid.g_translate = Translate(0, 0, 0)
+            self.scroll_to_beat(jack_beat)
 
         self.last_playback_state = current_state
         
         # Déplacement de la barre rouge
-        self.ids.playhead.x = current_beat * self.pixels_per_beat
+        self.ids.playhead.x = round(self.display_beat * self.pixels_per_beat)
         
         # Mise à jour du texte M:B
         if not self.ids.pos_label.focus:
-            # On utilise le formateur officiel du séquenceur pour éviter les erreurs de calcul
-            self.ids.pos_label.text = sequencer._format_beats_to_position(current_beat)
+            self.ids.pos_label.text = sequencer._format_beats_to_position(self.display_beat)
         
-        # Auto-scroll uniquement en lecture
-        if sequencer.playback_state == 'playing':
-            self._scroll_to_logic(current_beat)
+
 
     def scroll_to_beat(self, beat):
         """Défile la timeline pour afficher le beat spécifié."""

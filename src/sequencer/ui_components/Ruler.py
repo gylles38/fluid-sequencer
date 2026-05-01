@@ -9,7 +9,7 @@ from kivy.effects.scroll import ScrollEffect
 from kivy.graphics import Color, Rectangle, Line, Mesh, PushMatrix, PopMatrix, Translate
 from kivy.core.text import Label as CoreLabel # On utilise CoreLabel pour dessiner sur le canvas
 
-class RulerContent(Widget):
+class RulerContent(RelativeLayout):
     sequencer_layout = ObjectProperty(None)
     pixels_per_beat = NumericProperty(dp(100))
     total_beats = NumericProperty(16)
@@ -102,7 +102,7 @@ class RulerContent(Widget):
 
             with self.canvas:
                 Color(*c_bg)
-                Rectangle(pos=self.pos, size=(target_width, self.height))
+                Rectangle(pos=(0, 0), size=(target_width, self.height))
 
                 # --- DESSIN DE LA SÉLECTION (PLAGE START/END) ---
                 if self.sequencer_layout and self.sequencer_layout.sequencer:
@@ -112,19 +112,19 @@ class RulerContent(Widget):
 
                     if start_beat is not None and end_beat is not None and end_beat > start_beat:
                         Color(*c_selection_range)
-                        x_start = start_beat * self.pixels_per_beat
-                        x_end = end_beat * self.pixels_per_beat
-                        Rectangle(pos=(self.x + x_start, self.y), size=(x_end - x_start, self.height))
+                        x_start = round(start_beat * self.pixels_per_beat)
+                        x_end = round(end_beat * self.pixels_per_beat)
+                        Rectangle(pos=(x_start, 0), size=(x_end - x_start, self.height))
 
                     if start_beat is not None:
                         Color(*c_selection)
                         x = start_beat * self.pixels_per_beat
-                        Rectangle(pos=(self.x + x, self.y), size=(dp(3), self.height))
+                        Rectangle(pos=(round(x), 0), size=(dp(3), self.height))
 
                     if end_beat is not None:
                         Color(*c_selection)
                         x = end_beat * self.pixels_per_beat
-                        Rectangle(pos=(self.x + x - dp(3), self.y), size=(dp(3), self.height))
+                        Rectangle(pos=(round(x) - dp(3), 0), size=(dp(3), self.height))
 
                 # --- Optimized Grid Lines using Mesh ---
                 major_vertices = []
@@ -133,9 +133,9 @@ class RulerContent(Widget):
                 for beat in range(int(self.total_beats) + 1):
                     x = round(beat * self.pixels_per_beat)
                     if beat % self.beats_per_measure == 0:
-                        major_vertices.extend([self.x + x, self.y, 0, 0, self.x + x, self.y + self.height, 0, 0])
+                        major_vertices.extend([x, 0, 0, 0, x, self.height, 0, 0])
                     else:
-                        minor_vertices.extend([self.x + x, self.y + self.height * 0.4, 0, 0, self.x + x, self.y + self.height * 0.6, 0, 0])
+                        minor_vertices.extend([x, self.height * 0.4, 0, 0, x, self.height * 0.6, 0, 0])
 
                 if major_vertices:
                     Color(*c_measure)
@@ -154,7 +154,7 @@ class RulerContent(Widget):
                         Color(*c_white)
                         Rectangle(
                             texture=texture,
-                            pos=(self.x + x + self.label_padding_x, self.y + self.height * 0.2),
+                            pos=(x + self.label_padding_x, self.height * 0.2),
                             size=texture.size
                         )
         finally:
@@ -167,29 +167,21 @@ class Ruler(BoxLayout):
     info_width = NumericProperty(dp(150))
     controls_width = NumericProperty(dp(430))
     keyboard_width = NumericProperty(dp(40))
-    spacing = NumericProperty(dp(12))
+    bar_width = NumericProperty(0)
+    track_spacing = NumericProperty(dp(12))
+    num_gaps = NumericProperty(3)
     sequencer_layout = ObjectProperty(None)    
     
     def __init__(self, **kwargs):
-        # On extrait sequencer_layout avant le super() si on veut être prudent, 
-        # mais avec ObjectProperty déclaré plus haut, super() l'acceptera.
+        # Force BoxLayout spacing to 0 to avoid offset between placeholder and scrollview
         super().__init__(**kwargs)
-        
+        self.spacing = 0
         self.orientation = 'horizontal'
         self.size_hint_y = None
         self.height = dp(30)
 
         # --- CALCUL DE L'ALIGNEMENT PRÉCIS ---
-        # On doit additionner les largeurs ET les espacements (spacing)
-        # Dans TrackWidget, il y a souvent un spacing entre info/controls, 
-        # puis entre controls/keyboard, puis entre keyboard/timeline.
-        
-        total_left_width = (
-            self.info_width + 
-            self.controls_width + 
-            self.keyboard_width + 
-            (self.spacing * 2) # Ajustez ce multiplicateur selon le nombre de gaps dans TrackWidget
-        )
+        total_left_width = self._calculate_total_left_width()
 
         self.ruler_left_panel = Widget(size_hint_x=None, width=total_left_width)
         self.add_widget(self.ruler_left_panel)
@@ -206,6 +198,10 @@ class Ruler(BoxLayout):
         self.scroll_view.add_widget(self.ruler_content)
         self.add_widget(self.scroll_view)
 
+        # Right spacer to match vertical scrollbar of the content below
+        self.ruler_right_spacer = Widget(size_hint_x=None, width=self.bar_width)
+        self.add_widget(self.ruler_right_spacer)
+
         # Export du g_translate pour l'interface
         self.g_translate = self.ruler_content.g_translate
         
@@ -216,17 +212,25 @@ class Ruler(BoxLayout):
                   info_width=self._update_left_panel_width,
                   controls_width=self._update_left_panel_width,
                   keyboard_width=self._update_left_panel_width,
-                  spacing=self._update_left_panel_width)
+                  track_spacing=self._update_left_panel_width,
+                  num_gaps=self._update_left_panel_width)
 
-    def _update_left_panel_width(self, *args):
-        new_width = (
+    def _calculate_total_left_width(self):
+        return (
             self.info_width +
             self.controls_width +
             self.keyboard_width +
-            (self.spacing * 2)
+            (self.track_spacing * self.num_gaps)
         )
+
+    def _update_left_panel_width(self, *args):
+        new_width = self._calculate_total_left_width()
         if abs(self.ruler_left_panel.width - new_width) > 0.001:
             self.ruler_left_panel.width = new_width
+
+    def on_bar_width(self, instance, value):
+        if hasattr(self, 'ruler_right_spacer'):
+            self.ruler_right_spacer.width = value
 
     def redraw(self, *args):
         self.ruler_content.redraw()

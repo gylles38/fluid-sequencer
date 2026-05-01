@@ -1291,7 +1291,7 @@ class TrackWidget(HoverBehavior, BoxLayout):
 
     def set_playback_position(self, current_beat: float) -> None:
         if self.playback_line:
-            self.playback_line.x = current_beat * self.pixels_per_beat
+            self.playback_line.x = round(current_beat * self.pixels_per_beat)
 
     def update_grid_parameters(self, total_beats: float, pixels_per_beat: float) -> None:
         """Called by the parent layout to propagate zoom/length changes to this widget."""

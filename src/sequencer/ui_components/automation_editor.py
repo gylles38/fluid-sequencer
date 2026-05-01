@@ -1054,7 +1054,7 @@ class AutomationEditor(FloatingWindow):
         self.last_playback_state = current_state
         
         # Déplacement de la barre rouge
-        self.ids.playhead.x = current_beat * self.pixels_per_beat
+        self.ids.playhead.x = round(current_beat * self.pixels_per_beat)
         
         # Mise à jour du texte M:B
         if not self.ids.pos_label.focus:

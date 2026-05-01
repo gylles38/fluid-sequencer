@@ -39,8 +39,8 @@ class EditorBoundedScrollView(BoundedScrollView):
 
         # 1. Handle mouse scrolling and scrollbar interaction directly.
         local_x, local_y = self.to_local(*touch.pos)
-        is_in_vbar = local_x > self.width - self.bar_width
-        is_in_hbar = local_y < self.bar_width
+        is_in_vbar = (self.do_scroll_y and self.bar_width > 0 and local_x > self.width - self.bar_width)
+        is_in_hbar = (self.do_scroll_x and self.bar_width > 0 and local_y < self.bar_width)
 
         if touch.is_mouse_scrolling or is_in_vbar or is_in_hbar:
             return super().on_touch_down(touch)
@@ -255,7 +255,7 @@ class EditableMidiGrid(PianoRoll):
     def set_playback_line_x(self, x):
         self.playback_line_x = x
         if self.playback_rect:
-            self.playback_rect.pos = (self.x + x, self.y)
+            self.playback_rect.pos = (self.x + round(x), self.y)
 
     def on_touch_move(self, touch) -> None | bool:
         if touch.grab_current is not self:

@@ -870,6 +870,7 @@ class AutomationEditor(FloatingWindow):
 
     def __init__(self, initial_param='vol', **kwargs):
         self.history = EditHistoryManager()
+        self.display_beat = 0.0
         # On extrait track et sequencer_layout de kwargs avant le super s'ils y sont
         # ou on s'assure qu'ils sont passés par propriétés.        
         super(AutomationEditor, self).__init__(**kwargs)
@@ -1031,35 +1032,42 @@ class AutomationEditor(FloatingWindow):
             self.ids.edit_zone.opacity = 0
 
     def update_playhead(self, dt):
-        if 'playhead' not in self.ids:
-            return
-
-        # Optimization: Don't update UI if beat hasn't changed
+        if 'playhead' not in self.ids: return
         sequencer = self.sequencer_layout.sequencer
-        current_beat = sequencer.current_beat
-
-        if abs(getattr(self, '_last_playhead_beat', -1) - current_beat) < 0.001 and \
-           sequencer.playback_state == getattr(self, 'last_playback_state', 'stopped'):
-            return
-        self._last_playhead_beat = current_beat
-
         current_state = sequencer.playback_state
+        jack_beat = sequencer.current_beat
 
-        # --- RESET AU STOP ---
+        # --- 1. POSITION JACK & SMOOTHING ---
+        if current_state in ("playing", "recording"):
+            safe_dt = min(dt, 1/15.0)
+            beats_per_second = sequencer.song.tempo / 60.0
+            if beats_per_second > 0:
+                self.display_beat += (beats_per_second * safe_dt)
+            error = jack_beat - self.display_beat
+            correction_speed = 5.0
+            if abs(error) > 0.5 or dt > 0.1: self.display_beat = jack_beat
+            else: self.display_beat += (error * correction_speed * dt)
+
+            # Auto-scroll uniquement en lecture
+            self._scroll_to_logic(self.display_beat)
+        else:
+            self.display_beat = jack_beat
+
+        # --- 2. RESET AU STOP ---
         if current_state == "stopped" and getattr(self, 'last_playback_state', 'stopped') != "stopped":
             self.ids.ruler.g_translate.x = 0
-            self.ids.grid.g_translate = Translate(0, 0, 0) # Fallback optimization
+            if hasattr(self.ids.grid, 'g_translate'):
+                self.ids.grid.g_translate = Translate(0, 0, 0)
             self.scroll_to_beat(current_beat)
 
         self.last_playback_state = current_state
         
         # Déplacement de la barre rouge
-        self.ids.playhead.x = round(current_beat * self.pixels_per_beat)
+        self.ids.playhead.x = round(self.display_beat * self.pixels_per_beat)
         
         # Mise à jour du texte M:B
         if not self.ids.pos_label.focus:
-            # On utilise le formateur officiel du séquenceur pour éviter les erreurs de calcul
-            self.ids.pos_label.text = sequencer._format_beats_to_position(current_beat)
+            self.ids.pos_label.text = sequencer._format_beats_to_position(self.display_beat)
         
         # Auto-scroll uniquement en lecture
         if sequencer.playback_state == 'playing':

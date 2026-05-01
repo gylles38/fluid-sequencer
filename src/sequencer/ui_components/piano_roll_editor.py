@@ -1784,12 +1784,6 @@ class PianoRollEditor(FloatingWindow):
         current_state = self.sequencer_layout.sequencer.playback_state
         jack_beat = self.sequencer_layout.sequencer.current_beat
 
-        # Optimization: Don't update UI if beat hasn't changed
-        if abs(getattr(self, '_last_playhead_beat', -1) - jack_beat) < 0.001 and \
-           current_state == getattr(self, 'last_playback_state', 'stopped'):
-            return
-        self._last_playhead_beat = jack_beat
-
         # --- 1. POSITION JACK & SMOOTHING ---
         if current_state in ("playing", "recording"):
             safe_dt = min(dt, 1/15.0)

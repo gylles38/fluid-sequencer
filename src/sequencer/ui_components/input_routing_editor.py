@@ -703,11 +703,6 @@ class InputRoutingEditor(FloatingWindow):
         current_state = sequencer.playback_state
         jack_beat = sequencer.current_beat
 
-        # Optimization: only update if beat changed significantly or state changed
-        if abs(getattr(self, '_last_playhead_beat', -1) - jack_beat) < 0.001 and            current_state == getattr(self, 'last_playback_state', 'stopped'):
-            return
-        self._last_playhead_beat = jack_beat
-
         # --- 1. POSITION JACK & SMOOTHING ---
         if current_state in ("playing", "recording"):
             safe_dt = min(dt, 1/15.0)

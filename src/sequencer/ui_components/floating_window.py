@@ -138,7 +138,7 @@ class FloatingWindow(RelativeLayout):
         self.ids.content_container.add_widget(widget, index, canvas)
 
     def on_touch_down(self, touch):
-        #from kivy.logger import Logger
+        # from kivy.logger import Logger
         # Logger.info(f"FloatingWindow: on_touch_down entry {self.title} at {touch.pos}")
 
         if not self.collide_point(*touch.pos):
@@ -183,6 +183,7 @@ class FloatingWindow(RelativeLayout):
                 return True
 
         # 2. Let children handle touch (like title bar buttons or content)
+        # Standard dispatch for RelativeLayout children
         if super(RelativeLayout, self).on_touch_down(touch):
             touch.pop()
             return True

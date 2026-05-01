@@ -38,7 +38,10 @@ class EditorBoundedScrollView(BoundedScrollView):
             return False
 
         # 1. Handle mouse scrolling and scrollbar interaction directly.
-        local_x, local_y = self.to_local(*touch.pos)
+        # Scrollbars are fixed relative to the ScrollView widget, so we must
+        # use coordinates that DON'T include the scroll offset.
+        local_x = touch.x - self.x
+        local_y = touch.y - self.y
         is_in_vbar = (self.do_scroll_y and self.bar_width > 0 and local_x > self.width - self.bar_width)
         is_in_hbar = (self.do_scroll_x and self.bar_width > 0 and local_y < self.bar_width)
 
